@@ -32,6 +32,11 @@ MAX_NOTIONAL_HARD = Decimal(os.environ.get("DCM_DP_MAX_NOTIONAL_HARD", "25"))
 MAX_PORTFOLIO_NOTIONAL = Decimal(os.environ.get("DCM_DP_MAX_PORTFOLIO_NOTIONAL", "80"))
 # 逐所保证金预算:单所在场名义 ≤ 该所权益 × 此系数(保守杠杆上限,防单所过度占用)
 VENUE_LEV_FACTOR = Decimal(os.environ.get("DCM_DP_VENUE_LEV_FACTOR", "3"))
+# R6 自动收敛(显式开关,默认关):亏损腿距强平<临界 → 双腿同比例减仓(保持中性,缓解保证金)
+AUTO_CONVERGE = os.environ.get("DCM_DP_AUTO_CONVERGE", "false").lower() == "true"
+CONVERGE_CRIT_PCT = float(os.environ.get("DCM_DP_CONVERGE_CRIT_PCT", "6"))
+CONVERGE_REDUCE_FRAC = Decimal(os.environ.get("DCM_DP_CONVERGE_REDUCE_FRAC", "0.5"))
+CONVERGE_MIN_NOTIONAL = Decimal(os.environ.get("DCM_DP_CONVERGE_MIN_NOTIONAL", "6"))
 LEG_TIMEOUT = int(os.environ.get("DCM_DP_LEG_TIMEOUT_SEC", "15"))
 CROSS_BPS = Decimal(os.environ.get("DCM_DP_CROSS_BPS", "15"))       # marketable limit 穿价幅度
 MAX_SLIP_BPS = Decimal(os.environ.get("DCM_DP_MAX_SLIP_BPS", "40"))  # 穿价超此拒下(滑点保护)
@@ -273,6 +278,66 @@ class ArmedExecutor:
         except Exception as e:
             log.exception("close_pair %s crashed", sym)
             await self._alert(f"close-crash:{sym}", "配对平仓异常", f"{sym}: {e!r}", "fatal")
+        finally:
+            self.inflight.discard(sym)
+            await self.r.delete(lock)
+
+    async def _leg_dist_liq(self, venue: str, sym: str):
+        raw = await self.r.get(f"dcm:account:{venue}")
+        if not raw:
+            return None
+        d = json.loads(raw).get("pos_detail", {}).get(sym)
+        return d.get("dist_liq_pct") if d else None
+
+    async def maybe_converge(self, cli, sym: str):
+        """R6 自动收敛触发:任一腿距强平<临界 → 双腿同比例减仓。显式开关门控。"""
+        if not AUTO_CONVERGE or sym in self.inflight:
+            return
+        row = await self.pool.fetchrow(
+            "SELECT venue_long,venue_short FROM dualperp_positions WHERE symbol=$1 AND state='OPEN' "
+            "ORDER BY id DESC LIMIT 1", sym)
+        if not row:
+            return
+        dists = [await self._leg_dist_liq(row["venue_long"], sym), await self._leg_dist_liq(row["venue_short"], sym)]
+        dvals = [d for d in dists if d is not None]
+        if dvals and min(dvals) < CONVERGE_CRIT_PCT:
+            await self.converge_pair(cli, sym, CONVERGE_REDUCE_FRAC, min(dvals))
+
+    async def converge_pair(self, cli, sym: str, frac: Decimal, dist_seen: float):
+        """双腿同比例减仓 frac(reduce_only,保持 delta 中性),缓解逼近强平腿的保证金。"""
+        lock = f"dcm:dp:lock:{sym}"
+        if not await self.r.set(lock, str(os.getpid()), nx=True, ex=max(LEG_TIMEOUT * 4, 90)):
+            return
+        self.inflight.add(sym)
+        try:
+            row = await self.pool.fetchrow(
+                "SELECT id,venue_long,venue_short,qty_base,notional_usdt FROM dualperp_positions "
+                "WHERE symbol=$1 AND state='OPEN' ORDER BY id DESC LIMIT 1", sym)
+            if not row:
+                return
+            vl, vs = row["venue_long"], row["venue_short"]
+            if Decimal(str(row["notional_usdt"] or 0)) * frac < CONVERGE_MIN_NOTIONAL:
+                log.info("converge %s skipped: 减仓额低于粉尘 %s", sym, CONVERGE_MIN_NOTIONAL)
+                return
+            for venue in (vl, vs):
+                await self._ensure_filter(cli, venue, sym)
+                net = await self.clients[venue].fetch_position(cli, sym)
+                red = net * frac  # 带符号:多腿(+)→SELL,空腿(-)→BUY
+                l1 = await self.r.hget(f"dcm:feed:{venue}:perp", sym)
+                ref = Decimal(str(json.loads(l1)["bid"])) if l1 else Decimal("0")
+                if ref > 0 and abs(red) > 0:
+                    await self._flatten(cli, venue, sym, red, ref)
+            new_qty = Decimal(str(row["qty_base"] or 0)) * (Decimal("1") - frac)
+            new_notional = Decimal(str(row["notional_usdt"] or 0)) * (Decimal("1") - frac)
+            await self.pool.execute("UPDATE dualperp_positions SET qty_base=$2,notional_usdt=$3,"
+                                    "updated_at=now() WHERE id=$1", row["id"], float(new_qty), float(new_notional))
+            await self._alert(f"converge:{sym}", "R6 自动收敛:双腿减仓",
+                              f"{sym} 距强平 {dist_seen}%<{CONVERGE_CRIT_PCT}% → 双腿各减 {frac},"
+                              f"余 qty≈{new_qty}", level="fatal")
+            log.warning("CONVERGE %s reduced by %s (dist_liq=%s)", sym, frac, dist_seen)
+        except Exception as e:
+            log.exception("converge_pair %s crashed", sym)
+            await self._alert(f"converge-crash:{sym}", "自动收敛异常", f"{sym}: {e!r}", "fatal")
         finally:
             self.inflight.discard(sym)
             await self.r.delete(lock)
