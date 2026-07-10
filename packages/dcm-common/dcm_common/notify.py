@@ -14,7 +14,7 @@ from dataclasses import dataclass
 
 import redis as redis_sync
 
-from .feishu import send_bot_text, send_webhook_text
+from .feishu import send_bot_chat, send_bot_text, send_webhook_text
 from .throttle import throttle_ok
 
 logger = logging.getLogger(__name__)
@@ -26,6 +26,7 @@ class FeishuTarget:
     app_id: str = ""
     app_secret: str = ""
     open_id: str = ""
+    chat_id: str = ""
 
 
 class Notifier:
@@ -58,6 +59,10 @@ class Notifier:
         if self.feishu.webhook_url:
             ok, detail = send_webhook_text(self.feishu.webhook_url, f"{self.service}|{title}", content)
             results["feishu_webhook"] = detail if not ok else "sent"
+        if self.feishu.app_id and self.feishu.chat_id:
+            ok, detail = send_bot_chat(self.feishu.app_id, self.feishu.app_secret,
+                                       self.feishu.chat_id, f"{self.service}|{title}", content)
+            results["feishu_chat"] = detail if not ok else "sent"
         if self.feishu.app_id and self.feishu.open_id:
             ok, detail = send_bot_text(self.feishu.app_id, self.feishu.app_secret,
                                        self.feishu.open_id, f"{self.service}|{title}", content)

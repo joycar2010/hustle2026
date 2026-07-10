@@ -58,6 +58,44 @@ def send_bot_text(app_id: str, app_secret: str, open_id: str, title: str, conten
         return False, str(e)
 
 
+def send_bot_chat(app_id: str, app_secret: str, chat_id: str, title: str, content: str) -> tuple[bool, str]:
+    """自建应用机器人发文本到群 chat_id。"""
+    if not (app_id and app_secret and chat_id):
+        return False, "app_id/app_secret/chat_id 不全"
+    tok = _tenant_token(app_id, app_secret)
+    if not tok:
+        return False, "获取 tenant_access_token 失败"
+    try:
+        resp = httpx.post(
+            _MSG_URL,
+            params={"receive_id_type": "chat_id"},
+            headers={"Authorization": f"Bearer {tok}", "Content-Type": "application/json"},
+            json={"receive_id": chat_id, "msg_type": "text",
+                  "content": json.dumps({"text": f"[{title}]\n{content}"})},
+            timeout=10,
+        )
+        d = resp.json()
+        if d.get("code") == 0:
+            return True, d.get("data", {}).get("message_id", "")
+        return False, d.get("msg", "unknown")
+    except Exception as e:
+        return False, str(e)
+
+
+def list_chats(app_id: str, app_secret: str) -> list[dict]:
+    """列出机器人所在的群(用于自动解析 chat_id)。返回 [{chat_id,name}]。"""
+    tok = _tenant_token(app_id, app_secret)
+    if not tok:
+        return []
+    try:
+        r = httpx.get("https://open.feishu.cn/open-apis/im/v1/chats?page_size=50",
+                      headers={"Authorization": f"Bearer {tok}"}, timeout=10).json()
+        return [{"chat_id": i.get("chat_id"), "name": i.get("name")}
+                for i in (r.get("data", {}) or {}).get("items", []) or []]
+    except Exception:
+        return []
+
+
 def send_webhook_text(webhook_url: str, title: str, content: str) -> tuple[bool, str]:
     """群自定义机器人 webhook 发文本。"""
     if not webhook_url:
