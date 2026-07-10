@@ -52,9 +52,12 @@ async def fetch_borrow_daily(cli) -> dict[str, float]:
     if isinstance(r, list):
         for x in r:
             try:
-                out[x["coin"]] = float(x.get("dailyInterestRate") or 0) * 100
+                # 实测字段为 dailyInterest(小数,如 0.0017685=0.17685%/日;yearlyInterest/365 印证)
+                out[x["coin"]] = float(x.get("dailyInterest") or 0) * 100
             except (KeyError, TypeError, ValueError):
                 pass
+    else:
+        log.warning("crossMarginData 非列表: %s", str(r)[:200])
     return out
 
 
@@ -62,7 +65,7 @@ async def fetch_earn_flexible(cli) -> dict[str, float]:
     """逐币灵活理财最新年化(%)→日化。simple-earn flexible list 分页。"""
     out = {}
     try:
-        for page in range(1, 4):
+        for page in range(1, 9):  # 实测 420+ 产品,100/页翻到空页为止
             r = (await cli.get(
                 f"https://api.binance.com/sapi/v1/simple-earn/flexible/list?{_signed({'size': 100, 'current': page})}",
                 headers={"X-MBX-APIKEY": KEY})).json()

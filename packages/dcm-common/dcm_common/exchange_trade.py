@@ -407,5 +407,78 @@ class BitgetTrade:
         return net
 
 
+class BinanceSpotTrade:
+    """币安现货(api/v3):basis 引擎现货腿。接口形状与 BinanceTrade 一致(place/fetch/cancel)。
+    fetch_position 语义=现货 free 余额(现货没有净持仓概念,对账用 base 资产余额)。"""
+
+    def __init__(self, cfg: dict):
+        self.key, self.secret = cfg["key"], cfg["secret"]
+        self.base = "https://api.binance.com"
+        self.tick: dict[str, Decimal] = {}
+        self.step: dict[str, Decimal] = {}
+        self.min_notional: dict[str, Decimal] = {}
+
+    _signed_qs = BinanceTrade._signed_qs
+    _hdr = BinanceTrade._hdr
+
+    async def load_filter(self, cli: httpx.AsyncClient, symbol: str):
+        d = (await cli.get(f"{self.base}/api/v3/exchangeInfo?symbol={symbol}")).json()
+        for s in d.get("symbols", []):
+            if s["symbol"] != symbol:
+                continue
+            for f in s["filters"]:
+                if f["filterType"] == "PRICE_FILTER":
+                    self.tick[symbol] = Decimal(f["tickSize"])
+                elif f["filterType"] == "LOT_SIZE":
+                    self.step[symbol] = Decimal(f["stepSize"])
+                elif f["filterType"] in ("MIN_NOTIONAL", "NOTIONAL"):
+                    self.min_notional[symbol] = Decimal(f.get("minNotional") or f.get("notional") or "5")
+
+    async def place_limit(self, cli, symbol, side, qty: Decimal, price: Decimal, reduce_only=False):
+        # 现货无 reduce_only 概念,参数保留仅为与合约客户端同形
+        price = _round_step(price, self.tick.get(symbol, Decimal("0.0001")))
+        qty = _round_step(qty, self.step.get(symbol, Decimal("0.001")))
+        params = {"symbol": symbol, "side": side, "type": "LIMIT", "timeInForce": "GTC",
+                  "quantity": _fmt(qty), "price": _fmt(price)}
+        r = (await cli.post(f"{self.base}/api/v3/order?{self._signed_qs(params)}", headers=self._hdr)).json()
+        if r.get("orderId"):
+            return True, {"order_id": str(r["orderId"]), "status": r.get("status"), "raw": r}
+        return False, {"err": f"{r.get('code')}:{r.get('msg')}", "raw": r}
+
+    async def fetch_order(self, cli, symbol, order_id, retries=4):
+        import asyncio
+        for i in range(retries):
+            r = (await cli.get(f"{self.base}/api/v3/order?{self._signed_qs({'symbol': symbol, 'orderId': order_id})}",
+                               headers=self._hdr)).json()
+            if r.get("orderId"):
+                filled = Decimal(str(r.get("executedQty") or 0))
+                quote = Decimal(str(r.get("cummulativeQuoteQty") or 0))
+                avg = quote / filled if filled > 0 else Decimal("0")
+                return True, {"status": r.get("status"), "filled": str(filled), "avg": str(avg), "raw": r}
+            if r.get("code") == -2013 and i < retries - 1:
+                await asyncio.sleep(0.5 * (i + 1))
+                continue
+            return False, {"err": f"{r.get('code')}:{r.get('msg')}", "raw": r}
+
+    async def cancel(self, cli, symbol, order_id):
+        r = (await cli.request("DELETE",
+             f"{self.base}/api/v3/order?{self._signed_qs({'symbol': symbol, 'orderId': order_id})}",
+             headers=self._hdr)).json()
+        if r.get("orderId") or r.get("status") == "CANCELED":
+            return True, {"status": r.get("status"), "raw": r}
+        return False, {"err": f"{r.get('code')}:{r.get('msg')}", "raw": r}
+
+    async def fetch_position(self, cli, base_asset) -> Decimal:
+        """现货 free 余额(base 资产)。对账真相源。"""
+        r = (await cli.get(f"{self.base}/api/v3/account?{self._signed_qs({'omitZeroBalances': 'true'})}",
+                           headers=self._hdr)).json()
+        for b in r.get("balances", []):
+            if b.get("asset") == base_asset:
+                return Decimal(str(b.get("free") or 0))
+        if "balances" not in r:
+            raise RuntimeError(f"binance spot account: {r}")
+        return Decimal("0")
+
+
 TRADE_CLIENTS = {"binance": BinanceTrade, "bybit": BybitTrade,
                  "okx": OkxTrade, "gate": GateTrade, "bitget": BitgetTrade}

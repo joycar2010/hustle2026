@@ -6,20 +6,26 @@
 shadow 自驱:扫币安 funding 哈希取正资金费币,读现货+永续 L1 算净期望 E:
   E = 资金费收益(日化%×HORIZON×100) − 往返价差(买现货ask+卖永续bid, 平仓反向) − 双边手续费
 funding 正 且 E≥门槛 → would_open;记 basis_shadow_log + 发 dcm:engine:basis:positions。
-armed 执行留后续(复用 binance client:现货买/永续卖 + PM 质押),本版只 shadow 攒战绩。
+armed:BasisExecutor(armed.py)双门闸(DCM_BASIS_MODE=armed 且 ∈ARM_SYMBOLS);
+执行器有 key 即常驻构造(reconcile 认领持仓防重启双开),下单按 mode 门控,持仓管理不分 mode。
 """
 import asyncio
 import json
 import logging
 import os
 import socket
+import sys
 import time
 from decimal import Decimal
 
 import asyncpg
+import httpx
 import redis.asyncio as aioredis
 
 from dcm_common.heartbeat import Heartbeat
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from armed import ARM_SYMBOLS, MODE, BasisExecutor  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 log = logging.getLogger("engine-basis")
@@ -70,8 +76,15 @@ async def main():
     pool = await asyncpg.create_pool(PG_DSN, min_size=1, max_size=2)
     hb = Heartbeat(REDIS_URL, "engine-basis", interval_sec=30, ttl_sec=120)
     asyncio.create_task(hb.run_forever())
-    log.info("engine-basis(shadow) up pid=%s host=%s min_E=%sbps horizon=%sd",
-             os.getpid(), socket.gethostname(), MIN_E_BPS, HORIZON_DAYS)
+    # 执行器:有 key 即常驻构造(reconcile 认领),下单按 MODE+ARM_SYMBOLS 双门闸
+    key, secret = os.environ.get("BINANCE_KEY", ""), os.environ.get("BINANCE_SECRET", "")
+    executor = None
+    cli = httpx.AsyncClient(timeout=20)  # 共享 client(反复新建会阻塞事件循环,testgo 学费)
+    if key and secret:
+        executor = BasisExecutor(r, pool, {"key": key, "secret": secret})
+        await executor.reconcile_startup(cli)
+    log.info("engine-basis up mode=%s arm=%s pid=%s host=%s min_E=%sbps horizon=%sd",
+             MODE, sorted(ARM_SYMBOLS), os.getpid(), socket.gethostname(), MIN_E_BPS, HORIZON_DAYS)
     last_log: dict[str, tuple[str, float]] = {}
     while True:
         try:
@@ -86,9 +99,25 @@ async def main():
                     cand.append((sym, fd))
             cand.sort(key=lambda x: -x[1])
             shadow = {}
-            for sym, fd in cand[:TOP_N]:
+            # 评估集 = top 候选 ∪ 在场持仓(持仓管理不能因跌出榜而失明)
+            eval_syms = {s for s, _ in cand[:TOP_N]}
+            if executor:
+                eval_syms |= executor.open_syms
+            fd_map = {s: fd for s, fd in cand}
+            for sym in sorted(eval_syms):
+                fd = fd_map.get(sym)
+                if fd is None:
+                    try:
+                        fd = Decimal(str(json.loads(fmap.get(sym) or "{}").get("daily_pct", "0")))
+                    except Exception:
+                        fd = Decimal("0")
                 sp = await l1(r, "spot", sym); pp = await l1(r, "perp", sym)
                 decision, detail = evaluate(sp, pp, fd)
+                if executor and sp and pp:
+                    if decision == "would_open" and executor.armed_for(sym) \
+                            and sym not in executor.open_syms:
+                        await executor.open_pair(cli, sym, sp, pp, detail["e_bps"], fd)
+                    await executor.manage(cli, sym, sp, pp, fd)
                 if not detail:
                     continue
                 shadow[sym] = {"decision": decision, **detail}
@@ -99,10 +128,16 @@ async def main():
                         "VALUES($1,$2,$3,$4,$5)",
                         sym, fd, Decimal(detail["e_bps"]), decision, json.dumps(detail))
                     last_log[sym] = (decision, time.time())
+            pos_rows = await pool.fetch(
+                "SELECT symbol,qty_base,notional_usdt,state,open_e_bps,funding_daily,"
+                "EXTRACT(EPOCH FROM opened_at)::bigint AS opened_ts FROM basis_positions "
+                "WHERE state NOT IN ('CLOSED','FAILED') ORDER BY id")
             await r.set("dcm:engine:basis:positions", json.dumps(
-                {"ts": int(time.time()), "mode": "shadow", "positions": [],
-                 "candidates": len(cand), "shadow": shadow}, ensure_ascii=False), ex=180)
-            hb.extra = {"mode": "shadow", "candidates": len(cand), "would_open":
+                {"ts": int(time.time()), "mode": MODE,
+                 "positions": [dict(x) for x in pos_rows],
+                 "candidates": len(cand), "shadow": shadow}, ensure_ascii=False, default=str), ex=180)
+            hb.extra = {"mode": MODE, "candidates": len(cand),
+                        "positions": len(pos_rows), "would_open":
                         sum(1 for v in shadow.values() if v["decision"] == "would_open")}
         except Exception:
             log.exception("basis eval crashed (continuing)")
