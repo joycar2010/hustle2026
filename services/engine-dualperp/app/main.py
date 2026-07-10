@@ -215,6 +215,18 @@ async def main():
                     elif decision == "would_close" and has_pos:
                         asyncio.create_task(executor.close_pair(trade_cli, sym))
 
+            # 平仓触发(路由消失/off/draining):这些币已不在 active 循环内,须单独扫持仓集,
+            # 否则置 off 的仓位会被孤立(引擎不再管、实盘仍开着)——close 不能只挂在 active 路由上
+            if executor:
+                for sym in list(executor.open_syms):
+                    if sym in executor.inflight or not executor.armed_for(sym):
+                        continue
+                    rt = book.routes.get(sym)
+                    if rt is None or rt.get("state") in ("off", "draining"):
+                        log.info("close trigger: %s route %s -> close_pair", sym,
+                                 "missing" if rt is None else rt.get("state"))
+                        asyncio.create_task(executor.close_pair(trade_cli, sym))
+
                 prev = last_logged.get(sym)
                 if prev is None or prev[0] != decision or time.time() - prev[1] >= SHADOW_LOG_EVERY_SEC:
                     await pool.execute(

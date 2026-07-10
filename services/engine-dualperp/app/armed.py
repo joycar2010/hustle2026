@@ -127,6 +127,14 @@ class ArmedExecutor:
         try:
             await self._ensure_filter(cli, vl, sym)
             await self._ensure_filter(cli, vs, sym)
+            # 双保险防重复开仓:开仓前实盘预检,任一腿已有仓 → 认领为持仓,不再开
+            # (open_syms 内存态可能因重启丢失,实盘才是真相——双开根因的确定性防线)
+            pre_l = await self.clients[vl].fetch_position(cli, sym)
+            pre_s = await self.clients[vs].fetch_position(cli, sym)
+            if abs(pre_l) > 0 or abs(pre_s) > 0:
+                self.open_syms.add(sym)
+                log.warning("open %s aborted: 实盘已有仓 long=%s short=%s → 认领不重开", sym, pre_l, pre_s)
+                return
             row_id = await self.pool.fetchval(
                 "INSERT INTO dualperp_positions(symbol,venue_long,market_long,venue_short,market_short,"
                 "account_long,account_short,notional_usdt,state) "
@@ -219,8 +227,9 @@ class ArmedExecutor:
             if resid * Decimal("1") > 0 and resid > 0:
                 await self._alert(f"close-resid:{sym}", "平仓后仍有残仓",
                                   f"{sym} 两腿净残 {resid} base,需人工核", "fatal")
+            # 平掉该币全部 OPEN/CLOSING 行(双开留下多行时一并收口,net 已按实盘平净)
             await self.pool.execute("UPDATE dualperp_positions SET state='CLOSED',closed_at=now(),"
-                                    "updated_at=now() WHERE id=$1", row["id"])
+                                    "updated_at=now() WHERE symbol=$1 AND state IN ('OPEN','CLOSING')", sym)
             self.open_syms.discard(sym)
             log.info("CLOSED %s", sym)
         except Exception as e:
@@ -231,22 +240,27 @@ class ArmedExecutor:
             await self.r.delete(lock)
 
     async def reconcile_startup(self, cli):
-        """崩溃恢复:非终态 DB 行 vs 实盘。裸腿平掉(裸空安全网),双腿齐→标 OPEN,皆无→FAILED。"""
+        """崩溃恢复:含 OPEN 的所有非终态行 vs 实盘。**必须加载 OPEN 进 open_syms**——
+        否则重启后引擎忘记持仓,would_open 会重复开仓(双开根因)。裸腿平掉,双腿齐→OPEN,皆无→FAILED。"""
         rows = await self.pool.fetch(
             "SELECT id,symbol,venue_long,venue_short FROM dualperp_positions "
-            "WHERE state IN ('OPENING','CLOSING','ROLLBACK')")
+            "WHERE state IN ('OPENING','OPEN','CLOSING','ROLLBACK')")
+        seen: set[str] = set()
         for row in rows:
             sym = row["symbol"]
+            if sym in seen:  # 同币多行(双开历史),实盘已在首行认领,跳过重复
+                continue
             try:
                 await self._ensure_filter(cli, row["venue_long"], sym)
                 await self._ensure_filter(cli, row["venue_short"], sym)
                 nl = await self.clients[row["venue_long"]].fetch_position(cli, sym)
                 ns = await self.clients[row["venue_short"]].fetch_position(cli, sym)
                 if abs(nl) > 0 and abs(ns) > 0:
+                    seen.add(sym)
                     await self.pool.execute("UPDATE dualperp_positions SET state='OPEN',updated_at=now() "
                                             "WHERE id=$1", row["id"])
                     self.open_syms.add(sym)
-                    log.info("reconcile: %s both legs present -> OPEN", sym)
+                    log.info("reconcile: %s both legs present long=%s short=%s -> OPEN(adopted)", sym, nl, ns)
                 elif abs(nl) > 0 or abs(ns) > 0:
                     # 裸腿:平掉
                     for venue, net in ((row["venue_long"], nl), (row["venue_short"], ns)):
