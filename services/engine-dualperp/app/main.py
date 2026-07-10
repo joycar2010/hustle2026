@@ -211,38 +211,40 @@ def evaluate(route: dict, long_l1: dict | None, short_l1: dict | None,
 
 
 async def main():
-    assert MODE in ("shadow", "armed"), f"未知 MODE={MODE}"
+    from livecfg import CFG
     r = aioredis.from_url(REDIS_URL, decode_responses=True)
     pool = await asyncpg.create_pool(PG_DSN, min_size=1, max_size=3)
+    await CFG.load(pool)                        # DB 配置优先(engine_config),env 兜底
     hb = Heartbeat(REDIS_URL, SERVICE, interval_sec=30, ttl_sec=120)
     book = RouteBook(r)
     await book.load_all()
     asyncio.create_task(book.watch())
     asyncio.create_task(hb.run_forever())
+    asyncio.create_task(CFG.watch(r, pool))     # 订阅 dcm:config:updates 热重载(armed 可热切换)
 
-    # armed 执行器:仅 MODE=armed 时构造;下单再受 per-symbol 白名单二次门闸
+    # 执行器常驻构造(有 key 即建;shadow 只是不被调用)——mode 热切 armed 时立即可用,
+    # reconcile_startup 保证任何时刻构造/切换都先认领实盘持仓(防双开)
     executor = None
     trade_cli = None
-    if MODE == "armed":
-        from armed import ArmedExecutor, ARM_SYMBOLS
-        cfg = {
-            "binance": {"key": os.environ.get("BINANCE_KEY", ""), "secret": os.environ.get("BINANCE_SECRET", "")},
-            "bybit": {"key": os.environ.get("BYBIT_KEY", ""), "secret": os.environ.get("BYBIT_SECRET", "")},
-            "okx": {"key": os.environ.get("OKX_KEY", ""), "secret": os.environ.get("OKX_SECRET", ""),
-                    "passphrase": os.environ.get("OKX_PASSPHRASE", "")},
-            "gate": {"key": os.environ.get("GATE_KEY", ""), "secret": os.environ.get("GATE_SECRET", "")},
-            "bitget": {"key": os.environ.get("BITGET_KEY", ""), "secret": os.environ.get("BITGET_SECRET", ""),
-                       "passphrase": os.environ.get("BITGET_PASSPHRASE", "")},
-        }
+    cfg = {
+        "binance": {"key": os.environ.get("BINANCE_KEY", ""), "secret": os.environ.get("BINANCE_SECRET", "")},
+        "bybit": {"key": os.environ.get("BYBIT_KEY", ""), "secret": os.environ.get("BYBIT_SECRET", "")},
+        "okx": {"key": os.environ.get("OKX_KEY", ""), "secret": os.environ.get("OKX_SECRET", ""),
+                "passphrase": os.environ.get("OKX_PASSPHRASE", "")},
+        "gate": {"key": os.environ.get("GATE_KEY", ""), "secret": os.environ.get("GATE_SECRET", "")},
+        "bitget": {"key": os.environ.get("BITGET_KEY", ""), "secret": os.environ.get("BITGET_SECRET", ""),
+                   "passphrase": os.environ.get("BITGET_PASSPHRASE", "")},
+    }
+    if any(c.get("key") for c in cfg.values()):
+        from armed import ArmedExecutor
         notifier = Notifier(REDIS_URL, "engine-dualperp", feishu=feishu_from_env(),
                             throttle_interval_sec=300, throttle_max_count=2)
         trade_cli = httpx.AsyncClient(timeout=15)
         executor = ArmedExecutor(r, pool, notifier, cfg)
         await executor.reconcile_startup(trade_cli)
-        log.warning("ARMED MODE — arm_symbols=%s (空=仍不下单)", sorted(ARM_SYMBOLS))
 
-    log.info(f"engine-dualperp up mode={MODE} pid={os.getpid()} host={socket.gethostname()} "
-             f"min_funding={MIN_FUNDING_DAILY_PCT}%/d max_entry_cost={MAX_ENTRY_COST_BPS}bps eval={EVAL_SEC}s")
+    log.info(f"engine-dualperp up mode={CFG.mode} arm={sorted(CFG.arm_symbols)} pid={os.getpid()} "
+             f"host={socket.gethostname()} eval={EVAL_SEC}s (热配置:engine_config)")
 
     last_logged: dict[str, tuple[str, float]] = {}  # symbol -> (decision, ts) 决策变化或60s才落库
     while True:
@@ -263,8 +265,8 @@ async def main():
                                             long_fund, short_fund, depth_usdt, has_open_position=has_pos)
                 shadow_status[sym] = {"decision": decision, **detail}
 
-                # armed 执行:仅白名单币且不在途;shadow 决策即执行信号,同一决策核
-                if executor and executor.armed_for(sym) and sym not in executor.inflight:
+                # armed 开仓:mode=armed 且白名单币且不在途(新开仓受 mode 门控)
+                if executor and CFG.mode == "armed" and executor.armed_for(sym) and sym not in executor.inflight:
                     target = Decimal(str(route.get("target_notional_usdt") or "0"))
                     if decision == "would_open" and not has_pos:
                         asyncio.create_task(executor.open_pair(trade_cli, route, target, long_l1, short_l1))
@@ -289,9 +291,10 @@ async def main():
 
             # 平仓触发(路由消失/off/draining)+ 持仓管理(基差止损/收敛):独立于 for route 扫持仓集,
             # 否则置 off 的仓位会被孤立(引擎不再管、实盘仍开着)——close/manage 不能只挂在 active 路由上
+            # 持仓管理无论 mode:只要实盘有仓就管(基差止损/收敛/路由off平仓),即便切回 shadow
             if executor:
                 for sym in list(executor.open_syms):
-                    if sym in executor.inflight or not executor.armed_for(sym):
+                    if sym in executor.inflight:
                         continue
                     rt = book.routes.get(sym)
                     if rt is None or rt.get("state") in ("off", "draining"):
@@ -309,12 +312,12 @@ async def main():
                     "short_order_id,opened_at FROM dualperp_positions WHERE state='OPEN'")
                 open_positions = [dict(r) for r in rows]
             await r.set("dcm:engine:dualperp:positions", json.dumps({
-                "ts": int(time.time()), "mode": MODE,
+                "ts": int(time.time()), "mode": CFG.mode,
                 "armed_symbols": sorted(executor.open_syms) if executor else [],
                 "active_routes": len(shadow_status), "positions": open_positions,
                 "shadow": shadow_status,
             }, ensure_ascii=False, default=str), ex=180)
-            hb.extra = {"mode": MODE, "active_routes": len(shadow_status),
+            hb.extra = {"mode": CFG.mode, "active_routes": len(shadow_status),
                         "open_positions": len(open_positions)}
         except Exception:
             log.exception("eval round crashed (continuing)")

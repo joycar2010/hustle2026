@@ -4,6 +4,7 @@
 风控护栏、活跃路由、shadow 战绩。只读——不下单不改配置(那些走 decision/引擎)。
 """
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -204,6 +205,154 @@ async def shadow_trend(request: Request, hours: int = 48):
             GROUP BY h ORDER BY h""")
     return {"configured": True,
             "points": [{"t": r["h"].isoformat(), "opps": r["opps"], "symbols": r["symbols"]} for r in rows]}
+
+
+# ───────────── 管理鉴权(operators 三令牌 + RBAC 三级) ─────────────
+ROLE_RANK = {"VIEWER": 0, "OPERATOR": 1, "SUPER_ADMIN": 2}
+DUALPERP_KEYS = {  # engine_config 白名单 + 各键最低角色
+    "mode": "SUPER_ADMIN", "arm_symbols": "SUPER_ADMIN", "max_notional_hard": "SUPER_ADMIN",
+    "max_portfolio_notional": "SUPER_ADMIN", "auto_converge": "SUPER_ADMIN",
+    "min_e_bps": "OPERATOR", "min_funding_daily_pct": "OPERATOR", "basis_stop": "OPERATOR",
+    "loss_budget_pct": "OPERATOR", "basis_quantile": "OPERATOR",
+}
+
+
+async def _operator(request: Request):
+    """解析操作员:X-Op-Token → sha256 → operators 表。返回 (name, role) 或 None。
+    兼容:dashboard token(cookie/query)= 只读 VIEWER(引导/纯看)。"""
+    tok = request.headers.get("X-Op-Token") or ""
+    if tok and _pool is not None:
+        h = hashlib.sha256(tok.encode()).hexdigest()
+        row = await _pool.fetchrow(
+            "SELECT name, role FROM operators WHERE token_hash=$1 AND enabled=TRUE", h)
+        if row:
+            await _pool.execute("UPDATE operators SET last_seen=now() WHERE token_hash=$1", h)
+            return row["name"], row["role"]
+    if _authed(request):
+        return "dashboard", "VIEWER"
+    return None
+
+
+def _has_role(role: str, need: str) -> bool:
+    return ROLE_RANK.get(role, -1) >= ROLE_RANK.get(need, 99)
+
+
+async def _audit(op, role, action, target, payload, result):
+    try:
+        await _pool.execute(
+            "INSERT INTO admin_audit(operator,role,action,target,payload,result) VALUES($1,$2,$3,$4,$5,$6)",
+            op, role, action, target, json.dumps(payload, ensure_ascii=False, default=str), result[:200])
+    except Exception as e:
+        logger.warning(f"audit failed: {e!r}")
+
+
+async def _publish_config(engine: str):
+    try:
+        await _redis.publish("dcm:config:updates", engine)
+    except Exception:
+        pass
+
+
+@app.get("/api/admin/config")
+async def get_config(request: Request):
+    who = await _operator(request)
+    if not who:
+        return JSONResponse(status_code=401, content={"error": "unauthorized"})
+    rows = await _pool.fetch("SELECT engine,ckey,cval,version,updated_by,updated_at FROM engine_config ORDER BY engine,ckey")
+    return {"me": {"name": who[0], "role": who[1]},
+            "config": [{"engine": r["engine"], "key": r["ckey"], "val": r["cval"],
+                        "version": r["version"], "by": r["updated_by"],
+                        "at": r["updated_at"].isoformat()} for r in rows]}
+
+
+@app.post("/api/admin/engine_config")
+async def set_config(request: Request):
+    who = await _operator(request)
+    if not who:
+        return JSONResponse(status_code=401, content={"error": "unauthorized"})
+    op, role = who
+    body = await request.json()
+    engine, key, val = body.get("engine"), body.get("key"), str(body.get("val", ""))
+    if engine != "dualperp" or key not in DUALPERP_KEYS:
+        return JSONResponse(status_code=400, content={"error": f"未知配置项 {engine}.{key}"})
+    if not _has_role(role, DUALPERP_KEYS[key]):
+        await _audit(op, role, "engine_config.deny", f"{engine}.{key}", body, "role不足")
+        return JSONResponse(status_code=403, content={"error": f"需 {DUALPERP_KEYS[key]} 权限"})
+    # 武装联锁:mode=armed 须 risk-ledger 当轮全绿
+    if key == "mode" and val == "armed":
+        risk = await _get_json("dcm:risk:status") or {}
+        svc_ok = all(v == "ok" for v in (risk.get("services") or {}).values())
+        if risk.get("alerts_this_round", 1) != 0 or not svc_ok:
+            await _audit(op, role, "engine_config.interlock", f"{engine}.{key}", body, "风控未全绿拒绝")
+            return JSONResponse(status_code=409, content={
+                "error": "武装联锁:risk-ledger 未全绿(有告警或服务停更),不允许武装"})
+        if body.get("confirm") != "ARM":
+            return JSONResponse(status_code=428, content={"error": "武装需二次确认:confirm=ARM"})
+    await _pool.execute(
+        "INSERT INTO engine_config(engine,ckey,cval,updated_by) VALUES($1,$2,$3,$4) "
+        "ON CONFLICT (engine,ckey) DO UPDATE SET cval=$3,version=engine_config.version+1,"
+        "updated_by=$4,updated_at=now()", engine, key, val, op)
+    await _publish_config(engine)
+    await _audit(op, role, "engine_config.set", f"{engine}.{key}", body, f"={val}")
+    logger.warning(f"CONFIG {op}({role}) {engine}.{key}={val}")
+    return {"ok": True, "engine": engine, "key": key, "val": val}
+
+
+@app.post("/api/admin/kill")
+async def kill_switch(request: Request):
+    """全局急停:所有引擎置 shadow + 清白名单(停新开;不强平,平仓另走路由 off)。SUPER_ADMIN。"""
+    who = await _operator(request)
+    if not who or not _has_role(who[1], "SUPER_ADMIN"):
+        return JSONResponse(status_code=403, content={"error": "需 SUPER_ADMIN"})
+    op, role = who
+    for key, val in (("mode", "shadow"), ("arm_symbols", "")):
+        await _pool.execute(
+            "INSERT INTO engine_config(engine,ckey,cval,updated_by) VALUES('dualperp',$1,$2,$3) "
+            "ON CONFLICT (engine,ckey) DO UPDATE SET cval=$2,version=engine_config.version+1,"
+            "updated_by=$3,updated_at=now()", key, val, op)
+    await _publish_config("dualperp")
+    await _audit(op, role, "KILL_SWITCH", "dualperp", {}, "置shadow+清白名单")
+    logger.warning(f"KILL_SWITCH by {op}")
+    return {"ok": True, "message": "全组合已置 shadow,白名单已清(存量仓位需手动路由 off 平仓)"}
+
+
+@app.post("/api/admin/route")
+async def admin_route(request: Request):
+    """路由写:代理 decision /routes,OPERATOR+。"""
+    who = await _operator(request)
+    if not who or not _has_role(who[1], "OPERATOR"):
+        return JSONResponse(status_code=403, content={"error": "需 OPERATOR"})
+    op, role = who
+    body = await request.json()
+    body["actor"] = f"admin:{op}"
+    try:
+        async with __import__("httpx").AsyncClient(timeout=10) as cli:
+            resp = await cli.post(f"{os.environ.get('DCM_DECISION_URL','http://10.0.1.12:8001')}/routes", json=body)
+        await _audit(op, role, "route.set", body.get("symbol", ""), body, f"http {resp.status_code}")
+        return JSONResponse(status_code=resp.status_code, content=resp.json())
+    except Exception as e:
+        return JSONResponse(status_code=502, content={"error": str(e)})
+
+
+@app.get("/api/admin/alerts")
+async def get_alerts(request: Request, limit: int = 100):
+    if not await _operator(request):
+        return JSONResponse(status_code=401, content={"error": "unauthorized"})
+    rows = await _pool.fetch(
+        "SELECT ts,service,level,title,content FROM alerts_log ORDER BY ts DESC LIMIT $1", min(limit, 300))
+    return {"alerts": [{"ts": r["ts"].isoformat(), "service": r["service"], "level": r["level"],
+                        "title": r["title"], "content": r["content"]} for r in rows]}
+
+
+@app.get("/api/admin/audit")
+async def get_audit(request: Request, limit: int = 100):
+    who = await _operator(request)
+    if not who or not _has_role(who[1], "OPERATOR"):
+        return JSONResponse(status_code=403, content={"error": "需 OPERATOR"})
+    rows = await _pool.fetch(
+        "SELECT ts,operator,role,action,target,result FROM admin_audit ORDER BY ts DESC LIMIT $1", min(limit, 300))
+    return {"audit": [{"ts": r["ts"].isoformat(), "operator": r["operator"], "role": r["role"],
+                       "action": r["action"], "target": r["target"], "result": r["result"]} for r in rows]}
 
 
 @app.get("/", response_class=HTMLResponse)

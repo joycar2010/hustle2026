@@ -64,12 +64,22 @@ notifier = Notifier(
 )
 
 
+_alert_pool = None  # main() 注入,用于告警落库(alerts_log)
+
+
 async def fire(key: str, title: str, content: str, level: str = "warn"):
-    """告警=日志+飞书(若配置)+跑马灯发布,经共享节流;绝不抛异常打断巡检轮。"""
+    """告警=日志+飞书(若配置)+跑马灯发布+落库(alerts_log 供告警历史页);经共享节流;绝不抛异常。"""
     try:
         res = await asyncio.to_thread(notifier.fire, key, title, content,
                                       level=level, marquee=True, color="#ef4444")
         log.warning("ALERT[%s] %s | %s -> %s", key, title, content, res)
+        if _alert_pool is not None and not (isinstance(res, dict) and res.get("throttled")):
+            try:
+                await _alert_pool.execute(
+                    "INSERT INTO alerts_log(service,akey,level,title,content) VALUES('risk-ledger',$1,$2,$3,$4)",
+                    key, level, title, content[:500])
+            except Exception:
+                pass
     except Exception as e:
         log.error("alert fire failed %s: %r", key, e)
 
@@ -310,6 +320,8 @@ async def main():
             pool = await asyncpg.create_pool(PG_DSN, min_size=1, max_size=3)
         except Exception as e:
             log.warning("pg pool init failed (guards disabled): %r", e)
+    global _alert_pool
+    _alert_pool = pool
     hb = Heartbeat(REDIS_URL, "risk-ledger", interval_sec=INTERVAL, ttl_sec=INTERVAL * 3 + 30)
     log.info("risk-ledger up interval=%ss stale_pos=%ss guards=%s expected=%s",
              INTERVAL, STALE_POS_SEC, pool is not None, list(EXPECTED_HB))

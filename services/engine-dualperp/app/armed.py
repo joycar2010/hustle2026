@@ -26,14 +26,9 @@ from dcm_common.exchange_trade import TRADE_CLIENTS
 
 log = logging.getLogger("engine-dualperp.armed")
 
-ARM_SYMBOLS = {s.strip().upper() for s in os.environ.get("DCM_DP_ARM_SYMBOLS", "").split(",") if s.strip()}
-MAX_NOTIONAL_HARD = Decimal(os.environ.get("DCM_DP_MAX_NOTIONAL_HARD", "25"))
-# 组合级敞口闸(多币并跑防线):全组合在场名义总额上限
-MAX_PORTFOLIO_NOTIONAL = Decimal(os.environ.get("DCM_DP_MAX_PORTFOLIO_NOTIONAL", "80"))
+from livecfg import CFG  # armed/白名单/上限/收敛开关走热配置(DB 优先),可管理台 0 秒热切换
 # 逐所保证金预算:单所在场名义 ≤ 该所权益 × 此系数(保守杠杆上限,防单所过度占用)
 VENUE_LEV_FACTOR = Decimal(os.environ.get("DCM_DP_VENUE_LEV_FACTOR", "3"))
-# R6 自动收敛(显式开关,默认关):亏损腿距强平<临界 → 双腿同比例减仓(保持中性,缓解保证金)
-AUTO_CONVERGE = os.environ.get("DCM_DP_AUTO_CONVERGE", "false").lower() == "true"
 CONVERGE_CRIT_PCT = float(os.environ.get("DCM_DP_CONVERGE_CRIT_PCT", "6"))
 CONVERGE_REDUCE_FRAC = Decimal(os.environ.get("DCM_DP_CONVERGE_REDUCE_FRAC", "0.5"))
 CONVERGE_MIN_NOTIONAL = Decimal(os.environ.get("DCM_DP_CONVERGE_MIN_NOTIONAL", "6"))
@@ -62,7 +57,7 @@ class ArmedExecutor:
         self._filters_loaded: set[tuple[str, str]] = set()
 
     def armed_for(self, sym: str) -> bool:
-        return sym in ARM_SYMBOLS and len(self.clients) > 0
+        return sym in CFG.arm_symbols and len(self.clients) > 0
 
     async def _alert(self, key, title, content, level="warn"):
         try:
@@ -148,12 +143,12 @@ class ArmedExecutor:
                               f"{sym} {vl}/{vs} 缺交易客户端(未配 key)", "warn")
             return
         # 硬顶(单腿)
-        target_usdt = min(target_usdt, MAX_NOTIONAL_HARD)
+        target_usdt = min(target_usdt, CFG.max_notional_hard)
 
         # 组合级敞口闸 + 逐所保证金预算闸(多币并跑防线)
         total, per_venue = await self._exposure(exclude_sym=sym)
-        if total + target_usdt > MAX_PORTFOLIO_NOTIONAL:
-            log.info("open %s skipped: 组合敞口 %s+%s > 上限 %s", sym, total, target_usdt, MAX_PORTFOLIO_NOTIONAL)
+        if total + target_usdt > CFG.max_portfolio_notional:
+            log.info("open %s skipped: 组合敞口 %s+%s > 上限 %s", sym, total, target_usdt, CFG.max_portfolio_notional)
             return
         for v in (vl, vs):
             eq = await self._venue_equity(v)
@@ -372,7 +367,7 @@ class ArmedExecutor:
 
     async def maybe_converge(self, cli, sym: str):
         """R6 自动收敛触发:任一腿距强平<临界 → 双腿同比例减仓。显式开关门控。"""
-        if not AUTO_CONVERGE or sym in self.inflight:
+        if not CFG.auto_converge or sym in self.inflight:
             return
         row = await self.pool.fetchrow(
             "SELECT venue_long,venue_short FROM dualperp_positions WHERE symbol=$1 AND state='OPEN' "
