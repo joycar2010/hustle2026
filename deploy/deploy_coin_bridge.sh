@@ -42,9 +42,11 @@ scp -q -i "$KEY" -o StrictHostKeyChecking=no services/coin-bridge/app/main.py "e
 $SSH "umask 077; cat > ~/dcmbridge/.env" <<ENV
 COIN_PG_DSN=dbname=cex_trading user=dcm_ro password=$ROPW host=127.0.0.1
 DCM_REDIS_URL=redis://10.0.1.212:6379/0
+COIN_ENV_PATH=/etc/systemd/system/cex-business.service
+COIN_API_BASE=http://127.0.0.1:8000
 ENV
 $SSH "test -x ~/dcmbridge/venv/bin/python || python3 -m venv ~/dcmbridge/venv;
-      ~/dcmbridge/venv/bin/pip -q install redis 'psycopg2-binary>=2.9' >/dev/null"
+      ~/dcmbridge/venv/bin/pip -q install redis 'psycopg2-binary>=2.9' PyJWT requests >/dev/null"
 
 echo "== systemd =="
 scp -q -i "$KEY" -o StrictHostKeyChecking=no deploy/units/dcm-coin-bridge.service "ec2-user@$HOST:/tmp/"

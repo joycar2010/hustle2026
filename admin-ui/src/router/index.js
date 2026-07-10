@@ -13,6 +13,7 @@ const routes = [
       { path: 'alerts', component: () => import('../views/Alerts.vue'), meta: { title: '告警历史' } },
       { path: 'audit', component: () => import('../views/Audit.vue'), meta: { title: '操作审计' } },
       { path: 'lending', component: () => import('../views/Lending.vue'), meta: { title: '借贷增强' } },
+      { path: 'pnl', component: () => import('../views/Pnl.vue'), meta: { title: 'PnL 归因' } },
       { path: 'coin', component: () => import('../views/CoinBridge.vue'), meta: { title: 'coin 借币' } },
     ],
   },

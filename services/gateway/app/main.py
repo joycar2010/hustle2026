@@ -371,6 +371,63 @@ async def coin_positions(request: Request):
     return {"ts": snap.get("ts"), "positions": snap.get("positions", [])}
 
 
+COIN_CMD_WHITELIST = {"engine_status", "engine_start", "engine_stop"}
+
+
+@app.post("/api/coin/command")
+async def coin_command(request: Request):
+    """代理式操作合并:入队审计过的 coin 命令→coin-bridge 本地执行(coin FastAPI 权威)。OPERATOR+。"""
+    who = await _operator(request)
+    if not who or not _has_role(who[1], "OPERATOR"):
+        return JSONResponse(status_code=403, content={"error": "需 OPERATOR"})
+    op, role = who
+    body = await request.json()
+    action = body.get("action")
+    if action not in COIN_CMD_WHITELIST:
+        return JSONResponse(status_code=400, content={"error": f"action 不在白名单: {action}"})
+    cid = str(await _redis.incr("dcm:coin:cmd:seq"))
+    cmd = {"id": cid, "action": action, "params": body.get("params") or {},
+           "operator": op, "user_id": 1}
+    await _redis.rpush("dcm:coin:cmd", json.dumps(cmd, ensure_ascii=False))
+    await _audit(op, role, f"coin.{action}", "coin", body, "enqueued")
+    # 轮询结果(coin-bridge ~2s 消费)
+    for _ in range(8):
+        await asyncio.sleep(1)
+        res = await _get_json(f"dcm:coin:cmd:result:{cid}")
+        if res is not None:
+            await _audit(op, role, f"coin.{action}.result", "coin", {}, str(res.get("ok")))
+            return {"enqueued": True, "id": cid, "result": res}
+    return {"enqueued": True, "id": cid, "result": None, "note": "已入队,结果未在8s内返回(coin-bridge 可能停更)"}
+
+
+@app.get("/api/pnl")
+async def pnl_attribution(request: Request, days: int = 30):
+    if not await _operator(request):
+        return JSONResponse(status_code=401, content={"error": "unauthorized"})
+    if _pool is None:
+        return {"configured": False}
+    by = await _pool.fetch(
+        f"""SELECT venue, itype, round(sum(amount),4) AS total FROM income_records
+            WHERE itype IN ('FUNDING','FEE','PNL') AND ts > now() - interval '{int(days)} days'
+            GROUP BY venue, itype""")
+    venues: dict = {}
+    for r in by:
+        venues.setdefault(r["venue"], {}).__setitem__(r["itype"], float(r["total"] or 0))
+    for v in venues.values():
+        v["net"] = round(sum(v.get(k, 0) for k in ("FUNDING", "FEE", "PNL")), 4)
+    daily = await _pool.fetch(
+        f"""SELECT date_trunc('day',ts) AS d, round(sum(amount),4) AS net FROM income_records
+            WHERE itype IN ('FUNDING','FEE','PNL') AND ts > now() - interval '{int(days)} days'
+            GROUP BY d ORDER BY d""")
+    cum, series = 0.0, []
+    for r in daily:
+        cum += float(r["net"] or 0)
+        series.append({"d": r["d"].date().isoformat(), "net": float(r["net"] or 0), "cum": round(cum, 4)})
+    totals = {k: round(sum(v.get(k, 0) for v in venues.values()), 4) for k in ("FUNDING", "FEE", "PNL")}
+    totals["net"] = round(sum(totals.values()), 4)
+    return {"configured": True, "days": days, "venues": venues, "totals": totals, "daily": series}
+
+
 @app.get("/", response_class=HTMLResponse)
 async def console(request: Request):
     # 正式 Vite 构建(admin-dist)优先;缺失回退 CDN 单文件(console.py)

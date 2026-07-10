@@ -23,4 +23,6 @@ export const api = {
   alerts: (limit = 120) => http.get('/api/admin/alerts', { params: { limit } }),
   audit: (limit = 120) => http.get('/api/admin/audit', { params: { limit } }),
   coinPositions: () => http.get('/api/coin/positions'),
+  coinCommand: (action, params = {}) => http.post('/api/coin/command', { action, params }),
+  pnl: (days = 30) => http.get('/api/pnl', { params: { days } }),
 }
