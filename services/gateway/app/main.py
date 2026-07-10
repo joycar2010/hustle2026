@@ -114,7 +114,8 @@ async def readyz():
 EXPECTED_SVCS = {"feed-cex": 120, "funding-sync": 900, "depth-sampler": 400, "universe-sync": 7500,
                  "account-snapshot": 240, "engine-dualperp": 120, "gateway": 120, "decision": 120,
                  "risk-ledger": 120, "carry-advisor": 1900, "coin-bridge": 240, "basis-sampler": 200,
-                 "pnl-recorder": 900, "engine-basis": 120, "lending-advisor": 5500}
+                 "pnl-recorder": 900, "engine-basis": 120, "lending-advisor": 5500,
+                 "llm-advisor": 1800}
 
 
 @app.get("/api/overview")
@@ -426,6 +427,15 @@ async def pnl_attribution(request: Request, days: int = 30):
     totals = {k: round(sum(v.get(k, 0) for v in venues.values()), 4) for k in ("FUNDING", "FEE", "PNL")}
     totals["net"] = round(sum(totals.values()), 4)
     return {"configured": True, "days": days, "venues": venues, "totals": totals, "daily": series}
+
+
+@app.get("/api/advisor/llm")
+async def advisor_llm(request: Request):
+    """LLM 顾问评审(只读展示)。llm-advisor 服务产出,gateway 只透传,不调 LLM。"""
+    if not await _operator(request):
+        return JSONResponse(status_code=401, content={"error": "unauthorized"})
+    return await _get_json("dcm:advisor:llm") or {"status": "missing",
+        "note": "llm-advisor 未产出(服务未起或首轮未完)"}
 
 
 @app.get("/", response_class=HTMLResponse)

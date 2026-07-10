@@ -9,6 +9,7 @@
         <el-menu-item index="/alerts">告警历史</el-menu-item>
         <el-menu-item index="/audit">操作审计</el-menu-item>
         <el-menu-item index="/lending">借贷增强</el-menu-item>
+        <el-menu-item index="/advisor">AI 顾问</el-menu-item>
         <el-menu-item index="/pnl">PnL 归因</el-menu-item>
         <el-menu-item index="/coin">coin 借币</el-menu-item>
       </el-menu>

@@ -54,6 +54,7 @@ EXPECTED_HB = {
     "account-snapshot": 240,
     "depth-sampler": 400,
     "basis-sampler": 200,
+    "engine-basis": 120,
 }
 RECON_VENUES = ("binance", "bybit", "okx", "gate", "bitget")
 STALE_STATUSES = ("PENDING_BORROW", "BORROWED_IDLE", "PENDING_REPAY")
@@ -307,6 +308,18 @@ async def check_round(r: aioredis.Redis, self_pool) -> dict:
                        f"—补仓余量不足,需注资或减仓", level="warn")
             alerts += 1
     status["waterline"] = waterline
+
+    # R10 basis 底仓可见性:引擎已发布 dcm:engine:basis:positions(意图账),此处只呈现不新增告警——
+    # basis 引擎 liveness 已由 R1 心跳(engine-basis)覆盖;单腿裸露由 R8 全域净敞口跨所归并兜底
+    # (basis 现货多+永续空,delta 中性→R8 net≈0;缺腿则 R8 净敞口超地板 fatal,无需在此重复判断)。
+    basis = await get_json(r, "dcm:engine:basis:positions")
+    if basis:
+        bpos = basis.get("positions") or []
+        status["basis"] = {"mode": basis.get("mode"), "open": len(bpos),
+                           "candidates": basis.get("candidates"),
+                           "positions": [{"symbol": p.get("symbol"), "state": p.get("state"),
+                                          "notional_usdt": p.get("notional_usdt"),
+                                          "funding_daily": p.get("funding_daily")} for p in bpos]}
 
     status["alerts_this_round"] = alerts
     return status

@@ -25,4 +25,5 @@ export const api = {
   coinPositions: () => http.get('/api/coin/positions'),
   coinCommand: (action, params = {}) => http.post('/api/coin/command', { action, params }),
   pnl: (days = 30) => http.get('/api/pnl', { params: { days } }),
+  llmAdvisor: () => http.get('/api/advisor/llm'),
 }
