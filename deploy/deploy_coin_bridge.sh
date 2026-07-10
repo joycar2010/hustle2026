@@ -44,6 +44,7 @@ COIN_PG_DSN=dbname=cex_trading user=dcm_ro password=$ROPW host=127.0.0.1
 DCM_REDIS_URL=redis://10.0.1.212:6379/0
 COIN_ENV_PATH=/etc/systemd/system/cex-business.service
 COIN_API_BASE=http://127.0.0.1:8000
+DCM_ROUTE_MUTEX=1
 ENV
 $SSH "test -x ~/dcmbridge/venv/bin/python || python3 -m venv ~/dcmbridge/venv;
       ~/dcmbridge/venv/bin/pip -q install redis 'psycopg2-binary>=2.9' PyJWT requests >/dev/null"

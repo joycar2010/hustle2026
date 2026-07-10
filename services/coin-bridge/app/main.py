@@ -80,6 +80,66 @@ def _exec_command(cmd: dict) -> dict:
         return {"ok": False, "err": repr(e)[:200]}
 
 
+# ── 路由互斥另一半(M4):decision 路由给非 coin 引擎且 active/draining 的币,
+# 写进 coin user1 blacklist(只拦新开仓,存量自然退出);路由解除后删除。
+# 所有权纪律:只增删 reason 前缀 dcm-route: 且 user_id=1 的行;
+# 人工行/全局系统行(user_id NULL)绝不碰——同币已被人工拉黑则跳过不认领。
+# 显式开关 DCM_ROUTE_MUTEX(默认关,部署 .env 显式开)。写路径走 coin FastAPI(coin 逻辑权威)。
+ROUTE_MUTEX = os.environ.get("DCM_ROUTE_MUTEX", "0") == "1"
+MUTEX_PREFIX = "dcm-route:"
+MUTEX_MAX_OPS = 50  # 单轮增删上限,防路由表异常时血洗黑名单
+
+
+def sync_route_mutex(r) -> dict:
+    """对账一轮。返回 {desired, owned, added, removed} 计数(进心跳)。"""
+    counts = {"desired": 0, "owned": 0, "added": 0, "removed": 0}
+    desired = {}
+    for sym, raw in r.hgetall("dcm:route:assignments").items():
+        try:
+            rt = json.loads(raw)
+        except Exception:
+            continue
+        if rt.get("engine") not in ("coin", "none", "") and \
+                rt.get("state") in ("active", "draining"):
+            desired[sym.upper()] = rt.get("engine")
+    counts["desired"] = len(desired)
+    secret = _coin_jwt_secret()
+    if not secret:
+        return counts
+    import requests
+    headers = {"Authorization": "Bearer " + _mint_jwt(secret)}
+    cur = requests.get(f"{COIN_API}/api/blacklist/", headers=headers, timeout=10)
+    cur.raise_for_status()
+    rows = cur.json()
+    owned = {row["symbol"].upper() for row in rows
+             if row.get("user_id") == 1 and (row.get("reason") or "").startswith(MUTEX_PREFIX)}
+    all_syms = {row["symbol"].upper() for row in rows}
+    counts["owned"] = len(owned)
+    ops = 0
+    for sym, eng in sorted(desired.items()):
+        if sym in all_syms or ops >= MUTEX_MAX_OPS:
+            continue  # 已在黑名单(本人或全局)则不重复也不认领
+        resp = requests.post(f"{COIN_API}/api/blacklist/", headers=headers, timeout=10,
+                             json={"symbol": sym, "reason": MUTEX_PREFIX + eng})
+        ops += 1
+        if resp.status_code < 400:
+            counts["added"] += 1
+            log.info("ROUTE_MUTEX add %s (engine=%s)", sym, eng)
+        else:
+            log.warning("ROUTE_MUTEX add %s failed %s %s", sym, resp.status_code, resp.text[:120])
+    for sym in sorted(owned - set(desired)):
+        if ops >= MUTEX_MAX_OPS:
+            break
+        resp = requests.delete(f"{COIN_API}/api/blacklist/{sym}", headers=headers, timeout=10)
+        ops += 1
+        if resp.status_code < 400:
+            counts["removed"] += 1
+            log.info("ROUTE_MUTEX del %s (路由解除)", sym)
+        else:
+            log.warning("ROUTE_MUTEX del %s failed %s %s", sym, resp.status_code, resp.text[:120])
+    return counts
+
+
 def consume_commands(r):
     """消费 dcm:coin:cmd(lpop),执行并把结果写 dcm:coin:cmd:result:{id}(EX60)。"""
     for _ in range(20):  # 每轮最多处理 20 条防饥饿
@@ -135,6 +195,9 @@ def fetch(dsn):
         conn.close()
 
 
+_last_mutex = {"desired": 0, "owned": 0, "added": 0, "removed": 0}
+
+
 def publish_state(r):
     positions, states = fetch(COIN_PG_DSN)
     now = int(time.time())
@@ -146,18 +209,27 @@ def publish_state(r):
     r.set("dcm:hb:coin-bridge", json.dumps(
         {"service": "coin-bridge", "ts": now, "pid": os.getpid(),
          "positions_open": len(positions), "engine_scopes": len(states),
-         "proxy": "on"}), ex=120)
+         "proxy": "on", "route_mutex": ("on" if ROUTE_MUTEX else "off"),
+         "mutex": _last_mutex}), ex=120)
     log.info("BRIDGE_OK positions=%d engine_scopes=%d", len(positions), len(states))
 
 
 def main():
+    global _last_mutex
     r = redis_sync.from_url(DCM_REDIS_URL, decode_responses=True)
-    log.info("coin-bridge up interval=%ss redis=%s proxy_whitelist=%s",
-             INTERVAL, DCM_REDIS_URL, list(CMD_WHITELIST))
+    log.info("coin-bridge up interval=%ss redis=%s proxy_whitelist=%s route_mutex=%s",
+             INTERVAL, DCM_REDIS_URL, list(CMD_WHITELIST), ROUTE_MUTEX)
     last_state = 0.0
+    last_mutex_ts = 0.0
     while True:
         try:
             consume_commands(r)              # 命令消费(~2s 响应)
+            if ROUTE_MUTEX and time.time() - last_mutex_ts >= 60:
+                try:
+                    _last_mutex = sync_route_mutex(r)   # 路由互斥对账(60s)
+                except Exception as e:
+                    log.warning("route mutex round failed: %r", e)
+                last_mutex_ts = time.time()
             if time.time() - last_state >= INTERVAL:
                 publish_state(r)             # 状态发布(INTERVAL)
                 last_state = time.time()
