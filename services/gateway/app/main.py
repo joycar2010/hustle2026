@@ -15,7 +15,8 @@ from contextlib import asynccontextmanager
 import asyncpg
 import redis.asyncio as aioredis
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from dcm_common.heartbeat import Heartbeat
 from app.console import CONSOLE_HTML
@@ -24,11 +25,13 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 logger = logging.getLogger("gateway")
 
 SERVICE = "gateway"
-VERSION = "0.2.0"
+VERSION = "0.3.0"
 REDIS_URL = os.environ.get("DCM_REDIS_URL", "redis://10.0.1.212:6379/0")
 PG_DSN = os.environ.get("DCM_PG_DSN", "")
 TSDB_DSN = os.environ.get("DCM_TSDB_DSN", "")
 DASHBOARD_TOKEN = os.environ.get("DCM_DASHBOARD_TOKEN", "")  # 空=不设门禁(仅内网/隧道)
+ADMIN_DIST = os.environ.get("DCM_ADMIN_DIST", os.path.expanduser("~/dexcexmix/admin-dist"))
+ADMIN_INDEX = os.path.join(ADMIN_DIST, "index.html")
 
 
 def _authed(request: Request) -> bool:
@@ -60,6 +63,10 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="DexCexMix Gateway", version=VERSION, lifespan=lifespan)
+
+# Vite 构建静态资源(hash 文件名,长缓存);缺失时不挂载(回退 CDN 单文件)
+if os.path.isdir(os.path.join(ADMIN_DIST, "assets")):
+    app.mount("/assets", StaticFiles(directory=os.path.join(ADMIN_DIST, "assets")), name="assets")
 
 
 async def _get_json(key: str):
@@ -366,7 +373,9 @@ async def coin_positions(request: Request):
 
 @app.get("/", response_class=HTMLResponse)
 async def console(request: Request):
-    # 控制台外壳(登录在客户端,数据 API 各自 RBAC 鉴权)
+    # 正式 Vite 构建(admin-dist)优先;缺失回退 CDN 单文件(console.py)
+    if os.path.isfile(ADMIN_INDEX):
+        return FileResponse(ADMIN_INDEX)
     return HTMLResponse(content=CONSOLE_HTML)
 
 
@@ -378,6 +387,14 @@ async def panel(request: Request):
     if DASHBOARD_TOKEN and request.query_params.get("token") == DASHBOARD_TOKEN:
         resp.set_cookie("dcm_token", DASHBOARD_TOKEN, max_age=86400 * 7, httponly=True, samesite="lax")
     return resp
+
+
+@app.get("/{full_path:path}", response_class=HTMLResponse)
+async def spa_fallback(full_path: str, request: Request):
+    """SPA 历史路由回退(/overview /engine 等)→ index.html;已注册的 API/静态路由先匹配不受影响。"""
+    if os.path.isfile(ADMIN_INDEX):
+        return FileResponse(ADMIN_INDEX)
+    return HTMLResponse(content=CONSOLE_HTML)
 
 
 _DASHBOARD_HTML = """<!doctype html><html lang="zh"><head><meta charset="utf-8">
