@@ -18,6 +18,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from dcm_common.heartbeat import Heartbeat
+from app.console import CONSOLE_HTML
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 logger = logging.getLogger("gateway")
@@ -111,7 +112,7 @@ EXPECTED_SVCS = {"feed-cex": 120, "funding-sync": 900, "depth-sampler": 400, "un
 
 @app.get("/api/overview")
 async def overview(request: Request):
-    if not _authed(request):
+    if not await _operator(request):
         return JSONResponse(status_code=401, content={"error": "unauthorized"})
     now = int(time.time())
     # 服务健康(dcm:hb:*)
@@ -167,7 +168,7 @@ async def overview(request: Request):
 @app.get("/api/shadow")
 async def shadow_report(request: Request, hours: int = 24):
     """shadow 战绩聚合:各币 would_open 占比 / 平均 E / 平均 gap(dualperp_shadow_log)。"""
-    if not _authed(request):
+    if not await _operator(request):
         return JSONResponse(status_code=401, content={"error": "unauthorized"})
     if _pool is None:
         return {"configured": False, "rows": []}
@@ -193,7 +194,7 @@ async def shadow_report(request: Request, hours: int = 24):
 @app.get("/api/shadow_trend")
 async def shadow_trend(request: Request, hours: int = 48):
     """shadow 机会趋势:逐小时 would_open 决策数 + 涉及币种数(单序列随时间变化)。"""
-    if not _authed(request):
+    if not await _operator(request):
         return JSONResponse(status_code=401, content={"error": "unauthorized"})
     if _pool is None:
         return {"configured": False, "points": []}
@@ -355,11 +356,24 @@ async def get_audit(request: Request, limit: int = 100):
                        "action": r["action"], "target": r["target"], "result": r["result"]} for r in rows]}
 
 
+@app.get("/api/coin/positions")
+async def coin_positions(request: Request):
+    if not await _operator(request):
+        return JSONResponse(status_code=401, content={"error": "unauthorized"})
+    snap = await _get_json("dcm:engine:coin:positions") or {}
+    return {"ts": snap.get("ts"), "positions": snap.get("positions", [])}
+
+
 @app.get("/", response_class=HTMLResponse)
-async def dashboard(request: Request):
+async def console(request: Request):
+    # 控制台外壳(登录在客户端,数据 API 各自 RBAC 鉴权)
+    return HTMLResponse(content=CONSOLE_HTML)
+
+
+@app.get("/panel", response_class=HTMLResponse)
+async def panel(request: Request):
     if not _authed(request):
-        return HTMLResponse(status_code=401,
-                            content="<h3 style='font-family:sans-serif'>需要 token:在 URL 加 ?token=你的令牌</h3>")
+        return HTMLResponse(status_code=401, content="<h3>需要 token:?token=</h3>")
     resp = HTMLResponse(content=_DASHBOARD_HTML)
     if DASHBOARD_TOKEN and request.query_params.get("token") == DASHBOARD_TOKEN:
         resp.set_cookie("dcm_token", DASHBOARD_TOKEN, max_age=86400 * 7, httponly=True, samesite="lax")
