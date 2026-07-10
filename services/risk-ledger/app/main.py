@@ -23,7 +23,7 @@ import asyncpg
 import redis.asyncio as aioredis
 
 from dcm_common.heartbeat import Heartbeat
-from dcm_common.notify import FeishuTarget, Notifier
+from dcm_common.notify import Notifier, feishu_from_env
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 log = logging.getLogger("risk-ledger")
@@ -56,8 +56,7 @@ RECON_VENUES = ("binance", "bybit", "okx", "gate", "bitget")
 STALE_STATUSES = ("PENDING_BORROW", "BORROWED_IDLE", "PENDING_REPAY")
 
 notifier = Notifier(
-    REDIS_URL, "risk-ledger",
-    feishu=FeishuTarget(webhook_url=os.environ.get("DCM_FEISHU_WEBHOOK", "")),
+    REDIS_URL, "risk-ledger", feishu=feishu_from_env(),
     throttle_interval_sec=THROTTLE_SEC, throttle_max_count=1,
 )
 

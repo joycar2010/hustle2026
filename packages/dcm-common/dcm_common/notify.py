@@ -29,6 +29,18 @@ class FeishuTarget:
     chat_id: str = ""
 
 
+def feishu_from_env() -> "FeishuTarget":
+    """从标准环境变量装配告警目标(webhook/自建应用 bot open_id 或 chat_id)。"""
+    import os
+    return FeishuTarget(
+        webhook_url=os.environ.get("DCM_FEISHU_WEBHOOK", ""),
+        app_id=os.environ.get("DCM_FEISHU_APP_ID", ""),
+        app_secret=os.environ.get("DCM_FEISHU_APP_SECRET", ""),
+        open_id=os.environ.get("DCM_FEISHU_OPEN_ID", ""),
+        chat_id=os.environ.get("DCM_FEISHU_CHAT_ID", ""),
+    )
+
+
 class Notifier:
     def __init__(self, redis_url: str, service: str,
                  feishu: FeishuTarget | None = None,

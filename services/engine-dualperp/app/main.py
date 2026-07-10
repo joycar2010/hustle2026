@@ -25,7 +25,7 @@ import httpx
 import redis.asyncio as aioredis
 
 from dcm_common.heartbeat import Heartbeat
-from dcm_common.notify import FeishuTarget, Notifier
+from dcm_common.notify import Notifier, feishu_from_env
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 log = logging.getLogger("engine-dualperp")
@@ -234,8 +234,7 @@ async def main():
             "bitget": {"key": os.environ.get("BITGET_KEY", ""), "secret": os.environ.get("BITGET_SECRET", ""),
                        "passphrase": os.environ.get("BITGET_PASSPHRASE", "")},
         }
-        notifier = Notifier(REDIS_URL, "engine-dualperp",
-                            feishu=FeishuTarget(webhook_url=os.environ.get("DCM_FEISHU_WEBHOOK", "")),
+        notifier = Notifier(REDIS_URL, "engine-dualperp", feishu=feishu_from_env(),
                             throttle_interval_sec=300, throttle_max_count=2)
         trade_cli = httpx.AsyncClient(timeout=15)
         executor = ArmedExecutor(r, pool, notifier, cfg)
