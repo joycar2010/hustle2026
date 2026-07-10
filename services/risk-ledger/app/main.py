@@ -40,6 +40,7 @@ EXPECTED_HB = {
     "gateway": 120,
     "decision": 120,
     "engine-dualperp": 120,
+    "funding-sync": 900,
 }
 STALE_STATUSES = ("PENDING_BORROW", "BORROWED_IDLE", "PENDING_REPAY")
 

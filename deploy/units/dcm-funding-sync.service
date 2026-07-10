@@ -1,0 +1,17 @@
+[Unit]
+Description=DexCexMix funding-rate sync (5 venues, settlement-interval normalized)
+After=network-online.target redis6.service
+Wants=network-online.target
+
+[Service]
+User=ec2-user
+Slice=dexcexmix.slice
+MemoryMax=256M
+WorkingDirectory=/home/ec2-user/dexcexmix/src
+EnvironmentFile=/home/ec2-user/dexcexmix/.env
+ExecStart=/home/ec2-user/dexcexmix/venv/bin/python services/funding-sync/app/main.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

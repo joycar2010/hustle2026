@@ -33,10 +33,15 @@ REDIS_URL = os.environ.get("DCM_REDIS_URL", "redis://10.0.1.212:6379/0")
 PG_DSN = os.environ.get("DCM_PG_DSN", "")
 MODE = os.environ.get("DCM_DP_MODE", "shadow")            # shadow | armed(key 到位前禁用)
 EVAL_SEC = int(os.environ.get("DCM_DP_EVAL_SEC", "5"))
-ENTRY_BPS = Decimal(os.environ.get("DCM_DP_ENTRY_BPS", "5"))
-EXIT_BPS = Decimal(os.environ.get("DCM_DP_EXIT_BPS", "0"))
 STALE_MS = int(os.environ.get("DCM_DP_STALE_MS", "10000"))
 SHADOW_LOG_EVERY_SEC = int(os.environ.get("DCM_DP_SHADOW_LOG_SEC", "60"))
+# 净期望口径:费差是收益主体,即刻价差是入场成本/红利。
+# 开仓 = 费差日化 ≥ MIN_FUNDING 且 入场价差 ≥ -MAX_ENTRY_COST(允许小幅倒贴,由费差摊销);
+# 平仓 = 费差日化 ≤ CLOSE_FUNDING(体制消失即撤,基差无锚收敛不保证)。
+MIN_FUNDING_DAILY_PCT = Decimal(os.environ.get("DCM_DP_MIN_FUNDING_DAILY_PCT", "0.05"))
+CLOSE_FUNDING_DAILY_PCT = Decimal(os.environ.get("DCM_DP_CLOSE_FUNDING_DAILY_PCT", "0"))
+MAX_ENTRY_COST_BPS = Decimal(os.environ.get("DCM_DP_MAX_ENTRY_COST_BPS", "10"))
+FUNDING_STALE_SEC = int(os.environ.get("DCM_DP_FUNDING_STALE_SEC", "1800"))
 
 
 class RouteBook:
@@ -92,12 +97,28 @@ async def leg_l1(r: aioredis.Redis, venue: str, market: str, symbol: str) -> dic
         return None
 
 
+async def leg_funding(r: aioredis.Redis, venue: str, symbol: str) -> dict | None:
+    try:
+        raw = await r.hget(f"dcm:feed:funding:{venue}", symbol)
+        return json.loads(raw) if raw else None
+    except Exception as e:
+        log.warning(f"funding read failed {venue}:{symbol}: {e!r}")
+        return None
+
+
 def evaluate(route: dict, long_l1: dict | None, short_l1: dict | None,
+             long_fund: dict | None, short_fund: dict | None,
              has_open_position: bool) -> tuple[str, dict]:
     """shadow/armed 共用的决策核:返回 (decision, detail)。
-    价差口径:gap = (空腿bid - 多腿ask) / 多腿ask,正值=开仓即刻价差收益(bps)。"""
-    now_ms = int(time.time() * 1000)
-    detail: dict = {"funding_missing": True}  # TODO: 接资金费差后并入净期望
+
+    收益结构:多腿付/收 long 所资金费,空腿收/付 short 所资金费 →
+      funding_edge_daily_pct = short_daily - long_daily(正=按日净收)。
+    价差口径:gap_bps = (空腿bid - 多腿ask)/多腿ask,正=开仓即刻价差红利,负=入场成本。
+    决策:费差 ≥ 门槛 且 入场成本可接受 → would_open;费差体制消失 → would_close。
+    任一腿行情/资金费缺失或超龄 → 不决策(绝不用 stale 数据下判断)。"""
+    now = time.time()
+    now_ms = int(now * 1000)
+    detail: dict = {}
     for name, l1 in (("long", long_l1), ("short", short_l1)):
         if l1 is None:
             detail[f"{name}_leg"] = "missing"
@@ -114,12 +135,29 @@ def evaluate(route: dict, long_l1: dict | None, short_l1: dict | None,
     detail["gap_bps"] = str(round(gap_bps, 4))
     detail["long_ask"] = str(long_ask)
     detail["short_bid"] = str(short_bid)
+
+    # 资金费差(日化 %):缺失/超龄 → 不决策,如实标注
+    edge = None
+    for name, f in (("long", long_fund), ("short", short_fund)):
+        if f is None:
+            detail[f"funding_{name}"] = "missing"
+        elif now - float(f.get("ts") or 0) > FUNDING_STALE_SEC:
+            detail[f"funding_{name}"] = f"stale({int(now - float(f['ts']))}s)"
+        else:
+            detail[f"funding_{name}_daily_pct"] = round(float(f["daily_pct"]), 5)
+    if ("funding_long_daily_pct" in detail) and ("funding_short_daily_pct" in detail):
+        edge = Decimal(str(detail["funding_short_daily_pct"])) \
+             - Decimal(str(detail["funding_long_daily_pct"]))
+        detail["funding_edge_daily_pct"] = str(round(edge, 5))
+
     target = Decimal(str(route.get("target_notional_usdt") or "0"))
     if has_open_position:
-        if gap_bps <= EXIT_BPS or target == 0:
+        if target == 0 or (edge is not None and edge <= CLOSE_FUNDING_DAILY_PCT):
             return "would_close", detail
         return "would_hold", detail
-    if target > 0 and gap_bps >= ENTRY_BPS:
+    if edge is None:
+        return "idle", detail  # 费差不明绝不开仓
+    if target > 0 and edge >= MIN_FUNDING_DAILY_PCT and gap_bps >= -MAX_ENTRY_COST_BPS:
         return "would_open", detail
     return "idle", detail
 
@@ -134,7 +172,7 @@ async def main():
     asyncio.create_task(book.watch())
     asyncio.create_task(hb.run_forever())
     log.info(f"engine-dualperp up mode={MODE} pid={os.getpid()} host={socket.gethostname()} "
-             f"entry={ENTRY_BPS}bps exit={EXIT_BPS}bps eval={EVAL_SEC}s")
+             f"min_funding={MIN_FUNDING_DAILY_PCT}%/d max_entry_cost={MAX_ENTRY_COST_BPS}bps eval={EVAL_SEC}s")
 
     last_logged: dict[str, tuple[str, float]] = {}  # symbol -> (decision, ts) 决策变化或60s才落库
     while True:
@@ -144,7 +182,10 @@ async def main():
                 sym = route["symbol"]
                 long_l1 = await leg_l1(r, route["venue_long"], route["market_long"], sym)
                 short_l1 = await leg_l1(r, route["venue_short"], route["market_short"], sym)
-                decision, detail = evaluate(route, long_l1, short_l1, has_open_position=False)
+                long_fund = await leg_funding(r, route["venue_long"], sym)
+                short_fund = await leg_funding(r, route["venue_short"], sym)
+                decision, detail = evaluate(route, long_l1, short_l1,
+                                            long_fund, short_fund, has_open_position=False)
                 shadow_status[sym] = {"decision": decision, **detail}
 
                 prev = last_logged.get(sym)
