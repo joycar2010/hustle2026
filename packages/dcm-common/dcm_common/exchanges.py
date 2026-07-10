@@ -202,7 +202,10 @@ async def _gate(cli: httpx.AsyncClient, cfg: dict) -> AccountSnapshot:
     try:
         acc = await get("/futures/usdt/accounts")
         if isinstance(acc, dict):
-            snap.equity_usdt = float(acc.get("total") or 0)
+            # Gate credit(统一保证金)模式:total=0 但 available=现货可用作合约保证金 → 取 available
+            total = float(acc.get("total") or 0)
+            avail = float(acc.get("available") or 0)
+            snap.equity_usdt = total if total > 0 else avail
         pos = await get("/futures/usdt/positions")
         if isinstance(pos, list):
             for p in pos:
