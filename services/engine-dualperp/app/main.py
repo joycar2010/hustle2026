@@ -179,8 +179,15 @@ async def main():
     trade_cli = None
     if MODE == "armed":
         from armed import ArmedExecutor, ARM_SYMBOLS
-        cfg = {"binance": {"key": os.environ.get("BINANCE_KEY", ""), "secret": os.environ.get("BINANCE_SECRET", "")},
-               "bybit": {"key": os.environ.get("BYBIT_KEY", ""), "secret": os.environ.get("BYBIT_SECRET", "")}}
+        cfg = {
+            "binance": {"key": os.environ.get("BINANCE_KEY", ""), "secret": os.environ.get("BINANCE_SECRET", "")},
+            "bybit": {"key": os.environ.get("BYBIT_KEY", ""), "secret": os.environ.get("BYBIT_SECRET", "")},
+            "okx": {"key": os.environ.get("OKX_KEY", ""), "secret": os.environ.get("OKX_SECRET", ""),
+                    "passphrase": os.environ.get("OKX_PASSPHRASE", "")},
+            "gate": {"key": os.environ.get("GATE_KEY", ""), "secret": os.environ.get("GATE_SECRET", "")},
+            "bitget": {"key": os.environ.get("BITGET_KEY", ""), "secret": os.environ.get("BITGET_SECRET", ""),
+                       "passphrase": os.environ.get("BITGET_PASSPHRASE", "")},
+        }
         notifier = Notifier(REDIS_URL, "engine-dualperp",
                             feishu=FeishuTarget(webhook_url=os.environ.get("DCM_FEISHU_WEBHOOK", "")),
                             throttle_interval_sec=300, throttle_max_count=2)

@@ -36,7 +36,7 @@ LEG_TIMEOUT = int(os.environ.get("DCM_DP_LEG_TIMEOUT_SEC", "15"))
 CROSS_BPS = Decimal(os.environ.get("DCM_DP_CROSS_BPS", "15"))       # marketable limit 穿价幅度
 MAX_SLIP_BPS = Decimal(os.environ.get("DCM_DP_MAX_SLIP_BPS", "40"))  # 穿价超此拒下(滑点保护)
 DUST_USDT = Decimal(os.environ.get("DCM_DP_DUST_USDT", "1"))
-SUPPORTED = {"binance", "bybit"}
+SUPPORTED = {"binance", "bybit", "okx", "gate", "bitget"}
 
 
 class ArmedExecutor:
@@ -50,7 +50,7 @@ class ArmedExecutor:
         self._filters_loaded: set[tuple[str, str]] = set()
 
     def armed_for(self, sym: str) -> bool:
-        return sym in ARM_SYMBOLS and self.clients.keys() >= SUPPORTED
+        return sym in ARM_SYMBOLS and len(self.clients) > 0
 
     async def _alert(self, key, title, content, level="warn"):
         try:
@@ -124,18 +124,16 @@ class ArmedExecutor:
         """反向平掉 signed_qty(>0 平多→SELL, <0 平空→BUY),reduce 语义用穿价确保成交。"""
         if abs(signed_qty) <= 0:
             return
-        side = "SELL" if signed_qty > 0 else "BUY"
-        if venue == "bybit":
-            side = "Sell" if signed_qty > 0 else "Buy"
+        side = "SELL" if signed_qty > 0 else "BUY"  # 客户端内部转各所格式
         filled, _, _ = await self._place_confirm(cli, venue, symbol, side, abs(signed_qty), ref_px)
         log.info("flatten %s %s %s qty=%s filled=%s", venue, symbol, side, abs(signed_qty), filled)
 
     async def open_pair(self, cli, route: dict, target_usdt: Decimal, l1_long: dict, l1_short: dict):
         sym = route["symbol"]
         vl, vs = route["venue_long"], route["venue_short"]
-        if not (vl in SUPPORTED and vs in SUPPORTED):
-            await self._alert(f"unsupported:{sym}", "armed 路由含不支持 venue",
-                              f"{sym} {vl}/{vs} 暂只支持 binance+bybit", "warn")
+        if not (vl in self.clients and vs in self.clients):
+            await self._alert(f"unsupported:{sym}", "armed 路由含未配置 venue 客户端",
+                              f"{sym} {vl}/{vs} 缺交易客户端(未配 key)", "warn")
             return
         # 硬顶(单腿)
         target_usdt = min(target_usdt, MAX_NOTIONAL_HARD)
@@ -191,10 +189,9 @@ class ArmedExecutor:
             if not long_first:
                 legs = legs[::-1]
 
-            # 腿1(薄)
+            # 腿1(薄)——所有客户端统一接受 BUY/SELL,内部转各所格式
             leg1 = legs[0]
-            side1 = leg1[2] if leg1[1] == "binance" else ({"BUY": "Buy", "SELL": "Sell"}[leg1[2]])
-            f1, avg1, oid1 = await self._place_confirm(cli, leg1[1], sym, side1, qty, leg1[3])
+            f1, avg1, oid1 = await self._place_confirm(cli, leg1[1], sym, leg1[2], qty, leg1[3])
             if f1 <= 0:
                 await self.pool.execute("UPDATE dualperp_positions SET state='FAILED',"
                                         "error_message='leg1 no fill',updated_at=now() WHERE id=$1", row_id)
@@ -203,8 +200,7 @@ class ArmedExecutor:
 
             # 腿2(厚),数量对齐腿1实际成交(保持中性)
             leg2 = legs[1]
-            side2 = leg2[2] if leg2[1] == "binance" else ({"BUY": "Buy", "SELL": "Sell"}[leg2[2]])
-            f2, avg2, oid2 = await self._place_confirm(cli, leg2[1], sym, side2, f1, leg2[3])
+            f2, avg2, oid2 = await self._place_confirm(cli, leg2[1], sym, leg2[2], f1, leg2[3])
 
             # 残差:两腿成交 base 之差
             residual = f1 - f2

@@ -18,6 +18,11 @@ REDIS_URL = os.environ.get("DCM_REDIS_URL", "redis://10.0.1.212:6379/0")
 CFG = {
     "binance": {"key": os.environ.get("BINANCE_KEY", ""), "secret": os.environ.get("BINANCE_SECRET", "")},
     "bybit": {"key": os.environ.get("BYBIT_KEY", ""), "secret": os.environ.get("BYBIT_SECRET", "")},
+    "okx": {"key": os.environ.get("OKX_KEY", ""), "secret": os.environ.get("OKX_SECRET", ""),
+            "passphrase": os.environ.get("OKX_PASSPHRASE", "")},
+    "gate": {"key": os.environ.get("GATE_KEY", ""), "secret": os.environ.get("GATE_SECRET", "")},
+    "bitget": {"key": os.environ.get("BITGET_KEY", ""), "secret": os.environ.get("BITGET_SECRET", ""),
+               "passphrase": os.environ.get("BITGET_PASSPHRASE", "")},
 }
 
 
@@ -37,12 +42,12 @@ async def main():
     async with httpx.AsyncClient(timeout=15) as cli:
         await tc.load_filter(cli, symbol)
         mid = await mid_price(symbol, venue)
-        # BUY 挂到市价一半 → 绝不成交;名义约 6 USDT(过 minNotional)
+        # BUY 挂到市价一半 → 绝不成交;名义约 10 USDT(过各所 min)
         price = mid / 2
-        qty = (Decimal("6") / price)
-        print(f"[{venue}:{symbol}] mid={mid} 挂单价={price}(市价50%,不成交) 目标名义~6U")
+        qty = (Decimal("10") / price)
+        print(f"[{venue}:{symbol}] mid={mid} 挂单价={price}(市价50%,不成交) 目标名义~10U")
 
-        ok, res = await tc.place_limit(cli, symbol, "Buy" if venue == "bybit" else "BUY", qty, price)
+        ok, res = await tc.place_limit(cli, symbol, "BUY", qty, price)
         print(f"  place -> ok={ok} {res if not ok else res['order_id']}")
         if not ok:
             print("  FAIL place"); return
