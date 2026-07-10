@@ -104,7 +104,7 @@ async def readyz():
 # 逐服务心跳最大龄(秒)——各服务周期不同(采样器小时级/顾问10min级),不能用统一阈值
 EXPECTED_SVCS = {"feed-cex": 120, "funding-sync": 900, "depth-sampler": 400, "universe-sync": 7500,
                  "account-snapshot": 240, "engine-dualperp": 120, "gateway": 120, "decision": 120,
-                 "risk-ledger": 120, "carry-advisor": 1900, "coin-bridge": 240}
+                 "risk-ledger": 120, "carry-advisor": 1900, "coin-bridge": 240, "basis-sampler": 200}
 
 
 @app.get("/api/overview")
@@ -181,6 +181,23 @@ async def shadow_report(request: Request, hours: int = 24):
                      for r in rows]}
 
 
+@app.get("/api/shadow_trend")
+async def shadow_trend(request: Request, hours: int = 48):
+    """shadow 机会趋势:逐小时 would_open 决策数 + 涉及币种数(单序列随时间变化)。"""
+    if not _authed(request):
+        return JSONResponse(status_code=401, content={"error": "unauthorized"})
+    if _pool is None:
+        return {"configured": False, "points": []}
+    rows = await _pool.fetch(
+        f"""SELECT date_trunc('hour', ts) AS h,
+              count(*) FILTER (WHERE decision='would_open') AS opps,
+              count(DISTINCT symbol) FILTER (WHERE decision='would_open') AS symbols
+            FROM dualperp_shadow_log WHERE ts > now() - interval '{int(hours)} hours'
+            GROUP BY h ORDER BY h""")
+    return {"configured": True,
+            "points": [{"t": r["h"].isoformat(), "opps": r["opps"], "symbols": r["symbols"]} for r in rows]}
+
+
 @app.get("/", response_class=HTMLResponse)
 async def dashboard(request: Request):
     if not _authed(request):
@@ -232,6 +249,10 @@ td{padding:4px 8px;border-bottom:1px solid #21262d}tr:last-child td{border:0}
 </div>
 
 <div class="panel"><h2>在场配对 + 风控护栏</h2><table id="guards"></table></div>
+<div class="panel"><h2>机会趋势（48h · would_open 决策数 / 小时）</h2>
+<div id="trend" style="position:relative"><svg id="tsvg" width="100%" height="140" preserveAspectRatio="none"></svg>
+<div id="ttip" style="position:absolute;display:none;pointer-events:none;background:#0d1117;
+border:1px solid var(--border);border-radius:6px;padding:4px 8px;font-size:11px;white-space:nowrap"></div></div></div>
 <div class="panel"><h2>活跃路由</h2><table id="routes"></table></div>
 <div class="panel"><h2>Shadow 战绩（24h：would_open 占比 / 平均净期望E / 平均价差）</h2><table id="shadow"></table></div>
 </div>
@@ -276,6 +297,37 @@ async function tick(){
     '<span class="mono">'+fmt(r.max_e,1)+'</span>',
     '<span class="mono">'+fmt(r.avg_gap,1)+'</span>'])).join('');
  }
+ drawTrend(await j('/api/shadow_trend'));
 }
+// 机会趋势:单序列面积图(基线锚定/2px线/隐性网格/hover十字准星)——形随"随时间变化"
+let _pts=[];
+function drawTrend(d){
+ const svg=$('#tsvg'); if(!d||!d.points||!d.points.length){svg.innerHTML='';return}
+ _pts=d.points; const W=svg.clientWidth||900,H=140,PL=32,PR=8,PT=10,PB=18;
+ const xs=_pts.map(p=>new Date(p.t).getTime()), ys=_pts.map(p=>p.opps);
+ const x0=Math.min(...xs),x1=Math.max(...xs)||x0+1,ymax=Math.max(4,...ys);
+ const X=t=>PL+(W-PL-PR)*(x1===x0?0.5:(t-x0)/(x1-x0)), Y=v=>PT+(H-PT-PB)*(1-v/ymax);
+ let g='';for(let i=0;i<=3;i++){const v=Math.round(ymax*i/3),y=Y(v);
+  g+='<line x1="'+PL+'" y1="'+y+'" x2="'+(W-PR)+'" y2="'+y+'" stroke="#21262d" stroke-width="1"/>'
+   +'<text x="'+(PL-4)+'" y="'+(y+3)+'" fill="#8b949e" font-size="10" text-anchor="end">'+v+'</text>'}
+ const lp=_pts.map((p,i)=>(i?'L':'M')+X(xs[i]).toFixed(1)+' '+Y(ys[i]).toFixed(1)).join(' ');
+ const ap=lp+' L'+X(x1).toFixed(1)+' '+Y(0)+' L'+X(x0).toFixed(1)+' '+Y(0)+' Z';
+ const t0=new Date(x0),t1=new Date(x1);
+ const xl='<text x="'+PL+'" y="'+(H-4)+'" fill="#8b949e" font-size="10">'+t0.toLocaleString([],{month:'numeric',day:'numeric',hour:'2-digit'})+'</text>'
+  +'<text x="'+(W-PR)+'" y="'+(H-4)+'" fill="#8b949e" font-size="10" text-anchor="end">'+t1.toLocaleString([],{month:'numeric',day:'numeric',hour:'2-digit'})+'</text>';
+ svg.innerHTML=g+'<path d="'+ap+'" fill="#58a6ff" fill-opacity="0.12"/>'
+  +'<path d="'+lp+'" fill="none" stroke="#58a6ff" stroke-width="2"/>'
+  +'<line id="cx" x1="0" y1="'+PT+'" x2="0" y2="'+(H-PB)+'" stroke="#58a6ff" stroke-width="1" style="display:none"/>'+xl;
+ svg._m={W,PL,PR,PT,PB,x0,x1,X,Y,xs,ys};
+}
+$('#tsvg').addEventListener('mousemove',e=>{
+ const svg=$('#tsvg'),m=svg._m; if(!m||!_pts.length)return;
+ const rx=e.offsetX/svg.clientWidth*m.W, i=_pts.reduce((b,p,k)=>Math.abs(m.xs[k]-invX(m,rx))<Math.abs(m.xs[b]-invX(m,rx))?k:b,0);
+ const cx=$('#cx');cx.style.display='';cx.setAttribute('x1',m.X(m.xs[i]));cx.setAttribute('x2',m.X(m.xs[i]));
+ const tt=$('#ttip');tt.style.display='';tt.style.left=Math.min(e.offsetX+10,svg.clientWidth-120)+'px';tt.style.top='6px';
+ tt.innerHTML=new Date(_pts[i].t).toLocaleString([],{month:'numeric',day:'numeric',hour:'2-digit'})+'<br><b>'+_pts[i].opps+'</b> 机会 · '+_pts[i].symbols+' 币';
+});
+$('#tsvg').addEventListener('mouseleave',()=>{const c=$('#cx');if(c)c.style.display='none';$('#ttip').style.display='none'});
+function invX(m,px){return m.x0+(m.x1-m.x0)*(px-m.PL)/(m.W-m.PL-m.PR)}
 tick(); setInterval(tick,5000);
 </script></body></html>"""

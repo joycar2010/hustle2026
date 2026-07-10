@@ -344,14 +344,15 @@ class ArmedExecutor:
             return False  # 浮亏在预算内,无论基差如何都不止损
 
         # 浮亏超预算 → 再看基差是否极端(历史分位):gap 拉到高分位=收敛不保证的信号
+        # 分位从 dualperp_basis_samples 算(basis-sampler 连续采,覆盖比 shadow_log 全,不受 route off 影响)
         cur_gap = await self._current_gap_bps(vl, vs, sym)
         pth = await self.pool.fetchval(
-            f"SELECT percentile_cont($4) WITHIN GROUP (ORDER BY gap_bps) FROM dualperp_shadow_log "
-            f"WHERE symbol=$1 AND venue_long=$2 AND venue_short=$3 AND gap_bps IS NOT NULL "
+            f"SELECT percentile_cont($4) WITHIN GROUP (ORDER BY basis_bps) FROM dualperp_basis_samples "
+            f"WHERE symbol=$1 AND venue_long=$2 AND venue_short=$3 "
             f"AND ts > now() - interval '{BASIS_WINDOW_HOURS} hours'", sym, vl, vs, BASIS_QUANTILE)
         n = await self.pool.fetchval(
-            f"SELECT count(*) FROM dualperp_shadow_log WHERE symbol=$1 AND venue_long=$2 AND venue_short=$3 "
-            f"AND gap_bps IS NOT NULL AND ts > now() - interval '{BASIS_WINDOW_HOURS} hours'", sym, vl, vs)
+            f"SELECT count(*) FROM dualperp_basis_samples WHERE symbol=$1 AND venue_long=$2 AND venue_short=$3 "
+            f"AND ts > now() - interval '{BASIS_WINDOW_HOURS} hours'", sym, vl, vs)
         if cur_gap is not None and n >= BASIS_MIN_SAMPLES and pth is not None:
             extreme = cur_gap >= Decimal(str(pth))
             qdetail = f"gap={round(cur_gap,1)}bps vs P{int(BASIS_QUANTILE*100)}={round(float(pth),1)} (n={n})"

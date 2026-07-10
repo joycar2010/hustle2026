@@ -51,6 +51,7 @@ EXPECTED_HB = {
     "carry-advisor": 1900,
     "account-snapshot": 240,
     "depth-sampler": 400,
+    "basis-sampler": 200,
 }
 RECON_VENUES = ("binance", "bybit", "okx", "gate", "bitget")
 STALE_STATUSES = ("PENDING_BORROW", "BORROWED_IDLE", "PENDING_REPAY")
