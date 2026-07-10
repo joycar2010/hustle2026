@@ -42,7 +42,9 @@ EXPECTED_HB = {
     "engine-dualperp": 120,
     "funding-sync": 900,
     "carry-advisor": 1900,
+    "account-snapshot": 240,
 }
+RECON_VENUES = ("binance", "bybit", "okx", "gate", "bitget")
 STALE_STATUSES = ("PENDING_BORROW", "BORROWED_IDLE", "PENDING_REPAY")
 
 notifier = Notifier(
@@ -151,6 +153,31 @@ async def check_round(r: aioredis.Redis) -> dict:
                        f"status={sp['status']} 已滞留 {sp['age_min']}min borrow_qty={sp['borrow_qty']}"
                        f" — 僵尸仓/钉死币前兆,需人工核")
             alerts += 1
+
+    # R5 实盘对账(account-snapshot 只读快照为真相源):逐所权益+持仓汇总,鉴权失败 fatal
+    recon: dict = {"configured": False, "venues": {}}
+    total_equity = 0.0
+    any_configured = False
+    for v in RECON_VENUES:
+        acct = await get_json(r, f"dcm:account:{v}")
+        if acct is None:
+            continue
+        any_configured = True
+        if acct.get("ok"):
+            eq = float(acct.get("equity_usdt") or 0)
+            total_equity += eq
+            recon["venues"][v] = {"equity_usdt": eq, "positions": len(acct.get("positions") or {})}
+        else:
+            err = str(acct.get("err") or "")
+            recon["venues"][v] = {"error": err[:120]}
+            # 鉴权/IP 类错误 fatal(裸奔风险:引擎以为能交易实则被拒);区分限频等瞬时错误
+            low = err.lower()
+            if any(k in low for k in ("ip", "-2015", "unauthorized", "invalid api", "sign")):
+                await fire(f"acct-auth:{v}", f"{v} 账户鉴权失败", f"实盘对账被拒: {err[:100]}", level="fatal")
+                alerts += 1
+    recon["configured"] = any_configured
+    recon["total_equity_usdt"] = round(total_equity, 2)
+    status["reconcile"] = recon
 
     status["alerts_this_round"] = alerts
     return status
