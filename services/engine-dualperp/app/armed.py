@@ -37,9 +37,13 @@ AUTO_CONVERGE = os.environ.get("DCM_DP_AUTO_CONVERGE", "false").lower() == "true
 CONVERGE_CRIT_PCT = float(os.environ.get("DCM_DP_CONVERGE_CRIT_PCT", "6"))
 CONVERGE_REDUCE_FRAC = Decimal(os.environ.get("DCM_DP_CONVERGE_REDUCE_FRAC", "0.5"))
 CONVERGE_MIN_NOTIONAL = Decimal(os.environ.get("DCM_DP_CONVERGE_MIN_NOTIONAL", "6"))
-# 基差止损纪律:配对浮亏达预算(名义%)→ 双腿撤退(基差无锚,收敛不保证)
+# 基差止损纪律:浮亏达预算(名义%) 且 基差超历史分位 → 双腿撤退(基差无锚,收敛不保证);
+# 历史分位从 shadow_log.gap_bps 算(gap 即基差);样本不足回落纯浮亏预算(保护不缺位)
 BASIS_STOP = os.environ.get("DCM_DP_BASIS_STOP", "true").lower() == "true"
 LOSS_BUDGET_PCT = Decimal(os.environ.get("DCM_DP_LOSS_BUDGET_PCT", "15"))
+BASIS_QUANTILE = float(os.environ.get("DCM_DP_BASIS_QUANTILE", "0.9"))       # gap 超此分位=极端拉宽
+BASIS_MIN_SAMPLES = int(os.environ.get("DCM_DP_BASIS_MIN_SAMPLES", "30"))
+BASIS_WINDOW_HOURS = int(os.environ.get("DCM_DP_BASIS_WINDOW_HOURS", "12"))
 LEG_TIMEOUT = int(os.environ.get("DCM_DP_LEG_TIMEOUT_SEC", "15"))
 CROSS_BPS = Decimal(os.environ.get("DCM_DP_CROSS_BPS", "15"))       # marketable limit 穿价幅度
 MAX_SLIP_BPS = Decimal(os.environ.get("DCM_DP_MAX_SLIP_BPS", "40"))  # 穿价超此拒下(滑点保护)
@@ -307,9 +311,21 @@ class ArmedExecutor:
             return
         await self.maybe_converge(cli, sym)
 
+    async def _current_gap_bps(self, vl: str, vs: str, sym: str):
+        """当前基差(gap)=(空腿bid-多腿ask)/多腿ask,与 shadow_log.gap_bps 同口径。"""
+        ll = await self.r.hget(f"dcm:feed:{vl}:perp", sym)
+        sl = await self.r.hget(f"dcm:feed:{vs}:perp", sym)
+        if not (ll and sl):
+            return None
+        long_ask = Decimal(str(json.loads(ll)["ask"]))
+        short_bid = Decimal(str(json.loads(sl)["bid"]))
+        if long_ask <= 0:
+            return None
+        return (short_bid - long_ask) / long_ask * Decimal("10000")
+
     async def maybe_basis_stop(self, cli, sym: str) -> bool:
-        """基差止损:配对总浮亏 > 预算(名义%)→ 双腿撤退。delta 中性下亏损=基差逆行+费差,
-        持续拉宽即撤(基差无锚不赌收敛)。BASIS_STOP 开关门控。返回是否已撤退。"""
+        """基差止损:浮亏>预算 **且** 基差(gap)超历史分位 → 双腿撤退(基差无锚不赌收敛)。
+        历史分位从 shadow_log.gap_bps 算;样本<MIN 回落纯浮亏预算(保护不缺位)。返回是否已撤退。"""
         if not BASIS_STOP or sym in self.inflight:
             return False
         row = await self.pool.fetchrow(
@@ -317,20 +333,41 @@ class ArmedExecutor:
             "WHERE symbol=$1 AND state='OPEN' ORDER BY id DESC LIMIT 1", sym)
         if not row:
             return False
-        ul = await self._leg_upnl(row["venue_long"], sym)
-        us = await self._leg_upnl(row["venue_short"], sym)
+        vl, vs = row["venue_long"], row["venue_short"]
+        ul = await self._leg_upnl(vl, sym)
+        us = await self._leg_upnl(vs, sym)
         if ul is None or us is None:
             return False  # 数据未就绪不判(与护栏同纪律)
         pair_upnl = Decimal(str(ul + us))
         budget = Decimal(str(row["notional_usdt"] or 0)) * LOSS_BUDGET_PCT / Decimal("100")
-        if pair_upnl < -budget:
-            await self._alert(f"basis-stop:{sym}", "基差止损:配对撤退",
-                              f"{sym} 配对浮亏 {round(pair_upnl,4)}U > 预算 {round(budget,4)}U → 双腿平仓",
-                              level="fatal")
-            log.warning("BASIS_STOP %s pair_upnl=%s budget=%s -> close", sym, pair_upnl, budget)
-            await self.close_pair(cli, sym)
-            return True
-        return False
+        if pair_upnl >= -budget:
+            return False  # 浮亏在预算内,无论基差如何都不止损
+
+        # 浮亏超预算 → 再看基差是否极端(历史分位):gap 拉到高分位=收敛不保证的信号
+        cur_gap = await self._current_gap_bps(vl, vs, sym)
+        pth = await self.pool.fetchval(
+            f"SELECT percentile_cont($4) WITHIN GROUP (ORDER BY gap_bps) FROM dualperp_shadow_log "
+            f"WHERE symbol=$1 AND venue_long=$2 AND venue_short=$3 AND gap_bps IS NOT NULL "
+            f"AND ts > now() - interval '{BASIS_WINDOW_HOURS} hours'", sym, vl, vs, BASIS_QUANTILE)
+        n = await self.pool.fetchval(
+            f"SELECT count(*) FROM dualperp_shadow_log WHERE symbol=$1 AND venue_long=$2 AND venue_short=$3 "
+            f"AND gap_bps IS NOT NULL AND ts > now() - interval '{BASIS_WINDOW_HOURS} hours'", sym, vl, vs)
+        if cur_gap is not None and n >= BASIS_MIN_SAMPLES and pth is not None:
+            extreme = cur_gap >= Decimal(str(pth))
+            qdetail = f"gap={round(cur_gap,1)}bps vs P{int(BASIS_QUANTILE*100)}={round(float(pth),1)} (n={n})"
+        else:
+            extreme = True  # 样本/数据不足 → 纯浮亏预算兜底(早期保护不缺位)
+            qdetail = f"样本不足兜底(n={n})"
+        if not extreme:
+            # 浮亏但基差未达极端 → 暂不撤(可能均值回归,基差无锚才撤)
+            log.info("basis_stop %s 浮亏%s>预算但基差未极端(%s),暂持", sym, round(pair_upnl, 3), qdetail)
+            return False
+        await self._alert(f"basis-stop:{sym}", "基差止损:配对撤退",
+                          f"{sym} 浮亏 {round(pair_upnl,4)}U>预算{round(budget,4)}U 且基差极端[{qdetail}] → 双腿平仓",
+                          level="fatal")
+        log.warning("BASIS_STOP %s pair_upnl=%s budget=%s %s -> close", sym, pair_upnl, budget, qdetail)
+        await self.close_pair(cli, sym)
+        return True
 
     async def maybe_converge(self, cli, sym: str):
         """R6 自动收敛触发:任一腿距强平<临界 → 双腿同比例减仓。显式开关门控。"""
