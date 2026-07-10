@@ -48,6 +48,7 @@ async def main():
                     await r.set(f"dcm:account:{s.venue}", json.dumps({
                         "ts": int(time.time()), "ok": s.ok, "equity_usdt": round(s.equity_usdt, 2),
                         "positions": {k: round(v, 10) for k, v in s.positions.items()},
+                        "pos_detail": s.pos_detail,
                         "err": s.err}, ensure_ascii=False), ex=180)
                     hb[s.venue] = f"{round(s.equity_usdt, 2)}U/{len(s.positions)}pos" if s.ok else f"ERR:{s.err[:60]}"
                 await r.set("dcm:hb:account-snapshot", json.dumps(hb, ensure_ascii=False), ex=max(INTERVAL * 3, 300))

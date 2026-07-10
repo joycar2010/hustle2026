@@ -30,11 +30,27 @@ class AccountSnapshot:
     ok: bool = False
     equity_usdt: float = 0.0
     positions: dict[str, float] = field(default_factory=dict)  # 统一符号 -> 带方向数量
+    # 逐仓风险明细(风控三护栏数据源):qty/mark/liq/upnl/dist_liq_pct/adl
+    pos_detail: dict[str, dict] = field(default_factory=dict)
     err: str = ""
 
 
 def _norm(sym: str) -> str:
     return sym.replace("-SWAP", "").replace("-", "").replace("_", "").upper()
+
+
+def _f2(x, d=0.0):
+    try:
+        return float(x)
+    except (TypeError, ValueError):
+        return d
+
+
+def _dist_liq_pct(mark: float, liq: float) -> float | None:
+    """距强平价百分比(越大越安全)。cross 无 liq(0/空)→None=暂无强平风险读数。"""
+    if mark > 0 and liq > 0:
+        return round(abs(mark - liq) / mark * 100, 3)
+    return None
 
 
 # ───────────── binance USDM ─────────────
@@ -61,10 +77,26 @@ async def _binance(cli: httpx.AsyncClient, cfg: dict) -> AccountSnapshot:
         if isinstance(pos, dict):
             snap.err = f"{pos.get('code')}:{pos.get('msg')}"
             return snap
+        # ADL 分位(单独端点):one-way 用 BOTH 档
+        adl_map: dict[str, float] = {}
+        try:
+            adl = (await cli.get(signed("/fapi/v1/adlQuantile"), headers=headers)).json()
+            if isinstance(adl, list):
+                for a in adl:
+                    q = a.get("adlQuantile") or {}
+                    adl_map[_norm(a["symbol"])] = _f2(q.get("BOTH") or q.get("LONG") or q.get("SHORT"))
+        except Exception:
+            pass
         for p in pos:
             amt = float(p.get("positionAmt") or 0)
             if amt != 0:
-                snap.positions[_norm(p["symbol"])] = amt
+                s = _norm(p["symbol"])
+                mark, liq = _f2(p.get("markPrice")), _f2(p.get("liquidationPrice"))
+                snap.positions[s] = amt
+                snap.pos_detail[s] = {"qty": amt, "mark": mark, "liq": liq,
+                                      "upnl": _f2(p.get("unRealizedProfit")),
+                                      "dist_liq_pct": _dist_liq_pct(mark, liq),
+                                      "adl": adl_map.get(s)}
         snap.ok = True
     except Exception as e:
         snap.err = repr(e)[:200]
@@ -96,7 +128,14 @@ async def _bybit(cli: httpx.AsyncClient, cfg: dict) -> AccountSnapshot:
         for p in pl.get("result", {}).get("list", []):
             size = float(p.get("size") or 0)
             if size != 0:
-                snap.positions[_norm(p["symbol"])] = size if p.get("side") == "Buy" else -size
+                s = _norm(p["symbol"])
+                signed = size if p.get("side") == "Buy" else -size
+                mark, liq = _f2(p.get("markPrice")), _f2(p.get("liqPrice"))
+                snap.positions[s] = signed
+                snap.pos_detail[s] = {"qty": signed, "mark": mark, "liq": liq,
+                                      "upnl": _f2(p.get("unrealisedPnl")),
+                                      "dist_liq_pct": _dist_liq_pct(mark, liq),
+                                      "adl": _f2(p.get("adlRankIndicator")) or None}
         if wb.get("retCode") == 0 and pl.get("retCode") == 0:
             snap.ok = True
         else:
@@ -129,7 +168,13 @@ async def _okx(cli: httpx.AsyncClient, cfg: dict) -> AccountSnapshot:
         for p in pos.get("data", []):
             amt = float(p.get("pos") or 0)
             if amt != 0 and p.get("instId"):
-                snap.positions[_norm(p["instId"])] = amt
+                s = _norm(p["instId"])
+                mark, liq = _f2(p.get("markPx")), _f2(p.get("liqPx"))
+                snap.positions[s] = amt
+                snap.pos_detail[s] = {"qty": amt, "mark": mark, "liq": liq,
+                                      "upnl": _f2(p.get("upl")),
+                                      "dist_liq_pct": _dist_liq_pct(mark, liq),
+                                      "adl": _f2(p.get("adl")) or None}
         if bal.get("code") == "0" and pos.get("code") == "0":
             snap.ok = True
         else:
@@ -163,7 +208,13 @@ async def _gate(cli: httpx.AsyncClient, cfg: dict) -> AccountSnapshot:
             for p in pos:
                 size = float(p.get("size") or 0)
                 if size != 0 and p.get("contract"):
-                    snap.positions[_norm(p["contract"])] = size  # 注意:张数,非 base
+                    s = _norm(p["contract"])
+                    mark, liq = _f2(p.get("mark_price")), _f2(p.get("liq_price"))
+                    snap.positions[s] = size  # 注意:张数,非 base
+                    snap.pos_detail[s] = {"qty": size, "mark": mark, "liq": liq,
+                                          "upnl": _f2(p.get("unrealised_pnl")),
+                                          "dist_liq_pct": _dist_liq_pct(mark, liq),
+                                          "adl": _f2(p.get("adl_ranking")) or None}
             snap.ok = True
         else:
             snap.err = f"pos={str(pos)[:120]}"
@@ -197,7 +248,14 @@ async def _bitget(cli: httpx.AsyncClient, cfg: dict) -> AccountSnapshot:
         for p in pos.get("data", []) or []:
             size = float(p.get("total") or 0)
             if size != 0 and p.get("symbol"):
-                snap.positions[_norm(p["symbol"])] = size if p.get("holdSide") == "long" else -size
+                s = _norm(p["symbol"])
+                signed = size if p.get("holdSide") == "long" else -size
+                mark, liq = _f2(p.get("markPrice")), _f2(p.get("liquidationPrice"))
+                snap.positions[s] = signed
+                snap.pos_detail[s] = {"qty": signed, "mark": mark, "liq": liq,
+                                      "upnl": _f2(p.get("unrealizedPL")),
+                                      "dist_liq_pct": _dist_liq_pct(mark, liq),
+                                      "adl": None}
         if acc.get("code") == "00000" and pos.get("code") == "00000":
             snap.ok = True
         else:
