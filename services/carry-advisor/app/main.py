@@ -102,12 +102,24 @@ def best_pair(per_venue: dict[str, dict]) -> tuple[str, str, float] | None:
     return lo[0], hi[0], float(hi[1]["daily_pct"]) - float(lo[1]["daily_pct"])
 
 
+async def _coin_held_symbols(r: aioredis.Redis) -> set[str]:
+    """coin 引擎在场(非终态)币的统一符号——跨引擎路由互斥:dualperp 不碰 coin 已持有的币。"""
+    try:
+        snap = json.loads(await r.get("dcm:engine:coin:positions") or "{}")
+        return {p.get("symbol") for p in snap.get("positions", []) or [] if p.get("symbol")}
+    except Exception:
+        return set()
+
+
 async def advisor_round(r: aioredis.Redis, cli: httpx.AsyncClient) -> dict:
     funding = await load_funding(r)
+    coin_held = await _coin_held_symbols(r)  # 路由互斥:排除 coin 引擎在管的币
 
-    # 候选:edge 达标 + 两腿 L1 新鲜
+    # 候选:edge 达标 + 两腿 L1 新鲜 + 非 coin 已持有(跨引擎互斥)
     candidates: list[dict] = []
     for sym, per_venue in funding.items():
+        if sym in coin_held:
+            continue
         bp = best_pair(per_venue)
         if bp is None or bp[2] < MIN_EDGE:
             continue

@@ -104,7 +104,8 @@ async def readyz():
 # 逐服务心跳最大龄(秒)——各服务周期不同(采样器小时级/顾问10min级),不能用统一阈值
 EXPECTED_SVCS = {"feed-cex": 120, "funding-sync": 900, "depth-sampler": 400, "universe-sync": 7500,
                  "account-snapshot": 240, "engine-dualperp": 120, "gateway": 120, "decision": 120,
-                 "risk-ledger": 120, "carry-advisor": 1900, "coin-bridge": 240, "basis-sampler": 200}
+                 "risk-ledger": 120, "carry-advisor": 1900, "coin-bridge": 240, "basis-sampler": 200,
+                 "pnl-recorder": 900, "engine-basis": 120, "lending-advisor": 5500}
 
 
 @app.get("/api/overview")
@@ -137,11 +138,18 @@ async def overview(request: Request):
     except Exception:
         routes = []
     active = [r for r in routes if r.get("state") == "active"]
+    pnl = await _get_json("dcm:pnl:summary") or {}
+    lending = await _get_json("dcm:lending:ranking") or {}
     return {
         "ts": now, "mode": dp.get("mode", "?"),
         "services": services,
         "reconcile": risk.get("reconcile", {}),
         "guards": risk.get("guards", {}),
+        "net_exposure": risk.get("net_exposure", {}),
+        "waterline": risk.get("waterline", []),
+        "pnl": {"net_total": pnl.get("net_total"), "net_today": pnl.get("net_today"),
+                "total": pnl.get("total", {})},
+        "lending": {"top": (lending.get("top") or [])[:8], "inversions": lending.get("inversions", [])},
         "alerts_this_round": risk.get("alerts_this_round", 0),
         "accounts": accounts,
         "open_positions": dp.get("positions", []),
@@ -239,6 +247,7 @@ td{padding:4px 8px;border-bottom:1px solid #21262d}tr:last-child td{border:0}
 <header><h1>⚡ DexCexMix</h1><span id="mode" class="pill"></span>
 <div class="kpi"><b id="equity">–</b><span>实盘权益 USDT</span></div>
 <div class="kpi"><b id="posn">–</b><span>在场配对</span></div>
+<div class="kpi"><b id="pnl">–</b><span>累计净PnL USDT</span></div>
 <div class="kpi"><b id="alerts">–</b><span>本轮告警</span></div>
 <div class="kpi"><b id="svcok">–</b><span>服务在线</span></div>
 <span id="upd" style="margin-left:auto"></span></header>
@@ -254,6 +263,10 @@ td{padding:4px 8px;border-bottom:1px solid #21262d}tr:last-child td{border:0}
 <div id="ttip" style="position:absolute;display:none;pointer-events:none;background:#0d1117;
 border:1px solid var(--border);border-radius:6px;padding:4px 8px;font-size:11px;white-space:nowrap"></div></div></div>
 <div class="panel"><h2>活跃路由</h2><table id="routes"></table></div>
+<div class="grid g2">
+<div class="panel"><h2>全域净敞口 + 保证金水位</h2><table id="expo"></table></div>
+<div class="panel"><h2>借贷三率净差（|资金费|+理财−借币，日化%）</h2><table id="lend"></table></div>
+</div>
 <div class="panel"><h2>Shadow 战绩（24h：would_open 占比 / 平均净期望E / 平均价差）</h2><table id="shadow"></table></div>
 </div>
 
@@ -270,6 +283,16 @@ async function tick(){
  $('#alerts').textContent=o.alerts_this_round;
  const ok=o.services.filter(s=>s.state==='ok').length;
  $('#svcok').textContent=ok+'/'+o.services.length;
+ const pn=o.pnl&&o.pnl.net_total; $('#pnl').textContent=fmt(pn); $('#pnl').className=cls(pn);
+ const ex=(o.net_exposure&&o.net_exposure.breaches)||[], wl=o.waterline||[];
+ $('#expo').innerHTML='<tr><th>项</th><th class="mono">值</th></tr>'
+  +row(['净敞口超限币',ex.length?('<span class="neg">'+ex.length+'</span>'):'<span class="pos">0</span>'])
+  +wl.map(w=>row([w.venue+' 杠杆',
+    '<span class="mono'+(w.leverage>4?' neg':'')+'">'+fmt(w.leverage,2)+'x</span> <span class="dim">('+fmt(w.equity)+'U)</span>'])).join('');
+ const L=(o.lending&&o.lending.top)||[];
+ $('#lend').innerHTML='<tr><th>币</th><th class="mono">净差</th><th class="mono">资金费</th><th class="mono">理财</th><th class="mono">借币</th></tr>'
+  +L.map(x=>row([x.coin,'<span class="mono pos">'+fmt(x.net_daily_pct,3)+'</span>',
+    fmt(x.funding_abs,3),fmt(x.earn,3),fmt(x.borrow,3)])).join('');
  $('#upd').textContent='更新 '+new Date(o.ts*1000).toLocaleTimeString();
  $('#svc').innerHTML='<tr><th>服务</th><th>状态</th><th>心跳(s)</th></tr>'+
   o.services.map(s=>row(['<span class="dot s-'+s.state+'"></span>'+s.name,s.state,s.age==null?'–':s.age])).join('');

@@ -38,6 +38,8 @@ DIST_LIQ_WARN = float(os.environ.get("DCM_RISK_DIST_LIQ_WARN", "10"))   # 距强
 DIST_LIQ_CRIT = float(os.environ.get("DCM_RISK_DIST_LIQ_CRIT", "4"))    # 距强平<此% 致命
 ADL_WARN = float(os.environ.get("DCM_RISK_ADL_WARN", "4"))              # ADL档≥此 预警(0-5,越高越可能被减)
 LEG_MISMATCH_TOL = float(os.environ.get("DCM_RISK_LEG_MISMATCH_TOL", "0.1"))  # 两腿量差>10% 判单腿
+NET_EXPOSURE_FLOOR_USDT = float(os.environ.get("DCM_RISK_NET_EXPOSURE_FLOOR", "25"))  # 逐币全域净敞口地板
+MARGIN_LEV_WARN = float(os.environ.get("DCM_RISK_MARGIN_LEV_WARN", "5"))  # 逐所有效杠杆预警线
 
 # 期望在场的服务及其心跳最大年龄(秒)。缺失键==停更同罪。
 EXPECTED_HB = {
@@ -251,6 +253,50 @@ async def check_round(r: aioredis.Redis, self_pool) -> dict:
                 pg["upnl"] = {"long": dl.get("upnl"), "short": ds.get("upnl")}
             guards["pairs"].append(pg)
     status["guards"] = guards
+
+    # R8 全域净敞口账本:逐币归并五所实盘 signed 持仓(已 base),delta 中性组合应≈0;
+    # 某币净敞口名义超地板 = 有腿裸奔/配对失衡(全书级,跨所跨引擎)
+    acct_all = {v: (await get_json(r, f"dcm:account:{v}") or {}) for v in RECON_VENUES}
+    net_by_coin: dict[str, float] = {}
+    mark_by_coin: dict[str, float] = {}
+    for v in RECON_VENUES:
+        acct = acct_all.get(v) or {}
+        for s, q in (acct.get("positions") or {}).items():
+            net_by_coin[s] = net_by_coin.get(s, 0.0) + float(q)
+            d = (acct.get("pos_detail") or {}).get(s) or {}
+            if d.get("mark"):
+                mark_by_coin[s] = float(d["mark"])
+    net_exposure = []
+    for s, nq in net_by_coin.items():
+        mark = mark_by_coin.get(s, 0.0)
+        notional = abs(nq) * mark
+        if notional > NET_EXPOSURE_FLOOR_USDT:
+            net_exposure.append({"symbol": s, "net_base": round(nq, 8), "notional": round(notional, 2)})
+            await fire(f"netexp:{s}", f"全域净敞口超限 {s}",
+                       f"五所归并净 {round(nq,6)} base ≈ {round(notional,1)}U(>{NET_EXPOSURE_FLOOR_USDT})"
+                       f"—裸腿/配对失衡,查实盘", level="fatal")
+            alerts += 1
+    status["net_exposure"] = {"floor": NET_EXPOSURE_FLOOR_USDT, "breaches": net_exposure,
+                              "coins_with_pos": len([s for s, q in net_by_coin.items() if abs(q) > 0])}
+
+    # R9 保证金水位线:逐所 在场名义/权益 = 有效杠杆,超阈预警(补仓依赖余量,见底=补不动)
+    waterline = []
+    for v in RECON_VENUES:
+        acct = acct_all.get(v) or {}
+        if not acct.get("ok"):
+            continue
+        eq = float(acct.get("equity_usdt") or 0)
+        notl = sum(abs(float(q)) * float(((acct.get("pos_detail") or {}).get(s) or {}).get("mark") or 0)
+                   for s, q in (acct.get("positions") or {}).items())
+        lev = (notl / eq) if eq > 0 else 0.0
+        wl = {"venue": v, "equity": round(eq, 2), "pos_notional": round(notl, 2), "leverage": round(lev, 2)}
+        waterline.append(wl)
+        if eq > 0 and lev > MARGIN_LEV_WARN:
+            await fire(f"waterline:{v}", f"{v} 保证金水位偏低",
+                       f"在场名义 {round(notl,1)}U / 权益 {round(eq,1)}U = {round(lev,1)}x(>{MARGIN_LEV_WARN}x)"
+                       f"—补仓余量不足,需注资或减仓", level="warn")
+            alerts += 1
+    status["waterline"] = waterline
 
     status["alerts_this_round"] = alerts
     return status

@@ -53,6 +53,38 @@ def _dist_liq_pct(mark: float, liq: float) -> float | None:
     return None
 
 
+# ── 张数→base 乘数缓存(账本正确性命门:OKX pos=张(×ctVal)、Gate size=张(×quanto);
+#    不换算则净敞口账本/两腿量对比全错。小时级刷新,失败沿用旧值。) ──
+_mult_cache: dict[str, tuple[float, dict[str, float]]] = {}  # venue -> (fetched_at, {SYM: mult})
+
+
+async def _get_mults(cli: httpx.AsyncClient, venue: str) -> dict[str, float]:
+    import time as _t
+    cached = _mult_cache.get(venue)
+    if cached and _t.monotonic() - cached[0] < 3600:
+        return cached[1]
+    out: dict[str, float] = {}
+    try:
+        if venue == "okx":
+            r = (await cli.get("https://www.okx.com/api/v5/public/instruments?instType=SWAP")).json()
+            for x in r.get("data", []):
+                inst = x.get("instId", "")
+                if inst.endswith("-USDT-SWAP"):
+                    out[_norm(inst)] = _f2(x.get("ctVal"), 1.0) * _f2(x.get("ctMult"), 1.0) or 1.0
+        elif venue == "gate":
+            r = (await cli.get("https://api.gateio.ws/api/v4/futures/usdt/contracts")).json()
+            for c in r:
+                name = c.get("name", "")
+                if name.endswith("_USDT"):
+                    out[_norm(name)] = _f2(c.get("quanto_multiplier"), 1.0) or 1.0
+        if out:
+            _mult_cache[venue] = (_t.monotonic(), out)
+    except Exception:
+        if cached:
+            return cached[1]
+    return out or (cached[1] if cached else {})
+
+
 # ───────────── binance USDM ─────────────
 
 async def _binance(cli: httpx.AsyncClient, cfg: dict) -> AccountSnapshot:
@@ -165,10 +197,12 @@ async def _okx(cli: httpx.AsyncClient, cfg: dict) -> AccountSnapshot:
         if data:
             snap.equity_usdt = float(data[0].get("totalEq") or 0)
         pos = await get("/api/v5/account/positions")
+        mults = await _get_mults(cli, "okx")
         for p in pos.get("data", []):
             amt = float(p.get("pos") or 0)
             if amt != 0 and p.get("instId"):
                 s = _norm(p["instId"])
+                amt *= mults.get(s, 1.0)  # 张→base
                 mark, liq = _f2(p.get("markPx")), _f2(p.get("liqPx"))
                 snap.positions[s] = amt
                 snap.pos_detail[s] = {"qty": amt, "mark": mark, "liq": liq,
@@ -208,12 +242,14 @@ async def _gate(cli: httpx.AsyncClient, cfg: dict) -> AccountSnapshot:
             snap.equity_usdt = total if total > 0 else avail
         pos = await get("/futures/usdt/positions")
         if isinstance(pos, list):
+            mults = await _get_mults(cli, "gate")
             for p in pos:
                 size = float(p.get("size") or 0)
                 if size != 0 and p.get("contract"):
                     s = _norm(p["contract"])
+                    size *= mults.get(s, 1.0)  # 张→base
                     mark, liq = _f2(p.get("mark_price")), _f2(p.get("liq_price"))
-                    snap.positions[s] = size  # 注意:张数,非 base
+                    snap.positions[s] = size
                     snap.pos_detail[s] = {"qty": size, "mark": mark, "liq": liq,
                                           "upnl": _f2(p.get("unrealised_pnl")),
                                           "dist_liq_pct": _dist_liq_pct(mark, liq),
