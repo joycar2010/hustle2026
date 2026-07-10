@@ -90,6 +90,14 @@ class BinanceTrade:
             return True, {"status": r.get("status"), "raw": r}
         return False, {"err": f"{r.get('code')}:{r.get('msg')}", "raw": r}
 
+    async def fetch_position(self, cli, symbol) -> Decimal:
+        """净持仓 base(带方向,多+空-)。实盘真相源,对账/回滚用。"""
+        r = (await cli.get(f"{self.base}/fapi/v2/positionRisk?{self._signed_qs({'symbol': symbol})}",
+                           headers=self._hdr)).json()
+        if isinstance(r, list):
+            return sum(Decimal(str(p.get("positionAmt") or 0)) for p in r)
+        raise RuntimeError(f"binance positionRisk: {r}")
+
 
 class BybitTrade:
     def __init__(self, cfg: dict):
@@ -153,6 +161,14 @@ class BybitTrade:
         if r.get("retCode") == 0:
             return True, {"raw": r}
         return False, {"err": f"{r.get('retCode')}:{r.get('retMsg')}", "raw": r}
+
+    async def fetch_position(self, cli, symbol) -> Decimal:
+        r = await self._get(cli, "/v5/position/list", f"category=linear&symbol={symbol}")
+        net = Decimal("0")
+        for p in r.get("result", {}).get("list", []):
+            size = Decimal(str(p.get("size") or 0))
+            net += size if p.get("side") == "Buy" else -size
+        return net
 
 
 TRADE_CLIENTS = {"binance": BinanceTrade, "bybit": BybitTrade}

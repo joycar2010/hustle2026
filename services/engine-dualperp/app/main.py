@@ -21,9 +21,11 @@ import time
 from decimal import Decimal
 
 import asyncpg
+import httpx
 import redis.asyncio as aioredis
 
 from dcm_common.heartbeat import Heartbeat
+from dcm_common.notify import FeishuTarget, Notifier
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 log = logging.getLogger("engine-dualperp")
@@ -163,7 +165,7 @@ def evaluate(route: dict, long_l1: dict | None, short_l1: dict | None,
 
 
 async def main():
-    assert MODE == "shadow", "armed 模式未启用:API key 配置+canary 验收前禁止"
+    assert MODE in ("shadow", "armed"), f"未知 MODE={MODE}"
     r = aioredis.from_url(REDIS_URL, decode_responses=True)
     pool = await asyncpg.create_pool(PG_DSN, min_size=1, max_size=3)
     hb = Heartbeat(REDIS_URL, SERVICE, interval_sec=30, ttl_sec=120)
@@ -171,6 +173,22 @@ async def main():
     await book.load_all()
     asyncio.create_task(book.watch())
     asyncio.create_task(hb.run_forever())
+
+    # armed 执行器:仅 MODE=armed 时构造;下单再受 per-symbol 白名单二次门闸
+    executor = None
+    trade_cli = None
+    if MODE == "armed":
+        from app.armed import ArmedExecutor, ARM_SYMBOLS
+        cfg = {"binance": {"key": os.environ.get("BINANCE_KEY", ""), "secret": os.environ.get("BINANCE_SECRET", "")},
+               "bybit": {"key": os.environ.get("BYBIT_KEY", ""), "secret": os.environ.get("BYBIT_SECRET", "")}}
+        notifier = Notifier(REDIS_URL, "engine-dualperp",
+                            feishu=FeishuTarget(webhook_url=os.environ.get("DCM_FEISHU_WEBHOOK", "")),
+                            throttle_interval_sec=300, throttle_max_count=2)
+        trade_cli = httpx.AsyncClient(timeout=15)
+        executor = ArmedExecutor(r, pool, notifier, cfg)
+        await executor.reconcile_startup(trade_cli)
+        log.warning("ARMED MODE — arm_symbols=%s (空=仍不下单)", sorted(ARM_SYMBOLS))
+
     log.info(f"engine-dualperp up mode={MODE} pid={os.getpid()} host={socket.gethostname()} "
              f"min_funding={MIN_FUNDING_DAILY_PCT}%/d max_entry_cost={MAX_ENTRY_COST_BPS}bps eval={EVAL_SEC}s")
 
@@ -184,9 +202,18 @@ async def main():
                 short_l1 = await leg_l1(r, route["venue_short"], route["market_short"], sym)
                 long_fund = await leg_funding(r, route["venue_long"], sym)
                 short_fund = await leg_funding(r, route["venue_short"], sym)
+                has_pos = bool(executor and sym in executor.open_syms)
                 decision, detail = evaluate(route, long_l1, short_l1,
-                                            long_fund, short_fund, has_open_position=False)
+                                            long_fund, short_fund, has_open_position=has_pos)
                 shadow_status[sym] = {"decision": decision, **detail}
+
+                # armed 执行:仅白名单币且不在途;shadow 决策即执行信号,同一决策核
+                if executor and executor.armed_for(sym) and sym not in executor.inflight:
+                    target = Decimal(str(route.get("target_notional_usdt") or "0"))
+                    if decision == "would_open" and not has_pos:
+                        asyncio.create_task(executor.open_pair(trade_cli, route, target, long_l1, short_l1))
+                    elif decision == "would_close" and has_pos:
+                        asyncio.create_task(executor.close_pair(trade_cli, sym))
 
                 prev = last_logged.get(sym)
                 if prev is None or prev[0] != decision or time.time() - prev[1] >= SHADOW_LOG_EVERY_SEC:
@@ -202,13 +229,21 @@ async def main():
                     last_logged[sym] = (decision, time.time())
                     log.info(f"shadow[{sym}] {decision} {detail.get('gap_bps', '-')}bps")
 
-            # 快照契约(risk-ledger/gateway 消费):shadow 期 positions 恒空,armed 后填真仓
+            # 快照契约(risk-ledger/gateway 消费)
+            open_positions = []
+            if executor and executor.open_syms:
+                rows = await pool.fetch(
+                    "SELECT symbol,venue_long,venue_short,qty_base,notional_usdt,long_order_id,"
+                    "short_order_id,opened_at FROM dualperp_positions WHERE state='OPEN'")
+                open_positions = [dict(r) for r in rows]
             await r.set("dcm:engine:dualperp:positions", json.dumps({
-                "ts": int(time.time()), "mode": MODE, "armed": False,
-                "active_routes": len(shadow_status), "positions": [],
+                "ts": int(time.time()), "mode": MODE,
+                "armed_symbols": sorted(executor.open_syms) if executor else [],
+                "active_routes": len(shadow_status), "positions": open_positions,
                 "shadow": shadow_status,
-            }, ensure_ascii=False), ex=180)
-            hb.extra = {"mode": MODE, "active_routes": len(shadow_status)}
+            }, ensure_ascii=False, default=str), ex=180)
+            hb.extra = {"mode": MODE, "active_routes": len(shadow_status),
+                        "open_positions": len(open_positions)}
         except Exception:
             log.exception("eval round crashed (continuing)")
         await asyncio.sleep(EVAL_SEC)
