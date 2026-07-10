@@ -37,6 +37,9 @@ AUTO_CONVERGE = os.environ.get("DCM_DP_AUTO_CONVERGE", "false").lower() == "true
 CONVERGE_CRIT_PCT = float(os.environ.get("DCM_DP_CONVERGE_CRIT_PCT", "6"))
 CONVERGE_REDUCE_FRAC = Decimal(os.environ.get("DCM_DP_CONVERGE_REDUCE_FRAC", "0.5"))
 CONVERGE_MIN_NOTIONAL = Decimal(os.environ.get("DCM_DP_CONVERGE_MIN_NOTIONAL", "6"))
+# 基差止损纪律:配对浮亏达预算(名义%)→ 双腿撤退(基差无锚,收敛不保证)
+BASIS_STOP = os.environ.get("DCM_DP_BASIS_STOP", "true").lower() == "true"
+LOSS_BUDGET_PCT = Decimal(os.environ.get("DCM_DP_LOSS_BUDGET_PCT", "15"))
 LEG_TIMEOUT = int(os.environ.get("DCM_DP_LEG_TIMEOUT_SEC", "15"))
 CROSS_BPS = Decimal(os.environ.get("DCM_DP_CROSS_BPS", "15"))       # marketable limit 穿价幅度
 MAX_SLIP_BPS = Decimal(os.environ.get("DCM_DP_MAX_SLIP_BPS", "40"))  # 穿价超此拒下(滑点保护)
@@ -288,6 +291,46 @@ class ArmedExecutor:
             return None
         d = json.loads(raw).get("pos_detail", {}).get(sym)
         return d.get("dist_liq_pct") if d else None
+
+    async def _leg_upnl(self, venue: str, sym: str):
+        raw = await self.r.get(f"dcm:account:{venue}")
+        if not raw:
+            return None
+        d = json.loads(raw).get("pos_detail", {}).get(sym)
+        return float(d.get("upnl")) if d and d.get("upnl") is not None else None
+
+    async def manage_open(self, cli, sym: str):
+        """持仓管理:基差止损优先(撤退),未撤退再判保证金收敛。顺序执行避免抢单飞锁。"""
+        if sym in self.inflight:
+            return
+        if await self.maybe_basis_stop(cli, sym):
+            return
+        await self.maybe_converge(cli, sym)
+
+    async def maybe_basis_stop(self, cli, sym: str) -> bool:
+        """基差止损:配对总浮亏 > 预算(名义%)→ 双腿撤退。delta 中性下亏损=基差逆行+费差,
+        持续拉宽即撤(基差无锚不赌收敛)。BASIS_STOP 开关门控。返回是否已撤退。"""
+        if not BASIS_STOP or sym in self.inflight:
+            return False
+        row = await self.pool.fetchrow(
+            "SELECT venue_long,venue_short,notional_usdt FROM dualperp_positions "
+            "WHERE symbol=$1 AND state='OPEN' ORDER BY id DESC LIMIT 1", sym)
+        if not row:
+            return False
+        ul = await self._leg_upnl(row["venue_long"], sym)
+        us = await self._leg_upnl(row["venue_short"], sym)
+        if ul is None or us is None:
+            return False  # 数据未就绪不判(与护栏同纪律)
+        pair_upnl = Decimal(str(ul + us))
+        budget = Decimal(str(row["notional_usdt"] or 0)) * LOSS_BUDGET_PCT / Decimal("100")
+        if pair_upnl < -budget:
+            await self._alert(f"basis-stop:{sym}", "基差止损:配对撤退",
+                              f"{sym} 配对浮亏 {round(pair_upnl,4)}U > 预算 {round(budget,4)}U → 双腿平仓",
+                              level="fatal")
+            log.warning("BASIS_STOP %s pair_upnl=%s budget=%s -> close", sym, pair_upnl, budget)
+            await self.close_pair(cli, sym)
+            return True
+        return False
 
     async def maybe_converge(self, cli, sym: str):
         """R6 自动收敛触发:任一腿距强平<临界 → 双腿同比例减仓。显式开关门控。"""

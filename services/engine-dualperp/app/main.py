@@ -44,6 +44,11 @@ MIN_FUNDING_DAILY_PCT = Decimal(os.environ.get("DCM_DP_MIN_FUNDING_DAILY_PCT", "
 CLOSE_FUNDING_DAILY_PCT = Decimal(os.environ.get("DCM_DP_CLOSE_FUNDING_DAILY_PCT", "0"))
 MAX_ENTRY_COST_BPS = Decimal(os.environ.get("DCM_DP_MAX_ENTRY_COST_BPS", "10"))
 FUNDING_STALE_SEC = int(os.environ.get("DCM_DP_FUNDING_STALE_SEC", "1800"))
+# 净期望 E 闸:E = 持有期费差收益 + 往返价差损益 − 双边手续费 − 冲击成本(全部 bps of notional)
+HORIZON_DAYS = Decimal(os.environ.get("DCM_DP_HORIZON_DAYS", "3"))       # 预期持有天数(费差摊销窗)
+FEE_BPS_PER_FILL = Decimal(os.environ.get("DCM_DP_FEE_BPS_PER_FILL", "5"))  # 单笔 taker 费(bps)
+MIN_E_BPS = Decimal(os.environ.get("DCM_DP_MIN_E_BPS", "3"))             # E≥此才开(enforce)
+E_GATE_ENFORCE = os.environ.get("DCM_DP_E_GATE_ENFORCE", "true").lower() == "true"  # false=只shadow记E不拦
 
 
 class RouteBook:
@@ -108,9 +113,27 @@ async def leg_funding(r: aioredis.Redis, venue: str, symbol: str) -> dict | None
         return None
 
 
+async def _depth_side(r: aioredis.Redis, venue: str, symbol: str, side_key: str) -> float:
+    """读 depth-sampler 的 ±band 名义(冲击成本估算用);缺失返 0(evaluate 按未知深度保守)。"""
+    try:
+        raw = await r.get(f"dcm:depth:{venue}:perp:{symbol}")
+        return float(json.loads(raw).get(side_key) or 0) if raw else 0.0
+    except Exception:
+        return 0.0
+
+
+def _impact_bps(target: Decimal, depth_usdt: float) -> Decimal:
+    """冲击成本估算:从 ±25bps 深度 depth_usdt 吃掉 target,线性书近似 ≈ (target/depth)×band。
+    深度未知(0)→给保守高惩罚(不确定即当贵),迫使 E 闸对薄/未知深度币谨慎。"""
+    band = Decimal("25")
+    if depth_usdt <= 0:
+        return band  # 深度未知=一个 band 的保守惩罚
+    return min(target / Decimal(str(depth_usdt)) * band, band * 4)  # 封顶防极端
+
+
 def evaluate(route: dict, long_l1: dict | None, short_l1: dict | None,
              long_fund: dict | None, short_fund: dict | None,
-             has_open_position: bool) -> tuple[str, dict]:
+             depth_usdt: float, has_open_position: bool) -> tuple[str, dict]:
     """shadow/armed 共用的决策核:返回 (decision, detail)。
 
     收益结构:多腿付/收 long 所资金费,空腿收/付 short 所资金费 →
@@ -130,11 +153,17 @@ def evaluate(route: dict, long_l1: dict | None, short_l1: dict | None,
             detail[f"{name}_leg_stale_ms"] = age
             return "skip_stale", detail
     long_ask = Decimal(str(long_l1["ask"]))
+    long_bid = Decimal(str(long_l1["bid"]))
     short_bid = Decimal(str(short_l1["bid"]))
-    if long_ask <= 0:
+    short_ask = Decimal(str(short_l1["ask"]))
+    if long_ask <= 0 or short_ask <= 0:
         return "skip_stale", detail
-    gap_bps = (short_bid - long_ask) / long_ask * Decimal("10000")
+    # 入场即刻价差(买多腿ask/卖空腿bid);出场反向价差(卖多腿bid/买空腿ask)
+    entry_gap_bps = (short_bid - long_ask) / long_ask * Decimal("10000")
+    exit_gap_bps = (long_bid - short_ask) / long_ask * Decimal("10000")
+    gap_bps = entry_gap_bps  # 兼容既有字段
     detail["gap_bps"] = str(round(gap_bps, 4))
+    detail["exit_gap_bps"] = str(round(exit_gap_bps, 4))
     detail["long_ask"] = str(long_ask)
     detail["short_bid"] = str(short_bid)
 
@@ -152,16 +181,33 @@ def evaluate(route: dict, long_l1: dict | None, short_l1: dict | None,
              - Decimal(str(detail["funding_long_daily_pct"]))
         detail["funding_edge_daily_pct"] = str(round(edge, 5))
 
+    # 净期望 E(bps of notional):费差收益(持有期) + 往返价差损益 − 双边手续费 − 冲击成本
+    e_bps = None
+    if edge is not None:
+        funding_income_bps = edge * HORIZON_DAYS * Decimal("100")   # 日化% × 天数 × 100 = bps
+        roundtrip_spread_bps = entry_gap_bps + exit_gap_bps          # 两段价差损益(通常为负=成本)
+        fees_bps = FEE_BPS_PER_FILL * Decimal("4")                   # 开2腿+平2腿=4笔 taker
+        impact_bps = _impact_bps(Decimal(str(route.get("target_notional_usdt") or "0")), depth_usdt)
+        e_bps = funding_income_bps + roundtrip_spread_bps - fees_bps - impact_bps
+        detail["e_bps"] = str(round(e_bps, 3))
+        detail["e_parts"] = {"funding": str(round(funding_income_bps, 2)),
+                             "spread": str(round(roundtrip_spread_bps, 2)),
+                             "fees": str(round(fees_bps, 2)), "impact": str(round(impact_bps, 2))}
+
     target = Decimal(str(route.get("target_notional_usdt") or "0"))
     if has_open_position:
+        # 平仓:费差体制消失 或 E 转负(持有已不划算)
         if target == 0 or (edge is not None and edge <= CLOSE_FUNDING_DAILY_PCT):
             return "would_close", detail
         return "would_hold", detail
-    if edge is None:
-        return "idle", detail  # 费差不明绝不开仓
-    if target > 0 and edge >= MIN_FUNDING_DAILY_PCT and gap_bps >= -MAX_ENTRY_COST_BPS:
-        return "would_open", detail
-    return "idle", detail
+    if edge is None or e_bps is None:
+        return "idle", detail  # 费差/E 不明绝不开仓
+    # E 闸:enforce 模式按 E≥门槛开;shadow 模式仅记 E,仍用旧费差+价差阈值(coin E闸 shadow/enforce)
+    if E_GATE_ENFORCE:
+        open_ok = target > 0 and e_bps >= MIN_E_BPS
+    else:
+        open_ok = target > 0 and edge >= MIN_FUNDING_DAILY_PCT and gap_bps >= -MAX_ENTRY_COST_BPS
+    return ("would_open" if open_ok else "idle"), detail
 
 
 async def main():
@@ -209,9 +255,13 @@ async def main():
                 short_l1 = await leg_l1(r, route["venue_short"], route["market_short"], sym)
                 long_fund = await leg_funding(r, route["venue_long"], sym)
                 short_fund = await leg_funding(r, route["venue_short"], sym)
+                # 冲击成本用两腿吃单侧较薄深度(多腿吃ask/空腿吃bid)
+                dl = await _depth_side(r, route["venue_long"], sym, "ask_usdt")
+                ds = await _depth_side(r, route["venue_short"], sym, "bid_usdt")
+                depth_usdt = min(dl, ds) if (dl > 0 and ds > 0) else max(dl, ds)
                 has_pos = bool(executor and sym in executor.open_syms)
                 decision, detail = evaluate(route, long_l1, short_l1,
-                                            long_fund, short_fund, has_open_position=has_pos)
+                                            long_fund, short_fund, depth_usdt, has_open_position=has_pos)
                 shadow_status[sym] = {"decision": decision, **detail}
 
                 # armed 执行:仅白名单币且不在途;shadow 决策即执行信号,同一决策核
@@ -235,7 +285,8 @@ async def main():
                                  "missing" if rt is None else rt.get("state"))
                         asyncio.create_task(executor.close_pair(trade_cli, sym))
                     else:
-                        asyncio.create_task(executor.maybe_converge(trade_cli, sym))
+                        # 持仓管理:先基差止损(撤退),未撤退再看保证金收敛——顺序执行避免抢锁
+                        asyncio.create_task(executor.manage_open(trade_cli, sym))
 
                 prev = last_logged.get(sym)
                 if prev is None or prev[0] != decision or time.time() - prev[1] >= SHADOW_LOG_EVERY_SEC:
