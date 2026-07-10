@@ -28,8 +28,13 @@ INTERVAL = int(os.environ.get("DCM_ADV_INTERVAL_SEC", "600"))
 MIN_EDGE = float(os.environ.get("DCM_ADV_MIN_EDGE_DAILY_PCT", "0.15"))
 EXIT_EDGE = float(os.environ.get("DCM_ADV_EXIT_EDGE_DAILY_PCT", "0.05"))
 MAX_ROUTES = int(os.environ.get("DCM_ADV_MAX_ROUTES", "10"))
-TARGET_USDT = os.environ.get("DCM_ADV_TARGET_NOTIONAL", "200")
+TARGET_USDT = float(os.environ.get("DCM_ADV_TARGET_NOTIONAL", "200"))
 FUNDING_FRESH_SEC = int(os.environ.get("DCM_ADV_FUNDING_FRESH_SEC", "1800"))
+# 容量钳位:单腿 ±band 名义 × 安全占比 = 该腿可吃仓;配对取两腿较小;
+# 低于最小交易额则该对太薄不铺(xv 命门:高费差长尾容量薄,榜面费差≠可容纳资金)。
+DEPTH_SAFETY = float(os.environ.get("DCM_ADV_DEPTH_SAFETY", "0.1"))
+MIN_TRADE_USDT = float(os.environ.get("DCM_ADV_MIN_TRADE_USDT", "15"))
+DEPTH_FRESH_SEC = int(os.environ.get("DCM_ADV_DEPTH_FRESH_SEC", "300"))
 VENUES = ["binance", "okx", "bybit", "gate", "bitget"]
 ACTOR = "advisor:carry-v1"
 
@@ -67,6 +72,25 @@ async def leg_fresh(r: aioredis.Redis, venue: str, symbol: str) -> bool:
         return False
 
 
+async def capacity_cap(r: aioredis.Redis, vl: str, vs: str, symbol: str) -> float | None:
+    """配对可容纳名义(USDT):开仓时多腿吃 ask 侧、空腿吃 bid 侧,取两腿较小 × 安全占比。
+    深度缺失/陈旧 → None(不钳=不铺,armed 前深度未知的对不给真金入场额度)。"""
+    now = time.time()
+    caps = []
+    for venue, side in ((vl, "ask_usdt"), (vs, "bid_usdt")):
+        try:
+            raw = await r.get(f"dcm:depth:{venue}:perp:{symbol}")
+        except Exception:
+            return None
+        if not raw:
+            return None
+        d = json.loads(raw)
+        if now - float(d.get("ts") or 0) > DEPTH_FRESH_SEC:
+            return None
+        caps.append(float(d.get(side) or 0))
+    return min(caps) * DEPTH_SAFETY
+
+
 def best_pair(per_venue: dict[str, dict]) -> tuple[str, str, float] | None:
     """返回 (venue_long=最低日化, venue_short=最高日化, edge)。"""
     if len(per_venue) < 2:
@@ -96,6 +120,13 @@ async def advisor_round(r: aioredis.Redis, cli: httpx.AsyncClient) -> dict:
     top = candidates[:MAX_ROUTES]
     top_syms = {c["symbol"] for c in top}
 
+    # watchlist:让 depth-sampler 先采本轮候选两腿深度,本轮不足者下轮即可钳位铺路
+    watch = []
+    for c in top:
+        watch.append([c["venue_long"], c["symbol"]])
+        watch.append([c["venue_short"], c["symbol"]])
+    await r.set("dcm:depth:watchlist", json.dumps(watch), ex=max(INTERVAL * 3, 1800))
+
     # 现有路由(经 decision API 读,不直连表)
     routes = (await cli.get(f"{DECISION_URL}/routes")).json()["routes"]
     mine = {rt["symbol"]: rt for rt in routes if rt["updated_by"] == ACTOR}
@@ -108,12 +139,30 @@ async def advisor_round(r: aioredis.Redis, cli: httpx.AsyncClient) -> dict:
         if sym in others and others[sym].get("state") in ("proposed", "active"):
             skipped += 1  # 人工/他引擎路由在场,顾问不抢(路由互斥礼让)
             continue
+        # 容量钳位:target = min(配置目标, 两腿深度较小 × 安全占比);太薄则不铺(下方 off)
+        cap = await capacity_cap(r, c["venue_long"], c["venue_short"], sym)
+        target = min(TARGET_USDT, cap) if cap is not None else 0.0
+        c["cap"] = None if cap is None else round(cap, 1)
+        c["target"] = round(target, 1)
+        if target < MIN_TRADE_USDT:
+            # 深度不足/未知:若我名下已有该对则撤,否则跳过不铺
+            if sym in mine and mine[sym]["state"] == "active":
+                cur = mine[sym]
+                await cli.post(f"{DECISION_URL}/routes", json={
+                    "symbol": sym, "engine": "dualperp",
+                    "venue_long": cur["venue_long"], "market_long": "perp",
+                    "venue_short": cur["venue_short"], "market_short": "perp",
+                    "target_notional_usdt": "0", "state": "off",
+                    "reason": f"carry-v1 容量不足 cap={c['cap']}", "actor": ACTOR,
+                    "version": cur["version"]})
+            skipped += 1
+            continue
         cur = mine.get(sym)
         body = {"symbol": sym, "engine": "dualperp",
                 "venue_long": c["venue_long"], "market_long": "perp",
                 "venue_short": c["venue_short"], "market_short": "perp",
-                "target_notional_usdt": TARGET_USDT, "state": "active",
-                "reason": f"carry-v1 edge={c['edge']}%/d", "actor": ACTOR}
+                "target_notional_usdt": str(target), "state": "active",
+                "reason": f"carry-v1 edge={c['edge']}%/d cap={c['cap']}", "actor": ACTOR}
         if cur is None:
             resp = await cli.post(f"{DECISION_URL}/routes", json=body)
             if resp.status_code == 200:
@@ -122,7 +171,9 @@ async def advisor_round(r: aioredis.Redis, cli: httpx.AsyncClient) -> dict:
             else:
                 log.warning(f"route create {sym} failed {resp.status_code}: {resp.text[:150]}")
         elif (cur["venue_long"] != c["venue_long"] or cur["venue_short"] != c["venue_short"]
-              or cur["state"] != "active"):
+              or cur["state"] != "active"
+              # 容量跟随:书变薄/变厚使 target 实质变化也更新(armed 下书缩必须实时缩仓)
+              or abs(float(cur["target_notional_usdt"]) - target) > max(1.0, target * 0.05)):
             body["version"] = cur["version"]
             resp = await cli.post(f"{DECISION_URL}/routes", json=body)
             if resp.status_code == 200:
