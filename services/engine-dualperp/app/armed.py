@@ -28,6 +28,10 @@ log = logging.getLogger("engine-dualperp.armed")
 
 ARM_SYMBOLS = {s.strip().upper() for s in os.environ.get("DCM_DP_ARM_SYMBOLS", "").split(",") if s.strip()}
 MAX_NOTIONAL_HARD = Decimal(os.environ.get("DCM_DP_MAX_NOTIONAL_HARD", "25"))
+# 组合级敞口闸(多币并跑防线):全组合在场名义总额上限
+MAX_PORTFOLIO_NOTIONAL = Decimal(os.environ.get("DCM_DP_MAX_PORTFOLIO_NOTIONAL", "80"))
+# 逐所保证金预算:单所在场名义 ≤ 该所权益 × 此系数(保守杠杆上限,防单所过度占用)
+VENUE_LEV_FACTOR = Decimal(os.environ.get("DCM_DP_VENUE_LEV_FACTOR", "3"))
 LEG_TIMEOUT = int(os.environ.get("DCM_DP_LEG_TIMEOUT_SEC", "15"))
 CROSS_BPS = Decimal(os.environ.get("DCM_DP_CROSS_BPS", "15"))       # marketable limit 穿价幅度
 MAX_SLIP_BPS = Decimal(os.environ.get("DCM_DP_MAX_SLIP_BPS", "40"))  # 穿价超此拒下(滑点保护)
@@ -66,6 +70,29 @@ class ArmedExecutor:
         if not raw:
             return 0.0
         return float(json.loads(raw).get(side_key) or 0)
+
+    async def _exposure(self, exclude_sym: str | None = None):
+        """当前在场敞口:(全组合名义, {venue: 该所名义})。每配对名义计入其两腿所各一次。"""
+        rows = await self.pool.fetch(
+            "SELECT symbol,venue_long,venue_short,notional_usdt FROM dualperp_positions "
+            "WHERE state IN ('OPEN','OPENING')")
+        total = Decimal("0")
+        per_venue: dict[str, Decimal] = {}
+        for row in rows:
+            if exclude_sym and row["symbol"] == exclude_sym:
+                continue
+            n = Decimal(str(row["notional_usdt"] or 0))
+            total += n
+            per_venue[row["venue_long"]] = per_venue.get(row["venue_long"], Decimal("0")) + n
+            per_venue[row["venue_short"]] = per_venue.get(row["venue_short"], Decimal("0")) + n
+        return total, per_venue
+
+    async def _venue_equity(self, venue: str) -> Decimal:
+        raw = await self.r.get(f"dcm:account:{venue}")
+        if not raw:
+            return Decimal("0")
+        d = json.loads(raw)
+        return Decimal(str(d.get("equity_usdt") or 0)) if d.get("ok") else Decimal("0")
 
     async def _place_confirm(self, cli, venue, symbol, side, qty: Decimal, ref_px: Decimal):
         """marketable limit 穿价下单 + 轮询实盘成交。返回 (filled_base, avg_px, order_id) 或 (0,..)。"""
@@ -110,8 +137,23 @@ class ArmedExecutor:
             await self._alert(f"unsupported:{sym}", "armed 路由含不支持 venue",
                               f"{sym} {vl}/{vs} 暂只支持 binance+bybit", "warn")
             return
-        # 硬顶
+        # 硬顶(单腿)
         target_usdt = min(target_usdt, MAX_NOTIONAL_HARD)
+
+        # 组合级敞口闸 + 逐所保证金预算闸(多币并跑防线)
+        total, per_venue = await self._exposure(exclude_sym=sym)
+        if total + target_usdt > MAX_PORTFOLIO_NOTIONAL:
+            log.info("open %s skipped: 组合敞口 %s+%s > 上限 %s", sym, total, target_usdt, MAX_PORTFOLIO_NOTIONAL)
+            return
+        for v in (vl, vs):
+            eq = await self._venue_equity(v)
+            budget = eq * VENUE_LEV_FACTOR
+            used = per_venue.get(v, Decimal("0"))
+            if used + target_usdt > budget:
+                log.info("open %s skipped: %s 所名义 %s+%s > 预算 %s(权益%s×%s)",
+                         sym, v, used, target_usdt, budget, eq, VENUE_LEV_FACTOR)
+                return
+
         mid_long = (Decimal(str(l1_long["bid"])) + Decimal(str(l1_long["ask"]))) / 2
         mid_short = (Decimal(str(l1_short["bid"])) + Decimal(str(l1_short["ask"]))) / 2
         if mid_long <= 0 or mid_short <= 0:

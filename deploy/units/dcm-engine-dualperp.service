@@ -13,6 +13,7 @@ EnvironmentFile=/home/ec2-user/dexcexmix/.env
 Environment=DCM_DP_MODE=shadow
 Environment=DCM_DP_ARM_SYMBOLS=LABUSDT
 Environment=DCM_DP_MAX_NOTIONAL_HARD=12
+Environment=DCM_DP_MAX_PORTFOLIO_NOTIONAL=80
 ExecStart=/home/ec2-user/dexcexmix/venv/bin/python services/engine-dualperp/app/main.py
 Restart=always
 RestartSec=5
