@@ -41,6 +41,7 @@ EXPECTED_HB = {
     "decision": 120,
     "engine-dualperp": 120,
     "funding-sync": 900,
+    "carry-advisor": 1900,
 }
 STALE_STATUSES = ("PENDING_BORROW", "BORROWED_IDLE", "PENDING_REPAY")
 
