@@ -1256,6 +1256,11 @@ class Worker:
                 state.total_cycles = self._cycle_count
                 if error:
                     state.error_message = error
+                elif status == "RUNNING" and state.error_message:
+                    # 化石错误自清:历史崩溃残言(如某次部署窗口的 import 错)在 worker 恢复
+                    # RUNNING 后仍钉在行上误导排障(实测 sub:9 顶着旧 import 错跑了 6 万周期)。
+                    # RUNNING 心跳即代表当前健康,清掉旧错。
+                    state.error_message = None
                 if active_positions is not None:
                     state.active_positions = active_positions
                 db.commit()

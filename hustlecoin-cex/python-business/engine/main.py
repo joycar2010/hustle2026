@@ -56,7 +56,9 @@ def _get_running_user_ids() -> set[int]:
         rows = db.query(EngineState.user_id).filter(
             EngineState.scope == "global",
             EngineState.user_id.isnot(None),
-            EngineState.status == "RUNNING",
+            # STARTING 也算"应在运行":它是 API 已受理的启动意图(乐观置态)。若引擎在
+            # 消费命令前重启/或旧版消费端 no-op 没回写,只认 RUNNING 会把该用户漏掉。
+            EngineState.status.in_(["RUNNING", "STARTING"]),
         ).all()
         return {r.user_id for r in rows}
     finally:
@@ -232,14 +234,19 @@ async def _command_consumer_loop(
                             await user_engines[uid].stop()
                             del user_engines[uid]
                             logger.info(f"Stopped engine for user {uid} (user command)")
-                            _update_user_global_state(uid, "STOPPED")
+                        # 已停时的 stop = no-op,但必须回写:API 端点已乐观置 STOPPING,
+                        # 不回写该行钉死 STOPPING(界面撒谎)。无论是否真停都以 STOPPED 收口。
+                        _update_user_global_state(uid, "STOPPED")
                     elif cmd["action"] == "start":
                         if uid not in user_engines:
                             ue = UserEngine(uid, spread_feed)
                             await ue.start()
                             user_engines[uid] = ue
                             logger.info(f"Started engine for user {uid} (user command)")
-                            _update_user_global_state(uid, "RUNNING")
+                        # 已在运行时的 start = no-op,但必须回写 RUNNING:否则 API 乐观置的
+                        # STARTING 永久钉死,且重启恢复只认 RUNNING → 下次引擎重启不再拉起
+                        # 该用户(存量陷阱:运行中按启动=引擎"失忆")。ack 语义:命令消费即回写终态。
+                        _update_user_global_state(uid, "RUNNING")
                     elif cmd["action"] == "clear_account":
                         account_id = cmd.get("account_id")
                         if account_id and uid in user_engines:
