@@ -6,6 +6,7 @@
 签名复用各所已验证口径(只读路径证过)。所有方法返回 (ok, data/err),不抛。
 """
 import base64
+import asyncio
 import hashlib
 import hmac
 import json
@@ -480,5 +481,96 @@ class BinanceSpotTrade:
         return Decimal("0")
 
 
-TRADE_CLIENTS = {"binance": BinanceTrade, "bybit": BybitTrade,
+class HLTrade:
+    """Hyperliquid 交易客户端(agent 键签名,包官方 hyperliquid-python-sdk)。
+
+    - SDK 是同步阻塞(requests):所有调用一律 asyncio.to_thread,绝不在事件循环裸调
+      (事件循环被同步 I/O 拖死的 testgo 学费);cli 参数忽略(SDK 自持会话)。
+    - cfg = {"key": agent 私钥, "address": 主钱包地址}(agent 只能交易不能提现)。
+    - 符号:统一 XUSDT ↔ HL coin X;价格规范 ≤5 有效数字 且 ≤(6-szDecimals) 位小数。
+    - fetch_order.avg 用 limitPx 近似(HL 按限价或更优成交,v1 容差)。
+    - SDK 懒加载:只有构造时才 import,未装 SDK 的机器 import 本模块不受影响。"""
+
+    def __init__(self, cfg: dict):
+        import eth_account
+        from hyperliquid.exchange import Exchange as _HLExchange
+        from hyperliquid.info import Info as _HLInfo
+        self.address = cfg["address"]
+        acct = eth_account.Account.from_key(cfg["key"])
+        self.info = _HLInfo(skip_ws=True)
+        self.ex = _HLExchange(acct, account_address=self.address)
+        self.sz_dec: dict[str, int] = {}
+
+    @staticmethod
+    def _coin(symbol: str) -> str:
+        return symbol[:-4] if symbol.endswith("USDT") else symbol
+
+    async def load_filter(self, cli, symbol):
+        def _load():
+            meta = self.info.meta()
+            for a in meta.get("universe", []):
+                self.sz_dec[a["name"].upper() + "USDT"] = int(a.get("szDecimals") or 2)
+        await asyncio.to_thread(_load)
+
+    def _round_px(self, symbol: str, px: Decimal) -> float:
+        sd = self.sz_dec.get(symbol, 2)
+        p = float(f"{float(px):.5g}")           # ≤5 有效数字
+        return round(p, max(0, 6 - sd))          # ≤(6-szDecimals) 小数
+
+    async def place_limit(self, cli, symbol, side, qty: Decimal, price: Decimal, reduce_only=False):
+        coin = self._coin(symbol)
+        sd = self.sz_dec.get(symbol, 2)
+        sz = round(float(qty), sd)
+        px = self._round_px(symbol, price)
+        is_buy = side.upper() in ("BUY", "Buy".upper())
+        def _place():
+            return self.ex.order(coin, is_buy, sz, px, {"limit": {"tif": "Gtc"}},
+                                 reduce_only=reduce_only)
+        r = await asyncio.to_thread(_place)
+        try:
+            st = r["response"]["data"]["statuses"][0]
+        except Exception:
+            return False, {"err": str(r)[:200], "raw": r}
+        if "resting" in st:
+            return True, {"order_id": str(st["resting"]["oid"]), "raw": r}
+        if "filled" in st:      # 穿价即时全成
+            return True, {"order_id": str(st["filled"]["oid"]), "raw": r}
+        return False, {"err": str(st)[:200], "raw": r}
+
+    async def fetch_order(self, cli, symbol, order_id):
+        def _q():
+            return self.info.query_order_by_oid(self.address, int(order_id))
+        r = await asyncio.to_thread(_q)
+        o = (r or {}).get("order") or {}
+        inner = o.get("order") or {}
+        status = str(o.get("status") or "")
+        orig = float(inner.get("origSz") or 0)
+        rem = float(inner.get("sz") or 0)
+        filled = max(0.0, orig - rem)
+        st = "FILLED" if status == "filled" else status.upper()
+        return True, {"status": st, "filled": f"{filled}",
+                      "avg": inner.get("limitPx") or 0, "raw": o}
+
+    async def cancel(self, cli, symbol, order_id):
+        coin = self._coin(symbol)
+        def _c():
+            return self.ex.cancel(coin, int(order_id))
+        r = await asyncio.to_thread(_c)
+        ok = isinstance(r, dict) and r.get("status") == "ok"
+        return ok, {"raw": r}
+
+    async def fetch_position(self, cli, symbol) -> Decimal:
+        coin = self._coin(symbol).upper()
+        def _s():
+            return self.info.user_state(self.address)
+        st = await asyncio.to_thread(_s)
+        for ap in st.get("assetPositions") or []:
+            pos = ap.get("position") or {}
+            if str(pos.get("coin") or "").upper() == coin:
+                return Decimal(str(pos.get("szi") or 0))
+        return Decimal("0")
+
+
+TRADE_CLIENTS = {"hyperliquid": HLTrade,
+                 "binance": BinanceTrade, "bybit": BybitTrade,
                  "okx": OkxTrade, "gate": GateTrade, "bitget": BitgetTrade}

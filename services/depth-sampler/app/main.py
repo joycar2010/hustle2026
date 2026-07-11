@@ -33,6 +33,8 @@ def _native(venue: str, sym: str) -> str:
         return f"{base}-USDT-SWAP"
     if venue == "gate":
         return f"{base}_USDT"
+    if venue == "hyperliquid":
+        return base  # HL coin 无 USDT 后缀
     return sym  # binance/bybit/bitget
 
 
@@ -71,6 +73,12 @@ async def _levels(cli, venue, sym):
             d = (await cli.get(f"https://api.gateio.ws/api/v4/futures/usdt/order_book?contract={nat}&limit={LIMIT}")).json()
             return ([(float(x["p"]), float(x["s"])) for x in d["bids"]],
                     [(float(x["p"]), float(x["s"])) for x in d["asks"]])
+        if venue == "hyperliquid":
+            d = (await cli.post("https://api.hyperliquid.xyz/info",
+                                json={"type": "l2Book", "coin": nat})).json()
+            lv = d.get("levels") or [[], []]
+            return ([(float(x["px"]), float(x["sz"])) for x in lv[0]],
+                    [(float(x["px"]), float(x["sz"])) for x in lv[1]])
         if venue == "bitget":
             d = (await cli.get(f"https://api.bitget.com/api/v2/mix/market/orderbook?symbol={nat}&productType=USDT-FUTURES&limit={LIMIT}")).json()["data"]
             return ([(float(p), float(q)) for p, q in d["bids"]],

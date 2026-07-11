@@ -41,7 +41,7 @@ MAX_NOTIONAL = Decimal(os.environ.get("DCM_ROUTE_MAX_NOTIONAL", "1000"))     # �
 GLOBAL_MAX = Decimal(os.environ.get("DCM_ROUTE_GLOBAL_MAX", "5000"))         # 全组合上限
 
 ENGINES = {"coin", "dualperp", "basis", "none"}
-VENUES = {"binance", "okx", "bybit", "gate", "bitget"}
+VENUES = {"binance", "okx", "bybit", "gate", "bitget", "hyperliquid"}  # HL=第六腿(2026-07-11 交易腿解锁)
 MARKETS = {"spot", "perp"}
 
 _pool: asyncpg.Pool | None = None
@@ -115,7 +115,7 @@ async def _validate_and_clamp(body: RouteIn, conn: asyncpg.Connection) -> tuple[
         for v, m, leg in ((body.venue_long, body.market_long, "long"),
                           (body.venue_short, body.market_short, "short")):
             if v not in VENUES or m != "perp":
-                raise HTTPException(400, f"dualperp {leg} 腿必须是五所之一的 perp")
+                raise HTTPException(400, f"dualperp {leg} 腿必须是六所之一的 perp")
         if body.venue_long == body.venue_short:
             raise HTTPException(400, "dualperp 两腿必须异所")
         # 可交易性用实时行情证明:两腿都必须存在于 feed 哈希

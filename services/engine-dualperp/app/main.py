@@ -260,6 +260,9 @@ async def main():
         "okx": {"key": os.environ.get("OKX_KEY", ""), "secret": os.environ.get("OKX_SECRET", ""),
                 "passphrase": os.environ.get("OKX_PASSPHRASE", "")},
         "gate": {"key": os.environ.get("GATE_KEY", ""), "secret": os.environ.get("GATE_SECRET", "")},
+        # HL:agent 私钥(只能交易不能提现)+主钱包地址;.hl_agent.env 经 unit EnvironmentFile 注入
+        "hyperliquid": {"key": os.environ.get("HL_AGENT_PRIVKEY", ""),
+                        "address": os.environ.get("HL_WALLET_ADDRESS", "")},
         "bitget": {"key": os.environ.get("BITGET_KEY", ""), "secret": os.environ.get("BITGET_SECRET", ""),
                    "passphrase": os.environ.get("BITGET_PASSPHRASE", "")},
     }

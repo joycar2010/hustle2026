@@ -44,7 +44,7 @@ CROSS_BPS = Decimal(os.environ.get("DCM_DP_CROSS_BPS", "15"))       # marketable
 MAX_SLIP_BPS = Decimal(os.environ.get("DCM_DP_MAX_SLIP_BPS", "40"))
 FAIL_COOLDOWN_SEC = int(os.environ.get("DCM_DP_FAIL_COOLDOWN_SEC", "600"))  # 开仓失败冷却,防5s循环烧费(AMAT 110126学费)  # 穿价超此拒下(滑点保护)
 DUST_USDT = Decimal(os.environ.get("DCM_DP_DUST_USDT", "1"))
-SUPPORTED = {"binance", "bybit", "okx", "gate", "bitget"}
+SUPPORTED = {"binance", "bybit", "okx", "gate", "bitget", "hyperliquid"}
 
 
 class ArmedExecutor:
@@ -278,7 +278,8 @@ class ArmedExecutor:
                      avg1 if long_first else avg2, avg2 if long_first else avg1)
         except Exception as e:
             log.exception("open_pair %s crashed", sym)
-            await self._alert(f"open-crash:{sym}", "配对建仓异常", f"{sym}: {e!r}", "fatal")
+            self._fail_until[sym] = time.time() + FAIL_COOLDOWN_SEC  # 崩溃同样进冷却,防5s crash-loop
+            await self._alert(f"open-crash:{sym}", "配对建仓异常", f"{sym}: {e!r};冷却{FAIL_COOLDOWN_SEC}s", "fatal")
         finally:
             self.inflight.discard(sym)
             await self.r.delete(lock)
