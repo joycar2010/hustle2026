@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import os
 import time
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal
@@ -26,10 +27,13 @@ AUTO_REMEDIATE = True            # 裸空全自动收口(用户已选):检测+�
 
 
 class Worker:
-    def __init__(self, sub_account_id: int, config: ConfigLoader, spread_feed: SpreadFeed):
+    def __init__(self, sub_account_id: int, config: ConfigLoader, spread_feed: SpreadFeed, shard_ids: list[int] = None):
         self.sub_account_id = sub_account_id
         self.config = config
         self.spread_feed = spread_feed
+        self.shard_ids = shard_ids or []
+        self.shard_count = settings.coin_shard_count
+        self._active_positions: list = []
         self._running = False
         self._repay_ban: dict[str, datetime] = {}
         self._last_borrow_at: dict[str, datetime] = {}
@@ -50,9 +54,32 @@ class Worker:
         self._account_max_positions: int | None = None
         self._account_borrow_rate: Decimal | None = None
         self._redis: aioredis.Redis | None = None
+        self._shard_config: dict | None = None
+
+    def _symbol_to_shard(self, symbol: str) -> int:
+        """将币种哈希到分片ID (0 到 shard_count-1)"""
+        import hashlib
+        hash_bytes = hashlib.md5(symbol.encode('utf-8')).digest()
+        return int.from_bytes(hash_bytes[:4], 'big') % self.shard_count
+
+    def _belongs_to_my_shards(self, symbol: str) -> bool:
+        """判断币种是否属于本 Worker 的分片"""
+        if not self.shard_ids:
+            return True
+        shard_id = self._symbol_to_shard(symbol)
+        return shard_id in self.shard_ids
+
+    def _count_positions_in_shard(self, shard_id: int) -> int:
+        """统计某个分片内的持仓数"""
+        count = 0
+        for pos in self._active_positions:
+            if self._symbol_to_shard(pos.get('symbol', '')) == shard_id:
+                count += 1
+        return count
 
     async def run(self):
         self._running = True
+        logger.info(f"Worker {self.sub_account_id}: shard_ids={self.shard_ids}, shard_count={self.shard_count}")
         account_info = await asyncio.to_thread(self._load_account)
         if not account_info:
             logger.error(f"Sub-account {self.sub_account_id} not found")
@@ -63,6 +90,11 @@ class Worker:
         self._account_max_borrow = account_info.get("max_borrow_amount")
         self._account_max_positions = account_info.get("max_positions")
         self._account_borrow_rate = account_info.get("borrow_rate_per_sec")
+        self._shard_config = account_info.get("shard_config")
+        if self._shard_config:
+            logger.info(f"Worker {self.sub_account_id}: shard_config loaded: {self._shard_config}")
+        else:
+            logger.info(f"Worker {self.sub_account_id}: no shard_config (processing all symbols)")
         logger.info(f"Worker started for sub-account {self.sub_account_id} ({account_note})")
 
         await asyncio.to_thread(self._load_symbol_rules)
@@ -247,6 +279,8 @@ class Worker:
         await asyncio.to_thread(self._reclaim_stale_pending_borrow)
 
         open_positions = await asyncio.to_thread(self._load_open_positions)
+        # Phase 2A: 更新活跃持仓列表供 per-shard 心跳使用
+        self._active_positions = [{"symbol": p.symbol} for p in open_positions]
         idle_positions = await asyncio.to_thread(self._load_positions_by_status, "BORROWED_IDLE")
         pending_repay = await asyncio.to_thread(self._load_positions_by_status, "PENDING_REPAY")
 
@@ -394,6 +428,10 @@ class Worker:
         borrow_buffer = float(getattr(rules, "open_spread_buffer", 0) or 0)
         no_inventory = self._load_no_inventory()   # 无券冷却中的币(-3045),本周期跳过不重试
         for symbol in pushed:
+            # 分片过滤:不属于本 Worker 分片的币种跳过(由其他 Worker 处理)
+            if not self._should_process_symbol(symbol):
+                logger.debug(f"Skipping {symbol} (not in this shard)")
+                continue
             # 已在途(借/持/待还)的币状态由上方 open/active 逻辑给定,这里不覆盖
             if symbol in active_symbols or symbol in statuses:
                 continue
@@ -773,6 +811,38 @@ class Worker:
         except Exception:
             return set()
 
+    def _should_process_symbol(self, symbol: str) -> bool:
+        """判断本 Worker 是否应处理该币种（分片过滤）。
+
+        Phase 2A: 第一层 shard 哈希过滤
+        Phase 1: 第二层 shard_config 过滤
+
+        Returns:
+            True: 应处理
+            False: 跳过（由其他分片处理）
+        """
+        # Phase 2A: 第一层 shard 哈希过滤
+        if not self._belongs_to_my_shards(symbol):
+            logger.debug(f"Worker {self.sub_account_id}: Skipping {symbol} (not in my shards {self.shard_ids})")
+            return False
+
+        # Phase 1: 第二层 shard_config 过滤
+        config = self._shard_config
+        if not config:
+            return True  # 默认处理所有（向后兼容）
+
+        mode = config.get("mode", "include")
+        patterns = config.get("symbols", [])
+
+        if mode == "include":
+            # 只处理匹配的币种
+            import fnmatch
+            return any(fnmatch.fnmatch(symbol, pat) for pat in patterns)
+        else:  # exclude
+            # 处理除匹配外的所有币种
+            import fnmatch
+            return not any(fnmatch.fnmatch(symbol, pat) for pat in patterns)
+
     async def _filter_by_tick(self, syms: set, threshold: float) -> set:
         """P1-6 tick 粒度过滤:剔除"一个 tick 的点差步进 > 阈值一半"的币。
         粗刻度低价币(如 RPL,tick=0.54%)点差只能按 tick 大档跳、量子化,开平各付半个 tick 摩擦
@@ -926,6 +996,7 @@ class Worker:
                 "max_borrow_amount": account.max_borrow_amount,
                 "max_positions": account.max_positions,
                 "borrow_rate_per_sec": account.borrow_rate_per_sec,
+                "shard_config": account.shard_config,
             }
         finally:
             db.close()
@@ -1246,6 +1317,21 @@ class Worker:
         def _write():
             db = SessionLocal()
             try:
+                # Phase 2A: 逐 shard 写心跳
+                if self.shard_ids and status == "RUNNING":
+                    for shard_id in self.shard_ids:
+                        active_pos = self._count_positions_in_shard(shard_id)
+                        scope = f"shard:{shard_id}"
+                        state = db.query(EngineState).filter(EngineState.scope == scope).first()
+                        if not state:
+                            state = EngineState(scope=scope, user_id=self._user_id)
+                            db.add(state)
+                        state.status = 'RUNNING'
+                        state.last_heartbeat = datetime.now(timezone.utc)
+                        state.active_positions = active_pos
+                        state.pid = os.getpid()
+
+                # 保留旧 scope 心跳（向后兼容）
                 scope = f"sub:{self.sub_account_id}"
                 state = db.query(EngineState).filter(EngineState.scope == scope).first()
                 if not state:

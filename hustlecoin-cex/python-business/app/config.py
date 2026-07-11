@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     allowed_origins: str = ""
     aicoin_api_key: str = ""
     aicoin_api_secret: str = ""
+    coin_shard_count: int = 3  # Phase 2A: 全局 shard 总数
 
     class Config:
         env_prefix = "CEX_"

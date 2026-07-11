@@ -24,10 +24,10 @@ _clear_tasks: set[asyncio.Task] = set()
 
 
 class UserEngine:
-    def __init__(self, user_id: int, spread_feed: SpreadFeed):
+    def __init__(self, user_id: int, spread_feed: SpreadFeed, shard_id: int | None = None):
         self.user_id = user_id
         self.config_loader = ConfigLoader(user_id=user_id)
-        self.orchestrator = Orchestrator(self.config_loader, spread_feed, user_id=user_id)
+        self.orchestrator = Orchestrator(self.config_loader, spread_feed, user_id=user_id, shard_id=shard_id)
 
     async def start(self):
         await self.config_loader.start()
@@ -93,13 +93,18 @@ def _update_user_global_state(user_id: int, status: str):
         db.close()
 
 
-async def _main():
+async def _main(shard_id: int | None = None):
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(name)s] %(levelname)s %(message)s",
         stream=sys.stdout,
     )
     logger.info("CEX Arbitrage Engine starting (pid=%d)", os.getpid())
+
+    if shard_id is not None:
+        logger.info(f"Running in single-shard mode: shard_id={shard_id}")
+    else:
+        logger.info(f"Running in multi-shard mode: {settings.coin_shard_count} shards")
 
     Base.metadata.create_all(bind=db_engine)
     logger.info("Database tables ensured")
@@ -138,14 +143,14 @@ async def _main():
     running_user_ids = _get_running_user_ids()
     if running_user_ids:
         for uid in running_user_ids:
-            ue = UserEngine(uid, spread_feed)
+            ue = UserEngine(uid, spread_feed, shard_id=shard_id)
             await ue.start()
             user_engines[uid] = ue
             logger.info(f"Recovered engine for user {uid} (was RUNNING)")
     else:
         active_user_ids = _get_active_user_ids()
         if not active_user_ids:
-            ue = UserEngine(None, spread_feed)
+            ue = UserEngine(None, spread_feed, shard_id=shard_id)
             await ue.start()
             user_engines[0] = ue
             logger.info("Started legacy engine (no user_id)")
@@ -157,7 +162,7 @@ async def _main():
             continue
         logger.info(f"Auto-starting engine for user {uid} (auto_start_on_boot=true)")
         await asyncio.sleep(1)
-        ue = UserEngine(uid, spread_feed)
+        ue = UserEngine(uid, spread_feed, shard_id=shard_id)
         await ue.start()
         user_engines[uid] = ue
         _update_user_global_state(uid, "RUNNING")
@@ -239,7 +244,7 @@ async def _command_consumer_loop(
                         _update_user_global_state(uid, "STOPPED")
                     elif cmd["action"] == "start":
                         if uid not in user_engines:
-                            ue = UserEngine(uid, spread_feed)
+                            ue = UserEngine(uid, spread_feed, shard_id=shard_id)
                             await ue.start()
                             user_engines[uid] = ue
                             logger.info(f"Started engine for user {uid} (user command)")
@@ -274,7 +279,7 @@ async def _command_consumer_loop(
                         continue
                     cmd = json.loads(raw)
                     if cmd["action"] == "start":
-                        ue = UserEngine(uid, spread_feed)
+                        ue = UserEngine(uid, spread_feed, shard_id=shard_id)
                         await ue.start()
                         user_engines[uid] = ue
                         logger.info(f"Started engine for user {uid} (user command)")
@@ -301,7 +306,7 @@ async def _user_reconcile_loop(
             running_ids = {uid for uid in user_engines if uid != 0}
 
             for uid in wanted_ids - running_ids:
-                ue = UserEngine(uid, spread_feed)
+                ue = UserEngine(uid, spread_feed, shard_id=shard_id)
                 await ue.start()
                 user_engines[uid] = ue
                 logger.info(f"Auto-recovered engine for user {uid}")
@@ -382,5 +387,5 @@ async def _clear_account_positions(orchestrator: Orchestrator, account_id: int):
     logger.info(f"Account {account_id} clearing complete")
 
 
-def run():
-    asyncio.run(_main())
+def run(shard_id: int | None = None):
+    asyncio.run(_main(shard_id=shard_id))

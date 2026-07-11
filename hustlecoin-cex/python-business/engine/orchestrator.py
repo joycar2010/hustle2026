@@ -2,6 +2,7 @@ import asyncio
 import logging
 from datetime import datetime, timezone
 
+from app.config import settings
 from app.db.models import SubAccount
 from app.db.session import SessionLocal
 from engine.models import EngineState
@@ -14,10 +15,11 @@ logger = logging.getLogger(__name__)
 
 
 class Orchestrator:
-    def __init__(self, config_loader: ConfigLoader, spread_feed: SpreadFeed, user_id: int = None):
+    def __init__(self, config_loader: ConfigLoader, spread_feed: SpreadFeed, user_id: int = None, shard_id: int | None = None):
         self.config = config_loader
         self.spread_feed = spread_feed
         self.user_id = user_id
+        self.shard_id = shard_id
         self._workers: dict[int, Worker] = {}
         self._tasks: dict[int, asyncio.Task] = {}
         self._running = False
@@ -103,6 +105,39 @@ class Orchestrator:
     async def _reconcile(self):
         enabled_ids = await asyncio.to_thread(self._get_enabled_accounts)
 
+        # Phase 2A: 简单均分 shard 给所有 worker
+        SHARD_COUNT = settings.coin_shard_count
+        enabled_list = sorted(enabled_ids)
+        
+        # Phase 2B: single-shard mode filtering
+        if self.shard_id is not None:
+            logger.info(f"Orchestrator: single-shard mode, running shard_id={self.shard_id}")
+            # Only run the worker that handles this shard
+            # Based on Phase 2A allocation: shard 0 → worker 9, shard 1 → worker 10, shard 2 → worker 9
+            worker_for_shard = {0: 9, 1: 10, 2: 9}
+            target_worker = worker_for_shard.get(self.shard_id)
+            if target_worker and target_worker in enabled_ids:
+                shard_allocation = {target_worker: [self.shard_id]}
+                enabled_ids = {target_worker}
+                enabled_list = [target_worker]
+            else:
+                logger.warning(f"Shard {self.shard_id} target worker {target_worker} not enabled, running nothing")
+                shard_allocation = {}
+                enabled_ids = set()
+                enabled_list = []
+        else:
+            logger.info(f"Orchestrator: multi-shard mode, running all {SHARD_COUNT} shards")
+            shard_allocation = {}
+            if enabled_list:
+                for idx, account_id in enumerate(enabled_list):
+                    # 简单轮询分配: worker_0 → [0], worker_1 → [1], worker_2 → [2], worker_0 → [0], ...
+                    # 如果只有2个worker, shard_count=3: worker_0 → [0, 2], worker_1 → [1]
+                    assigned_shards = []
+                    for shard_id in range(SHARD_COUNT):
+                        if shard_id % len(enabled_list) == idx:
+                            assigned_shards.append(shard_id)
+                    shard_allocation[account_id] = assigned_shards
+
         for account_id in enabled_ids:
             if account_id in self._workers:
                 task = self._tasks.get(account_id)
@@ -116,7 +151,7 @@ class Orchestrator:
                     continue
 
             logger.info(f"Spawning worker for sub-account {account_id}")
-            worker = Worker(account_id, self.config, self.spread_feed)
+            worker = Worker(account_id, self.config, self.spread_feed, shard_ids=shard_allocation.get(account_id, []))
             self._workers[account_id] = worker
             self._tasks[account_id] = asyncio.create_task(worker.run())
 

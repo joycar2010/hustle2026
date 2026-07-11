@@ -74,6 +74,7 @@ class SubAccount(Base):
     max_borrow_amount = Column(Numeric(15, 2), nullable=True)
     max_order_count = Column(Integer, nullable=True)
     borrow_rate_per_sec = Column(Numeric(6, 2), nullable=True)  # per-account override; null=follow global
+    shard_config = Column(JSON, nullable=True)  # 分片配置: {mode: include/exclude, symbols: [patterns]}
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
