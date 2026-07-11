@@ -236,10 +236,12 @@ async def _gate(cli: httpx.AsyncClient, cfg: dict) -> AccountSnapshot:
     try:
         acc = await get("/futures/usdt/accounts")
         if isinstance(acc, dict):
-            # Gate credit(统一保证金)模式:total=0 但 available=现货可用作合约保证金 → 取 available
+            # Gate credit(统一保证金)模式:total≈0 但 available=现货可用作合约保证金。
+            # 取 max:普通模式 avail≤total 不受影响;credit 模式下合约钱包的结算粉尘
+            # (如 total=5e-9)不再骗过 total>0 判断把权益报成 0(2026-07-11 B3 学费)
             total = float(acc.get("total") or 0)
             avail = float(acc.get("available") or 0)
-            snap.equity_usdt = total if total > 0 else avail
+            snap.equity_usdt = max(total, avail)
         pos = await get("/futures/usdt/positions")
         if isinstance(pos, list):
             mults = await _get_mults(cli, "gate")
