@@ -42,10 +42,19 @@ SHADOW_LOG_EVERY_SEC = int(os.environ.get("DCM_DP_SHADOW_LOG_SEC", "60"))
 # 平仓 = 费差日化 ≤ CLOSE_FUNDING(体制消失即撤,基差无锚收敛不保证)。
 MIN_FUNDING_DAILY_PCT = Decimal(os.environ.get("DCM_DP_MIN_FUNDING_DAILY_PCT", "0.05"))
 CLOSE_FUNDING_DAILY_PCT = Decimal(os.environ.get("DCM_DP_CLOSE_FUNDING_DAILY_PCT", "0"))
+# 费差强负硬平阈值:edge ≤ 此(收变净付)=体制真反转,持有=付逆向资金费,绕过持有闸即时平;
+# CLOSE_FUNDING(0)~此之间=轻微波动,持有到结算收carry(不因抖动早平烧费)。
+CLOSE_FUNDING_HARD_PCT = Decimal(os.environ.get("DCM_DP_CLOSE_FUNDING_HARD_PCT", "-0.15"))
 MAX_ENTRY_COST_BPS = Decimal(os.environ.get("DCM_DP_MAX_ENTRY_COST_BPS", "10"))
 FUNDING_STALE_SEC = int(os.environ.get("DCM_DP_FUNDING_STALE_SEC", "1800"))
 # 净期望 E 闸:E = 持有期费差收益 + 往返价差损益 − 双边手续费 − 冲击成本(全部 bps of notional)
-HORIZON_DAYS = Decimal(os.environ.get("DCM_DP_HORIZON_DAYS", "3"))       # 预期持有天数(费差摊销窗)
+HORIZON_DAYS = Decimal(os.environ.get("DCM_DP_HORIZON_DAYS", "3"))       # (遗留,已弃用)
+# 资金费离散化:资金费按结算点收付,持有 <1 结算周期收不到 carry 却付满 4 笔费(实证亏损根因)。
+# E 闸的费差收益只按「预期持有窗」算,不再假设 HORIZON_DAYS 连续收;默认 8h=一个币安结算。
+HOLD_HOURS = Decimal(os.environ.get("DCM_DP_HOLD_HOURS", "8"))
+# 持有到结算:funding-edge 触发的平仓须持有 ≥ 此秒数(至少跨一次结算收过 carry),
+# 否则快进快出只烧费。风险退出(基差止损/逼近强平)由 manage_open 独立即时处理,不受此限。
+MIN_HOLD_SEC = int(os.environ.get("DCM_DP_MIN_HOLD_SEC", str(int(float(os.environ.get("DCM_DP_HOLD_HOURS", "8")) * 3600))))
 FEE_BPS_PER_FILL = Decimal(os.environ.get("DCM_DP_FEE_BPS_PER_FILL", "5"))  # 单笔 taker 费(bps)
 MIN_E_BPS = Decimal(os.environ.get("DCM_DP_MIN_E_BPS", "3"))             # E≥此才开(enforce)
 E_GATE_ENFORCE = os.environ.get("DCM_DP_E_GATE_ENFORCE", "true").lower() == "true"  # false=只shadow记E不拦
@@ -210,7 +219,8 @@ def evaluate(route: dict, long_l1: dict | None, short_l1: dict | None,
     # 净期望 E(bps of notional):费差收益(持有期) + 往返价差损益 − 双边手续费 − 冲击成本
     e_bps = None
     if edge is not None:
-        funding_income_bps = edge * HORIZON_DAYS * Decimal("100")   # 日化% × 天数 × 100 = bps
+        # 资金费离散化:只按预期持有窗(HOLD_HOURS)算收的费差,不再 ×HORIZON_DAYS 连续收(高估~9倍致假正E)
+        funding_income_bps = edge * HOLD_HOURS / Decimal("24") * Decimal("100")   # 日化% × 持有h/24 × 100 = bps
         roundtrip_spread_bps = entry_gap_bps + exit_gap_bps          # 两段价差损益(通常为负=成本)
         fees_bps = FEE_BPS_PER_FILL * Decimal("4")                   # 开2腿+平2腿=4笔 taker
         impact_bps = _impact_bps(Decimal(str(route.get("target_notional_usdt") or "0")), depth_usdt)
@@ -234,6 +244,22 @@ def evaluate(route: dict, long_l1: dict | None, short_l1: dict | None,
     else:
         open_ok = target > 0 and edge >= MIN_FUNDING_DAILY_PCT and gap_bps >= -MAX_ENTRY_COST_BPS
     return ("would_open" if open_ok else "idle"), detail
+
+
+async def _hold_ok_to_close(pool, sym: str) -> bool:
+    """funding-edge 平仓的持有闸:持有 ≥ MIN_HOLD_SEC(至少跨一次结算)才准 edge-based 退出。
+    无开仓时间(异常)→放行不卡死;风险退出(基差/强平)走 manage_open 不经此。"""
+    try:
+        from datetime import datetime, timezone
+        row = await pool.fetchrow(
+            "SELECT opened_at FROM dualperp_positions WHERE symbol=$1 AND state='OPEN' "
+            "ORDER BY id DESC LIMIT 1", sym)
+        if not row or not row["opened_at"]:
+            return True
+        held = (datetime.now(timezone.utc) - row["opened_at"]).total_seconds()
+        return held >= MIN_HOLD_SEC
+    except Exception:
+        return True   # 查询失败不阻塞平仓(安全侧:宁可平也不卡死)
 
 
 async def main():
@@ -302,7 +328,14 @@ async def main():
                     if decision == "would_open" and not has_pos:
                         asyncio.create_task(executor.open_pair(trade_cli, route, target, long_l1, short_l1))
                     elif decision == "would_close" and has_pos:
-                        asyncio.create_task(executor.close_pair(trade_cli, sym))
+                        # 持有到结算闸:轻微费差回落不早平(续持收 carry);但费差强负(≤HARD=收变净付)
+                        # =体制真反转,绕过闸即时平(持有只会付逆向资金费)。风险退出走 manage_open 独立。
+                        _edge = detail.get("funding_edge_daily_pct")
+                        _hard = _edge is not None and Decimal(str(_edge)) <= CLOSE_FUNDING_HARD_PCT
+                        if _hard or await _hold_ok_to_close(pool, sym):
+                            asyncio.create_task(executor.close_pair(trade_cli, sym))
+                        else:
+                            shadow_status[sym]["hold_gate"] = "未到最短持有,续持收carry"
 
                 # shadow 落库(决策变化或60s)——必须在 for route 循环内,每个活跃路由都记,
                 # 且与 armed 无关(shadow 模式 executor=None 也要记战绩)
@@ -328,7 +361,11 @@ async def main():
                     if sym in executor.inflight:
                         continue
                     rt = book.routes.get(sym)
-                    if rt is None or rt.get("state") in ("off", "draining"):
+                    route_gone = rt is None or rt.get("state") in ("off", "draining")
+                    # 路由删除/draining=deliberate 立即平;route=off(advisor边缘退出)须过持有到结算闸,
+                    # 未到最短持有则续持收carry(风险退出仍由下方 manage_open 兜)。
+                    immediate = rt is None or (rt is not None and rt.get("state") == "draining")
+                    if route_gone and (immediate or await _hold_ok_to_close(pool, sym)):
                         log.info("close trigger: %s route %s -> close_pair", sym,
                                  "missing" if rt is None else rt.get("state"))
                         asyncio.create_task(executor.close_pair(trade_cli, sym))
