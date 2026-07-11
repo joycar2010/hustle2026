@@ -52,6 +52,7 @@ EXPECTED_HB = {
     "universe-sync": 7500,
     "event-calendar": 900,
     "fund-scheduler": 7500,
+    "borrow-monitor": 400,
     "gateway": 120,
     "decision": 120,
     "engine-dualperp": 120,
