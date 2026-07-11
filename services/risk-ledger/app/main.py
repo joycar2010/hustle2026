@@ -62,7 +62,7 @@ EXPECTED_HB = {
     "basis-sampler": 200,
     "engine-basis": 120,
 }
-RECON_VENUES = ("binance", "bybit", "okx", "gate", "bitget")
+RECON_VENUES = ("binance", "bybit", "okx", "gate", "bitget", "hyperliquid")
 STALE_STATUSES = ("PENDING_BORROW", "BORROWED_IDLE", "PENDING_REPAY")
 
 notifier = Notifier(
