@@ -220,6 +220,7 @@ async def shadow_trend(request: Request, hours: int = 48):
 ROLE_RANK = {"VIEWER": 0, "OPERATOR": 1, "SUPER_ADMIN": 2}
 DUALPERP_KEYS = {  # engine_config 白名单 + 各键最低角色
     "mode": "SUPER_ADMIN", "arm_symbols": "SUPER_ADMIN", "max_notional_hard": "SUPER_ADMIN",
+    "arm_mode": "SUPER_ADMIN",  # list=显式白名单 | advisor=自动信任advisor名下active路由
     "max_portfolio_notional": "SUPER_ADMIN", "auto_converge": "SUPER_ADMIN",
     "min_e_bps": "OPERATOR", "min_funding_daily_pct": "OPERATOR", "basis_stop": "OPERATOR",
     "loss_budget_pct": "OPERATOR", "basis_quantile": "OPERATOR",

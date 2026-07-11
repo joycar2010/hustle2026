@@ -1,0 +1,17 @@
+[Unit]
+Description=DexCexMix event calendar (new perp listings / delistings, universe diff)
+After=network-online.target redis6.service
+Wants=network-online.target
+
+[Service]
+User=ec2-user
+Slice=dexcexmix.slice
+MemoryMax=128M
+WorkingDirectory=/home/ec2-user/dexcexmix/src
+EnvironmentFile=/home/ec2-user/dexcexmix/.env
+ExecStart=/home/ec2-user/dexcexmix/venv/bin/python services/event-calendar/app/main.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

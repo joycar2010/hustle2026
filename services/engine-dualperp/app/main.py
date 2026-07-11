@@ -294,7 +294,7 @@ async def main():
                 shadow_status[sym] = {"decision": decision, **detail}
 
                 # armed 开仓:mode=armed 且白名单币且不在途(新开仓受 mode 门控)
-                if executor and CFG.mode == "armed" and executor.armed_for(sym) and sym not in executor.inflight:
+                if executor and CFG.mode == "armed" and executor.armed_for(sym, route) and sym not in executor.inflight:
                     target = Decimal(str(route.get("target_notional_usdt") or "0"))
                     if decision == "would_open" and not has_pos:
                         asyncio.create_task(executor.open_pair(trade_cli, route, target, long_l1, short_l1))

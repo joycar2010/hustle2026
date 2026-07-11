@@ -58,8 +58,17 @@ class ArmedExecutor:
         self._filters_loaded: set[tuple[str, str]] = set()
         self._fail_until: dict[str, float] = {}  # symbol -> ts,失败冷却
 
-    def armed_for(self, sym: str) -> bool:
-        return sym in CFG.arm_symbols and len(self.clients) > 0
+    def armed_for(self, sym: str, route: dict | None = None) -> bool:
+        """武装判定。arm_mode=list(默认):显式白名单。arm_mode=advisor:另外自动信任
+        advisor 名下路由(updated_by=advisor:*)——advisor 路由时更轮换,静态清单三度脱节
+        的学费;人工/smoke 路由无论何种模式都必须显式列名(误武装人工实验路由=真金)。"""
+        if not self.clients:
+            return False
+        if sym in CFG.arm_symbols:
+            return True
+        if CFG.arm_mode == "advisor" and route is not None:
+            return str(route.get("updated_by", "")).startswith("advisor:")
+        return False
 
     async def _alert(self, key, title, content, level="warn"):
         try:

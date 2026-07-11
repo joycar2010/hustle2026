@@ -19,6 +19,8 @@ import time
 import httpx
 import redis.asyncio as aioredis
 
+from dcm_common import arb_contract
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 log = logging.getLogger("carry-advisor")
 
@@ -151,11 +153,15 @@ async def _coin_held_symbols(r: aioredis.Redis) -> set[str]:
 
 async def advisor_round(r: aioredis.Redis, cli: httpx.AsyncClient) -> dict:
     funding = await load_funding(r)
-    coin_held = await _coin_held_symbols(r)  # 路由互斥:排除 coin 引擎在管的币
+    coin_held = await _coin_held_symbols(r)  # 路由互斥:排除 coin 引擎在管的币(在管=现任,无条件让)
     open_pos = await _open_position_syms(r)  # 真金在场币:off 须过滞回
+    # E 仲裁:coin 引擎的逐币出价(事件驱动,无出价=无意愿)。coin 出价按滞回规则
+    # 胜出的币让给借币引擎——路由互斥从"先到先得"升级为"期望值裁决"。
+    coin_bids = arb_contract.parse_bids(await r.hgetall(arb_contract.KEY_COIN_E))
 
     # 候选:edge 达标 + 两腿 L1 新鲜 + 非 coin 已持有(跨引擎互斥)
     candidates: list[dict] = []
+    yielded: list[dict] = []
     for sym, per_venue in funding.items():
         if sym in coin_held:
             continue
@@ -165,6 +171,11 @@ async def advisor_round(r: aioredis.Redis, cli: httpx.AsyncClient) -> dict:
         vl, vs, edge = bp
         if not (await leg_fresh(r, vl, sym) and await leg_fresh(r, vs, sym)):
             continue
+        my_e = arb_contract.carry_daily_net_pct(edge, ARB_FLAT_COST_DAILY_PCT)
+        cb = coin_bids.get(sym)
+        if cb is not None and arb_contract.challenger_wins(cb["e_daily_pct"], my_e):
+            yielded.append({"sym": sym, "coin_e": cb["e_daily_pct"], "carry_e": round(my_e, 5)})
+            continue  # coin 期望值显著更高:让币,不入候选(coin 侧黑名单随路由消失自动解除)
         candidates.append({"symbol": sym, "venue_long": vl, "venue_short": vs,
                            "edge": round(edge, 5)})
     candidates.sort(key=lambda c: -c["edge"])
@@ -281,8 +292,19 @@ async def advisor_round(r: aioredis.Redis, cli: httpx.AsyncClient) -> dict:
         else:
             log.warning(f"route off {sym} failed {resp.status_code}: {resp.text[:150]}")
 
+    # 仲裁观测面:本轮裁决快照(胜负与双方出价),15min 过期
+    try:
+        await r.set("dcm:arb:verdicts", json.dumps(
+            {"ts": int(time.time()), "yielded_to_coin": yielded}, ensure_ascii=False), ex=900)
+    except Exception:
+        pass
+    if yielded:
+        log.info(f"arb 让币 {len(yielded)}: " + ", ".join(
+            f"{y['sym']}(coin {y['coin_e']} vs carry {y['carry_e']})" for y in yielded[:5]))
+
     return {"scanned": len(funding), "candidates": len(candidates),
             "created": created, "updated": updated, "closed": closed, "skipped": skipped,
+            "arb_yielded": len(yielded),
             "top": [(c["symbol"], c["edge"]) for c in top[:5]]}
 
 

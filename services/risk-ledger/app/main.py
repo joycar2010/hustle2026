@@ -50,6 +50,7 @@ EXPECTED_HB = {
     "feed-cex": 120,
     "coin-bridge": 240,
     "universe-sync": 7500,
+    "event-calendar": 900,
     "gateway": 120,
     "decision": 120,
     "engine-dualperp": 120,
