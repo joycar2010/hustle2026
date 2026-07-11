@@ -141,6 +141,10 @@ async def check_round(r: aioredis.Redis, self_pool) -> dict:
         scopes = state.get("engine_state") or []
         stale_scopes = []
         for s in scopes:
+            # scope=global 且带 user_id 的行是「用户期望态旗标」(pid/心跳长期不更新,
+            # 引擎重启据其决定拉不拉该用户)——不是活性行,勿判停更(2026-07-11 两次学费)
+            if s.get("scope") == "global" and s.get("user_id") is not None:
+                continue
             if s.get("status") == "RUNNING":
                 hb_ts = int(s.get("heartbeat_ts") or 0)
                 if hb_ts and now - hb_ts > 120:
