@@ -224,7 +224,9 @@ class ArmedExecutor:
             long_depth = await self._band(vl, sym, "ask_usdt")   # 多腿吃 ask
             short_depth = await self._band(vs, sym, "bid_usdt")  # 空腿吃 bid
             long_first = long_depth <= short_depth
-            legs = [("long", vl, "BUY", mid_long), ("short", vs, "SELL", mid_short)]
+            # 方向性取价:BUY 从 ask 穿/SELL 从 bid 穿(从 mid 穿在价差>2×CROSS_BPS 书上够不到对手价)
+            legs = [("long", vl, "BUY", Decimal(str(l1_long["ask"]))),
+                    ("short", vs, "SELL", Decimal(str(l1_short["bid"])))]
             if not long_first:
                 legs = legs[::-1]
 
@@ -246,9 +248,11 @@ class ArmedExecutor:
             residual = f1 - f2
             if abs(residual) * mid_long > DUST_USDT:
                 if f2 <= 0:
-                    # 腿2 全废 → 回滚腿1(平掉已成)
+                    # 腿2 全废 → 回滚腿1(平掉已成);方向性取价(平多从bid/平空从ask)
                     signed = f1 if leg1[2] == "BUY" else -f1
-                    await self._flatten(cli, leg1[1], sym, signed, leg1[3])
+                    l1_leg1 = l1_long if leg1[1] == vl else l1_short
+                    ref1 = Decimal(str(l1_leg1["bid" if signed > 0 else "ask"]))
+                    await self._flatten(cli, leg1[1], sym, signed, ref1)
                     await self.pool.execute("UPDATE dualperp_positions SET state='ROLLBACK',"
                                             "error_message='leg2 no fill, leg1 flattened',updated_at=now() "
                                             "WHERE id=$1", row_id)
@@ -256,9 +260,11 @@ class ArmedExecutor:
                                       f"{sym} 腿2({leg2[1]})未成,已平腿1({leg1[1]}) {f1};冷却{FAIL_COOLDOWN_SEC}s", "fatal")
                     self._fail_until[sym] = time.time() + FAIL_COOLDOWN_SEC
                     return
-                # 部分残差 → 在腿1 venue 轧平净敞口
+                # 部分残差 → 在腿1 venue 轧平净敞口(方向性取价)
                 signed_res = residual if leg1[2] == "BUY" else -residual
-                await self._flatten(cli, leg1[1], sym, signed_res, leg1[3])
+                l1_leg1 = l1_long if leg1[1] == vl else l1_short
+                refr = Decimal(str(l1_leg1["bid" if signed_res > 0 else "ask"]))
+                await self._flatten(cli, leg1[1], sym, signed_res, refr)
                 await self._alert(f"residual:{sym}", "配对残差已轧平",
                                   f"{sym} 腿差 {residual} base 已轧平", "warn")
 
@@ -300,7 +306,13 @@ class ArmedExecutor:
                     if abs(net) <= 0:
                         break
                     l1 = await self.r.hget(f"dcm:feed:{venue}:perp", sym)
-                    ref = Decimal(str(json.loads(l1)["bid"])) if l1 else Decimal("0")
+                    if not l1:
+                        break
+                    d1 = json.loads(l1)
+                    # 方向性取价:平多=SELL 从 bid 穿,平空=BUY 从 ask 穿。
+                    # 两腿同传 bid 时 BUY 腿在价差>CROSS_BPS 的书上永远够不到 ask
+                    # (B3 gate 腿三次 filled=0 整腿裸空的学费)
+                    ref = Decimal(str(d1["bid"] if net > 0 else d1["ask"]))
                     if ref <= 0:
                         break
                     await self._flatten(cli, venue, sym, net, ref)
