@@ -21,6 +21,7 @@ import logging
 import os
 import time
 
+import httpx
 import redis.asyncio as aioredis
 
 from dcm_common.heartbeat import Heartbeat
@@ -62,6 +63,71 @@ async def _held_symbols(r: aioredis.Redis) -> set[str]:
         except Exception:
             continue
     return held
+
+
+# ── ③公告前瞻(best-effort;失败不影响下方可靠的 universe 差分兜底)──
+# 新永续常提前数小时公告,universe 差分是上线后才见——公告给提前量喂主力引擎。
+# 币安公告 CMS 有 WAF/限频:非 JSON/异常一律跳过本轮,绝不崩;已见文章 id 去重持久化。
+ANN_CATALOGS = {48: "上新", 161: "下架"}   # catalogId→标签
+ANN_SEEN_KEY = "dcm:event:seen_articles"
+ANN_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+_ANN_KW_PERP = ("perpetual", "u本位", "永续", "usdⓈ-m", "usdⓈ-m")
+_ANN_KW_DELIST = ("delist", "下架", "will delist", "removal")
+
+
+async def announcement_poll(r: aioredis.Redis, cli: httpx.AsyncClient, notify: Notifier) -> dict:
+    seen = 0
+    fired = 0
+    # 冷启动:seen set 为空首轮只登记历史公告不告警(否则全历史当新刷屏,同 universe bootstrap)
+    bootstrap = (await r.scard(ANN_SEEN_KEY)) == 0
+    for cid, label in ANN_CATALOGS.items():
+        try:
+            resp = await cli.get(
+                "https://www.binance.com/bapi/composite/v1/public/cms/article/list/query",
+                params={"type": 1, "catalogId": cid, "pageNo": 1, "pageSize": 10},
+                headers={"User-Agent": ANN_UA, "clienttype": "web", "lang": "en"}, timeout=15)
+            if resp.status_code != 200 or not resp.headers.get("content-type", "").startswith("application/json"):
+                continue
+            cats = resp.json().get("data", {}).get("catalogs", [])
+        except Exception:
+            continue  # WAF/限频/非JSON:跳过本轮,universe 差分兜底
+        if not cats:
+            continue
+        for a in (cats[0].get("articles") or []):
+            aid = str(a.get("id") or a.get("code") or "")
+            title = (a.get("title") or "").strip()
+            if not aid or not title:
+                continue
+            # 已见去重(持久 set)
+            if await r.sismember(ANN_SEEN_KEY, aid):
+                continue
+            await r.sadd(ANN_SEEN_KEY, aid)
+            seen += 1
+            low = title.lower()
+            is_perp = any(k in low for k in _ANN_KW_PERP)
+            is_delist = any(k in low for k in _ANN_KW_DELIST)
+            ev = {"type": "announcement", "catalog": label, "id": aid, "title": title,
+                  "perp": is_perp, "delist": is_delist, "ts": int(time.time())}
+            await r.lpush(EVENTS_KEY, json.dumps(ev, ensure_ascii=False))
+            # 只对"新永续"与"下架"两类高价值公告出声(避免普通公告刷屏)
+            if is_perp and label == "上新" and not bootstrap:
+                fired += 1
+                await asyncio.to_thread(
+                    notify.fire, f"ann-perp:{aid}", "新永续公告(提前量)",
+                    f"币安公告:{title[:80]}——永续上线预告,先于 universe 差分,关注费率窗口", level="warn")
+            elif (is_delist or label == "下架") and not bootstrap:
+                fired += 1
+                await asyncio.to_thread(
+                    notify.fire, f"ann-delist:{aid}", "下架公告",
+                    f"币安公告:{title[:80]}——若命中在场持仓立即人工核", level="warn")
+    # seen set 防无限膨胀:保留最近(SPOP 到上限)
+    try:
+        n = await r.scard(ANN_SEEN_KEY)
+        if n > 2000:
+            await r.spop(ANN_SEEN_KEY, n - 2000)
+    except Exception:
+        pass
+    return {"new_articles": seen, "fired": fired}
 
 
 async def calendar_round(r: aioredis.Redis, notify: Notifier) -> dict:
@@ -137,10 +203,16 @@ async def main():
     notify = Notifier(REDIS_URL, SERVICE, feishu=feishu_from_env())
     hb = Heartbeat(REDIS_URL, SERVICE, interval_sec=60, ttl_sec=1200)
     asyncio.create_task(hb.run_forever())
-    log.info(f"event-calendar up interval={INTERVAL}s venues={VENUES}")
+    _ann_cli = httpx.AsyncClient(timeout=20)
+    log.info(f"event-calendar up interval={INTERVAL}s venues={VENUES} (含③公告前瞻)")
     while True:
         try:
             stats = await calendar_round(r, notify)
+            try:
+                ann = await announcement_poll(r, _ann_cli, notify)
+                stats["ann"] = ann
+            except Exception:
+                log.warning("announcement poll failed (universe diff 兜底继续)", exc_info=True)
             hb.extra = stats
             log.info(f"CALENDAR_OK {stats}")
         except Exception:
