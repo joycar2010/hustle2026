@@ -1032,6 +1032,7 @@ class Worker:
         共享(httpx 并发安全)。见 engine/fund/reconcile_checker.run_naked_short_guard。"""
         from engine.fund.reconcile_checker import run_naked_short_guard
         await asyncio.sleep(5)   # 启动稍延迟,避开冷启动 position 尚未载入窗口
+        auth_err_streak = 0      # 鉴权类错误(-2015/-2014)连败计数:testgo cancelall 无退避洪水教训
         while self._running:
             try:
                 if self._trading_client is not None:
@@ -1040,9 +1041,22 @@ class Worker:
                         self._user_id, self._notifier, account_note,
                         auto_remediate=AUTO_REMEDIATE,
                     )
+                auth_err_streak = 0
             except asyncio.CancelledError:
                 break
             except Exception as e:
+                msg = str(e)
+                # 鉴权/白名单类错误是结构性故障(IP 未加白/key 失效),0.5s 重试只会
+                # 刷爆日志+REST 权重+拖事件循环;指数退避到 300s 顶,恢复后自动归零
+                if "-2015" in msg or "-2014" in msg or "Invalid API-key" in msg:
+                    auth_err_streak += 1
+                    backoff = min(300.0, 5.0 * (2 ** min(auth_err_streak, 6)))
+                    if auth_err_streak in (1, 5) or auth_err_streak % 50 == 0:
+                        logger.warning(
+                            f"naked_short_guard auth error (streak={auth_err_streak}, "
+                            f"backoff={backoff:.0f}s): {e}")
+                    await asyncio.sleep(backoff)
+                    continue
                 logger.warning(f"naked_short_guard error: {e}")
             await asyncio.sleep(NAKED_CHECK_INTERVAL)
 
