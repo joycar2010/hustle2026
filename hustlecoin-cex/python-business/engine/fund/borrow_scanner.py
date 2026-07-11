@@ -2,8 +2,8 @@ import logging
 from datetime import datetime, timezone
 from decimal import Decimal
 
-from app.db.models import SymbolRule
-from app.db.session import SessionLocal
+from coincore.models import SymbolRule
+from coincore.db import SessionLocal
 from engine.trading.binance_trading import BinanceTradingClient
 
 logger = logging.getLogger(__name__)

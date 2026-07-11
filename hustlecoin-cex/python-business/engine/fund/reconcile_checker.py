@@ -17,7 +17,7 @@ import logging
 import math
 from decimal import Decimal
 
-from app.db.session import SessionLocal
+from coincore.db import SessionLocal
 from engine.models import Position
 from engine.trading.binance_trading import BinanceAPIError, SPOT_BASE
 

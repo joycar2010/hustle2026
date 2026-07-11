@@ -8,9 +8,9 @@ from decimal import Decimal
 
 import redis.asyncio as aioredis
 
-from app.config import settings
-from app.db.models import SubAccount, Symbol, SymbolRule, AccountSymbolRule
-from app.db.session import SessionLocal
+from coincore.config import settings
+from coincore.models import SubAccount, Symbol, SymbolRule, AccountSymbolRule
+from coincore.db import SessionLocal
 from engine.models import Position, EngineState
 from engine.config_loader import ConfigLoader
 from engine.spread_feed import SpreadFeed, SpreadSnapshot
@@ -699,7 +699,7 @@ class Worker:
         """平仓后自动下架+清规则:检查该币所有持仓是否已 CLOSED,若是则从 pushed_symbols discard + 清 SymbolRule/AccountSymbolRule。"""
         db = SessionLocal()
         try:
-            from app.db.models import Position
+            from coincore.models import Position
             # 检查该 user 该 symbol 是否还有活跃持仓。FAILED 是终态且永久留库(借币点差中止等
             # 高频产生),必须与 CLOSED 一并排除 —— 原 `!= "CLOSED"` 把 FAILED 也当"未平仓",
             # 导致交易过的币几乎永不自动下架(engine_api 手动路径早已用 notin_ 口径,此处对齐)。
@@ -726,8 +726,8 @@ class Worker:
                     }))
                     logger.info(f"Auto-removed {symbol} from pushed_symbols (all positions CLOSED)")
             # 清单一规则(复用 engine_api._purge_symbol_rules)
-            from app.api.engine_api import _purge_symbol_rules
-            from app.db.models import SubAccount
+            from coincore.rules import _purge_symbol_rules
+            from coincore.models import SubAccount
             sub_ids = [a.id for a in db.query(SubAccount).filter(SubAccount.user_id == self._user_id).all()]
             _purge_symbol_rules(db, self._user_id, symbol, sub_ids)
             logger.info(f"Auto-purged symbol rules for {symbol} (回归全局默认)")
@@ -746,7 +746,7 @@ class Worker:
             thr = self._notifier.margin_rate_alert
             if thr is None or Decimal(str(thr)) <= 0:
                 return
-            from app.services.notifier import throttle_ok
+            from coincore.notify import throttle_ok
             if not await asyncio.to_thread(throttle_ok, f"futmargin:check:{self._user_id}", 25, 1):
                 return
             if getattr(self.config.global_rules, "hedge_via_master", False):

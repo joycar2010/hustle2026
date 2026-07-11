@@ -625,21 +625,9 @@ def push_symbol(symbol: str, request: Request, db: Session = Depends(get_db)):
     return {"message": f"Pushed {sym}"}
 
 
-def _purge_symbol_rules(db: Session, user_id: int, symbol: str, sub_account_ids: list[int] = None):
-    """清除某币的单一规则(SymbolRule + AccountSymbolRule),使再推进来时回归全局默认。
-    供 HTTP DELETE 手动移除 & 引擎平仓后自动下架 两条路径复用。"""
-    from app.db.models import SymbolRule, AccountSymbolRule
-    try:
-        db.query(SymbolRule).filter(
-            SymbolRule.user_id == user_id, SymbolRule.symbol == symbol,
-        ).delete(synchronize_session=False)
-        if sub_account_ids:
-            db.query(AccountSymbolRule).filter(
-                AccountSymbolRule.sub_account_id.in_(sub_account_ids), AccountSymbolRule.symbol == symbol,
-            ).delete(synchronize_session=False)
-        db.commit()
-    except Exception:
-        db.rollback()
+# 分家(coincore):实现已迁 coincore.rules —— 修复 engine→app.api 倒挂依赖,
+# API 层反向引用;旧名保留,两条调用路径(HTTP DELETE/引擎平仓下架)不变。
+from coincore.rules import _purge_symbol_rules  # noqa: E402
 
 
 # 持仓状态两分:对冲在场/在途(现货已卖出或合约腿已开)vs 无对冲腿(币在手/待还)。

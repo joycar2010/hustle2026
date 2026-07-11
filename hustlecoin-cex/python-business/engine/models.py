@@ -3,6 +3,8 @@ from sqlalchemy import (
     func,
 )
 
+# 门面豁免:app.db.models 尾部反向 import 本模块(模型层互相登记,历史一体),
+# 经 coincore 中转会形成三角循环(partially initialized)——模型基类直连源头。
 from app.db.models import Base
 
 

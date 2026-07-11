@@ -7,7 +7,7 @@ from typing import Optional
 
 import redis.asyncio as aioredis
 
-from app.config import settings
+from coincore.config import settings
 
 logger = logging.getLogger(__name__)
 

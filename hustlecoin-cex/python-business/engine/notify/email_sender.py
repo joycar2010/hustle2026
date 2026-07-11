@@ -4,8 +4,8 @@ import ssl
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
-from app.db.models_notify import EmailConfig
-from app.db.session import SessionLocal
+from coincore.models import EmailConfig
+from coincore.db import SessionLocal
 
 logger = logging.getLogger(__name__)
 

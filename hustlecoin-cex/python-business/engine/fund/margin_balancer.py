@@ -24,8 +24,8 @@ import asyncio
 import logging
 from decimal import Decimal, ROUND_DOWN
 
-from app.db.models import SubAccount
-from app.db.session import SessionLocal
+from coincore.models import SubAccount
+from coincore.db import SessionLocal
 from engine.trading.binance_trading import BinanceTradingClient
 
 logger = logging.getLogger(__name__)

@@ -2,9 +2,9 @@ import asyncio
 import logging
 from datetime import datetime, timezone
 
-from app.config import settings
-from app.db.models import SubAccount
-from app.db.session import SessionLocal
+from coincore.config import settings
+from coincore.models import SubAccount
+from coincore.db import SessionLocal
 from engine.models import EngineState
 from engine.config_loader import ConfigLoader
 from engine.spread_feed import SpreadFeed

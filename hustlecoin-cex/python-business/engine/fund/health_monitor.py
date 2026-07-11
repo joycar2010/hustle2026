@@ -3,7 +3,7 @@ import logging
 from datetime import datetime, timezone
 from decimal import Decimal
 
-from app.db.session import SessionLocal
+from coincore.db import SessionLocal
 from engine.models import Position, EngineState
 from engine.notify.feishu_sender import FeishuSender
 

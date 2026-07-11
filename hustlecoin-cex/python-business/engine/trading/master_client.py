@@ -11,8 +11,8 @@ import asyncio
 import logging
 import time
 
-from app.db.models import MasterAccount
-from app.db.session import SessionLocal
+from coincore.models import MasterAccount
+from coincore.db import SessionLocal
 from engine.trading.binance_trading import BinanceTradingClient
 
 logger = logging.getLogger(__name__)

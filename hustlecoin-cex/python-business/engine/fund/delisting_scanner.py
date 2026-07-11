@@ -3,8 +3,8 @@ import re
 
 import httpx
 
-from app.db.models import Symbol
-from app.db.session import SessionLocal
+from coincore.models import Symbol
+from coincore.db import SessionLocal
 from engine.notify.feishu_sender import FeishuSender
 
 logger = logging.getLogger(__name__)

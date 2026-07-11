@@ -14,7 +14,7 @@ from __future__ import annotations
 import logging
 from decimal import Decimal
 
-from app.db.session import SessionLocal
+from coincore.db import SessionLocal
 from engine.models import Position
 
 logger = logging.getLogger(__name__)

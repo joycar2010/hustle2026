@@ -8,10 +8,10 @@ from datetime import datetime, timezone
 
 import redis.asyncio as aioredis
 
-from app.config import settings
-from app.db.models import Base, SubAccount, GlobalRules
-from app.db.session import engine as db_engine, SessionLocal
-from app.db.models_auth import User
+from coincore.config import settings
+from coincore.models import Base, SubAccount, GlobalRules
+from coincore.db import engine as db_engine, SessionLocal
+from coincore.models import User
 from engine.models import Position, TradeLog, EngineState
 from engine.config_loader import ConfigLoader
 from engine.spread_feed import SpreadFeed

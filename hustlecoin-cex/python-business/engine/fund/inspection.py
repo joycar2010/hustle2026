@@ -19,9 +19,9 @@ import time
 import httpx
 from sqlalchemy import func
 
-from app.db.models import GlobalRules
-from app.db.models_notify import NotificationLog
-from app.db.session import SessionLocal
+from coincore.models import GlobalRules
+from coincore.models import NotificationLog
+from coincore.db import SessionLocal
 from engine.models import Position
 
 logger = logging.getLogger(__name__)
