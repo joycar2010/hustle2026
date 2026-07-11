@@ -445,6 +445,12 @@ class Worker:
             # 无券冷却:按用户口径显示"运行中"(运行中而借不进=市场没券,无需单独状态词);
             # 最大可借列已恒显 VIP 额度数字,无券信息不再单独上屏。
             if symbol in no_inventory:
+                # ①b 多venue降级:币安无券(-3045)时,若 OKX 武装且点差达 open 阈值 → OKX 卖借+对冲合一
+                if can_borrow and active_count < max_positions and self._running:
+                    _okx_pos = await self._maybe_okx_open(symbol, account_note)
+                    if _okx_pos:
+                        active_symbols.add(symbol); active_count += 1
+                        statuses[symbol] = "OKX借币"; continue
                 statuses[symbol] = "运行中"; continue
             if not self._volume_ok(symbol):
                 statuses[symbol] = "量不足"; continue
@@ -593,6 +599,37 @@ class Worker:
         except Exception as e:
             logger.error(f"Initiate borrow failed {symbol}: {e}")
 
+    async def _maybe_okx_open(self, symbol: str, account_note: str) -> bool:
+        """币安无券降级 OKX:门控齐(key+borrow_venues含okx+该币武装)且点差达 open 阈值 → 卖借+对冲合一。
+        OKX 无 BORROWED_IDLE,直达 OPEN。返回是否开仓。"""
+        try:
+            from engine.trading import okx_executor
+            venues = [v.strip().lower() for v in
+                      (getattr(self.config.global_rules, "borrow_venues", "") or "binance").split(",") if v.strip()]
+            if not okx_executor.okx_eligible(symbol, venues):
+                return False
+            spread = self.spread_feed.get_symbol(symbol)
+            if not self._spread_sane(spread) or not self._spread_fresh(spread):
+                return False
+            # OKX 卖借合一=直达 OPEN,须达 open 阈值(不是 borrow 阈值)
+            open_th = self._sym_threshold(symbol, "open_spread", self.config.global_rules.open_spread)
+            if spread.spread_short <= float(open_th):
+                return False
+            # 名义额=单笔金额(order_amount)
+            notional = float(getattr(self.config.global_rules, "order_amount", 500) or 500)
+            sr = self._symbol_rules.get(symbol, {})
+            if sr.get("order_amount") is not None:
+                notional = float(sr["order_amount"])
+            pos_id = await okx_executor.execute_okx_open(
+                self.sub_account_id, symbol, notional, account_note, user_id=self._user_id)
+            if pos_id:
+                self._last_borrow_at[symbol] = datetime.now(timezone.utc)
+                return True
+            return False
+        except Exception as e:
+            logger.error(f"OKX open attempt failed {symbol}: {e}")
+            return False
+
     async def _hedge_position(self, position: Position, spread: SpreadSnapshot, account_note: str):
         """Phase 2: sell spot + futures long. BORROWED_IDLE → OPEN.
         hedge_via_master 开启时合约腿用共享主账户 client;主账户 client 不可用则
@@ -618,6 +655,20 @@ class Worker:
     async def _unhedge_position(self, position: Position, spread: SpreadSnapshot, account_note: str):
         """Close hedge (futures close + spot buy back), leave coin pending repay.
         合约腿按持仓归属(hedge_account)选 client,与开关当前值无关。"""
+        # ①b OKX 原生平仓:hedge_account=okx 的仓走 OKX 合一平(平永续+买回抵债→CLOSED),
+        # 不经币安 unhedge/repay 两相;买回即抵债,无 PENDING_REPAY 中间态。
+        if getattr(position, "hedge_account", None) == "okx":
+            from engine.trading import okx_executor
+            try:
+                ok = await okx_executor.execute_okx_close(position, account_note)
+                if ok:
+                    now = datetime.now(timezone.utc)
+                    self._repay_ban[position.symbol] = now
+                    self._removed_ban[position.symbol] = now
+                    await self._check_and_remove_symbol_after_close(position.symbol)
+            except Exception as e:
+                logger.error(f"OKX unhedge failed {position.symbol}: {e}")
+            return
         from engine.trading.order_executor import execute_unhedge
         try:
             fc = None
@@ -1042,6 +1093,10 @@ class Worker:
                         auto_remediate=AUTO_REMEDIATE,
                     )
                 auth_err_streak = 0
+                # ①b OKX 裸空网:OKX 武装时对账 joycar002 债务 vs DB 的 OPEN okx 仓,
+                # 孤儿债务(有债无对应OPEN仓)=裸空 → 只告警(canary纪律:读端不猜测自愈,人工核)。
+                # 共享账户:多worker都跑但告警经飞书节流去重;低频只读,production(未武装)零开销。
+                await self._okx_naked_check(account_note)
             except asyncio.CancelledError:
                 break
             except Exception as e:
@@ -1059,6 +1114,50 @@ class Worker:
                     continue
                 logger.warning(f"naked_short_guard error: {e}")
             await asyncio.sleep(NAKED_CHECK_INTERVAL)
+
+    async def _okx_naked_check(self, account_note: str):
+        """OKX 裸空对账:joycar002 每笔债务须有对应 OPEN(hedge_account=okx)仓解释,否则孤儿裸空。"""
+        try:
+            from engine.trading import okx_executor
+            if not okx_executor.OKX_ARM_SYMBOLS or not okx_executor.okx_available():
+                return   # 未武装/无key:零开销跳过
+            import httpx as _httpx
+            okx = okx_executor._client()
+            # DB 里 OPEN 的 okx 仓 base 集(任一 worker 都能看全,shared 账户)
+            def _open_okx_bases():
+                db = SessionLocal()
+                try:
+                    rows = db.query(Position.base_asset).filter(
+                        Position.hedge_account == "okx", Position.status == "OPEN").all()
+                    return {r[0].upper() for r in rows}
+                finally:
+                    db.close()
+            open_bases = await asyncio.to_thread(_open_okx_bases)
+            async with _httpx.AsyncClient(timeout=15) as cli:
+                r = await okx._req(cli, "GET", "/api/v5/account/balance")
+                if str(r.get("code")) != "0":
+                    return
+                for c in r["data"][0].get("details", []):
+                    liab = c.get("liab") or "0"
+                    try:
+                        debt = abs(float(liab))
+                    except (TypeError, ValueError):
+                        debt = 0.0
+                    ccy = (c.get("ccy") or "").upper()
+                    if debt <= 0 or ccy in ("USDT", "USDC"):
+                        continue
+                    # 债务对应的 base 有 OPEN okx 仓 → 已对冲,正常;无 → 孤儿裸空
+                    if ccy not in open_bases:
+                        px = await okx.ticker(cli, ccy)
+                        notl = debt * px
+                        if notl < 1:   # 粉尘债务(结算残留)不告警
+                            continue
+                        await self._notifier.notify_naked_short(
+                            account_note, f"{ccy}USDT", Decimal(str(debt)), Decimal(str(notl))
+                        ) if hasattr(self._notifier, "notify_naked_short") else None
+                        logger.error(f"OKX 孤儿裸空 {ccy}: 债务 {debt}≈{notl:.2f}U 无 OPEN okx 仓解释,人工核 joycar002")
+        except Exception as e:
+            logger.warning(f"okx naked check failed: {e}")
 
     def _load_symbol_rules(self):
         db = SessionLocal()
