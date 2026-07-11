@@ -21,11 +21,14 @@
 ## 迁移步骤(每步可回滚,迁移窗口执行)
 
 M1 ✅ 本 scaffold(deploy 单元/unit/手册)——零生产影响
-M2 模型箭头翻转(上述 1-4),python-business 原地验证+三机滚动(同一期方法)
-M3 目录搬迁:engine/+coincore/ 复制到 ~/coin-engine/(独立 venv,requirements 见本目录),
-   unit 改 WorkingDirectory/PYTHONPATH 指新树;**旧树保留不删=回滚即改回 unit**
-M4 逐机切换:C(canary,shard 2)→观察 24h→B→A;每步断言 shard 心跳+worker RUNNING
-   +业务 API 200+RECON v2 零孤儿
+M2 ✅ 模型箭头翻转(coin 9683ba6):metadata 16表hash全等+三名同对象断言,三机滚动全绿
+M3 ✅ 目录搬迁(2026-07-11):~/coin-engine = engine/ + coincore/ + app 最小闭包
+   (config/db.session/db.models*/services.notifier+feishu_bot 共10文件,PYTHONPATH
+   只指新树的独立导入验证=闭包完整实锤);**解释器暂复用原venv**(独立venv为M3.5,
+   venv无树内代码,不影响树分离目标);旧树保留=秒级回滚(unit .bak_m4)
+M4 ✅ 逐机切换(2026-07-11,用户指示跳过24h观察期):C→B→A(cex-business不动),
+   /proc/PID/cwd 三机均=/home/ec2-user/coin-engine;shard心跳9-10s+worker RUNNING
+   +业务API 200+RECON零孤儿全绿
 M5 老 admin 降只读:cex-business 的引擎启停端点加 feature flag(默认拒绝,提示走
    dcm 控制台代理链路);紧急逃生阀:flag 可秒开回写模式
 M6 (可选)git 独立仓:subtree split 保留历史,推 coin-engine 分支/新 repo
