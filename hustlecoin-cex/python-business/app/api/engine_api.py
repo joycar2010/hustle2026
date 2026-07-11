@@ -1493,10 +1493,25 @@ async def manual_repay(data: ManualPositionRequest, request: Request, db: Sessio
 
 
 # ─── Engine Start/Stop Control ───
+# 分家二期 M5:引擎生命周期写端点对「网页人工路径」降只读——启停统一走 dcm 控制台
+# 代理链路(mixadmin → gateway 审计 → coin-bridge 本机直连)。区分人机:经 nginx 的
+# 人工请求带 X-Forwarded-For,bridge 本机直连没有。逃生阀:环境变量
+# COIN_ENGINE_WRITE_ENABLED=true(cex-business unit)秒开回写,紧急时不依赖 dcm 链路。
+import os as _os
+
+
+def _engine_write_guard(request: Request):
+    if _os.environ.get("COIN_ENGINE_WRITE_ENABLED", "").lower() == "true":
+        return
+    if request.headers.get("x-forwarded-for"):
+        raise HTTPException(status_code=403, detail=(
+            "引擎启停已迁移至 dcm 控制台(mixadmin.hustle2026.xyz → coin 页);"
+            "紧急逃生:cex-business unit 设 COIN_ENGINE_WRITE_ENABLED=true 后重启"))
 
 
 @router.post("/workers/start")
 def start_engine(request: Request, db: Session = Depends(get_db)):
+    _engine_write_guard(request)
     user_id = get_current_user_id(request)
     r = _redis()
     r.rpush(f"engine:{user_id}:commands", json.dumps({"action": "start"}))
@@ -1515,6 +1530,7 @@ def start_engine(request: Request, db: Session = Depends(get_db)):
 
 @router.post("/workers/stop")
 def stop_engine(request: Request, db: Session = Depends(get_db)):
+    _engine_write_guard(request)
     user_id = get_current_user_id(request)
     r = _redis()
     r.rpush(f"engine:{user_id}:commands", json.dumps({"action": "stop"}))
@@ -1539,6 +1555,7 @@ def _owned_sub(db: Session, user_id: int, account_id: int) -> SubAccount:
 
 @router.post("/workers/{account_id}/restart")
 def restart_one_worker(account_id: int, request: Request, db: Session = Depends(get_db)):
+    _engine_write_guard(request)
     """单独重启某子账户的 worker(卡死/心跳超时时无需整体停启)。经 Redis 命令 →
     orchestrator.restart_worker 取消并重建该 task,其余 worker 不动。"""
     user_id = get_current_user_id(request)
@@ -1551,6 +1568,7 @@ def restart_one_worker(account_id: int, request: Request, db: Session = Depends(
 
 @router.post("/workers/{account_id}/stop")
 def stop_one_worker(account_id: int, request: Request, db: Session = Depends(get_db)):
+    _engine_write_guard(request)
     """停用单个 worker = 禁用该子账户(is_enabled=False);orchestrator 下轮对账停其 worker。
     注:若该账户尚有在场持仓,worker 会被保留以管理平仓/还币(不会孤儿化),属预期安全行为。"""
     user_id = get_current_user_id(request)
@@ -1562,6 +1580,7 @@ def stop_one_worker(account_id: int, request: Request, db: Session = Depends(get
 
 @router.post("/workers/{account_id}/start")
 def start_one_worker(account_id: int, request: Request, db: Session = Depends(get_db)):
+    _engine_write_guard(request)
     """启用单个 worker = 启用该子账户(is_enabled=True);orchestrator 下轮对账拉起。"""
     user_id = get_current_user_id(request)
     acc = _owned_sub(db, user_id, account_id)
