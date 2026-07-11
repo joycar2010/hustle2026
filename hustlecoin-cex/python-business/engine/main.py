@@ -174,8 +174,8 @@ async def _main(shard_id: int | None = None):
     )
 
     heartbeat_task = asyncio.create_task(_heartbeat_loop(shutdown_event))
-    reconcile_task = asyncio.create_task(_user_reconcile_loop(user_engines, spread_feed, shutdown_event))
-    command_task = asyncio.create_task(_command_consumer_loop(user_engines, spread_feed, shutdown_event))
+    reconcile_task = asyncio.create_task(_user_reconcile_loop(user_engines, spread_feed, shutdown_event, shard_id=shard_id))
+    command_task = asyncio.create_task(_command_consumer_loop(user_engines, spread_feed, shutdown_event, shard_id=shard_id))
 
     await shutdown_event.wait()
 
@@ -220,6 +220,7 @@ async def _command_consumer_loop(
     user_engines: dict[int, UserEngine],
     spread_feed: SpreadFeed,
     shutdown_event: asyncio.Event,
+    shard_id: int | None = None,
 ):
     r = aioredis.from_url(settings.redis_url, decode_responses=True)
 
@@ -298,6 +299,7 @@ async def _user_reconcile_loop(
     user_engines: dict[int, UserEngine],
     spread_feed: SpreadFeed,
     shutdown_event: asyncio.Event,
+    shard_id: int | None = None,
 ):
     while not shutdown_event.is_set():
         try:
