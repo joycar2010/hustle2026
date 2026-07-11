@@ -51,6 +51,7 @@ EXPECTED_HB = {
     "coin-bridge": 240,
     "universe-sync": 7500,
     "event-calendar": 900,
+    "fund-scheduler": 7500,
     "gateway": 120,
     "decision": 120,
     "engine-dualperp": 120,

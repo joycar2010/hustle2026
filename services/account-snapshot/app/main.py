@@ -32,6 +32,9 @@ VENUE_CFG = {
     "gate": {"key": os.environ.get("GATE_KEY", ""), "secret": os.environ.get("GATE_SECRET", "")},
     "bitget": {"key": os.environ.get("BITGET_KEY", ""), "secret": os.environ.get("BITGET_SECRET", ""),
                "passphrase": os.environ.get("BITGET_PASSPHRASE", "")},
+    # HL 第六腿只读:info 端点免签名,地址即凭证(交易腿等钱包私钥到位另期)
+    "hyperliquid": {"key": os.environ.get("HL_WALLET_ADDRESS", ""), "secret": "-",
+                    "address": os.environ.get("HL_WALLET_ADDRESS", "")},
 }
 
 

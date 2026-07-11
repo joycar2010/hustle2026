@@ -57,6 +57,7 @@ class ArmedExecutor:
         self.inflight: set[str] = set()
         self._filters_loaded: set[tuple[str, str]] = set()
         self._fail_until: dict[str, float] = {}  # symbol -> ts,失败冷却
+        self._open_gate = asyncio.Lock()  # 组合/逐所闸+OPENING预占 的原子段(并发开仓竞态学费:7对175U>120上限)
 
     def armed_for(self, sym: str, route: dict | None = None) -> bool:
         """武装判定。arm_mode=list(默认):显式白名单。arm_mode=advisor:另外自动信任
@@ -91,6 +92,11 @@ class ArmedExecutor:
 
     async def _exposure(self, exclude_sym: str | None = None):
         """当前在场敞口:(全组合名义, {venue: 该所名义})。每配对名义计入其两腿所各一次。"""
+        # 超时 OPENING 预占自愈:开腿全程<1min,10min 还在 OPENING=任务异常死亡的孤儿预占,
+        # 不清则永久吃掉组合额度(预占行机制的配套排水阀)
+        await self.pool.execute(
+            "UPDATE dualperp_positions SET state='FAILED',error_message='OPENING超时,预占清理',"
+            "updated_at=now() WHERE state='OPENING' AND created_at < now() - interval '10 minutes'")
         rows = await self.pool.fetch(
             "SELECT symbol,venue_long,venue_short,notional_usdt FROM dualperp_positions "
             "WHERE state IN ('OPEN','OPENING')")
@@ -160,19 +166,31 @@ class ArmedExecutor:
         # 硬顶(单腿)
         target_usdt = min(target_usdt, CFG.max_notional_hard)
 
-        # 组合级敞口闸 + 逐所保证金预算闸(多币并跑防线)
-        total, per_venue = await self._exposure(exclude_sym=sym)
-        if total + target_usdt > CFG.max_portfolio_notional:
-            log.info("open %s skipped: 组合敞口 %s+%s > 上限 %s", sym, total, target_usdt, CFG.max_portfolio_notional)
-            return
-        for v in (vl, vs):
-            eq = await self._venue_equity(v)
-            budget = eq * VENUE_LEV_FACTOR
-            used = per_venue.get(v, Decimal("0"))
-            if used + target_usdt > budget:
-                log.info("open %s skipped: %s 所名义 %s+%s > 预算 %s(权益%s×%s)",
-                         sym, v, used, target_usdt, budget, eq, VENUE_LEV_FACTOR)
+        # 组合级敞口闸 + 逐所保证金预算闸(多币并跑防线)。
+        # 门锁原子段:同周期多任务并发查闸都读到旧敞口→一起过闸(实测 7对175U 冲破 120 上限);
+        # 锁内"查敞口→插 OPENING 行"原子化,OPENING 行即预占额度,后来者看得见。
+        async with self._open_gate:
+            total, per_venue = await self._exposure(exclude_sym=sym)
+            if total + target_usdt > CFG.max_portfolio_notional:
+                log.info("open %s skipped: 组合敞口 %s+%s > 上限 %s", sym, total, target_usdt, CFG.max_portfolio_notional)
                 return
+            over_budget = False
+            for v in (vl, vs):
+                eq = await self._venue_equity(v)
+                budget = eq * VENUE_LEV_FACTOR
+                used = per_venue.get(v, Decimal("0"))
+                if used + target_usdt > budget:
+                    log.info("open %s skipped: %s 所名义 %s+%s > 预算 %s(权益%s×%s)",
+                             sym, v, used, target_usdt, budget, eq, VENUE_LEV_FACTOR)
+                    over_budget = True
+                    break
+            if over_budget:
+                return
+            reserve_id = await self.pool.fetchval(
+                "INSERT INTO dualperp_positions(symbol,venue_long,market_long,venue_short,market_short,"
+                "account_long,account_short,notional_usdt,state) "
+                "VALUES($1,$2,'perp',$3,'perp','sub','main',$4,'OPENING') RETURNING id",
+                sym, vl, vs, float(target_usdt))
 
         mid_long = (Decimal(str(l1_long["bid"])) + Decimal(str(l1_long["ask"]))) / 2
         mid_short = (Decimal(str(l1_short["bid"])) + Decimal(str(l1_short["ask"]))) / 2
@@ -195,13 +213,12 @@ class ArmedExecutor:
             pre_s = await self.clients[vs].fetch_position(cli, sym)
             if abs(pre_l) > 0 or abs(pre_s) > 0:
                 self.open_syms.add(sym)
+                await self.pool.execute(
+                    "UPDATE dualperp_positions SET state='FAILED',error_message='预检:实盘已有仓,认领不重开',"
+                    "updated_at=now() WHERE id=$1", reserve_id)
                 log.warning("open %s aborted: 实盘已有仓 long=%s short=%s → 认领不重开", sym, pre_l, pre_s)
                 return
-            row_id = await self.pool.fetchval(
-                "INSERT INTO dualperp_positions(symbol,venue_long,market_long,venue_short,market_short,"
-                "account_long,account_short,notional_usdt,state) "
-                "VALUES($1,$2,'perp',$3,'perp','sub','main',$4,'OPENING') RETURNING id",
-                sym, vl, vs, float(target_usdt))
+            row_id = reserve_id
 
             # 先进薄盘口腿:比较两腿将吃那一侧的 band 深度
             long_depth = await self._band(vl, sym, "ask_usdt")   # 多腿吃 ask

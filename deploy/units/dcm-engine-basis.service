@@ -9,6 +9,7 @@ Slice=dexcexmix.slice
 MemoryMax=512M
 WorkingDirectory=/home/ec2-user/dexcexmix/src
 EnvironmentFile=/home/ec2-user/dexcexmix/.env
+Environment=DCM_BASIS_EARN=true
 ExecStart=/home/ec2-user/dexcexmix/venv/bin/python services/engine-basis/app/main.py
 Restart=always
 RestartSec=5

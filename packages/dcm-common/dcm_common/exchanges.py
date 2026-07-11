@@ -306,7 +306,42 @@ async def _bitget(cli: httpx.AsyncClient, cfg: dict) -> AccountSnapshot:
     return snap
 
 
-_FETCHERS = {"binance": _binance, "bybit": _bybit, "okx": _okx, "gate": _gate, "bitget": _bitget}
+async def _hyperliquid(cli: httpx.AsyncClient, cfg: dict) -> AccountSnapshot:
+    """HL 只读:info 端点免签名,只需钱包地址(cfg["address"])。
+    equity=accountValue;仓位 szi 已是 base 带方向;liq=liquidationPx。
+    交易腿(EIP-712 代理签名)另期——签名实现等钱包凭证到位再补,不写盲签名。"""
+    snap = AccountSnapshot("hyperliquid")
+    try:
+        addr = cfg.get("address") or ""
+        if not addr:
+            snap.err = "no wallet address"
+            return snap
+        r = (await cli.post("https://api.hyperliquid.xyz/info",
+                            json={"type": "clearinghouseState", "user": addr})).json()
+        ms = r.get("marginSummary") or {}
+        snap.equity_usdt = _f2(ms.get("accountValue"))
+        for ap in r.get("assetPositions") or []:
+            p = ap.get("position") or {}
+            szi = _f2(p.get("szi"))
+            coin = (p.get("coin") or "").upper()
+            if szi == 0 or not coin:
+                continue
+            sym = coin if coin.endswith("USDT") else coin + "USDT"
+            mark = _f2(p.get("entryPx"))  # HL 无逐仓 mark 字段,用 entry 近似(风控读数标注)
+            liq = _f2(p.get("liquidationPx"))
+            snap.positions[sym] = szi
+            snap.pos_detail[sym] = {"qty": szi, "mark": mark, "liq": liq,
+                                    "upnl": _f2(p.get("unrealizedPnl")),
+                                    "dist_liq_pct": _dist_liq_pct(mark, liq),
+                                    "adl": None}
+        snap.ok = True
+    except Exception as e:
+        snap.err = repr(e)[:200]
+    return snap
+
+
+_FETCHERS = {"binance": _binance, "bybit": _bybit, "okx": _okx, "gate": _gate,
+             "bitget": _bitget, "hyperliquid": _hyperliquid}
 
 
 async def fetch_account(cli: httpx.AsyncClient, venue: str, cfg: dict) -> AccountSnapshot:

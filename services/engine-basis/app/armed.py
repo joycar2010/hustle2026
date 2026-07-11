@@ -33,6 +33,10 @@ CLOSE_FUNDING = Decimal(os.environ.get("DCM_BASIS_CLOSE_FUNDING", "0"))
 CROSS_BPS = Decimal(os.environ.get("DCM_BASIS_CROSS_BPS", "15"))
 LEG_TIMEOUT = int(os.environ.get("DCM_BASIS_LEG_TIMEOUT_SEC", "15"))
 DUST_USDT = Decimal(os.environ.get("DCM_BASIS_DUST_USDT", "1"))
+# PM 质押(底仓层双份收益):现货多腿申购币安活期理财,平仓前赎回。
+# 只做活期(实时赎回);赎回确认→现货到位→再卖 两段式;无产品的长尾币静默跳过。
+EARN_ENABLED = os.environ.get("DCM_BASIS_EARN", "false").lower() == "true"
+EARN_REDEEM_TIMEOUT = int(os.environ.get("DCM_BASIS_EARN_REDEEM_TIMEOUT_SEC", "60"))
 
 
 class BasisExecutor:
@@ -41,6 +45,8 @@ class BasisExecutor:
         self.pool = pool
         self.spot = BinanceSpotTrade(cfg)
         self.perp = BinanceTrade(cfg)
+        from dcm_common.binance_earn import BinanceEarn
+        self.earn = BinanceEarn(cfg)
         self.open_syms: set[str] = set()
         self.inflight: set[str] = set()
         self._filters: set[str] = set()
@@ -91,7 +97,13 @@ class BasisExecutor:
             # OPENING/CLOSING/ROLLBACK 残行:实盘查证
             await self._ensure_filters(cli, sym)
             perp_pos = await self.perp.fetch_position(cli, sym)
-            spot_bal = await self.spot.fetch_position(cli, row["base_asset"] or sym.replace("USDT", ""))
+            base_a = row["base_asset"] or sym.replace("USDT", "")
+            spot_bal = await self.spot.fetch_position(cli, base_a)
+            if EARN_ENABLED:
+                try:  # 质押中的现货腿计入(否则被误判缺腿)
+                    spot_bal += Decimal(str(await self.earn.position(cli, base_a)))
+                except Exception as e:
+                    log.warning("earn position read failed %s: %r", base_a, e)
             if abs(perp_pos) < Decimal("1e-9") and spot_bal < Decimal("1e-9"):
                 await self.pool.execute(
                     "UPDATE basis_positions SET state='FAILED',error_message='reconcile: 实盘无腿,置败',"
@@ -177,10 +189,49 @@ class BasisExecutor:
                 row_id, f_perp, f_perp * avg_s, oid_s, oid_p)
             self.open_syms.add(sym)
             log.info("OPEN_OK %s spot=%s@%s perp=%s@%s", sym, f_spot, avg_s, f_perp, avg_p)
+            if EARN_ENABLED:
+                asyncio.create_task(self._earn_subscribe(cli, base))
             return True
         finally:
             self.inflight.discard(sym)
             await self.r.delete(lock)
+
+    async def _earn_subscribe(self, cli, base: str):
+        """现货多腿 → 活期理财(best-effort:无产品/失败只留日志,绝不影响持仓)。"""
+        try:
+            prod = await self.earn.flexible_product(cli, base)
+            if not prod:
+                log.info("earn: %s 无活期产品,跳过", base)
+                return
+            free = await self.earn.spot_free(cli, base)
+            if free <= 0:
+                return
+            ok, res = await self.earn.subscribe(cli, prod["productId"], f"{free:.8f}".rstrip("0").rstrip("."))
+            log.info("earn subscribe %s amount=%s -> %s %s", base, free, ok, str(res)[:120])
+        except Exception as e:
+            log.warning("earn subscribe %s failed: %r", base, e)
+
+    async def _earn_redeem_wait(self, cli, base: str):
+        """赎回全部活期并等现货到位(超时如实放行,卖出量按实际 free 定,不会超卖)。"""
+        try:
+            amt = await self.earn.position(cli, base)
+            if amt <= 0:
+                return
+            prod = await self.earn.flexible_product(cli, base)
+            if not prod:
+                log.warning("earn redeem %s: 有持仓但查不到产品,人工核", base)
+                return
+            ok, res = await self.earn.redeem_all(cli, prod["productId"])
+            log.info("earn redeem %s amt=%s -> %s %s", base, amt, ok, str(res)[:120])
+            deadline = time.time() + EARN_REDEEM_TIMEOUT
+            while time.time() < deadline:
+                free = float(await self.spot.fetch_position(cli, base))
+                if free >= amt * 0.99:
+                    return
+                await asyncio.sleep(2)
+            log.warning("earn redeem %s 超时未全部到账(继续按实际 free 卖出)", base)
+        except Exception as e:
+            log.warning("earn redeem %s failed: %r", base, e)
 
     async def close_pair(self, cli, sym: str, spot_l1: dict, perp_l1: dict, reason: str):
         if sym in self.inflight:
@@ -197,6 +248,9 @@ class BasisExecutor:
             if perp_pos < 0:
                 await self._place_confirm(self.perp, cli, sym, "BUY", -perp_pos,
                                           Decimal(str(perp_l1["ask"])), reduce_only=True)
+            # PM 质押赎回:理财在管即先赎回,轮询现货到位再卖(绝不带着理财仓卖现货)
+            if EARN_ENABLED:
+                await self._earn_redeem_wait(cli, base)
             # 现货卖出全部 free(留格点粉尘)
             spot_bal = await self.spot.fetch_position(cli, base)
             step_s = self.spot.step.get(sym, Decimal("0.001"))

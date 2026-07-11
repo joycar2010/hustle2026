@@ -1,0 +1,18 @@
+[Unit]
+Description=DexCexMix fund scheduler (waterline proposals, no execution)
+After=network-online.target redis6.service
+Wants=network-online.target
+
+[Service]
+User=ec2-user
+Slice=dexcexmix.slice
+MemoryMax=128M
+WorkingDirectory=/home/ec2-user/dexcexmix/src
+EnvironmentFile=/home/ec2-user/dexcexmix/.env
+Environment=DCM_FUND_PORTFOLIO_CAP=180
+ExecStart=/home/ec2-user/dexcexmix/venv/bin/python services/fund-scheduler/app/main.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
