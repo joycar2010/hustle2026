@@ -198,6 +198,20 @@ class ArmedExecutor:
             return
         qty = target_usdt / mid_long
 
+        # 最小可交易单位预检:张数制所(gate=quanto/okx=ctVal)一张面值可能超过目标数量
+        # (LAB gate quanto=100→1张≈67U>硬顶25U→换算取整0张 INVALID_PARAM,且 leg1 已成
+        #  才发现 leg2 不可下=白跑回滚烧费)。任一腿最小单位>qty 即不开,进冷却。
+        await self._ensure_filter(cli, vl, sym)
+        await self._ensure_filter(cli, vs, sym)
+        for v in (vl, vs):
+            mq_fn = getattr(self.clients[v], "min_base_qty", None)
+            min_q = mq_fn(sym) if mq_fn else Decimal("0")
+            if min_q and qty < min_q:
+                log.info("open %s skipped: %s 最小单位 %s base > 目标 %s(单张面值超预算);冷却%ss",
+                         sym, v, min_q, qty, FAIL_COOLDOWN_SEC)
+                self._fail_until[sym] = time.time() + FAIL_COOLDOWN_SEC
+                return
+
         # 单飞锁(跨重启防重入)
         lock = f"dcm:dp:lock:{sym}"
         if not await self.r.set(lock, str(os.getpid()), nx=True, ex=max(LEG_TIMEOUT * 4, 90)):

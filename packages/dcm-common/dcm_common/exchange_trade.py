@@ -191,6 +191,10 @@ class OkxTrade:
         self.ctval: dict[str, Decimal] = {}    # 每张=ctVal base
         self.instid: dict[str, str] = {}
 
+    def min_base_qty(self, symbol) -> Decimal:
+        """最小可交易单位=lotSz 张 × ctVal base(开仓前预检:单张面值>目标数量即不可下)。"""
+        return self.ctval.get(symbol, Decimal("0")) * (self.lot.get(symbol) or Decimal("1"))
+
     def _hdr(self, ts, method, path, body=""):
         pre = ts + method + path + body
         sign = base64.b64encode(hmac.new(self.secret.encode(), pre.encode(), hashlib.sha256).digest()).decode()
@@ -278,6 +282,10 @@ class GateTrade:
     def _contract(self, symbol):
         return f"{symbol[:-4]}_USDT"
 
+    def min_base_qty(self, symbol) -> Decimal:
+        """最小可交易单位=1张的 base 数(LAB quanto=100→1张≈67U 超硬顶的雷,开仓前预检用)。"""
+        return self.qm.get(symbol, Decimal("0"))
+
     def _hdr(self, method, path, query, body):
         ts = str(int(time.time()))
         bh = hashlib.sha512(body.encode()).hexdigest()
@@ -296,6 +304,9 @@ class GateTrade:
         con = self._contract(symbol)
         px = _round_step(price, self.tick.get(symbol, Decimal("0.0001")))
         contracts = int((base_qty / self.qm.get(symbol, Decimal("1"))).to_integral_value(rounding=ROUND_DOWN))
+        if contracts <= 0:
+            return False, {"err": f"张数换算为0: {base_qty} base < 1张({self.qm.get(symbol)} base)",
+                           "raw": None}
         size = contracts if side.upper() == "BUY" else -contracts  # 带符号
         body = json.dumps({"contract": con, "size": size, "price": _fmt(px), "tif": "gtc",
                            **({"reduce_only": True} if reduce_only else {})})
