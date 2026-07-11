@@ -52,21 +52,47 @@ E_GATE_ENFORCE = os.environ.get("DCM_DP_E_GATE_ENFORCE", "true").lower() == "tru
 
 
 class RouteBook:
-    """路由本地镜像:HGETALL 起步 + 订阅增量(coin rules:reload 同模式)。"""
+    """路由本地镜像:**DB 权威现读**起步 + 订阅增量 + 60s 全量轮询兜底。
+    两课编码于此:①resume 绝不回放 Redis 旧快照(dcm_main 重建日 Redis 残留 71
+    幽灵路由,DB 才 8 行——testgo「恢复回放旧快照」同课);②纯 pubsub 会被网络
+    黑洞静默吞掉(testgo userstream 握手 OK 零帧课),轮询兜底保证最迟 60s 收敛。"""
 
-    def __init__(self, r: aioredis.Redis):
+    def __init__(self, r: aioredis.Redis, pool=None):
         self.r = r
+        self.pool = pool
         self.routes: dict[str, dict] = {}
 
     async def load_all(self):
-        raw = await self.r.hgetall("dcm:route:assignments")
-        self.routes = {}
-        for sym, js in raw.items():
+        rows = None
+        if self.pool is not None:
             try:
-                self.routes[sym] = json.loads(js)
-            except json.JSONDecodeError:
-                log.warning(f"bad route json for {sym}")
-        log.info(f"route book loaded: {len(self.routes)} rows")
+                recs = await self.pool.fetch(
+                    "SELECT symbol,engine,venue_long,market_long,venue_short,market_short,"
+                    "target_notional_usdt,state,updated_by FROM route_assignments")
+                rows = {rec["symbol"]: {k: (str(v) if k == "target_notional_usdt" else v)
+                                        for k, v in dict(rec).items()} for rec in recs}
+            except Exception as e:
+                log.warning(f"route load from DB failed, fallback redis: {e!r}")
+        if rows is None:  # DB 不可用才退 Redis 快照(仍好过空书)
+            raw = await self.r.hgetall("dcm:route:assignments")
+            rows = {}
+            for sym, js in raw.items():
+                try:
+                    rows[sym] = json.loads(js)
+                except json.JSONDecodeError:
+                    log.warning(f"bad route json for {sym}")
+        self.routes = rows
+        log.info(f"route book loaded: {len(self.routes)} rows "
+                 f"(source={'db' if self.pool is not None else 'redis'})")
+
+    async def refresh_loop(self, interval: int = 60):
+        """轮询兑底:pubsub 半开假死时最迟 interval 秒收敛到 DB 真相。"""
+        while True:
+            await asyncio.sleep(interval)
+            try:
+                await self.load_all()
+            except Exception as e:
+                log.warning(f"route refresh failed: {e!r}")
 
     async def watch(self):
         while True:
@@ -216,11 +242,13 @@ async def main():
     pool = await asyncpg.create_pool(PG_DSN, min_size=1, max_size=3)
     await CFG.load(pool)                        # DB 配置优先(engine_config),env 兜底
     hb = Heartbeat(REDIS_URL, SERVICE, interval_sec=30, ttl_sec=120)
-    book = RouteBook(r)
+    book = RouteBook(r, pool=pool)
     await book.load_all()
     asyncio.create_task(book.watch())
+    asyncio.create_task(book.refresh_loop())
     asyncio.create_task(hb.run_forever())
     asyncio.create_task(CFG.watch(r, pool))     # 订阅 dcm:config:updates 热重载(armed 可热切换)
+    asyncio.create_task(CFG.poll(pool))         # 30s 轮询兜底(pubsub 黑洞时开关仍可达)
 
     # 执行器常驻构造(有 key 即建;shadow 只是不被调用)——mode 热切 armed 时立即可用,
     # reconcile_startup 保证任何时刻构造/切换都先认领实盘持仓(防双开)

@@ -40,6 +40,10 @@ ADL_WARN = float(os.environ.get("DCM_RISK_ADL_WARN", "4"))              # ADL档
 LEG_MISMATCH_TOL = float(os.environ.get("DCM_RISK_LEG_MISMATCH_TOL", "0.1"))  # 两腿量差>10% 判单腿
 NET_EXPOSURE_FLOOR_USDT = float(os.environ.get("DCM_RISK_NET_EXPOSURE_FLOOR", "25"))  # 逐币全域净敞口地板
 MARGIN_LEV_WARN = float(os.environ.get("DCM_RISK_MARGIN_LEV_WARN", "5"))  # 逐所有效杠杆预警线
+# R11 RECON v2 逆向对账(testgo 单腿噪音根治课的 dcm 版):实盘 perp 仓无 DB 行解释=孤儿仓。
+# 地板过滤(粉尘/结算残留不告警)+连续 2 轮命中才 fire(快照滞后/开仓瞬间的假阳性去抖)。
+ORPHAN_FLOOR_USDT = float(os.environ.get("DCM_RISK_ORPHAN_FLOOR_USDT", "5"))
+_orphan_hits: dict = {}   # (venue,sym) -> 连续命中轮数(进程内即可,重启重数)
 
 # 期望在场的服务及其心跳最大年龄(秒)。缺失键==停更同罪。
 EXPECTED_HB = {
@@ -293,6 +297,53 @@ async def check_round(r: aioredis.Redis, self_pool) -> dict:
             alerts += 1
     status["net_exposure"] = {"floor": NET_EXPOSURE_FLOOR_USDT, "breaches": net_exposure,
                               "coins_with_pos": len([s for s, q in net_by_coin.items() if abs(q) > 0])}
+
+    # R11 RECON v2 逆向对账:实盘 perp 仓 ∖ DB 期望腿 = 孤儿仓。
+    # 补 R7(只遍历 DB 行)与 R8(delta 中性孤儿对净≈0 不触地板)都看不见的洞——
+    # 实例:引擎重启 adopt 持仓但 DB 无行(PARTI 2026-07-11)、平仓残腿(B3 同日)。
+    expected_legs: set = set()
+    if self_pool_ok:
+        try:
+            drows = await self_pool.fetch(
+                "SELECT symbol,venue_long,venue_short FROM dualperp_positions "
+                "WHERE state NOT IN ('CLOSED','FAILED','ROLLBACK')")  # 含 OPENING/CLOSING 过渡态
+            for p in drows:
+                expected_legs.add((p["venue_long"], p["symbol"]))
+                expected_legs.add((p["venue_short"], p["symbol"]))
+            brows = await self_pool.fetch(
+                "SELECT symbol FROM basis_positions WHERE state NOT IN ('CLOSED','FAILED')")
+            for b in brows:   # basis=币安现货多+永续空,perp 腿在 binance
+                expected_legs.add(("binance", b["symbol"]))
+        except Exception as e:
+            log.warning("recon_v2 expected legs read failed: %r", e)
+        orphans = []
+        seen_keys = set()
+        for v in RECON_VENUES:
+            acct = acct_all.get(v) or {}
+            if not acct.get("ok"):
+                continue
+            for s, q in (acct.get("positions") or {}).items():
+                mark = float(((acct.get("pos_detail") or {}).get(s) or {}).get("mark") or 0)
+                notional = abs(float(q)) * mark
+                if notional <= ORPHAN_FLOOR_USDT:   # 地板:粉尘/结算残留不告警(绝对缺口误判课)
+                    continue
+                if (v, s) in expected_legs:
+                    continue
+                key = (v, s)
+                seen_keys.add(key)
+                _orphan_hits[key] = _orphan_hits.get(key, 0) + 1
+                if _orphan_hits[key] >= 2:          # 去抖:连续 2 轮命中才 fire
+                    orphans.append({"venue": v, "symbol": s, "qty": q,
+                                    "notional": round(notional, 2)})
+                    await fire(f"orphan:{v}:{s}", f"孤儿实盘仓 {v} {s}",
+                               f"实盘 {q} base ≈{round(notional,1)}U 无 DB 配对行解释"
+                               f"—平仓残腿/adopt未落库/手动仓,须人工核", level="fatal")
+                    alerts += 1
+        for key in list(_orphan_hits):              # 消失即清零(连续语义)
+            if key not in seen_keys:
+                _orphan_hits.pop(key, None)
+        status["recon_v2"] = {"expected_legs": len(expected_legs), "orphans": orphans,
+                              "floor_usdt": ORPHAN_FLOOR_USDT}
 
     # R9 保证金水位线:逐所 在场名义/权益 = 有效杠杆,超阈预警(补仓依赖余量,见底=补不动)
     waterline = []

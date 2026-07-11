@@ -44,6 +44,10 @@ ACTOR = "advisor:carry-v1"
 ARB_KEY_CARRY = "dcm:arb:carry_e"
 ARB_STALE_SEC = 900
 ARB_FLAT_COST_DAILY_PCT = float(os.environ.get("DCM_ARB_FLAT_COST_DAILY_PCT", "0.04"))
+# 退出滞回:有在场真金仓位的路由,连 N 轮不达标才 off(armed 下每次 off=真金往返成本;
+# PARTI 40min 开了又关的学费)。无仓路由照旧即时 off(shadow 翻路由零成本)。
+EXIT_STRIKES_N = int(os.environ.get("DCM_ADV_EXIT_STRIKES", "3"))
+STRIKES_KEY = "dcm:adv:exit_strikes"
 
 
 async def load_funding(r: aioredis.Redis) -> dict[str, dict[str, dict]]:
@@ -109,6 +113,33 @@ def best_pair(per_venue: dict[str, dict]) -> tuple[str, str, float] | None:
     return lo[0], hi[0], float(hi[1]["daily_pct"]) - float(lo[1]["daily_pct"])
 
 
+async def _open_position_syms(r: aioredis.Redis) -> set[str]:
+    """引擎快照里 state=OPEN 的真金持仓币集合(快照缺失/超龄按空集,宁可即时 off 也不凭旧账滞留)。"""
+    try:
+        raw = await r.get("dcm:engine:dualperp:positions")
+        if not raw:
+            return set()
+        d = json.loads(raw)
+        if time.time() - d.get("ts", 0) > 300:
+            return set()
+        return {p.get("symbol") for p in (d.get("positions") or []) if p.get("symbol")}
+    except Exception:
+        return set()
+
+
+async def _exit_allowed(r: aioredis.Redis, sym: str, open_syms: set[str], reason: str) -> bool:
+    """滞回裁决:无仓即放行;有仓则累计 strike,满 EXIT_STRIKES_N 轮才放行 off。"""
+    if sym not in open_syms:
+        await r.hdel(STRIKES_KEY, sym)
+        return True
+    strikes = await r.hincrby(STRIKES_KEY, sym, 1)
+    if strikes < EXIT_STRIKES_N:
+        log.info(f"route- {sym} 滞回持有 ({reason}; strike {strikes}/{EXIT_STRIKES_N})")
+        return False
+    await r.hdel(STRIKES_KEY, sym)
+    return True
+
+
 async def _coin_held_symbols(r: aioredis.Redis) -> set[str]:
     """coin 引擎在场(非终态)币的统一符号——跨引擎路由互斥:dualperp 不碰 coin 已持有的币。"""
     try:
@@ -121,6 +152,7 @@ async def _coin_held_symbols(r: aioredis.Redis) -> set[str]:
 async def advisor_round(r: aioredis.Redis, cli: httpx.AsyncClient) -> dict:
     funding = await load_funding(r)
     coin_held = await _coin_held_symbols(r)  # 路由互斥:排除 coin 引擎在管的币
+    open_pos = await _open_position_syms(r)  # 真金在场币:off 须过滞回
 
     # 候选:edge 达标 + 两腿 L1 新鲜 + 非 coin 已持有(跨引擎互斥)
     candidates: list[dict] = []
@@ -138,6 +170,8 @@ async def advisor_round(r: aioredis.Redis, cli: httpx.AsyncClient) -> dict:
     candidates.sort(key=lambda c: -c["edge"])
     top = candidates[:MAX_ROUTES]
     top_syms = {c["symbol"] for c in top}
+    if top_syms:
+        await r.hdel(STRIKES_KEY, *top_syms)  # 重新达标即清零(滞回=连续不达标才 off)
 
     # watchlist:让 depth-sampler 先采本轮候选两腿深度,本轮不足者下轮即可钳位铺路
     watch = []
@@ -190,8 +224,9 @@ async def advisor_round(r: aioredis.Redis, cli: httpx.AsyncClient) -> dict:
         c["cap"] = None if cap is None else round(cap, 1)
         c["target"] = round(target, 1)
         if target < MIN_TRADE_USDT:
-            # 深度不足/未知:若我名下已有该对则撤,否则跳过不铺
-            if sym in mine and mine[sym]["state"] == "active":
+            # 深度不足/未知:若我名下已有该对则撤(有真金仓须过滞回),否则跳过不铺
+            if sym in mine and mine[sym]["state"] == "active" \
+                    and await _exit_allowed(r, sym, open_pos, "容量不足"):
                 cur = mine[sym]
                 await cli.post(f"{DECISION_URL}/routes", json={
                     "symbol": sym, "engine": "dualperp",
@@ -227,9 +262,11 @@ async def advisor_round(r: aioredis.Redis, cli: httpx.AsyncClient) -> dict:
             else:
                 log.warning(f"route update {sym} failed {resp.status_code}: {resp.text[:150]}")
 
-    # 退出:我名下 active 但已不在 top(edge 塌缩/腿死/被挤出)
+    # 退出:我名下 active 但已不在 top(edge 塌缩/腿死/被挤出);有真金仓须连 N 轮不达标
     for sym, cur in mine.items():
         if cur["state"] != "active" or sym in top_syms:
+            continue
+        if not await _exit_allowed(r, sym, open_pos, "edge塌缩/挤出"):
             continue
         body = {"symbol": sym, "engine": "dualperp",
                 "venue_long": cur["venue_long"], "market_long": "perp",

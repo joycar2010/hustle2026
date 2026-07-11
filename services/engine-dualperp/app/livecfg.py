@@ -24,12 +24,17 @@ class LiveConfig:
     def _syms(s: str) -> set[str]:
         return {x.strip().upper() for x in (s or "").split(",") if x.strip()}
 
+    def _snapshot(self):
+        return (self.mode, tuple(sorted(self.arm_symbols)), str(self.max_notional_hard),
+                str(self.max_portfolio_notional), self.auto_converge)
+
     async def load(self, pool):
         try:
             rows = await pool.fetch("SELECT ckey,cval FROM engine_config WHERE engine='dualperp'")
         except Exception as e:
             logger.warning("engine_config load failed (用现值): %r", e)
             return
+        before = self._snapshot()
         m = {r["ckey"]: r["cval"] for r in rows}
         if "mode" in m and m["mode"] in ("shadow", "armed"):
             self.mode = m["mode"]
@@ -44,9 +49,10 @@ class LiveConfig:
                     pass
         if "auto_converge" in m:
             self.auto_converge = str(m["auto_converge"]).lower() == "true"
-        logger.info("CFG loaded: mode=%s arm=%s hard=%s portfolio=%s converge=%s",
-                    self.mode, sorted(self.arm_symbols), self.max_notional_hard,
-                    self.max_portfolio_notional, self.auto_converge)
+        if self._snapshot() != before:   # 轮询兜底下只在变更时出声,避免 30s 刷屏
+            logger.info("CFG loaded: mode=%s arm=%s hard=%s portfolio=%s converge=%s",
+                        self.mode, sorted(self.arm_symbols), self.max_notional_hard,
+                        self.max_portfolio_notional, self.auto_converge)
 
     async def watch(self, redis, pool):
         while True:
@@ -59,6 +65,16 @@ class LiveConfig:
             except Exception as e:
                 logger.warning("config watch reconnect: %r", e)
                 await asyncio.sleep(2)
+
+    async def poll(self, pool, interval: int = 30):
+        """轮询兜底:pubsub 半开假死(网络黑洞「握手 OK 零帧」课)时,armed/Kill
+        开关仍须最迟 interval 秒到达引擎——武装开关的送达不能依赖单一通道。"""
+        while True:
+            await asyncio.sleep(interval)
+            try:
+                await self.load(pool)
+            except Exception as e:
+                logger.warning("config poll failed: %r", e)
 
 
 CFG = LiveConfig()
