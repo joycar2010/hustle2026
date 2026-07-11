@@ -72,6 +72,9 @@ async def scheduler_round(r: aioredis.Redis, pool, notify: Notifier) -> dict:
             continue
         eq = float(acct.get("equity_usdt") or 0)
         notl = legs.get(v, 0.0)
+        if eq == 0 and notl == 0:
+            plan["venues"].append({"venue": v, "status": "inactive(零权益零腿,不催款)"})
+            continue  # 未启用所(如 HL 待入金)豁免最低水位线
         target = max(PORTFOLIO_CAP / 3.0, notl / 3.0 + notl * ADVERSE_PCT)
         row = {"venue": v, "equity": round(eq, 2), "leg_notional": round(notl, 2),
                "target": round(target, 2)}
