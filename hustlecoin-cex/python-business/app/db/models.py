@@ -2,11 +2,8 @@ from sqlalchemy import (
     Column, Integer, String, Boolean, Numeric, DateTime, Text, JSON,
     func,
 )
-from sqlalchemy.orm import DeclarativeBase
-
-
-class Base(DeclarativeBase):
-    pass
+# 分家二期 M2:Base 真身迁 coincore.base(模型层单一真身,消灭 app↔engine 互相登记)
+from coincore.base import Base  # noqa: F401
 
 
 class Symbol(Base):
@@ -299,5 +296,5 @@ class BalanceSnapshot(Base):
     account_count = Column(Integer)
 
 
-# Import engine models into same Base so create_all() covers them
-from engine.models import Position, TradeLog, EngineState  # noqa: E402, F401
+# 引擎三表注册进同一 Base(真身在 coincore.models_def;经 engine.models 会兜圈,直取)
+from coincore.models_def import Position, TradeLog, EngineState  # noqa: E402, F401
