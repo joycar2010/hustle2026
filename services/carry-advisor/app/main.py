@@ -39,6 +39,11 @@ DEPTH_FRESH_SEC = int(os.environ.get("DCM_ADV_DEPTH_FRESH_SEC", "300"))
 # HL 交易腿(独立签名进程)另期,armed 前勿加入 SUPPORTED
 VENUES = ["binance", "okx", "bybit", "gate", "bitget", "hyperliquid"]
 ACTOR = "advisor:carry-v1"
+# 跨引擎同币仲裁出价(契约权威=dcm_common/arb_contract.py,此处内联保持单文件部署):
+# 统一口径 e_daily_pct=%/天;carry 出价=edge−扁平成本(20bps往返/5天摊销)
+ARB_KEY_CARRY = "dcm:arb:carry_e"
+ARB_STALE_SEC = 900
+ARB_FLAT_COST_DAILY_PCT = float(os.environ.get("DCM_ARB_FLAT_COST_DAILY_PCT", "0.04"))
 
 
 async def load_funding(r: aioredis.Redis) -> dict[str, dict[str, dict]]:
@@ -140,6 +145,32 @@ async def advisor_round(r: aioredis.Redis, cli: httpx.AsyncClient) -> dict:
         watch.append([c["venue_long"], c["symbol"]])
         watch.append([c["venue_short"], c["symbol"]])
     await r.set("dcm:depth:watchlist", json.dumps(watch), ex=max(INTERVAL * 3, 1800))
+
+    # 仲裁契约:发布 carry 出价(候选全量,不止 top——仲裁面要看到所有 carry 有意愿的币),
+    # 并清理超龄字段。失败不影响铺路主流程。
+    try:
+        now = int(time.time())
+        pipe = r.pipeline()
+        for c in candidates:
+            pipe.hset(ARB_KEY_CARRY, c["symbol"], json.dumps({
+                "v": 1, "src": "carry", "sym": c["symbol"],
+                "e_daily_pct": round(c["edge"] - ARB_FLAT_COST_DAILY_PCT, 5),
+                "raw": {"edge_daily_pct": c["edge"],
+                        "venues": f"{c['venue_long']}/{c['venue_short']}"},
+                "ts": now}, ensure_ascii=False))
+        await pipe.execute()
+        existing = await r.hgetall(ARB_KEY_CARRY)
+        drop = []
+        for sym, s in existing.items():
+            try:
+                if now - json.loads(s).get("ts", 0) > ARB_STALE_SEC:
+                    drop.append(sym)
+            except Exception:
+                drop.append(sym)
+        if drop:
+            await r.hdel(ARB_KEY_CARRY, *drop)
+    except Exception:
+        log.warning("arb carry bid publish failed", exc_info=True)
 
     # 现有路由(经 decision API 读,不直连表)
     routes = (await cli.get(f"{DECISION_URL}/routes")).json()["routes"]

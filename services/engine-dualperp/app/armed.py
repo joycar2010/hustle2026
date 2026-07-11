@@ -41,7 +41,8 @@ BASIS_MIN_SAMPLES = int(os.environ.get("DCM_DP_BASIS_MIN_SAMPLES", "30"))
 BASIS_WINDOW_HOURS = int(os.environ.get("DCM_DP_BASIS_WINDOW_HOURS", "12"))
 LEG_TIMEOUT = int(os.environ.get("DCM_DP_LEG_TIMEOUT_SEC", "15"))
 CROSS_BPS = Decimal(os.environ.get("DCM_DP_CROSS_BPS", "15"))       # marketable limit 穿价幅度
-MAX_SLIP_BPS = Decimal(os.environ.get("DCM_DP_MAX_SLIP_BPS", "40"))  # 穿价超此拒下(滑点保护)
+MAX_SLIP_BPS = Decimal(os.environ.get("DCM_DP_MAX_SLIP_BPS", "40"))
+FAIL_COOLDOWN_SEC = int(os.environ.get("DCM_DP_FAIL_COOLDOWN_SEC", "600"))  # 开仓失败冷却,防5s循环烧费(AMAT 110126学费)  # 穿价超此拒下(滑点保护)
 DUST_USDT = Decimal(os.environ.get("DCM_DP_DUST_USDT", "1"))
 SUPPORTED = {"binance", "bybit", "okx", "gate", "bitget"}
 
@@ -55,6 +56,7 @@ class ArmedExecutor:
         self.open_syms: set[str] = set()
         self.inflight: set[str] = set()
         self._filters_loaded: set[tuple[str, str]] = set()
+        self._fail_until: dict[str, float] = {}  # symbol -> ts,失败冷却
 
     def armed_for(self, sym: str) -> bool:
         return sym in CFG.arm_symbols and len(self.clients) > 0
@@ -142,6 +144,10 @@ class ArmedExecutor:
             await self._alert(f"unsupported:{sym}", "armed 路由含未配置 venue 客户端",
                               f"{sym} {vl}/{vs} 缺交易客户端(未配 key)", "warn")
             return
+        # 失败冷却:上次开仓失败(拒单/单腿回滚)后静默一段时间,防每周期重试烧费
+        until = self._fail_until.get(sym, 0)
+        if time.time() < until:
+            return
         # 硬顶(单腿)
         target_usdt = min(target_usdt, CFG.max_notional_hard)
 
@@ -202,7 +208,8 @@ class ArmedExecutor:
             if f1 <= 0:
                 await self.pool.execute("UPDATE dualperp_positions SET state='FAILED',"
                                         "error_message='leg1 no fill',updated_at=now() WHERE id=$1", row_id)
-                log.info("open %s aborted: thin leg no fill (clean, no exposure)", sym)
+                log.info("open %s aborted: thin leg no fill (clean, no exposure); cooldown %ss", sym, FAIL_COOLDOWN_SEC)
+                self._fail_until[sym] = time.time() + FAIL_COOLDOWN_SEC
                 return
 
             # 腿2(厚),数量对齐腿1实际成交(保持中性)
@@ -220,7 +227,8 @@ class ArmedExecutor:
                                             "error_message='leg2 no fill, leg1 flattened',updated_at=now() "
                                             "WHERE id=$1", row_id)
                     await self._alert(f"rollback:{sym}", "配对回滚(单腿未成)",
-                                      f"{sym} 腿2({leg2[1]})未成,已平腿1({leg1[1]}) {f1}", "fatal")
+                                      f"{sym} 腿2({leg2[1]})未成,已平腿1({leg1[1]}) {f1};冷却{FAIL_COOLDOWN_SEC}s", "fatal")
+                    self._fail_until[sym] = time.time() + FAIL_COOLDOWN_SEC
                     return
                 # 部分残差 → 在腿1 venue 轧平净敞口
                 signed_res = residual if leg1[2] == "BUY" else -residual

@@ -27,6 +27,14 @@ COIN_PG_DSN = os.environ.get(
     "COIN_PG_DSN", "dbname=cex_trading user=dcm_ro host=127.0.0.1")
 DCM_REDIS_URL = os.environ.get("DCM_REDIS_URL", "redis://10.0.1.212:6379/0")
 INTERVAL = int(os.environ.get("DCM_BRIDGE_INTERVAL_SEC", "30"))
+# 跨引擎同币仲裁出价中继(契约权威=dcm_common/arb_contract.py,此处内联保持单文件部署):
+# coin 引擎评估开仓时写自己 Redis 的 engine:{uid}:neteval:{SYM}(60s TTL,事件驱动),
+# 本桥归一成 e_daily_pct(%/天)转发 dcm:arb:coin_e;无 neteval=coin 无意愿=不出价。
+COIN_REDIS_URL = os.environ.get("COIN_REDIS_URL", "redis://10.0.1.95:6379/0")
+ARB_KEY_COIN = "dcm:arb:coin_e"
+ARB_STALE_SEC = 900
+ARB_DEFAULT_HOLD_H = float(os.environ.get("DCM_ARB_DEFAULT_HOLD_HOURS", "4"))
+ARB_COIN_UID = os.environ.get("DCM_ARB_COIN_UID", "1")  # 引擎权威行=user1
 # 代理式操作合并(绞杀者第二步):gateway 把审计过的命令写 dcm:coin:cmd,本桥消费→
 # 本地铸 JWT(密钥永不离开 coin 机)→调 coin localhost FastAPI(coin 逻辑仍权威)
 # 注:coin 的 CEX_JWT_SECRET 配在 systemd unit 的 Environment= 行(非 .env),unit 644 可读
@@ -214,6 +222,64 @@ def publish_state(r):
     log.info("BRIDGE_OK positions=%d engine_scopes=%d", len(positions), len(states))
 
 
+_coin_redis = None
+
+
+def _get_coin_redis():
+    global _coin_redis
+    if _coin_redis is None:
+        _coin_redis = redis_sync.from_url(
+            COIN_REDIS_URL, decode_responses=True,
+            socket_timeout=5, socket_connect_timeout=5)
+    return _coin_redis
+
+
+def sync_arb_bids(r):
+    """coin neteval → dcm:arb:coin_e 出价中继(60s 一轮)。
+    归一:e_daily_pct = E/notional × 24/max(1,hold_hours) × 100。
+    同时清理超龄字段(neteval 60s TTL 自灭,出价 900s 后也视为无意愿)。"""
+    rc = _get_coin_redis()
+    now = int(time.time())
+    published = 0
+    pat = "engine:%s:neteval:*" % ARB_COIN_UID
+    for key in rc.scan_iter(match=pat, count=200):
+        try:
+            raw = rc.get(key)
+            if not raw:
+                continue
+            d = json.loads(raw)
+            n = float(d.get("notional_usdt") or 0)
+            if n <= 0:
+                continue
+            e = float(d.get("E") or 0)
+            hold_h = max(1.0, float(d.get("hold_hours") or ARB_DEFAULT_HOLD_H))
+            sym = key.rsplit(":", 1)[-1]
+            e_daily_pct = e / n * (24.0 / hold_h) * 100.0
+            r.hset(ARB_KEY_COIN, sym, json.dumps({
+                "v": 1, "src": "coin", "sym": sym,
+                "e_daily_pct": round(e_daily_pct, 5),
+                "raw": {"E_usdt": e, "notional_usdt": n, "hold_hours": hold_h,
+                        "decision": d.get("decision"), "gate_mode": d.get("gate_mode")},
+                "ts": now}, ensure_ascii=False))
+            published += 1
+        except Exception as ex:
+            log.warning("arb bid relay failed for %s: %r", key, ex)
+    # 超龄清理
+    try:
+        drop = []
+        for sym, s in (r.hgetall(ARB_KEY_COIN) or {}).items():
+            try:
+                if now - json.loads(s).get("ts", 0) > ARB_STALE_SEC:
+                    drop.append(sym)
+            except Exception:
+                drop.append(sym)
+        if drop:
+            r.hdel(ARB_KEY_COIN, *drop)
+    except Exception as ex:
+        log.warning("arb bid reap failed: %r", ex)
+    return published
+
+
 def main():
     global _last_mutex
     r = redis_sync.from_url(DCM_REDIS_URL, decode_responses=True)
@@ -221,6 +287,7 @@ def main():
              INTERVAL, DCM_REDIS_URL, list(CMD_WHITELIST), ROUTE_MUTEX)
     last_state = 0.0
     last_mutex_ts = 0.0
+    last_arb_ts = 0.0
     while True:
         try:
             consume_commands(r)              # 命令消费(~2s 响应)
@@ -230,6 +297,12 @@ def main():
                 except Exception as e:
                     log.warning("route mutex round failed: %r", e)
                 last_mutex_ts = time.time()
+            if time.time() - last_arb_ts >= 60:
+                try:
+                    sync_arb_bids(r)         # 仲裁出价中继(60s)
+                except Exception as e:
+                    log.warning("arb bids round failed: %r", e)
+                last_arb_ts = time.time()
             if time.time() - last_state >= INTERVAL:
                 publish_state(r)             # 状态发布(INTERVAL)
                 last_state = time.time()
