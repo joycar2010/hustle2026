@@ -6,6 +6,10 @@
 /*
 !/.gitignore
 !/hustlecoin-cex/
+# coin 三机分片/PG主从/监控 运维工具与文档(已脱敏:密码/加密钥打码)
+!/coin-shard-tools/
+!/phase2d_complete_report.md
+!/validate_shard_config.py
 
 __pycache__/
 *.pyc

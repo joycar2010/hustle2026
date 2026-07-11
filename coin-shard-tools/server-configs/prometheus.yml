@@ -1,0 +1,44 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  # PostgreSQL主库
+  - job_name: 'postgres_primary'
+    static_configs:
+      - targets: ['10.0.1.18:9187']
+        labels:
+          instance: 'primary'
+          role: 'primary'
+  
+  # PostgreSQL从库
+  - job_name: 'postgres_replica'
+    static_configs:
+      - targets: ['10.0.1.103:9187']
+        labels:
+          instance: 'replica1'
+          role: 'replica'
+      - targets: ['10.0.1.12:9187']
+        labels:
+          instance: 'replica2'
+          role: 'replica'
+  
+  # Node exporter
+  - job_name: 'node'
+    static_configs:
+      - targets: ['10.0.1.18:9100']
+        labels:
+          instance: 'machine-a-primary'
+      - targets: ['10.0.1.103:9100']
+        labels:
+          instance: 'machine-b-replica1'
+      - targets: ['10.0.1.12:9100']
+        labels:
+          instance: 'machine-c-replica2'
+  
+  # Coin Engine
+  - job_name: 'coin_engine'
+    static_configs:
+      - targets: ['10.0.1.18:9188']
+        labels:
+          instance: 'primary'

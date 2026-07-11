@@ -1,0 +1,22 @@
+[Unit]
+Description=CEX Arbitrage Trading Engine (Shard %i)
+After=network.target
+
+[Service]
+Type=simple
+User=ec2-user
+WorkingDirectory=/home/ec2-user/hustlecoin-cex/hustlecoin-cex/python-business
+ExecStart=/home/ec2-user/hustlecoin-cex/hustlecoin-cex/python-business/venv/bin/python3 -m engine --shard-id=%i
+Environment=CEX_REDIS_URL=redis://10.0.1.95:6379
+Environment=CEX_DATABASE_URL=postgresql://postgres:***@10.0.1.18:5432/cex_trading
+Environment=CEX_DATABASE_URL_REPLICA=postgresql://postgres:***@10.0.1.103:5432/cex_trading
+Environment=CEX_ENCRYPTION_KEY=***see-server-unit***
+Environment=PYTHONPATH=/home/ec2-user/hustlecoin-cex/hustlecoin-cex/python-business
+Restart=always
+RestartSec=10
+LimitNOFILE=65535
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
