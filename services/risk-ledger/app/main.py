@@ -53,6 +53,7 @@ EXPECTED_HB = {
     "event-calendar": 900,
     "fund-scheduler": 7500,
     "borrow-monitor": 400,
+    "transfer-monitor": 900,
     "gateway": 120,
     "decision": 120,
     "engine-dualperp": 120,
