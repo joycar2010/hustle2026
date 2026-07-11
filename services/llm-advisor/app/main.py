@@ -22,6 +22,7 @@ import os
 import time
 
 import httpx
+import asyncpg
 import redis.asyncio as aioredis
 
 from dcm_common.heartbeat import Heartbeat
@@ -223,8 +224,35 @@ async def call_llm(cli: httpx.AsyncClient, snapshot: dict) -> dict | None:
     return validated
 
 
+async def _journal(pool, out: dict):
+    """建议逐条落库(shadow 对照账本)。失败只警告,绝不影响顾问主流程。"""
+    if pool is None:
+        return
+    try:
+        recs = out.get("recommendations") or []
+        for rec in recs:
+            await pool.execute(
+                "INSERT INTO llm_advice_log(model,snapshot_ts,latency_ms,tokens,symbol,action,domain,reason,raw)"
+                " VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)",
+                out.get("model") or "", int(out.get("snapshot_ts") or 0),
+                int(out.get("latency_ms") or 0),
+                int((out.get("usage") or {}).get("total_tokens") or 0),
+                str(rec.get("symbol") or ""), str(rec.get("action") or ""),
+                str(rec.get("domain") or rec.get("scope") or ""),
+                str(rec.get("reason") or "")[:500], json.dumps(rec, ensure_ascii=False))
+    except Exception as e:
+        log.warning("advice journal failed: %r", e)
+
+
 async def main():
     r = aioredis.from_url(REDIS_URL, decode_responses=True)
+    pool = None
+    try:
+        dsn = os.environ.get("DCM_PG_DSN", "")
+        if dsn:
+            pool = await asyncpg.create_pool(dsn, min_size=1, max_size=2)
+    except Exception as e:
+        log.warning("pg pool unavailable (journal disabled): %r", e)
     hb = Heartbeat(REDIS_URL, "llm-advisor", interval_sec=min(INTERVAL, 60), ttl_sec=max(INTERVAL * 2, 300))
     asyncio.create_task(hb.run_forever())
     configured = bool(LLM_KEY)
@@ -258,6 +286,7 @@ async def main():
                     log.info("LLM_OK recs=%d latency=%dms tokens=%s",
                              len(result.get("recommendations", [])),
                              out["latency_ms"], usage.get("total_tokens"))
+                    await _journal(pool, out)
                 else:
                     hb.extra = {"status": "bad_round"}
                     log.warning("LLM round produced no valid output (keeping previous)")
