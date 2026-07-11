@@ -503,6 +503,21 @@ class Worker:
             _close_th = self._sym_threshold(symbol, "close_spread", rules.close_spread)
             if _open_th is not None and _close_th is not None and float(_open_th) < float(_close_th):
                 statuses[symbol] = "配置冲突"; continue
+            # ①b OKX 显式路由:该币在 OKX_ARM_SYMBOLS 武装 → 走 OKX 卖借+对冲合一(OKX-only,不回落币安)。
+            # 武装=显式指定 venue,与币安有无券无关;点差须达 open 阈值(OKX 合一直达 OPEN)。
+            try:
+                from engine.trading import okx_executor as _okxe
+                _venues = [v.strip().lower() for v in
+                           (getattr(rules, "borrow_venues", "") or "binance").split(",") if v.strip()]
+                if _okxe.okx_eligible(symbol, _venues):
+                    if can_borrow and active_count < max_positions and self._running:
+                        if await self._maybe_okx_open(symbol, account_note):
+                            active_symbols.add(symbol); active_count += 1
+                            statuses[symbol] = "OKX借币"; continue
+                    statuses[symbol] = "OKX等点差"   # 武装=OKX-only,点差不够则等,不回落币安
+                    continue
+            except Exception as _e:
+                logger.warning(f"OKX armed route check failed {symbol}: {_e}")
             # 有券 + 无异常 + 点差达标 → 正常运行(挂单借币中);本轮真借或受满仓/账户护栏暂缓,均标"运行中"
             statuses[symbol] = "运行中"
             if not can_borrow or active_count >= max_positions or not self._running:
