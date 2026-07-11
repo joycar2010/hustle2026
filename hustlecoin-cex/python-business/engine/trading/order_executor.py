@@ -126,6 +126,8 @@ def _compute_net_expect(spread_short_pct, notional_usdt: float, interest_rate_da
         "notional_usdt": round(n, 4), "spread_capture": round(cap, 4),
         "interest_cost": round(interest, 4), "fee_cost": round(fee, 4),
         "tick_cost": round(tick, 4), "funding_expect": 0.0, "E": round(e, 4),
+        # 仲裁契约(dcm arb_contract):日化归一需要预期持有时长,随分项一并发布
+        "hold_hours": round(max(1.0, hold_hours), 2),
     }
 
 
