@@ -267,12 +267,17 @@ class ArmedExecutor:
                                     "WHERE id=$1", row["id"])
             for venue in (row["venue_long"], row["venue_short"]):
                 await self._ensure_filter(cli, venue, sym)
-                net = await self.clients[venue].fetch_position(cli, sym)
-                if abs(net) > 0:
+                # 平腿按实盘余量重试:单次 flatten 可能部分成交后超时撤单
+                # (B3 gate 腿 20000/34000 学费,残 14000 裸空 10 分钟),重试至归零或次数用尽
+                for _attempt in range(3):
+                    net = await self.clients[venue].fetch_position(cli, sym)
+                    if abs(net) <= 0:
+                        break
                     l1 = await self.r.hget(f"dcm:feed:{venue}:perp", sym)
                     ref = Decimal(str(json.loads(l1)["bid"])) if l1 else Decimal("0")
-                    if ref > 0:
-                        await self._flatten(cli, venue, sym, net, ref)
+                    if ref <= 0:
+                        break
+                    await self._flatten(cli, venue, sym, net, ref)
             # 平后复核
             resid = Decimal("0")
             for venue in (row["venue_long"], row["venue_short"]):
