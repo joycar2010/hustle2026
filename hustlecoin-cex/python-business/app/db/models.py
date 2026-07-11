@@ -121,7 +121,10 @@ class GlobalRules(Base):
     tier_ratios = Column(String(120), default="")             # "0.5:30,0.8:30,1.2:40" (persisted)
     borrow_rate_per_sec = Column(Numeric(6, 2), default=2)    # per-account target borrow pacing (req/s)
     borrow_via_otoco = Column(Boolean, default=False)         # True=借币走 coinmini 同款 IOC OTO/OTOCO;False=borrow-repay
-    borrow_mode = Column(String(20), nullable=True)           # 借币方式枚举: repay/otoco/single/multi;null=回退 borrow_via_otoco(灰度兼容)
+    borrow_mode = Column(String(20), nullable=True)
+    # ①多venue借币开关:有序借币所资格列表(逗号分隔,币安优先→降级)。默认 binance=今日行为零改变;
+    # 单币安=列表退化为 [binance]。执行路径逐venue实现后,引擎按序尝试、无券降级下一所。
+    borrow_venues = Column(String(60), nullable=True, server_default='binance')           # 借币方式枚举: repay/otoco/single/multi;null=回退 borrow_via_otoco(灰度兼容)
     otoco_legs = Column(Integer, default=2)                   # OTOCO 借币腿数: 1=单腿裸MARGIN_BUY(最省order-count)/2=OTO(2单撤)/3=OTOCO(3单撤)
     multi_max_accounts_per_symbol = Column(Integer, default=3)  # 多账户并联(borrow_mode=multi): 同一币最多几个子账户同时并联借(突破单UID order-count瓶颈)
     hedge_via_master = Column(Boolean, default=False)         # True=合约对冲腿用主账户 key;False=三腿同子账户(原行为)

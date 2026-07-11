@@ -27,6 +27,7 @@ class GlobalRulesUpdate(BaseModel):
     borrow_rate_per_sec: Optional[Decimal] = None
     borrow_via_otoco: Optional[bool] = None
     borrow_mode: Optional[str] = None
+    borrow_venues: Optional[str] = None
     otoco_legs: Optional[int] = None
     multi_max_accounts_per_symbol: Optional[int] = None
     hedge_via_master: Optional[bool] = None
@@ -121,6 +122,17 @@ class GlobalRulesUpdate(BaseModel):
             raise ValueError("撤单腿数只能是 1、2 或 3")
         return v
 
+    @field_validator("borrow_venues")
+    @classmethod
+    def _v_borrow_venues(cls, v):
+        if v is None or v == "":
+            return v
+        allowed = {"binance", "okx", "gate", "bybit", "bitget"}
+        vs = [x.strip().lower() for x in str(v).split(",") if x.strip()]
+        if not vs or any(x not in allowed for x in vs):
+            raise ValueError("借币所只能是 binance/okx/gate/bybit/bitget 的逗号有序列表")
+        return ",".join(vs)
+
     @field_validator("borrow_mode")
     @classmethod
     def _v_borrow_mode(cls, v):
@@ -186,6 +198,7 @@ class GlobalRulesResponse(BaseModel):
     borrow_rate_per_sec: Optional[Decimal] = 2
     borrow_via_otoco: Optional[bool] = False
     borrow_mode: Optional[str] = None
+    borrow_venues: Optional[str] = None
     otoco_legs: Optional[int] = 2
     multi_max_accounts_per_symbol: Optional[int] = 3
     hedge_via_master: Optional[bool] = False

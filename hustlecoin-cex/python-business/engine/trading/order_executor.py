@@ -464,6 +464,12 @@ async def execute_borrow(
     Net-flat (owe coin, hold coin) — no directional exposure. Returns position id or None."""
     base_asset = symbol.replace("USDT", "")
     confirm_spread = rules.open_spread if min_spread is None else min_spread
+    # ①多venue借币资格列表(有序,币安优先→降级)。今日仅 binance 有执行路径:
+    # 列表首个可执行所=binance,行为与单币安完全一致(零改变)。OKX 等所的借币执行路径
+    # 落地后,此处按序尝试、撞 -3045(无券)降级下一所——见 borrow-monitor 的放币事件配套。
+    _borrow_venues = [v.strip().lower() for v in (getattr(rules, "borrow_venues", "") or "binance").split(",") if v.strip()]
+    if _borrow_venues and _borrow_venues != ["binance"]:
+        logger.info(f"borrow_venues={_borrow_venues} for {symbol} (仅binance有执行路径,余所待①b上线)")
     db = SessionLocal()
     position = Position(
         sub_account_id=sub_account_id,

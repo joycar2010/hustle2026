@@ -39,6 +39,7 @@ class GlobalRulesSnapshot:
     borrow_rate_per_sec: Decimal = Decimal("2")
     borrow_via_otoco: bool = False
     borrow_mode: str = "repay"
+    borrow_venues: str = "binance"
     otoco_legs: int = 2
     multi_max_accounts_per_symbol: int = 3
     hedge_via_master: bool = False
@@ -85,7 +86,7 @@ DEFAULT_FUND = FundRulesSnapshot()
 # admin /admin/global-rules「系统后端规则」TAB 编辑。per-user worker 的这些字段从 NULL 行覆盖。
 _SYSTEM_FIELDS = (
     "follow_type", "slippage_pct", "stabilize_sec", "tier_ratios", "borrow_rate_per_sec",
-    "borrow_via_otoco", "borrow_mode", "otoco_legs", "multi_max_accounts_per_symbol",
+    "borrow_via_otoco", "borrow_mode", "borrow_venues", "otoco_legs", "multi_max_accounts_per_symbol",
     "hedge_via_master", "max_spread_pct", "min_volume_24h",
     "min_volume_24h_futures", "block_risky_open", "filter_duration_ms", "min_borrow_usdt",
     "collateral_ratio", "removed_cooldown_minutes", "open_spread_buffer",
@@ -94,7 +95,7 @@ _SYSTEM_FIELDS = (
 )
 _SYS_BOOL = {"borrow_via_otoco", "hedge_via_master", "block_risky_open", "hedge_auto_converge"}
 _SYS_INT = {"otoco_legs", "multi_max_accounts_per_symbol", "filter_duration_ms", "removed_cooldown_minutes"}
-_SYS_STR = {"follow_type", "tier_ratios", "borrow_mode", "net_gate_mode", "spot_order_mode"}
+_SYS_STR = {"follow_type", "tier_ratios", "borrow_mode", "borrow_venues", "net_gate_mode", "spot_order_mode"}
 
 
 class ConfigLoader:
@@ -158,6 +159,7 @@ class ConfigLoader:
                     borrow_rate_per_sec=rules.borrow_rate_per_sec if getattr(rules, "borrow_rate_per_sec", None) is not None else Decimal("2"),
                     borrow_via_otoco=bool(getattr(rules, "borrow_via_otoco", False)),
                     borrow_mode=(getattr(rules, "borrow_mode", None) or ""),
+                    borrow_venues=(getattr(rules, "borrow_venues", None) or "binance"),
                     otoco_legs=int(getattr(rules, "otoco_legs", 2) or 2),
                     multi_max_accounts_per_symbol=int(getattr(rules, "multi_max_accounts_per_symbol", 3) or 3),
                     hedge_via_master=bool(getattr(rules, "hedge_via_master", False)),

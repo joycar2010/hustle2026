@@ -138,6 +138,7 @@ def _rules_to_dict(r: GlobalRules) -> dict:
         "borrow_rate_per_sec": str(r.borrow_rate_per_sec) if getattr(r, "borrow_rate_per_sec", None) is not None else None,
         "borrow_via_otoco": bool(getattr(r, "borrow_via_otoco", False)),
         "borrow_mode": getattr(r, "borrow_mode", None),
+        "borrow_venues": getattr(r, "borrow_venues", None) or "binance",
         "otoco_legs": getattr(r, "otoco_legs", 2),
         "multi_max_accounts_per_symbol": getattr(r, "multi_max_accounts_per_symbol", 3),
         "hedge_via_master": bool(getattr(r, "hedge_via_master", False)),
