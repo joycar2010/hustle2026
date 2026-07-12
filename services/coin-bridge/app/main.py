@@ -50,6 +50,12 @@ CMD_WHITELIST = {
     "engine_stop": ("POST", "/api/engine/workers/stop", {}),
     "blacklist_add": ("POST", "/api/blacklist/", {}),
     "blacklist_remove": ("DELETE", "/api/blacklist/{symbol}", {}),
+    # 干预菜单（coin 状态机权威:manual_close 仅 OPEN/manual_repay 仅 PENDING_REPAY/
+    # manual_hedge 仅 BORROWED_IDLE,还币闸等护栏在 coin 侧原样生效;桥只做 position_id 整数校验）
+    "manual_close": ("POST", "/api/engine/manual-close", {}),
+    "manual_repay": ("POST", "/api/engine/manual-repay", {}),
+    "manual_hedge": ("POST", "/api/engine/manual-hedge", {}),
+    "push_symbol": ("POST", "/api/engine/push-symbol/{symbol}", {}),
 }
 # S3 面板快照发布周期(dcm:coin:panel);原料=coin 引擎自己维护的缓存键+blacklist API,
 # 绝不直打交易所 REST(IP 权重预算课)
@@ -92,6 +98,11 @@ def _exec_command(cmd: dict) -> dict:
         body = {}
     else:
         body = {**base_body, **params}
+    if action.startswith("manual_"):
+        try:
+            body["position_id"] = int(body.get("position_id"))
+        except (TypeError, ValueError):
+            return {"ok": False, "err": "position_id 必须为整数"}
     try:
         tok = _mint_jwt(secret, int(cmd.get("user_id", 1)))
         resp = requests.request(method, f"{COIN_API}{path}", json=body,

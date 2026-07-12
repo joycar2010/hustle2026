@@ -37,6 +37,21 @@ VENUE_CFG = {
 }
 
 
+async def _strategy_tagger(pool):
+    """归因打标(写入时定案,消费端不再猜):S1=basis 名下币 / S2=dualperp / ''=未归因。
+    时间局部性:按写入当时的在管归属认领——历史行保持当时的标签,不被今后换手改写。"""
+    bs = {r["symbol"] for r in await pool.fetch("SELECT DISTINCT symbol FROM basis_positions")}
+    dp = {r["symbol"] for r in await pool.fetch("SELECT DISTINCT symbol FROM dualperp_positions")}
+
+    def tag(sym: str) -> str:
+        if sym in bs:
+            return "S1"
+        if sym in dp:
+            return "S2"
+        return ""
+    return tag
+
+
 async def pull_venue(cli, pool, venue, cfg) -> tuple[int, str]:
     cur = await pool.fetchval("SELECT last_ts_ms FROM income_cursors WHERE venue=$1", venue)
     since = int(cur) if cur else int((time.time() - BOOTSTRAP_HOURS * 3600) * 1000)
@@ -44,6 +59,7 @@ async def pull_venue(cli, pool, venue, cfg) -> tuple[int, str]:
         recs = await fetch_income(cli, venue, cfg, since)
     except Exception as e:
         return 0, f"{e!r}"[:120]
+    tag = await _strategy_tagger(pool)
     ins = 0
     max_ts = since
     for r in recs:
@@ -51,10 +67,10 @@ async def pull_venue(cli, pool, venue, cfg) -> tuple[int, str]:
             continue
         max_ts = max(max_ts, r.ts_ms)
         status = await pool.execute(
-            "INSERT INTO income_records(venue,ext_id,symbol,itype,amount,ts,raw) "
-            "VALUES($1,$2,$3,$4,$5,to_timestamp($6/1000.0),$7) ON CONFLICT (venue,ext_id) DO NOTHING",
+            "INSERT INTO income_records(venue,ext_id,symbol,itype,amount,ts,raw,strategy_code) "
+            "VALUES($1,$2,$3,$4,$5,to_timestamp($6/1000.0),$7,$8) ON CONFLICT (venue,ext_id) DO NOTHING",
             r.venue, r.ext_id, r.symbol, r.itype, r.amount, r.ts_ms,
-            json.dumps(r.raw, ensure_ascii=False, default=str))
+            json.dumps(r.raw, ensure_ascii=False, default=str), tag(r.symbol))
         if status.endswith("1"):
             ins += 1
     # 游标回退60s重叠窗,由唯一约束吸收重复
