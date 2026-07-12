@@ -47,7 +47,6 @@ import { mixApi } from '../../api/mix'
 
 const list = ref([])
 const form = reactive({ symbol: '', scopeSel: '*', reason: '' })
-const base = import.meta.env.VITE_MIX_API || 'http://localhost:8100/api/v1'
 const autoRatio = computed(() => list.value.length ? Math.round(list.value.filter(b => b.source !== 'manual').length / list.value.length * 100) : 0)
 
 const srcLabel = s => ({ manual: '手动', auto_borrow_wedge: '自动·借币钉死', auto_3045: '自动·-3045 无券', announcement_delist: '自动·公告下架', risk_trigger: '自动·风控触发' }[s] || s)
@@ -56,14 +55,18 @@ const tagType = s => s === 'manual' ? 'info' : s === 'auto_3045' ? 'warning' : '
 async function load() { list.value = await mixApi.blacklist() }
 async function add() {
   if (!form.symbol) return ElMessage.warning('请输入币种')
-  await fetch(`${base}/blacklist`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ symbol: form.symbol, reason: form.reason, scope: [form.scopeSel] }) })
-  ElMessage.success(`${form.symbol.toUpperCase()} 已加入黑名单（${form.scopeSel === '*' ? '全局' : '仅 ' + form.scopeSel}）`)
-  form.symbol = ''; form.reason = ''; load()
+  try {
+    await mixApi.blacklistAdd(form.symbol, form.reason)
+    ElMessage.success(`${form.symbol.toUpperCase()} 已加入黑名单（coin 权威侧已生效）`)
+    form.symbol = ''; form.reason = ''; load()
+  } catch (e) { ElMessage.error(e?.detail || e?.error || '加入失败') }
 }
 async function remove(row) {
   await ElMessageBox.confirm(`移除 ${row.symbol}？（重新进入费差候选池）`, '移除黑名单', { type: 'warning' })
-  await fetch(`${base}/blacklist/remove`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ symbol: row.symbol }) })
-  ElMessage.success('已移除'); load()
+  try {
+    await mixApi.blacklistRemove(row.symbol)
+    ElMessage.success('已移除'); load()
+  } catch (e) { if (e !== 'cancel') ElMessage.error(e?.detail || e?.error || '移除失败') }
 }
 onMounted(load)
 </script>

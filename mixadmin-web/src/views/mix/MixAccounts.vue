@@ -12,7 +12,7 @@
         <div class="row master" @click="toggle(m.id)" @contextmenu.prevent="openMenu($event, m)">
           <span class="caret">{{ open.has(m.id) ? '▾' : '▸' }}</span>
           <span class="kind" :class="m.platformType">{{ m.platformType === 'kms_wallet' ? '链上' : '主' }}</span>
-          <span class="name">{{ m.id }}</span>
+          <span class="name">{{ m.id }}<i v-if="reg[m.id]?.alias" class="alias">{{ reg[m.id].alias }}</i></span>
           <span class="venue">{{ m.venue }} · 域 {{ m.domain }}</span>
           <span class="dot" :class="m.apiStatus" />
           <span v-for="(v,k) in m.metrics" :key="k" class="pair"><em>{{ k }}</em><b :class="{neg:String(v).startsWith('-')}">{{ v }}</b></span>
@@ -23,7 +23,7 @@
           <div v-for="c in m.children" :key="c.id" class="row sub" @contextmenu.prevent="openMenu($event, c, m)">
             <span class="caret"></span>
             <span class="kind" :class="c.kind === 'wallet' ? 'kms_wallet' : 'sub'">{{ c.kind === 'wallet' ? '址' : '子' }}</span>
-            <span class="name sm">↳ {{ c.id }}</span>
+            <span class="name sm">↳ {{ c.id }}<i v-if="reg[c.id]?.alias" class="alias">{{ reg[c.id].alias }}</i></span>
             <span class="venue">{{ c.venue }}</span>
             <span class="dot" :class="c.apiStatus" />
             <span v-if="c.apiStatus==='restricted'" class="restricted">受限 · -2015 IP 白名单</span>
@@ -45,6 +45,19 @@
         </template>
       </div>
     </Teleport>
+
+    <!-- 别名簿（accounts_registry：别名/邮箱/备注,mix 自有域直写） -->
+    <el-dialog v-model="regDlg" :title="`别名/备注 · ${regForm.account_key}`" width="420">
+      <el-form label-width="70">
+        <el-form-item label="别名"><el-input v-model="regForm.alias" placeholder="如：套利1号·币安主" /></el-form-item>
+        <el-form-item label="邮箱"><el-input v-model="regForm.email" placeholder="账户绑定邮箱（备查）" /></el-form-item>
+        <el-form-item label="备注"><el-input v-model="regForm.note" type="textarea" :rows="2" /></el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="regDlg=false">取消</el-button>
+        <el-button type="warning" @click="saveRegistry">保存</el-button>
+      </template>
+    </el-dialog>
 
     <!-- 新建账户：主 / 子 二选一（对齐设计确认项） -->
     <el-dialog v-model="createDlg" title="新建账户" width="420">
@@ -85,8 +98,14 @@ const open = reactive(new Set())
 const menu = reactive({ open: false, x: 0, y: 0, node: null })
 const createDlg = ref(false)
 const createForm = reactive({ kind: 'sub', venue: '币安', parentId: '' })
+const reg = ref({})
+const regDlg = ref(false)
+const regForm = reactive({ account_key: '', alias: '', email: '', note: '' })
 
-const menuItems = computed(() => menu.node ? ACCOUNT_MENUS[menu.node.platformType] || [] : [])
+const menuItems = computed(() => menu.node
+  ? [...(ACCOUNT_MENUS[menu.node.platformType] || []),
+     { key: 'edit_registry', label: '别名 / 备注…', kind: 'registry', dividerBefore: true }]
+  : [])
 
 function toggle(id) { open.has(id) ? open.delete(id) : open.add(id) }
 function openMenu(e, node) {
@@ -99,6 +118,11 @@ async function doAction(it) {
   menu.open = false
   const node = menu.node
   try {
+    if (it.key === 'edit_registry') {
+      const cur = reg.value[node.id] || {}
+      Object.assign(regForm, { account_key: node.id, alias: cur.alias || '', email: cur.email || '', note: cur.note || '' })
+      regDlg.value = true; return
+    }
     if (it.key === 'create_sub' || it.key === 'create_wallet') { createDlg.value = true; return }
     if (it.kind === 'link') { ElMessageBox.alert(`打开「${it.label}」配置弹窗（M4 接线）`, node.id); return }
     if (it.confirm) await ElMessageBox.confirm(`确认对 ${node.id} 执行「${it.label}」？`, '危险操作', { type: 'warning' })
@@ -123,11 +147,24 @@ async function createAccount() {
     createDlg.value = false; load()
   } catch (e) { ElMessage.error(e?.error || '创建失败') }
 }
+async function saveRegistry() {
+  try {
+    await mixApi.registryPut({ ...regForm })
+    ElMessage.success('别名簿已保存')
+    regDlg.value = false; loadRegistry()
+  } catch (e) { ElMessage.error(e?.detail || e?.error || '保存失败') }
+}
+async function loadRegistry() {
+  try {
+    const rows = await mixApi.registryList()
+    reg.value = Object.fromEntries((rows || []).map(r => [r.account_key, r]))
+  } catch (e) { /* 降级：无别名不阻塞账户树 */ }
+}
 async function load() {
   tree.value = await mixApi.accounts()
   tree.value.forEach(m => open.add(m.id))   // 默认全展
 }
-onMounted(load)
+onMounted(() => { load(); loadRegistry() })
 </script>
 
 <style scoped lang="scss">
@@ -143,7 +180,9 @@ onMounted(load)
   &.cex { background: rgba(240,185,11,.15); color: #B8860B; }
   &.kms_wallet { background: rgba(45,212,191,.15); color: #0d9488; }
   &.sub { background: var(--el-fill-color-dark); color: var(--el-text-color-secondary); } }
-.name { min-width: 150px; &.sm { font-weight: 600; } }
+.name { min-width: 150px; &.sm { font-weight: 600; }
+  .alias { font-style: normal; margin-left: 6px; padding: 0 5px; border-radius: 4px; font-size: 10px;
+    background: rgba(240,185,11,.12); color: #B8860B; font-weight: 700; } }
 .venue { color: var(--el-text-color-secondary); font-size: 11px; min-width: 110px; }
 .dot { width: 7px; height: 7px; border-radius: 50%;
   &.ok { background: #0ECB81; } &.restricted { background: #F6465D; } &.healing { background: #F0B90B; } }

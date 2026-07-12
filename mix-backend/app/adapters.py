@@ -826,20 +826,53 @@ async def attribution() -> list[dict]:
 # ================= 账户 / 币管理 / 用户端 =================
 
 async def account_nodes() -> list[dict]:
+    """dcm 六所主账户行 + coin 子账户子行（面板真名/杠杆户指标）+ 别名簿合并。"""
     snaps = await _accounts_snap()
+    panel = await ds.get_json("dcm:coin:panel") or {}
+    reg = {}
+    pool = await ds.pg_main()
+    if pool:
+        try:
+            for r in await pool.fetch("SELECT account_key, alias, email FROM accounts_registry"):
+                reg[r["account_key"]] = {"alias": r["alias"], "email": r["email"]}
+        except Exception:  # noqa: BLE001
+            pass
+
+    def deco(key, metrics):
+        e = reg.get(key)
+        if e and e.get("alias"):
+            metrics = {"别名": e["alias"], **metrics}
+        if e and e.get("email"):
+            metrics["邮箱"] = e["email"]
+        return metrics
+
     out = []
     for venue in VENUES:
         s = snaps.get(venue)
         if s is None:
             continue
+        children = []
+        if venue == "binance":  # coin 子账户挂在币安主账户之下（借币主引擎在 coin）
+            for acct in (panel.get("balances") or {}).get("balances") or []:
+                note = str(acct.get("note") or f"sub:{acct.get('account_id')}")
+                children.append({
+                    "id": note, "kind": "sub", "platformType": "cex", "venue": "binance",
+                    "domain": "coin·3shard", "apiStatus": "ok",
+                    "metrics": deco(f"binance:{note}", {
+                        "杠杆净资产": f"{float(acct.get('margin_net_usdt') or 0):,.2f} U",
+                        "可用USDT": f"{float(acct.get('margin_usdt_free') or 0):,.2f}",
+                        "借币负债": f"{float(acct.get('margin_usdt_borrowed') or 0):,.2f}",
+                        "风险度": _num(acct.get("margin_level"), 2)}),
+                    "approvalState": None, "children": [],
+                })
         npos = len(s.get("positions") or {})
         out.append({
             "id": venue, "kind": "master", "platformType": "cex", "venue": venue,
             "domain": "B·exec", "apiStatus": "ok" if s.get("ok") else "restricted",
-            "metrics": {"净值": f"{float(s.get('equity_usdt') or 0):,.2f} U",
-                        "持仓数": str(npos),
-                        "快照": _age_text(s.get("ts"))},
-            "approvalState": None, "children": [],
+            "metrics": deco(venue, {"净值": f"{float(s.get('equity_usdt') or 0):,.2f} U",
+                                    "持仓数": str(npos),
+                                    "快照": _age_text(s.get("ts"))}),
+            "approvalState": None, "children": children,
         })
     return out
 

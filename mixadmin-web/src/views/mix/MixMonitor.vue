@@ -96,8 +96,10 @@ async function load() {
   try { events.value = await m.events(); strategies.value = await mixApi.strategies() } catch (e) { /* 降级 */ }
 }
 async function createOrder(w) {
-  const r = await fetch(`${import.meta.env.VITE_MIX_API || 'http://localhost:8100/api/v1'}/monitor/transfer-suggestions/${w.account}/create-order`, { method: 'POST' }).then(r => r.json())
-  ElMessage.success(`划转单 ${r.orderId} 已创建（${r.state}，人工确认执行）`)
+  try {
+    const r = await mixApi.transferCreateOrder(w.account)
+    ElMessage.success(`划转单 ${r?.orderId || ''} 已创建（${r?.state || '受理'}，人工确认执行）`)
+  } catch (e) { ElMessage.error(e?.detail || e?.error || '暂未接线（提案制,人工划转）') }
 }
 let timer
 onMounted(() => { load(); timer = setInterval(load, 5000) })

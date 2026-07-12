@@ -4,16 +4,23 @@ import Layout from '../layout/Layout.vue'
 const routes = [
   { path:'/', component:Layout, redirect:'/mix/dashboard', children:[
     // ===== Mix 主控(置顶, 不收缩) —— HustleCoin Mix 多策略持股公司 =====
-    { path:'mix/dashboard', name:'mix-dashboard', meta:{title:'主控台·Mix',icon:'Odometer',group:'总控',ord:0}, component:()=>import('../views/mix/MixDashboard.vue') },
+    { path:'mix/dashboard', name:'mix-dashboard', meta:{title:'Mix主控台',icon:'Odometer',group:'总控',ord:0}, component:()=>import('../views/mix/MixDashboard.vue') },
     { path:'mix/strategies', name:'mix-strategies', meta:{title:'策略总览',icon:'Share',group:'总控',ord:0.1}, component:()=>import('../views/mix/MixStrategies.vue') },
     { path:'mix/strategy/:code', name:'mix-strategy-detail', meta:{title:'策略明细',icon:'Share',group:'总控',hidden:true}, component:()=>import('../views/mix/MixStrategyDetail.vue') },
     { path:'mix/rules', name:'mix-rules', meta:{title:'规则中心',icon:'Setting',group:'总控',ord:0.2}, component:()=>import('../views/mix/MixRules.vue') },
+    { path:'mix/history', name:'mix-history', meta:{title:'交易历史',icon:'Files',group:'总控',ord:0.25}, component:()=>import('../views/mix/MixHistory.vue') },
     { path:'mix/accounts', name:'mix-accounts', meta:{title:'账户列表',icon:'CreditCard',group:'总控',ord:0.3}, component:()=>import('../views/mix/MixAccounts.vue') },
-    { path:'mix/monitor', name:'mix-monitor', meta:{title:'监控中心',icon:'Monitor',group:'总控',ord:0.35}, component:()=>import('../views/mix/MixMonitor.vue') },
+    // 监控中心已解散:币种利差→屏1机会墙 / 进程心跳→屏3风控墙 / 水位→主控台底排(路由保留可直达)
+    { path:'mix/monitor', name:'mix-monitor', meta:{hidden:true,title:'监控中心',icon:'Monitor',group:'总控',ord:0.35}, component:()=>import('../views/mix/MixMonitor.vue') },
     { path:'mix/blacklist', name:'mix-blacklist', meta:{title:'黑名单',icon:'CircleClose',group:'总控',ord:0.4}, component:()=>import('../views/mix/MixBlacklist.vue') },
     { path:'mix/coins', name:'mix-coins', meta:{title:'币管理',icon:'Coin',group:'总控',ord:0.45}, component:()=>import('../views/mix/MixCoins.vue') },
     { path:'mix/report', name:'mix-report', meta:{title:'资金报表',icon:'TrendCharts',group:'总控',ord:0.5}, component:()=>import('../views/mix/MixReport.vue') },
-    { path:'mix/notify', name:'mix-notify', meta:{title:'通知设置',icon:'Bell',group:'总控',ord:0.55}, component:()=>import('../views/mix/MixNotify.vue') },
+    // ===== 系统设置(Mix 版:qh 同名模块已由下列页面替代) =====
+    { path:'mix/notify', name:'mix-notify', meta:{title:'通知模块',icon:'Bell',group:'系统设置',ord:2}, component:()=>import('../views/mix/MixNotify.vue') },
+    { path:'mix/site', name:'mix-site', meta:{title:'官网管理',icon:'Link',group:'系统设置',ord:2.5}, component:()=>import('../views/mix/MixSite.vue') },
+    { path:'mix/operators', name:'mix-operators', meta:{title:'操作员管理',icon:'Avatar',group:'系统设置',ord:3}, component:()=>import('../views/mix/MixOperators.vue') },
+    { path:'mix/system', name:'mix-system', meta:{title:'系统配置',icon:'Coin',group:'系统设置',ord:4}, component:()=>import('../views/mix/MixSystem.vue') },
+    { path:'mix/llm', name:'mix-llm', meta:{title:'LLM设置',icon:'Service',group:'系统设置',ord:5}, component:()=>import('../views/mix/MixLLM.vue') },
     // ===== 总控(qh 原有, 待 M3+ 逐模块替换) =====
     { path:'dashboard', name:'dashboard', meta:{hidden:true,title:'总控面板',icon:'Odometer',group:'总控',ord:0.5}, component:()=>import('../views/Dashboard.vue') },
     // ===== 分析 =====
@@ -37,12 +44,12 @@ const routes = [
     { path:'overview', name:'overview', meta:{title:'全渠道看板',icon:'DataAnalysis',group:'分析',hidden:true}, component:()=>import('../views/Overview.vue') },
     // ===== 系统设置（运维面板/通知模块/操作员管理/系统配置：版本·数据库·SSL/LLM 设置） =====
     { path:'system', name:'system', meta:{title:'运维面板',icon:'Monitor',group:'系统设置',ord:1}, component:()=>import('../views/System.vue') },
-    { path:'params', name:'params', meta:{title:'参数下发',icon:'Setting',group:'系统设置',ord:1.5}, component:()=>import('../views/Params.vue') },
-    { path:'notify', name:'notify', meta:{title:'通知模块',icon:'Bell',group:'系统设置',ord:2}, component:()=>import('../views/Notify.vue') },
-    { path:'sitemgr', name:'sitemgr', meta:{title:'官网管理',icon:'Link',group:'系统设置',ord:2.5}, component:()=>import('../views/SiteMgr.vue') },
-    { path:'operators', name:'operators', meta:{title:'操作员管理',icon:'Avatar',group:'系统设置',ord:3}, component:()=>import('../views/Operators.vue') },
-    { path:'datamgr', name:'datamgr', meta:{title:'系统配置（版本/数据库/SSL）',icon:'Coin',group:'系统设置',ord:4}, component:()=>import('../views/DataMgr.vue') },
-    { path:'chat', name:'llm', meta:{title:'LLM 设置',icon:'Service',group:'系统设置',ord:5}, component:()=>import('../views/Chat.vue') },
+    { path:'params', name:'params', meta:{hidden:true,title:'参数下发',icon:'Setting',group:'系统设置',ord:1.5}, component:()=>import('../views/Params.vue') },
+    { path:'notify', name:'notify', meta:{hidden:true,title:'通知模块',icon:'Bell',group:'系统设置',ord:2}, component:()=>import('../views/Notify.vue') },
+    { path:'sitemgr', name:'sitemgr', meta:{hidden:true,title:'官网管理',icon:'Link',group:'系统设置',ord:2.5}, component:()=>import('../views/SiteMgr.vue') },
+    { path:'operators', name:'operators', meta:{hidden:true,title:'操作员管理',icon:'Avatar',group:'系统设置',ord:3}, component:()=>import('../views/Operators.vue') },
+    { path:'datamgr', name:'datamgr', meta:{hidden:true,title:'系统配置（版本/数据库/SSL）',icon:'Coin',group:'系统设置',ord:4}, component:()=>import('../views/DataMgr.vue') },
+    { path:'chat', name:'llm', meta:{hidden:true,title:'LLM 设置',icon:'Service',group:'系统设置',ord:5}, component:()=>import('../views/Chat.vue') },
     // 保留(功能不丢, 附运维末尾)
     { path:'legs', name:'legs', meta:{hidden:true,title:'双腿监控',icon:'Connection',group:'运维',ord:6}, component:()=>import('../views/Legs.vue') },
     { path:'recon', name:'recon', meta:{hidden:true,title:'跨用户对账',icon:'Files',group:'运维',ord:7}, component:()=>import('../views/Recon.vue') },

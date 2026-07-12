@@ -49,7 +49,6 @@ import { mixApi } from '../../api/mix'
 
 const coins = ref([])
 const filter = ref('all')
-const base = import.meta.env.VITE_MIX_API || 'http://localhost:8100/api/v1'
 const filters = [
   { key: 'all', label: '全部' }, { key: 'enabled', label: '启用' }, { key: 'watch', label: '观察' },
   { key: 'paused', label: '暂停' }, { key: 'frozen', label: '冻结' }, { key: 'delisted', label: '下架' },
@@ -62,10 +61,10 @@ const stateTag = s => ({ enabled: 'success', watch: 'warning', paused: 'info', f
 async function act(row, action, label) {
   try {
     if (action === 'unfreeze') await ElMessageBox.confirm(`解冻 ${row.symbol}？冻结为风控态（借币钉死/裸空触发）`, '人工解冻', { type: 'warning' })
-    const r = await fetch(`${base}/coins/${row.symbol}/actions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action }) }).then(async x => x.ok ? x.json() : Promise.reject(await x.json()))
+    await mixApi.coinAction(row.symbol, action)
     ElMessage.success(`${row.symbol} ${label}已受理`)
     load()
-  } catch (e) { if (e !== 'cancel') ElMessage.error(e?.error || '被拒绝') }
+  } catch (e) { if (e !== 'cancel') ElMessage.error(e?.detail || e?.error || '被拒绝') }
 }
 async function load() { coins.value = await mixApi.coins() }
 onMounted(load)

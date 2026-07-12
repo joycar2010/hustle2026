@@ -29,6 +29,11 @@
             <b>{{ b.symbol }}</b><span>{{ b.qty }}</span><span>{{ b.usd }}</span>
             <i class="st" :class="b.health==='正常'?'可开':'不可'">{{ b.health }}</i>
           </div>
+          <div class="hd" style="margin-top:10px">公告 / 新上市（event-calendar）</div>
+          <div v-for="(e, i) in events.slice(0, 8)" :key="i" class="srow">
+            <b>{{ e.type }}</b><span>{{ e.text }}</span><span>{{ e.at }}</span>
+          </div>
+          <div v-if="!events.length" class="srow"><span style="color:#5E6673">近期无新上市/下架事件</span></div>
         </div>
       </div>
     </template>
@@ -38,16 +43,19 @@
 <script setup>
 import { onMounted, onUnmounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
+const events = ref([])
 import { mixApi } from '../../api/mix'
 
 const route = useRoute()
-const authed = ref(!!route.query.token)   // mock 门槛；真实实现由后端校验只读墙令牌
+const authed = ref(!!route.query.token)
+if (route.query.token) localStorage.setItem('mix_token', String(route.query.token))  // 墙令牌引导同源 API 头   // mock 门槛；真实实现由后端校验只读墙令牌
 const strategies = ref([]); const spreads = ref([]); const borrowables = ref([])
 const clock = ref('')
 const sign = v => String(v).startsWith('-') ? 'dn' : 'up'
 async function load() {
   ;[strategies.value, spreads.value, borrowables.value] =
     await Promise.all([mixApi.strategies(), mixApi.monitor.spreads(), mixApi.monitor.borrowables()])
+  try { events.value = await mixApi.monitor.events() } catch (e) { /* 降级 */ }
 }
 let t1, t2
 onMounted(() => { if (authed.value) { load(); t1 = setInterval(load, 5000) } t2 = setInterval(() => clock.value = new Date().toLocaleTimeString('zh-CN'), 1000) })

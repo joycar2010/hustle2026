@@ -1,11 +1,11 @@
 <template>
   <div class="mixdash">
-    <!-- 跑马灯（WS marquee 频道，dcm 全服务广播） -->
+    <!-- 跑马灯（WS marquee 频道） -->
     <div v-if="marqueeText" class="marquee">
       <span class="dot" :class="{on: wsOn}"></span>📢 {{ marqueeText }}
     </div>
 
-    <!-- 全局工作流管道（8 段·分策略六色堆叠，/monitor/overview 真信号） -->
+    <!-- 全局工作流管道（8 段·分策略六色堆叠） -->
     <div class="pipeline" v-if="ov.pipeline?.length">
       <div v-for="(seg, i) in ov.pipeline" :key="seg.label" class="pseg">
         <div class="pnum">{{ seg.total }}</div>
@@ -18,93 +18,73 @@
       </div>
     </div>
 
-    <div class="cols">
-      <div class="left">
-        <!-- 顶部：策略过滤 + 排序 -->
-        <div class="bar">
-          <div class="chips">
-            <span class="chip" :class="{on:!filterStrategy}" @click="setStrategy('')">全部 {{ totalCount }}</span>
-            <span v-for="s in strategies" :key="s.code" class="chip"
-                  :class="{on:filterStrategy===s.code}"
-                  :style="filterStrategy===s.code?{background:META[s.code].colorBg,color:META[s.code].color,borderColor:META[s.code].color}:{}"
-                  @click="setStrategy(s.code)">
-              {{ s.code }}·{{ s.name }}
-            </span>
-          </div>
-          <div class="right">
-            <el-radio-group v-model="sortKey" size="small" @change="load">
-              <el-radio-button value="opened_at">发起时间</el-radio-button>
-              <el-radio-button value="pnl">收益</el-radio-button>
-            </el-radio-group>
-            <el-button size="small" @click="flipDir">{{ sortDir==='asc'?'早→晚 / 低→高':'晚→早 / 高→低' }}</el-button>
-            <el-button size="small" :loading="loading" @click="load">刷新</el-button>
-          </div>
-        </div>
+    <!-- 过滤 + 排序 -->
+    <div class="bar">
+      <div class="chips">
+        <span class="chip" :class="{on:!filterStrategy}" @click="setStrategy('')">全部 {{ totalCount }}</span>
+        <span v-for="s in strategies" :key="s.code" class="chip"
+              :class="{on:filterStrategy===s.code}"
+              :style="filterStrategy===s.code?{background:META[s.code].colorBg,color:META[s.code].color,borderColor:META[s.code].color}:{}"
+              @click="setStrategy(s.code)">
+          {{ s.code }}·{{ s.name }}
+        </span>
+      </div>
+      <div class="right">
+        <el-radio-group v-model="sortKey" size="small" @change="load">
+          <el-radio-button value="opened_at">发起时间</el-radio-button>
+          <el-radio-button value="pnl">收益</el-radio-button>
+        </el-radio-group>
+        <el-button size="small" @click="flipDir">{{ sortDir==='asc'?'早→晚 / 低→高':'晚→早 / 高→低' }}</el-button>
+        <el-button size="small" :loading="loading" @click="load">刷新</el-button>
+      </div>
+    </div>
 
-        <!-- 坑位行（币种行兼列头 + ↳账户子行 + 右键菜单） -->
-        <VirtualPositionTable
-          :rows="rows" :sort-key="sortKey" :sort-dir="sortDir" :height="tableH"
-          @action="onAction" @rule-override="onRuleOverride" />
+    <!-- 坑位行（全宽） -->
+    <VirtualPositionTable
+      :rows="rows" :sort-key="sortKey" :sort-dir="sortDir" :height="tableH"
+      @action="onAction" @rule-override="onRuleOverride" />
 
-        <div class="foot">
-          在管 {{ totalCount }} · 当日收益
-          <b :class="(ov.pnl_today||0) >= 0 ? 'up' : 'down'">{{ fmtPnl(ov.pnl_today) }}</b> USDT ·
-          phase 枚举 {{ enumCount }} 态 ·
-          WS <span class="dot" :class="{on: wsOn}"></span>{{ wsOn ? '已连接' : '重连中…' }}
+    <!-- 底部横排三卡：策略总览缩略 / 账户余额水位预警 / 分策略管道总览 -->
+    <div class="botrow">
+      <div class="card">
+        <div class="chd">策略总览 <el-link type="warning" @click="$router.push('/mix/strategies')">全页 →</el-link></div>
+        <div v-for="s in strategies" :key="s.code" class="srow" @click="$router.push('/mix/strategy/'+s.code)">
+          <span class="sbadge" :style="{background: SC[s.code]}">{{ s.code }}</span>
+          <span class="snm">{{ s.name }}</span>
+          <span class="skpi">{{ s.slots }} 仓</span>
+          <span class="skpi">{{ (s.notional||0).toLocaleString() }}U</span>
+          <b class="skpi" :class="(s.pnlTotal||0) >= 0 ? 'up' : 'down'">{{ (s.pnlTotal||0).toFixed(2) }}</b>
+          <i class="sdot2" :class="{off: !s.enabled}"></i>
         </div>
       </div>
 
-      <!-- 右栏（画板：系统健康/风控护栏/告警时间线/支撑域A/支撑域B，全真信号只读） -->
-      <div class="rail">
-        <div class="card">
-          <div class="chd">系统健康 <b class="up">{{ ov.health?.ok ?? '—' }}/{{ ov.health?.total ?? '—' }}</b></div>
-          <div class="svc-grid">
-            <span v-for="(st, name) in ov.health?.services || {}" :key="name" class="svc"
-                  :title="name + ': ' + st">
-              <i class="dot2" :class="{bad: st !== 'ok'}"></i>{{ name }}
-            </span>
-          </div>
+      <div class="card">
+        <div class="chd">账户余额水位预警 <b :class="warnCount ? 'warn' : 'up'">{{ warnCount }} 预警</b></div>
+        <div v-for="w in watermarks" :key="w.account" class="wrow">
+          <span class="wnm">{{ w.account }}</span>
+          <span class="wamt">{{ w.available }}</span>
+          <span class="wbar"><i :style="{width: (w.level*100)+'%', background: wcolor(w)}" /></span>
+          <span class="wth" :style="{color: wcolor(w)}">{{ wlabel(w) }}</span>
         </div>
+        <div class="fnote">水位=权益/目标（fund-scheduler 提案制，人工划转执行）</div>
+      </div>
 
-        <div class="card">
-          <div class="chd">风控护栏</div>
-          <div class="kv"><span>实盘总权益</span><b>{{ num(ov.risk?.total_equity) }} U</b></div>
-          <div class="kv"><span>净敞口越线</span><b :class="ov.risk?.net_breaches ? 'down' : 'up'">{{ ov.risk?.net_breaches ?? '—' }}（地板 {{ ov.risk?.net_floor ?? '—' }}U）</b></div>
-          <div class="kv"><span>孤儿实盘仓</span><b :class="ov.risk?.orphans ? 'down' : 'up'">{{ ov.risk?.orphans ?? '—' }}</b></div>
-          <div class="kv"><span>最高有效杠杆</span><b>{{ ov.risk?.max_lev ?? '—' }}x</b></div>
-          <div class="kv"><span>本轮告警</span><b :class="ov.risk?.alerts_this_round ? 'warn' : 'up'">{{ ov.risk?.alerts_this_round ?? '—' }}</b></div>
-        </div>
-
-        <div class="card">
-          <div class="chd">告警时间线</div>
-          <div v-for="(a, i) in alerts.slice(0, 8)" :key="i" class="alert-row">
-            <span class="lv" :class="a.level.toLowerCase()">{{ a.level }}</span>
-            <span v-if="a.strategy" class="sbadge" :style="{background: SC[a.strategy]}">{{ a.strategy }}</span>
-            <span class="atxt" :title="a.text">{{ a.text }}</span>
-          </div>
-          <div v-if="!alerts.length" class="empty">暂无告警</div>
-        </div>
-
-        <div class="card">
-          <div class="chd">支撑域 A · AI 决策 <span class="ro">只读</span></div>
-          <div v-for="ad in ov.advisors || []" :key="ad.name" class="kv">
-            <span :title="ad.cadence">{{ ad.name }}</span>
-            <b :class="ad.status.includes('停更') ? 'down' : 'up'">{{ ad.status }}</b>
-          </div>
-          <div class="fnote">摘除=只持有不新增、只告警不动手（治理在 dcm 控制台）</div>
-        </div>
-
-        <div class="card">
-          <div class="chd">支撑域 B · 风控与运营
-            <b :class="supportOk === (ov.support_b||[]).length ? 'up' : 'warn'">{{ supportOk }}/{{ (ov.support_b||[]).length }}</b>
-          </div>
-          <div class="sup-grid">
-            <span v-for="g in ov.support_b || []" :key="g.name" class="svc">
-              <i class="dot2" :class="{bad: !g.ok}"></i>{{ g.name }}
-            </span>
-          </div>
+      <div class="card">
+        <div class="chd">分策略管道总览</div>
+        <div v-for="s in strategies" :key="s.code" class="prow">
+          <span class="sbadge" :style="{background: SC[s.code]}">{{ s.code }}</span>
+          <span class="pipe-mini">
+            <i v-for="(v, k) in s.pipeline" :key="k"><em>{{ k }}</em><b>{{ v }}</b></i>
+          </span>
         </div>
       </div>
+    </div>
+
+    <div class="foot">
+      在管 {{ totalCount }} · 当日收益
+      <b :class="(ov.pnl_today||0) >= 0 ? 'up' : 'down'">{{ fmtPnl(ov.pnl_today) }}</b> USDT ·
+      系统健康与风控护栏 → 屏3·风控墙 ·
+      WS <span class="dot" :class="{on: wsOn}"></span>{{ wsOn ? '已连接' : '重连中…' }}
     </div>
   </div>
 </template>
@@ -124,19 +104,18 @@ const rows = ref([])
 const strategies = ref([])
 const enums = ref({})
 const ov = ref({})
-const alerts = ref([])
+const watermarks = ref([])
 const filterStrategy = ref('')
 const sortKey = ref('opened_at')
 const sortDir = ref('asc')
 const loading = ref(false)
-const tableH = Math.max(420, window.innerHeight - 360)
+const tableH = Math.max(380, window.innerHeight - 470)
 
 const totalCount = computed(() => rows.value.reduce((n, r) => n + (r.positionCount || 0), 0))
-const enumCount = computed(() => (enums.value.PhaseCode || []).length)
-const supportOk = computed(() => (ov.value.support_b || []).filter(g => g.ok).length)
-
-const num = v => (v == null ? '—' : Number(v).toLocaleString(undefined, { maximumFractionDigits: 2 }))
+const warnCount = computed(() => watermarks.value.filter(w => w.threshold !== 'ok').length)
 const fmtPnl = v => (v == null ? '—' : (v >= 0 ? '+' : '') + Number(v).toFixed(2))
+const wcolor = w => w.threshold === 'withdraw' ? '#F6465D' : w.threshold === 'topup' ? '#F0B90B' : '#0ECB81'
+const wlabel = w => ({ topup: '补仓线', withdraw: '提现线' }[w.threshold] || '正常')
 
 async function load() {
   loading.value = true
@@ -146,16 +125,16 @@ async function load() {
     ElMessage.error(e?.error || '加载失败')
   } finally { loading.value = false }
 }
-async function loadRail() {
+async function loadAux() {
   try {
     ov.value = await mixApi.monitor.overview()
-    alerts.value = await mixApi.alerts()
-  } catch (e) { /* 右栏降级不阻断主表 */ }
+    strategies.value = await mixApi.strategies()
+    watermarks.value = await mixApi.monitor.watermarks()
+  } catch (e) { /* 辅助区降级不阻断主表 */ }
 }
 function setStrategy(code) { filterStrategy.value = code; load() }
 function flipDir() { sortDir.value = sortDir.value === 'asc' ? 'desc' : 'asc'; load() }
 
-/** 右键菜单/行内钮动作：confirm 项先弹确认浮层；409=状态机拒绝原样回显 */
 async function onAction({ action, rowId, accountId }) {
   const row = rows.value.find(r => r.id === rowId)
   const item = row ? (CONTEXT_MENUS[row.strategyCode] || []).find(i => i.key === action) : null
@@ -176,18 +155,16 @@ function onRuleOverride(rowId) {
   ElMessageBox.alert(`打开规则中心 · 币种覆盖：${row?.symbol}（当前 ${row?.ruleScope === 'template' ? '通用规则' : '单独规则'}）`, '单独规则')
 }
 
-// WS：跑马灯 + position:updates 实时对账
 const marqueeText = ref('')
 const wsOn = ref(false)
 let wsDisconnect = null
-let railTimer = null
+let auxTimer = null
 
 onMounted(async () => {
   enums.value = await mixApi.enums()
-  strategies.value = await mixApi.strategies()
   await load()
-  loadRail()
-  railTimer = setInterval(loadRail, 15000)
+  loadAux()
+  auxTimer = setInterval(loadAux, 15000)
   wsDisconnect = connectStream((msg) => {
     wsOn.value = true
     if (msg.channel === 'marquee') {
@@ -198,15 +175,14 @@ onMounted(async () => {
     }
   })
 })
-onUnmounted(() => { wsDisconnect && wsDisconnect(); wsOn.value = false; railTimer && clearInterval(railTimer) })
+onUnmounted(() => { wsDisconnect && wsDisconnect(); wsOn.value = false; auxTimer && clearInterval(auxTimer) })
 </script>
 
 <style scoped lang="scss">
 .mixdash { display: flex; flex-direction: column; gap: 10px; }
 
-/* 全局管道 */
 .pipeline { display: flex; gap: 8px; align-items: stretch; overflow-x: auto; padding: 2px 0; }
-.pseg { position: relative; flex: 1; min-width: 108px; background: var(--mix-card, #181B21); border: 1px solid var(--mix-border, #262B33);
+.pseg { position: relative; flex: 1; min-width: 104px; background: var(--mix-card, #181B21); border: 1px solid var(--mix-border, #262B33);
   border-radius: 8px; padding: 8px 12px 10px; color: var(--mix-t1, #EAECEF); }
 .pnum { font-size: 20px; font-weight: 800; line-height: 1.1; }
 .plabel { font-size: 11px; color: var(--mix-t2, #848E9C); margin: 2px 0 6px; }
@@ -215,29 +191,24 @@ onUnmounted(() => { wsDisconnect && wsDisconnect(); wsOn.value = false; railTime
 .pchunk { display: block; height: 100%; }
 .parrow { position: absolute; right: -9px; top: 40%; color: var(--mix-t3, #5E6673); z-index: 1; }
 
-/* 两栏 */
-.cols { display: flex; gap: 10px; align-items: flex-start; }
-.left { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
-.rail { width: 302px; flex: none; display: flex; flex-direction: column; gap: 10px; }
-@media (max-width: 1280px) { .cols { flex-direction: column; } .rail { width: 100%; } }
-
+.botrow { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 10px; }
 .card { background: var(--mix-card, #181B21); border: 1px solid var(--mix-border, #262B33); border-radius: 8px; padding: 10px 12px; }
 .chd { font-size: 12.5px; font-weight: 700; color: var(--mix-t1, #EAECEF); margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; }
-.ro { font-size: 10px; color: var(--mix-t3, #5E6673); border: 1px solid var(--mix-border, #262B33); border-radius: 4px; padding: 0 5px; }
-.svc-grid, .sup-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 3px 8px; }
-.svc { font-size: 10.5px; color: var(--mix-t2, #848E9C); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.dot2 { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--mix-green, #0ECB81); margin-right: 5px;
-  &.bad { background: var(--mix-red, #F6465D); } }
-.kv { display: flex; justify-content: space-between; font-size: 11.5px; color: var(--mix-t2, #848E9C); padding: 2px 0;
-  b { color: var(--mix-t1, #EAECEF); font-weight: 600; } }
-.alert-row { display: flex; align-items: center; gap: 6px; font-size: 11px; padding: 3px 0; }
-.lv { font-size: 9.5px; font-weight: 700; border-radius: 3px; padding: 0 4px;
-  &.fatal { background: rgba(246,70,93,.18); color: var(--mix-red, #F6465D); }
-  &.warn { background: rgba(240,185,11,.15); color: var(--mix-accent, #F0B90B); }
-  &.info { background: rgba(74,156,255,.15); color: var(--mix-blue, #4A9CFF); } }
-.sbadge { font-size: 9.5px; font-weight: 800; color: #0B0E11; border-radius: 3px; padding: 0 4px; }
-.atxt { flex: 1; color: var(--mix-t2, #848E9C); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.empty { font-size: 11px; color: var(--mix-t3, #5E6673); }
+.srow { display: flex; align-items: center; gap: 8px; font-size: 11.5px; padding: 3px 0; cursor: pointer; color: var(--mix-t2, #848E9C);
+  &:hover { color: var(--mix-t1, #EAECEF); } }
+.snm { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.skpi { min-width: 52px; text-align: right; }
+.sbadge { min-width: 24px; text-align: center; font-size: 9.5px; font-weight: 800; color: #0B0E11; border-radius: 3px; padding: 1px 4px; }
+.sdot2 { width: 7px; height: 7px; border-radius: 50%; background: var(--mix-green, #0ECB81); &.off { background: var(--mix-t3, #5E6673); } }
+.wrow { display: flex; align-items: center; gap: 8px; font-size: 11.5px; padding: 3px 0; color: var(--mix-t2, #848E9C); }
+.wnm { min-width: 72px; font-weight: 600; color: var(--mix-t1, #EAECEF); }
+.wamt { min-width: 60px; text-align: right; }
+.wbar { flex: 1; height: 5px; background: var(--mix-border, #262B33); border-radius: 3px; overflow: hidden;
+  i { display: block; height: 100%; border-radius: 3px; } }
+.wth { min-width: 44px; font-weight: 700; font-size: 10.5px; }
+.prow { display: flex; gap: 8px; align-items: baseline; padding: 3px 0; }
+.pipe-mini { display: flex; gap: 8px; flex-wrap: wrap; font-size: 10.5px; color: var(--mix-t2, #848E9C);
+  i { font-style: normal; em { font-style: normal; margin-right: 3px; } b { color: var(--mix-t1, #EAECEF); } } }
 .fnote { font-size: 10px; color: var(--mix-t3, #5E6673); margin-top: 6px; }
 
 .bar { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }

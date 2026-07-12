@@ -38,18 +38,24 @@
 <script setup>
 import { onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
+import { mixApi } from '../../api/mix'
 
-const base = import.meta.env.VITE_MIX_API || 'http://localhost:8100/api/v1'
 const cfg = ref({ channels: [], intervalSec: 300, maxPerHour: 6, cooldownSec: 600, tokenBucket: { rate: 1, burst: 3 } })
 const saving = ref(false)
 
-async function load() { cfg.value = await fetch(`${base}/settings/notifications`).then(r => r.json()) }
+async function load() {
+  try {
+    const r = await mixApi.notifyGet()
+    cfg.value = { ...cfg.value, ...r, tokenBucket: { ...cfg.value.tokenBucket, ...(r.tokenBucket || {}) } }
+  } catch (e) { ElMessage.error(e?.error || '读取失败') }
+}
 async function save() {
   saving.value = true
   try {
-    await fetch(`${base}/settings/notifications`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(cfg.value) })
-    ElMessage.success('通知设置已保存（全局生效）')
-  } finally { saving.value = false }
+    const r = await mixApi.notifySave(cfg.value)
+    ElMessage.success(`通知设置已保存（${r?.note || '全局生效'}）`)
+  } catch (e) { ElMessage.error(e?.error || e?.detail || '保存失败') }
+  finally { saving.value = false }
 }
 onMounted(load)
 </script>

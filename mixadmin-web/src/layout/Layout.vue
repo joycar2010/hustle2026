@@ -3,8 +3,11 @@
     <div class="nav-mask" @click="mnav=false"></div>
     <div class="sidebar" :class="{'as-drawer':true}" :style="{width: collapsed?'64px':'210px'}">
       <div class="logo">
-        <img :src="brand.logo||'/logo-white.png'" alt="Mix" style="height:26px;max-width:120px;object-fit:contain;vertical-align:middle"/>
-        <span v-if="!collapsed" style="margin-left:8px;vertical-align:middle">{{ brand.title||'HustleCoin Mix' }}</span>
+        <img :src="brand.logo||'/logo-white.png'" alt="Mix" class="brand-icon"/>
+        <span v-if="!collapsed" class="brand-text">
+          <template v-if="brand.title">{{ brand.title }}</template>
+          <template v-else>HustleCoin <em>Mix</em></template>
+        </span>
       </div>
       <el-menu :collapse="collapsed" :default-active="$route.path" router
                background-color="#12151A" text-color="#848E9C" active-text-color="#F0B90B" :collapse-transition="false" class="qh-menu">
@@ -125,7 +128,7 @@ const mnav=ref(false)   // 手机侧栏抽屉开合
 const brand=ref((()=>{ try{ return JSON.parse(localStorage.getItem('qha_brand')||'{}') }catch(e){ return {} } })())
 function applyBrand(b){ brand.value=b||{}; if(brand.value.docTitle)document.title=brand.value.docTitle
   try{ localStorage.setItem('qha_brand',JSON.stringify(brand.value)) }catch(e){} }
-async function loadBrand(){ try{ const r=await api.siteGet('qhadmin'); applyBrand((r&&r.cfg&&r.cfg.brand)||{}) }catch(e){} }
+async function loadBrand(){ try{ applyBrand(await mixApi.siteBrand()||{}) }catch(e){} }
 // SiteMgr 保存后广播即时热生效(同页免刷新)
 window.addEventListener('qha-brand-updated', e=>applyBrand(e.detail||{}))
 const menus=router.options.routes[0].children
@@ -234,6 +237,11 @@ onMounted(()=>{ setInterval(()=>{ clock.value=new Date().toTimeString().slice(0,
 /* tab 标题左侧扁平图标: 与文字基线对齐, 颜色继承(未激活=次要色, 激活=主色, 随主题自适应) */
 .tab-lbl{display:inline-flex;align-items:center;gap:5px}
 .tab-ic{font-size:14px;vertical-align:-2px}
+/* 品牌区：画板金柱 LOGO + 双色文字（HustleCoin 白 / Mix 金）+ 金辉光 */
+.brand-icon{height:28px;width:28px;border-radius:7px;object-fit:contain;vertical-align:middle;
+  filter:drop-shadow(0 0 10px rgba(240,185,11,.5))}
+.brand-text{margin-left:9px;vertical-align:middle;font-weight:800;font-size:15px;color:#EAECEF;letter-spacing:.2px}
+.brand-text em{font-style:normal;color:#F0B90B}
 /* Mix 黑金登录门（与 mix.hustle2026.xyz/login 同款视觉） */
 .login-gate{position:fixed;inset:0;z-index:3000;display:flex;align-items:center;justify-content:center;
   background:rgba(11,14,17,.94);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}

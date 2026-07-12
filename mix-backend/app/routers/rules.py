@@ -27,14 +27,44 @@ async def get_rules(scope: str = Query(...), _who=Depends(require_viewer)):
     if eng:
         fields = await _engine_config_fields(eng)
         return RulesResponse(scope=scope, fields=fields)
+    if scope == "strategy:S3":
+        # coin 全局规则真源（桥 60s 快照;字段=coin GlobalRulesResponse 全集,coin schema 权威）
+        panel = await ds.get_json("dcm:coin:panel") or {}
+        cr = panel.get("rules")
+        if isinstance(cr, dict):
+            skip = {"id", "user_id", "created_at", "updated_at"}
+            fields = [RuleField(key=k, label=k, value=str(v), inherited=False)
+                      for k, v in cr.items() if k not in skip]
+            return RulesResponse(scope=scope, fields=fields)
     return RulesResponse(scope=scope, fields=[])
 
 
 @router.put("/{scope_key}")
 async def put_rules(scope_key: str, body: dict, op=Depends(require_operator),
                     x_op_token: str | None = Header(default=None)):
-    """S2 写代理：只转发**变更过**的键到 gateway（差分写，防全量重写刷审计/版本号）。
-    mode=armed 需 confirm=ARM —— gateway 428 原样透传，武装类操作请仍走 dcm 控制台。"""
+    """写代理（差分写，防全量重写刷审计）：
+    S2 → gateway engine_config（联锁/confirm=ARM 原地生效）；
+    S3 → coin 命令队列 rules_update（coin schema 校验+审计+30s 热重载权威）。"""
+    if scope_key == "strategy:S3":
+        panel = await ds.get_json("dcm:coin:panel") or {}
+        current = panel.get("rules") or {}
+        changed = {}
+        for f in (body.get("fields") or []):
+            k, v = str(f.get("key", "")), f.get("value")
+            if k and k in current and str(current.get(k)) != str(v):
+                changed[k] = v
+        if not changed:
+            return {"saved": False, "applied": [], "rejected": [], "note": "无变更"}
+        res = await proxy.coin_cmd("rules_update", changed, op["operator"], timeout_sec=10)
+        await proxy.audit(op["operator"], op["role"], "rules.s3.update", "coin.global_rules",
+                          changed, "ok" if res.get("ok") else str(res)[:120])
+        if not res.get("ok"):
+            raise HTTPException(502, f"coin 侧拒绝：{res.get('err') or res.get('body')}")
+        after = res.get("body") or {}
+        verified = {k: (str(after.get(k)) == str(v)) for k, v in changed.items()}
+        return {"saved": True, "applied": list(changed), "verified": verified,
+                "rejected": [], "hotReloadSec": 30, "uniqueRow": True,
+                "note": "coin 引擎 30s 轮询回读生效"}
     if scope_key != "strategy:S2":
         not_wired(f"规则保存 {scope_key}（该作用域引擎侧尚无权威写点）")
     fields = body.get("fields") or []

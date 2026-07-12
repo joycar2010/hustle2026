@@ -136,16 +136,49 @@ async def alerts(strategy: str = Query(default=""), _who=Depends(require_viewer)
     return await adapters.alerts(strategy=strategy or None)
 
 
-@router.get("/settings/notifications", response_model=NotifySettings)
+@router.get("/settings/notifications")
 async def notify_get(_who=Depends(require_viewer)):
-    """展示当前 dcm notify 硬地板/节流约定（fatal 300s/1 地板）；引擎侧配置读取待 P2。"""
-    return NotifySettings(channels=["feishu", "marquee"], intervalSec=300, maxPerHour=6,
-                          cooldownSec=600, tokenBucket={"rate": 1, "burst": 3})
+    """权威=mix_main.notify_settings；生效链路=Redis dcm:notify:config(dcm_common 60s 缓存热读)。"""
+    pool = await ds.pg_main()
+    row = await pool.fetchrow("SELECT * FROM notify_settings WHERE id=1") if pool else None
+    applied = await ds.get_json("dcm:notify:config")
+    import json as _json
+    return {
+        "channels": _json.loads(row["channels"]) if row else ["feishu", "marquee"],
+        "intervalSec": row["interval_sec"] if row else 300,
+        "maxPerHour": row["max_per_hour"] if row else 6,
+        "cooldownSec": row["cooldown_sec"] if row else 600,
+        "tokenBucket": {"rate": float(row["token_rate"]), "burst": row["token_burst"]} if row
+        else {"rate": 1, "burst": 3},
+        "applied": applied,   # dcm 侧当前生效配置(空=各服务用内置默认;fatal 300s/1 地板恒不受影响)
+    }
 
 
 @router.put("/settings/notifications")
 async def notify_put(body: dict, op=Depends(require_operator)):
-    not_wired("通知设置写入")
+    """保存并热下发：写 mix_main + SET dcm:notify:config（dcm_common Notifier 60s 内生效）。"""
+    pool = await ds.pg_main()
+    if pool is None:
+        raise HTTPException(503, "mix_main 未配置")
+    import json as _json
+    interval = int(body.get("intervalSec") or 300)
+    max_hour = int(body.get("maxPerHour") or 6)
+    cooldown = int(body.get("cooldownSec") or 600)
+    tb = body.get("tokenBucket") or {}
+    await pool.execute(
+        "UPDATE notify_settings SET channels=$1, interval_sec=$2, max_per_hour=$3, cooldown_sec=$4, "
+        "token_rate=$5, token_burst=$6, updated_by=$7, updated_at=now() WHERE id=1",
+        _json.dumps(body.get("channels") or ["feishu", "marquee"]), interval, max_hour, cooldown,
+        float(tb.get("rate") or 1), int(tb.get("burst") or 3), op["operator"])
+    r = ds.rds()
+    cfg = {"interval_sec": interval, "max_count": max_hour, "cooldown_sec": cooldown,
+           "rate": float(tb.get("rate") or 1), "burst": int(tb.get("burst") or 3),
+           "updated_by": op["operator"], "ts": int(__import__("time").time())}
+    if r is not None:
+        await r.set("dcm:notify:config", _json.dumps(cfg))
+    await proxy.audit(op["operator"], op["role"], "notify.config", "dcm:notify:config", cfg, "applied")
+    return {"saved": True, "applied": cfg,
+            "note": "dcm_common 60s 缓存热生效（fatal 300s/1 硬地板不受影响）"}
 
 
 # ---- 数据源健康（运维自检） ----

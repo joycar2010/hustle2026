@@ -95,7 +95,7 @@ async function load() {
   } finally { loading.value = false }
 }
 async function fetchAudit() {
-  try { return await fetch(`${import.meta.env.VITE_MIX_API || 'http://localhost:8100/api/v1'}/rules/${encodeURIComponent(scope.value)}/audit`).then(r => r.json()) }
+  try { return await mixApi.rulesAudit(scope.value) }
   catch { return [] }
 }
 function setScope(s) { scope.value = s; load() }
