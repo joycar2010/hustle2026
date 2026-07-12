@@ -8,8 +8,15 @@
         <el-form-item label="标语"><el-input v-model="b.slogan" placeholder="把复杂的事，交给系统；把结果，交给你" /></el-form-item>
         <el-form-item label="LOGO URL"><el-input v-model="b.logo" placeholder="/logo-white.png（默认画板金柱版）" /></el-form-item>
         <el-form-item label="浏览器标题"><el-input v-model="b.docTitle" placeholder="HustleCoin Mix 管理后台" /></el-form-item>
+        <el-form-item label="页脚文案"><el-input v-model="b.footer" placeholder="© HustleCoin Mix" /></el-form-item>
+        <el-form-item label="联系方式"><el-input v-model="b.contact" placeholder="support@…（用户端页脚展示）" /></el-form-item>
+        <el-form-item label="备案/资质"><el-input v-model="b.icp" placeholder="选填" /></el-form-item>
       </el-form>
       <el-button type="warning" @click="save">保存（需 SUPER_ADMIN）</el-button>
+    </div>
+    <div class="card">
+      <div class="chd"><b>网站维护与公告</b><span class="sub">已并入「通知模块 → 网站维护与公告」统一管理（单一权威源）</span></div>
+      <el-button size="small" @click="$router.push('/mix/notify')">前往管理 →</el-button>
     </div>
     <div class="card">
       <div class="chd"><b>两站资产索引（只读）</b></div>

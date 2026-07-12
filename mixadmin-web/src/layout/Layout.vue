@@ -39,23 +39,43 @@
         <!-- 手机: 汉堡开抽屉; 桌面: 折叠侧栏 -->
         <el-icon class="hamburger" style="cursor:pointer;font-size:20px" @click="mnav=!mnav"><Expand/></el-icon>
         <el-icon class="fold-pc" style="cursor:pointer;font-size:18px" @click="collapsed=!collapsed"><Fold v-if="!collapsed"/><Expand v-else/></el-icon>
-        <span class="sp"></span>
-        <el-select v-model="layoutMode" size="small" style="width:110px" @change="noop">
-          <el-option label="侧栏布局" value="side"/><el-option label="顶栏布局" value="top"/>
-          <el-option label="混合布局" value="mix"/><el-option label="分栏布局" value="column"/>
-        </el-select>
-        <el-button size="small" @click="openWall('market')">屏1·机会墙</el-button>
-        <el-button size="small" @click="openWall('risk')">屏3·风控墙</el-button>
-        <el-button size="small" @click="toggleLang">{{ locale==='zh'?'EN':'中' }}</el-button>
-        <el-button size="small" @click="toggleTheme">{{ dark? t('light'):t('dark') }}</el-button>
-        <el-dropdown trigger="click" style="margin:0 4px">
-          <span style="cursor:pointer;font-size:13px;color:#2E8BD6;font-weight:600;display:inline-flex;align-items:center;gap:4px"><el-icon><Avatar/></el-icon>{{op.operator||'超级管理员'}} ({{op.role||'super'}})<el-icon><ArrowDown/></el-icon></span>
-          <template #dropdown><el-dropdown-menu>
-            <el-dropdown-item disabled>权限: {{op.perms||'全部'}}</el-dropdown-item>
-            <el-dropdown-item divided @click="opLogout">退出登录 / 更换操作员</el-dropdown-item>
-          </el-dropdown-menu></template>
-        </el-dropdown>
-        <span class="dotok"></span><span style="font-size:12px">{{ clock }}</span>
+        <!-- 跑马灯（全局 WS marquee 频道,占顶栏左侧余量;emoji 显示层剥离,级别用色点） -->
+        <div class="tb-marquee" :class="{quiet:!marqueeText}">
+          <span class="mq-dot" :class="{on:wsOn}"></span>
+          <div class="mq-clip" v-if="marqueeText"><span class="mq-txt" :title="marqueeText">{{ marqueeText }}</span></div>
+          <span v-else class="mq-idle">通知通道待命</span>
+        </div>
+        <el-button size="small" class="wall-btn" @click="openWall('market')">屏1·机会墙</el-button>
+        <el-button size="small" class="wall-btn" @click="openWall('risk')">屏3·风控墙</el-button>
+        <el-popover trigger="click" width="320" :teleported="false" popper-class="op-panel-pop" @show="loadPanelHealth">
+          <template #reference>
+            <span class="op-chip"><el-icon><Avatar/></el-icon>{{op.operator||'超级管理员'}} ({{op.role||'super'}})<el-icon><ArrowDown/></el-icon></span>
+          </template>
+          <!-- 用户面板(testgo 用户面板模式,适配三轨令牌) -->
+          <div class="op-panel">
+            <div class="opp-hd">
+              <div class="opp-avatar"><el-icon><Avatar/></el-icon></div>
+              <div class="opp-id">
+                <b>{{ op.operator || '未登录' }}</b>
+                <span class="opp-role">{{ op.role || '—' }} · {{ tokenKind }}</span>
+              </div>
+            </div>
+            <div class="opp-sec">身份</div>
+            <div class="opp-kv"><span>权限</span><b>{{ op.perms==='*' ? '全部模块' : (op.perms||'—') }}</b></div>
+            <div class="opp-kv"><span>令牌轨道</span><b>{{ tokenKind }}</b></div>
+            <div class="opp-sec">系统状态</div>
+            <div class="opp-kv"><span>数据源</span>
+              <b :class="panelHealth.degraded ? 'warn' : 'ok'">{{ panelHealth.degraded ? '降级(部分不可用)' : '正常' }}</b></div>
+            <div class="opp-kv"><span>总线服务</span><b>{{ panelHealth.bus_services_seen ?? '—' }} 个心跳在线</b></div>
+            <div class="opp-kv"><span>通知通道</span><b :class="wsOn?'ok':'warn'">{{ wsOn ? 'WS 已连' : '待命/重连中' }}</b></div>
+            <div class="opp-acts">
+              <el-button size="small" @click="$router.push('/mix/monitor')">运维面板</el-button>
+              <el-button size="small" @click="refreshIdentity">刷新身份</el-button>
+              <el-button size="small" type="danger" plain @click="opLogout">退出 / 更换</el-button>
+            </div>
+          </div>
+        </el-popover>
+        <span class="dotok"></span><span class="tb-clock">{{ clock }}</span>
       </div>
       <div class="tabs-bar">
         <el-tabs v-model="activeTab" type="card" closable @tab-remove="removeTab" @tab-click="clickTab" style="--el-tabs-header-height:32px">
@@ -119,10 +139,11 @@ import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import { api } from '../api'
 import { mixApi } from '../api/mix'
+import { connectStream } from '../api/mixWs'
 const route=useRoute(), router=useRouter()
-const { t, locale } = useI18n()
-const collapsed=ref(false), dark=ref(true), layoutMode=ref('side'), clock=ref(''), noop=()=>{}
-document.documentElement.classList.toggle('dark', dark.value)  // 画板=黑金,默认暗色
+const { t } = useI18n()
+const collapsed=ref(false), clock=ref('')
+document.documentElement.classList.add('dark')  // 币安黑金,固定暗色(明亮/布局/语言切换已随qh壳退役)
 const mnav=ref(false)   // 手机侧栏抽屉开合
 // 侧栏品牌自定义(官网管理 site=qhadmin 配置; localStorage 缓存防首屏闪默认值; 公开只读端点未登录也可取)
 const brand=ref((()=>{ try{ return JSON.parse(localStorage.getItem('qha_brand')||'{}') }catch(e){ return {} } })())
@@ -161,8 +182,10 @@ function canSee(name){ const p=op.value.perms||''; if(!op.value.operator)return 
 // 分组: 总控(置顶不收缩) → 分析 → 经营 → 运维; 隐藏 meta.hidden; 组内按 ord 排序
 const groups=computed(()=>{ const order=['总控','系统设置','分析','经营','运维']; const m={}
   menus.forEach(r=>{ if(!canSee(r.name))return; if(r.meta&&r.meta.hidden)return; const g=(r.meta&&r.meta.group)||'其它'; (m[g]=m[g]||[]).push(r) })
+  // 注意 ord:0 是合法值——不能用 ||99(falsy 坑,曾把主控台 ord:0 排到组尾)
+  const ordOf=r=>(r.meta&&r.meta.ord!=null)?r.meta.ord:99
   return order.filter(g=>m[g]).map(g=>({name:g, standalone:(g==='总控'),
-    items:m[g].slice().sort((a,b)=>((a.meta&&a.meta.ord)||99)-((b.meta&&b.meta.ord)||99))})) })
+    items:m[g].slice().sort((a,b)=>ordOf(a)-ordOf(b))})) })
 // 组收缩状态(localStorage 记忆; 默认全展开)
 const closedGroups=ref((()=>{ try{ return JSON.parse(localStorage.getItem('qh_admin_closed_grps')||'[]') }catch(e){ return [] } })())
 function isGroupClosed(name){ return closedGroups.value.includes(name) }
@@ -185,12 +208,31 @@ function removeTab(p){
   const i=tabs.value.findIndex(x=>x.path===p); tabs.value.splice(i,1)
   if(activeTab.value===p){ const n=tabs.value[Math.max(0,i-1)]; activeTab.value=n.path; router.push(n.path) }
 }
-function toggleTheme(){ dark.value=!dark.value; document.documentElement.classList.toggle('dark',dark.value) }
 // 三分屏指挥墙（免登录只读路由,带墙令牌新开窗;屏2=本主控台）
 function openWall(which){ const t=localStorage.getItem('mix_token')||''; window.open(`/wall/${which}?token=${encodeURIComponent(t)}`,'_blank') }
 // API 层 401（令牌失效/被清）→ 重新弹登录门,不再用 window.prompt
 window.addEventListener('mix-auth-required', ()=>{ op.value={operator:'',role:'',perms:''}; authed.value=false })
-function toggleLang(){ locale.value = locale.value==='zh'?'en':'zh' }
+// 用户面板(testgo 模式): 身份+令牌轨道+数据源健康;令牌轨道按存储形态判别
+const tokenKind = computed(()=>{
+  const t = localStorage.getItem('mix_token')||''
+  if(!t) return '未登录'
+  if(t.split('.').length===3) return '用户 JWT'
+  return op.value.role==='VIEWER' ? '只读令牌' : 'operator 令牌'
+})
+const panelHealth = ref({})
+async function loadPanelHealth(){ try{ panelHealth.value = await mixApi.datasources() }catch(e){ panelHealth.value={degraded:true} } }
+async function refreshIdentity(){ await restoreOp(); ElMessage.success('身份已刷新: '+(op.value.operator||'未登录')) }
+// 全局跑马灯（Layout 自持一条 WS,所有页面可见;emoji 属消息文本,显示层剥离改用色点分级）
+const marqueeText=ref(''), wsOn=ref(false)
+const EMOJI_RE=/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}\u{200D}]/gu
+let wsClose=null
+function startMarquee(){
+  if(wsClose) return
+  wsClose=connectStream(msg=>{ wsOn.value=true
+    if(msg.channel==='marquee'){ const d=msg.data||msg
+      const raw=d.text||d.title||d.content||''
+      marqueeText.value=String(raw).replace(EMOJI_RE,'').replace(/\s+/g,' ').trim() } })
+}
 // AI 运维助手悬浮球(site=qhadmin, 接 qh 后端 LLM; 未配置则后端回退; localStorage 保存/删除/清空对齐 qh)
 import { nextTick } from 'vue'
 const aiOpen=ref(false),aiIn=ref(''),aiBusy=ref(false),aiConvId=ref(null),aiBodyEl=ref(null)
@@ -211,7 +253,7 @@ async function aiSend(){
   }catch(e){ aiMsgs.value.push({id:aiId(),who:'ai',txt:'AI 服务调用失败: '+(e?.response?.data?.detail||'请稍后重试')}); aiSave() }
   finally{ aiBusy.value=false; await nextTick(()=>{ if(aiBodyEl.value)aiBodyEl.value.scrollTop=aiBodyEl.value.scrollHeight }) }
 }
-onMounted(()=>{ setInterval(()=>{ clock.value=new Date().toTimeString().slice(0,8) },1000); restoreOp(); loadBrand() })
+onMounted(()=>{ setInterval(()=>{ clock.value=new Date().toTimeString().slice(0,8) },1000); restoreOp(); loadBrand(); startMarquee() })
 </script>
 <style scoped>
 .ai-fab{position:fixed;right:24px;bottom:24px;width:52px;height:52px;border-radius:50%;background:var(--el-color-primary);color:#fff;
@@ -237,6 +279,43 @@ onMounted(()=>{ setInterval(()=>{ clock.value=new Date().toTimeString().slice(0,
 /* tab 标题左侧扁平图标: 与文字基线对齐, 颜色继承(未激活=次要色, 激活=主色, 随主题自适应) */
 .tab-lbl{display:inline-flex;align-items:center;gap:5px}
 .tab-ic{font-size:14px;vertical-align:-2px}
+/* 页签币安金风: 金边+金字,激活态亮金底衬 */
+.tabs-bar :deep(.el-tabs--card>.el-tabs__header){border-bottom:1px solid rgba(240,185,11,.35)}
+.tabs-bar :deep(.el-tabs--card>.el-tabs__header .el-tabs__nav){border:1px solid rgba(240,185,11,.3);border-bottom:none;border-radius:8px 8px 0 0}
+.tabs-bar :deep(.el-tabs--card>.el-tabs__header .el-tabs__item){border-left-color:rgba(240,185,11,.22);color:rgba(240,185,11,.62);font-weight:600}
+.tabs-bar :deep(.el-tabs--card>.el-tabs__header .el-tabs__item:hover){color:#FCD535}
+.tabs-bar :deep(.el-tabs--card>.el-tabs__header .el-tabs__item.is-active){color:#F0B90B;background:rgba(240,185,11,.1);border-bottom-color:transparent}
+/* 顶栏跑马灯: 占余量宽度,超长文本匀速滚动(hover 暂停);无消息=安静待命态 */
+.tb-marquee{flex:1;min-width:0;display:flex;align-items:center;gap:8px;margin:0 12px;padding:4px 12px;
+  border:1px solid rgba(240,185,11,.25);border-radius:14px;background:rgba(240,185,11,.06);font-size:12px;color:#F0B90B;overflow:hidden}
+.tb-marquee.quiet{border-color:var(--el-border-color);background:transparent}
+.mq-dot{width:7px;height:7px;border-radius:50%;background:#5E6673;flex:none}
+.mq-dot.on{background:#0ECB81;box-shadow:0 0 6px rgba(14,203,129,.8)}
+.mq-clip{flex:1;min-width:0;overflow:hidden;white-space:nowrap}
+.mq-txt{display:inline-block;white-space:nowrap;min-width:100%;animation:mq-roll 22s linear infinite;will-change:transform}
+.mq-clip:hover .mq-txt{animation-play-state:paused}
+@keyframes mq-roll{0%{transform:translateX(100%)}100%{transform:translateX(-100%)}}
+.mq-idle{color:#5E6673;font-size:11px}
+/* 用户区/时钟: 币安金风(白字+金图标) */
+.op-chip{cursor:pointer;font-size:13px;color:#EAECEF;font-weight:600;display:inline-flex;align-items:center;gap:4px}
+.op-chip .el-icon{color:#F0B90B}
+.op-chip:hover{color:#F0B90B}
+.tb-clock{font-size:12px;color:#848E9C;font-variant-numeric:tabular-nums}
+.wall-btn{border-color:rgba(240,185,11,.35);color:#F0B90B;background:transparent}
+.wall-btn:hover{border-color:#F0B90B;background:rgba(240,185,11,.1);color:#FCD535}
+/* 用户面板(testgo 模式) */
+.op-panel{font-size:12px;color:#EAECEF}
+.opp-hd{display:flex;gap:10px;align-items:center;padding-bottom:10px;border-bottom:1px solid #262B33}
+.opp-avatar{width:38px;height:38px;border-radius:50%;background:rgba(240,185,11,.14);color:#F0B90B;display:flex;align-items:center;justify-content:center;font-size:19px}
+.opp-id{display:flex;flex-direction:column;gap:2px}
+.opp-id b{font-size:14px}
+.opp-role{font-size:11px;color:#848E9C}
+.opp-sec{margin:10px 0 4px;font-size:10px;font-weight:800;color:#5E6673;letter-spacing:1px}
+.opp-kv{display:flex;justify-content:space-between;padding:2.5px 0;color:#848E9C}
+.opp-kv b{color:#EAECEF;font-weight:600}
+.opp-kv b.ok{color:#0ECB81}
+.opp-kv b.warn{color:#F0B90B}
+.opp-acts{display:flex;gap:8px;margin-top:12px;justify-content:flex-end}
 /* 品牌区：画板金柱 LOGO + 双色文字（HustleCoin 白 / Mix 金）+ 金辉光 */
 .brand-icon{height:28px;width:28px;border-radius:7px;object-fit:contain;vertical-align:middle;
   filter:drop-shadow(0 0 10px rgba(240,185,11,.5))}

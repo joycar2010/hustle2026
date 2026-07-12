@@ -43,3 +43,64 @@ html.dark body { background: var(--mix-bg); }
 .qh-menu .el-menu-item.is-active { background: rgba(240, 185, 11, .10) !important; }
 .qh-menu .el-menu-item:hover { background: rgba(240, 185, 11, .05) !important; }
 .layout .grp-head { color: var(--mix-t3) !important; }
+
+/* ===== 批次二：组件级币安金主题（Element Plus 变量重映射,全站一次生效） ===== */
+html.dark {
+  --el-color-primary: var(--mix-accent);
+  --el-color-primary-light-3: var(--mix-accent2);
+  --el-color-primary-light-5: rgba(240, 185, 11, .5);
+  --el-color-primary-light-7: rgba(240, 185, 11, .28);
+  --el-color-primary-light-8: rgba(240, 185, 11, .18);
+  --el-color-primary-light-9: rgba(240, 185, 11, .1);
+  --el-color-primary-dark-2: #d9a70a;
+  --el-color-success: var(--mix-green);
+  --el-color-danger: var(--mix-red);
+  --el-color-error: var(--mix-red);
+  --el-bg-color: var(--mix-card);
+  --el-bg-color-page: var(--mix-bg);
+  --el-bg-color-overlay: #1E232B;
+  --el-border-color: var(--mix-border);
+  --el-border-color-light: var(--mix-border);
+  --el-border-color-lighter: var(--mix-border);
+  --el-fill-color: var(--mix-card2);
+  --el-fill-color-light: var(--mix-panel);
+  --el-fill-color-lighter: var(--mix-panel);
+  --el-fill-color-blank: var(--mix-card);
+  --el-fill-color-dark: var(--mix-card2);
+  --el-text-color-primary: var(--mix-t1);
+  --el-text-color-regular: var(--mix-t1);
+  --el-text-color-secondary: var(--mix-t2);
+  --el-text-color-placeholder: var(--mix-t3);
+  --el-disabled-bg-color: var(--mix-panel);
+}
+/* 金底按钮配黑字(币安 CTA 规范;el 默认给白字对比不足) */
+html.dark .el-button--primary { color: #0B0E11; font-weight: 700; }
+html.dark .el-button--primary:hover { background: var(--mix-accent2); border-color: var(--mix-accent2); color: #0B0E11; }
+html.dark .el-button--warning { background: var(--mix-accent); border-color: var(--mix-accent); color: #0B0E11; font-weight: 700; }
+html.dark .el-button--warning:hover { background: var(--mix-accent2); border-color: var(--mix-accent2); color: #0B0E11; }
+html.dark .el-button:not(.el-button--primary):not(.el-button--warning):not(.el-button--danger):hover {
+  border-color: var(--mix-accent); color: var(--mix-accent); }
+/* 表格: 面板级表头 + 金色悬停行 */
+html.dark .el-table { --el-table-bg-color: var(--mix-card); --el-table-tr-bg-color: var(--mix-card);
+  --el-table-header-bg-color: var(--mix-panel); --el-table-header-text-color: var(--mix-t2);
+  --el-table-border-color: var(--mix-border); --el-table-row-hover-bg-color: rgba(240, 185, 11, .06); }
+html.dark .el-table th.el-table__cell { font-weight: 700; font-size: 11.5px; }
+/* 单选钮组(排序/天数按钮): 激活金底黑字 */
+html.dark .el-radio-button__inner { background: var(--mix-card2); border-color: var(--mix-border); color: var(--mix-t2); }
+html.dark .el-radio-button__original-radio:checked + .el-radio-button__inner {
+  background: var(--mix-accent); border-color: var(--mix-accent); color: #0B0E11; font-weight: 700; box-shadow: -1px 0 0 0 var(--mix-accent); }
+/* 输入/选择器: 深底金焦点 */
+html.dark .el-input__wrapper { background: var(--mix-panel); box-shadow: 0 0 0 1px var(--mix-border) inset; }
+html.dark .el-input__wrapper.is-focus { box-shadow: 0 0 0 1px var(--mix-accent) inset; }
+html.dark .el-textarea__inner { background: var(--mix-panel); box-shadow: 0 0 0 1px var(--mix-border) inset; color: var(--mix-t1); }
+/* 弹窗/下拉/消息框 */
+html.dark .el-dialog { background: var(--mix-card); border: 1px solid var(--mix-border); border-radius: 12px; }
+html.dark .el-dialog__title { color: var(--mix-t1); font-weight: 700; }
+html.dark .el-message-box { background: var(--mix-card); border: 1px solid var(--mix-border); }
+html.dark .el-dropdown-menu, html.dark .el-select-dropdown { background: #1E232B; border: 1px solid var(--mix-border); }
+/* 分页/开关/滑杆金色化由 --el-color-primary 联动,无需单独覆盖 */
+/* 滚动条: 细金灰 */
+html.dark ::-webkit-scrollbar { width: 8px; height: 8px; }
+html.dark ::-webkit-scrollbar-thumb { background: rgba(240, 185, 11, .22); border-radius: 4px; }
+html.dark ::-webkit-scrollbar-thumb:hover { background: rgba(240, 185, 11, .4); }
+html.dark ::-webkit-scrollbar-track { background: transparent; }

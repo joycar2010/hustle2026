@@ -16,9 +16,29 @@
       <pre class="cmt">{{ d.commentary || '（暂无）' }}</pre>
     </div>
     <div class="card">
+      <div class="chd"><b>建议历史（llm_advice_log · shadow 对照证据链）</b>
+        <el-button size="small" @click="loadHist">刷新</el-button>
+      </div>
+      <el-table :data="hist" size="small" max-height="420">
+        <el-table-column prop="ts" label="时间" width="110" />
+        <el-table-column prop="symbol" label="币种" width="110">
+          <template #default="{row}">{{ row.symbol || '组合级' }}</template>
+        </el-table-column>
+        <el-table-column label="动作" width="90">
+          <template #default="{row}">
+            <el-tag size="small" effect="plain"
+                    :type="{endorse:'success',caution:'warning',avoid:'danger',watch:'info'}[row.action]||'info'">{{ row.action }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="domain" label="域" width="90" />
+        <el-table-column prop="reason" label="理由" min-width="260" show-overflow-tooltip />
+        <el-table-column prop="latency_ms" label="延迟ms" width="80" align="right" />
+      </el-table>
+    </div>
+    <div class="card">
       <div class="chd"><b>治理链路（只读声明）</b></div>
       <div class="fnote">读总线全景 → LLM → schema 硬校验（action 越界丢弃/坏响应整轮弃用）→ 只写建议键 dcm:advisor:llm。
-        永不能下单；摘除=只持有不新增。模型/Key 变更：C 机 dcm-llm-advisor EnvironmentFile 修改后重启。</div>
+        永不能下单；摘除=只持有不新增。模型/Key 变更：C 机 dcm-llm-advisor EnvironmentFile 修改后重启（跨域纪律：mix 不代理 dcm 服务进程配置）。</div>
     </div>
   </div>
 </template>
@@ -27,10 +47,12 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { mixApi } from '../../api/mix'
 const d = ref({})
+const hist = ref([])
 const ts = computed(() => d.value.ts ? new Date(d.value.ts * 1000).toLocaleString() : '—')
 let t
 async function load() { try { d.value = await mixApi.system.llm() } catch (e) { /* 降级 */ } }
-onMounted(() => { load(); t = setInterval(load, 30000) })
+async function loadHist() { try { hist.value = await mixApi.llmHistory() } catch (e) { hist.value = [] } }
+onMounted(() => { load(); loadHist(); t = setInterval(load, 30000) })
 onUnmounted(() => clearInterval(t))
 </script>
 

@@ -24,6 +24,7 @@
         <span class="r">{{ u.scope_equity.toLocaleString() }}</span>
         <span class="dim">{{ u.last_login || '—' }}</span>
         <span class="acts">
+          <el-link size="small" @click="editRole(u)">改角色</el-link>
           <el-link size="small" @click="editScopes(u)">改范围</el-link>
           <el-link size="small" @click="resetPwd(u)">重置密码</el-link>
           <el-link size="small" :type="u.enabled?'danger':'success'" @click="toggle(u)">{{ u.enabled?'停用':'启用' }}</el-link>
@@ -75,6 +76,14 @@ async function editScopes(u) {
     ElMessage.success('已更新'); load()
   } catch (e) { if (e !== 'cancel') ElMessage.error(e?.detail || '失败') }
 }
+async function editRole(u) {
+  try {
+    const { value } = await ElMessageBox.prompt('角色: user(范围隔离) / operator / admin / owner(全量)',
+      `改角色: ${u.username}`, { inputValue: u.role, inputPattern: /^(user|operator|admin|owner)$/, inputErrorMessage: '仅 user/operator/admin/owner' })
+    await mixApi.userUpdate(u.id, { role: value })
+    ElMessage.success('已更新'); load()
+  } catch (e) { if (e !== 'cancel') ElMessage.error(e?.detail || '失败') }
+}
 async function resetPwd(u) {
   try {
     const { value } = await ElMessageBox.prompt('新密码', `重置密码: ${u.username}`, { inputType: 'password' })
@@ -89,7 +98,7 @@ onMounted(load)
 .card { background: var(--mix-card, #181B21); border: 1px solid var(--mix-border, #262B33); border-radius: 8px; padding: 12px 14px; }
 .chd { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; b { font-size: 13px; } }
 .tr { display: grid; grid-template-columns: 160px 130px 110px 1fr; gap: 8px; font-size: 12px; padding: 4px 0; align-items: center;
-  &.u { grid-template-columns: 120px 70px 1fr 110px 100px 180px; }
+  &.u { grid-template-columns: 120px 70px 1fr 110px 100px 230px; }
   &.th { color: var(--mix-t3, #5E6673); font-weight: 700; } }
 .dim { color: var(--mix-t2, #848E9C); }
 .r { text-align: right; }

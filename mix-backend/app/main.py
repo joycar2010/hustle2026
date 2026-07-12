@@ -8,7 +8,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
-from .routers import positions, strategies, rules, accounts, misc, me, auth, history, ops
+from .routers import positions, strategies, rules, accounts, misc, me, auth, history, ops, notify_center
 
 app = FastAPI(title="HustleCoin Mix API", version="0.1.0")
 
@@ -29,7 +29,7 @@ app.add_middleware(
 
 API = "/api/v1"
 for r in (positions.router, strategies.router, rules.router, accounts.router, misc.router, me.router,
-          auth.router, history.router, ops.router):
+          auth.router, history.router, ops.router, notify_center.router):
     app.include_router(r, prefix=API)
 
 # WS 已剥离为独立 hub（Rust mix-ws-hub@8201，qh-ws-hub 模式；Python app.ws_main 为回滚备胎）。

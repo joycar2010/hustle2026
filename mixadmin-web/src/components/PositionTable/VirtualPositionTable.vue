@@ -6,7 +6,7 @@
  * 账户子行渲染真实数值(values)；混合策略平铺时每行自带本策略标签。
  * 干预操作全部在右键菜单（右键 / 行尾 ⋮ / 移动端长按）；行内只留高频钮(移/还/平)。
  */
-import { computed, reactive, ref, shallowRef, watchEffect } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref, shallowRef, watchEffect } from 'vue'
 import type { AccountSubRow, MenuItem, PositionRow, SortDir, SortKey, SubRowState } from './types'
 import { STRATEGY_META } from './types'
 import { CONTEXT_MENUS, INLINE_ACTIONS } from './strategyColumns'
@@ -30,8 +30,8 @@ const emit = defineEmits<{
   ruleOverride: [rowId: string]
 }>()
 
-const ROW_H = 24
-const SUB_H = 22
+const ROW_H = 27
+const SUB_H = 24
 const OVERSCAN = 8
 
 /* ---------- 折叠（默认全展） ---------- */
@@ -78,6 +78,18 @@ watchEffect(() => {
 const scrollTop = ref(0)
 const viewport = ref<HTMLElement | null>(null)
 const onScroll = () => { scrollTop.value = viewport.value?.scrollTop ?? 0 }
+/* height=0 ⇒ 自适应填满父容器(ResizeObserver 实测视口高,页面级无滚动条) */
+const measuredH = ref(640)
+let ro: ResizeObserver | null = null
+onMounted(() => {
+  if (props.height === 0 && viewport.value) {
+    measuredH.value = viewport.value.clientHeight || 640
+    ro = new ResizeObserver(() => { measuredH.value = viewport.value?.clientHeight || 640 })
+    ro.observe(viewport.value)
+  }
+})
+onUnmounted(() => { ro?.disconnect(); ro = null })
+const effHeight = computed(() => (props.height === 0 ? measuredH.value : props.height))
 function lowerBound(offs: number[], t: number): number {
   let lo = 0, hi = offs.length - 1, ans = 0
   while (lo <= hi) { const m = (lo + hi) >> 1; if (offs[m] <= t) { ans = m; lo = m + 1 } else hi = m - 1 }
@@ -88,7 +100,7 @@ const visible = computed(() => {
   if (!offs.length) return { slice: [] as Item[], start: 0, padTop: 0 }
   const start = Math.max(0, lowerBound(offs, scrollTop.value) - OVERSCAN)
   let end = start
-  const bottom = scrollTop.value + props.height
+  const bottom = scrollTop.value + effHeight.value
   while (end < offs.length && offs[end] < bottom) end++
   end = Math.min(offs.length, end + OVERSCAN)
   return { slice: items.value.slice(start, end), start, padTop: offs[start] }
@@ -162,7 +174,7 @@ function stateStyle(s: SubRowState): { bg: string; fg: string } {
 </script>
 
 <template>
-  <div class="vpt" @click="closeMenu">
+  <div class="vpt" :class="{ fill: height === 0 }" @click="closeMenu">
     <div class="vpt-toolbar">
       <button class="chip chip-on" @click="expandAll">全展</button>
       <button class="chip" @click="collapseAll">全收</button>
@@ -170,7 +182,7 @@ function stateStyle(s: SubRowState): { bg: string; fg: string } {
       <span class="hint">币种行=列标签 · ↳账户行=数值 · 右键 / ⋮ / 长按呼出干预菜单</span>
     </div>
 
-    <div ref="viewport" class="vpt-viewport" :style="{ height: height + 'px' }" @scroll.passive="onScroll">
+    <div ref="viewport" class="vpt-viewport" :style="height === 0 ? {} : { height: height + 'px' }" @scroll.passive="onScroll">
       <div :style="{ height: totalH + 'px', position: 'relative' }">
         <div :style="{ transform: `translateY(${visible.padTop}px)` }">
           <template v-for="(it, i) in visible.slice" :key="visible.start + i">
@@ -187,7 +199,7 @@ function stateStyle(s: SubRowState): { bg: string; fg: string } {
               </span>
               <span class="sym" :class="{ dead: it.row.mark === 'dead' }">
                 {{ it.row.symbol }}<i v-if="it.row.positionCount" class="cnt">×{{ it.row.positionCount }}</i>
-                <i v-if="it.row.mark === 'dead'" class="mk">💀</i><i v-else-if="it.row.mark === 'risk'" class="mk risk">⚠</i>
+                <i v-if="it.row.mark === 'dead'" class="mk dead-chip">停</i><i v-else-if="it.row.mark === 'risk'" class="mk risk">险</i>
               </span>
               <span class="sbadge" :style="{ background: STRATEGY_META[it.row.strategyCode].colorBg, color: STRATEGY_META[it.row.strategyCode].color }">{{ it.row.strategyCode }}</span>
               <span class="phase">{{ it.row.phaseLabel }}</span>
@@ -267,14 +279,18 @@ function stateStyle(s: SubRowState): { bg: string; fg: string } {
 $bg: #0B0E11; $card: #181B21; $card2: #20242C; $border: #262B33;
 $t1: #EAECEF; $t2: #848E9C; $t3: #5E6673; $gold: #F0B90B;
 
-.vpt { background: $card; border: 1px solid $border; border-radius: 12px; font-size: 12px; color: $t1; }
+.vpt { background: $card; border: 1px solid $border; border-radius: 12px; font-size: 12px; color: $t1;
+  /* height=0 自适应: 父容器为 flex 列时填满剩余高度,页面级不出滚动条 */
+  &.fill { flex: 1 1 auto; min-height: 260px; display: flex; flex-direction: column;
+    .vpt-viewport { flex: 1; min-height: 0; } } }
 .vpt-toolbar { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-bottom: 1px solid $border;
   .chip { background: $card2; border: 1px solid $border; color: $t2; border-radius: 5px; padding: 3px 10px; cursor: pointer;
     &.chip-on { background: $gold; border-color: $gold; color: $bg; font-weight: 700; } }
   .hint { margin-left: auto; color: $t3; font-size: 11px; } }
 .vpt-viewport { overflow-y: auto; }
 
-.row { display: flex; align-items: center; gap: 6px; padding: 0 8px; cursor: pointer; line-height: 1;
+.row { display: flex; align-items: center; gap: 9px; padding: 0 12px; cursor: pointer; line-height: 1;
+  font-variant-numeric: tabular-nums;
   &.main { font-weight: 600;
     &.warn { background: linear-gradient(90deg, rgba(240,185,11,.19), rgba(240,185,11,.02)); box-shadow: inset 0 0 0 1px rgba(240,185,11,.4); border-radius: 5px; }
     &.frozen { box-shadow: inset 0 0 0 1px rgba(246,70,93,.4); border-radius: 5px; } }
@@ -285,7 +301,9 @@ $t1: #EAECEF; $t2: #848E9C; $t3: #5E6673; $gold: #F0B90B;
   &.dead { color: #F6465D; }
   &.acct { color: #fff; font-weight: 700; font-size: 10px; }
   .cnt { font-style: normal; color: $t3; font-size: 9px; margin-left: 3px; }
-  .mk { font-style: normal; margin-left: 3px; font-size: 10px; &.risk { color: $gold; } }
+  .mk { font-style: normal; margin-left: 4px; font-size: 9px; font-weight: 800; padding: 0 4px; border-radius: 3px;
+    &.dead-chip { background: rgba(246,70,93,.16); color: #F6465D; }
+    &.risk { background: rgba(240,185,11,.16); color: $gold; } }
   .kind { font-style: normal; padding: 0 4px; border-radius: 3px; font-size: 9px; font-weight: 700; margin: 0 2px;
     &.master { background: rgba(240,185,11,.15); color: $gold; }
     &.sub { background: rgba(132,142,156,.15); color: $t2; } } }
@@ -293,25 +311,27 @@ $t1: #EAECEF; $t2: #848E9C; $t3: #5E6673; $gold: #F0B90B;
   &.dimb { background: $card2; color: $t3; font-weight: 500; } }
 .phase { width: 56px; color: $t2; font-size: 10px; }
 .cell { flex: 1; min-width: 0; text-align: right; white-space: nowrap; overflow: hidden;
-  &.lbl { color: $t3; font-size: 9.5px; font-weight: 500; }
-  &.val { font-size: 10.5px; font-weight: 600; } }
-.params { width: 200px; display: inline-flex; gap: 6px; justify-content: flex-end; overflow: hidden;
-  i { font-style: normal; display: inline-flex; gap: 2px; align-items: baseline;
-    em { font-style: normal; color: $t3; font-size: 8.5px; } b { font-size: 9.5px; font-weight: 600; } } }
-.push { width: 84px; text-align: right; color: $t3; font-size: 9.5px;
-  .stchip { font-style: normal; padding: 1px 6px; border-radius: 3px; font-size: 9px; font-weight: 700; } }
-.ratio { width: 36px; text-align: right; font-size: 10px; font-weight: 700; color: $t2; }
-.single { width: 40px; text-align: right; color: $gold; font-size: 9px; }
-.pnl { width: 66px; text-align: right; font-weight: 800; &.rate { color: $t2; font-weight: 500; font-size: 9.5px; } }
-.ops { display: inline-flex; gap: 4px; width: 66px; justify-content: flex-end;
-  .op { background: $card2; border: 1px solid $border; color: $gold; border-radius: 4px; padding: 1px 6px; cursor: pointer; font-weight: 700; font-size: 10px;
+  &.lbl { color: $t3; font-size: 10px; font-weight: 500; }
+  &.val { font-size: 11.5px; font-weight: 600; } }
+/* 右侧信息区: 列宽/字号放大+列间呼吸感(曾 9px 字挤成一团不可读) */
+.params { width: 216px; display: inline-flex; gap: 9px; justify-content: flex-end; overflow: hidden; flex: none;
+  i { font-style: normal; display: inline-flex; gap: 3px; align-items: baseline;
+    em { font-style: normal; color: $t3; font-size: 9.5px; } b { font-size: 10.5px; font-weight: 600; } } }
+.push { width: 96px; text-align: right; color: $t3; font-size: 10.5px; flex: none;
+  .stchip { font-style: normal; padding: 1px 6px; border-radius: 3px; font-size: 9.5px; font-weight: 700; } }
+.ratio { width: 54px; text-align: right; font-size: 11px; font-weight: 700; color: $t2; flex: none; }
+.single { width: 56px; text-align: right; color: $gold; font-size: 10px; flex: none; }
+.pnl { width: 78px; text-align: right; font-weight: 800; font-size: 12px; flex: none;
+  &.rate { color: $t2; font-weight: 500; font-size: 10.5px; } }
+.ops { display: inline-flex; gap: 5px; width: 78px; justify-content: flex-end; flex: none;
+  .op { background: $card2; border: 1px solid $border; color: $gold; border-radius: 4px; padding: 2px 7px; cursor: pointer; font-weight: 700; font-size: 10.5px;
     &.more { color: $t2; }
     &.ban { color: #F6465D; }
     &:disabled { opacity: .6; cursor: not-allowed; } }
-  &.ban-cd { color: $t3; font-size: 9.5px; align-items: center; &.hot { color: #F6465D; font-weight: 800; } } }
-.rule { width: 56px; text-align: right; color: #4A9CFF; font-size: 9.5px;
+  &.ban-cd { color: $t3; font-size: 10px; align-items: center; &.hot { color: #F6465D; font-weight: 800; } } }
+.rule { width: 68px; text-align: right; color: #4A9CFF; font-size: 10.5px; flex: none;
   &.gold { color: $gold; }
-  &.restricted { color: #F6465D; font-weight: 700; font-size: 8.5px; } }
+  &.restricted { color: #F6465D; font-weight: 700; font-size: 9.5px; } }
 </style>
 
 <style lang="scss">

@@ -1,10 +1,6 @@
 <template>
   <div class="mixdash">
-    <!-- 跑马灯（WS marquee 频道） -->
-    <div v-if="marqueeText" class="marquee">
-      <span class="dot" :class="{on: wsOn}"></span>📢 {{ marqueeText }}
-    </div>
-
+    <!-- 跑马灯已全局化(Layout 顶栏);本页 WS 仅消费 position:updates -->
     <!-- 全局工作流管道（8 段·分策略六色堆叠） -->
     <div class="pipeline" v-if="ov.pipeline?.length">
       <div v-for="(seg, i) in ov.pipeline" :key="seg.label" class="pseg">
@@ -39,9 +35,9 @@
       </div>
     </div>
 
-    <!-- 坑位行（全宽） -->
+    <!-- 坑位行（全宽,自适应填满剩余高度=页面级无滚动条） -->
     <VirtualPositionTable
-      :rows="rows" :sort-key="sortKey" :sort-dir="sortDir" :height="tableH"
+      :rows="rows" :sort-key="sortKey" :sort-dir="sortDir" :height="0"
       @action="onAction" @rule-override="onRuleOverride" />
 
     <!-- 底部横排三卡：策略总览缩略 / 账户余额水位预警 / 分策略管道总览 -->
@@ -109,7 +105,6 @@ const filterStrategy = ref('')
 const sortKey = ref('opened_at')
 const sortDir = ref('asc')
 const loading = ref(false)
-const tableH = Math.max(380, window.innerHeight - 470)
 
 const totalCount = computed(() => rows.value.reduce((n, r) => n + (r.positionCount || 0), 0))
 const warnCount = computed(() => watermarks.value.filter(w => w.threshold !== 'ok').length)
@@ -155,8 +150,6 @@ function onRuleOverride(rowId) {
   ElMessageBox.alert(`打开规则中心 · 币种覆盖：${row?.symbol}（当前 ${row?.ruleScope === 'template' ? '通用规则' : '单独规则'}）`, '单独规则')
 }
 
-const marqueeText = ref('')
-const wsOn = ref(false)
 let wsDisconnect = null
 let auxTimer = null
 
@@ -166,20 +159,15 @@ onMounted(async () => {
   loadAux()
   auxTimer = setInterval(loadAux, 15000)
   wsDisconnect = connectStream((msg) => {
-    wsOn.value = true
-    if (msg.channel === 'marquee') {
-      const d = msg.data || {}
-      marqueeText.value = d.text || d.title || d.content || JSON.stringify(d).slice(0, 160)
-    } else if (msg.channel === 'position:updates') {
-      load()
-    }
+    if (msg.channel === 'position:updates') load()
   })
 })
-onUnmounted(() => { wsDisconnect && wsDisconnect(); wsOn.value = false; auxTimer && clearInterval(auxTimer) })
+onUnmounted(() => { wsDisconnect && wsDisconnect(); auxTimer && clearInterval(auxTimer) })
 </script>
 
 <style scoped lang="scss">
-.mixdash { display: flex; flex-direction: column; gap: 10px; }
+/* 满高布局: 坑位表 flex 填余量,主控台整页不出浏览器滚动条(窗口过矮时回落到 .page 内滚动) */
+.mixdash { display: flex; flex-direction: column; gap: 10px; height: 100%; }
 
 .pipeline { display: flex; gap: 8px; align-items: stretch; overflow-x: auto; padding: 2px 0; }
 .pseg { position: relative; flex: 1; min-width: 104px; background: var(--mix-card, #181B21); border: 1px solid var(--mix-border, #262B33);
@@ -220,8 +208,4 @@ onUnmounted(() => { wsDisconnect && wsDisconnect(); wsOn.value = false; auxTimer
 .up { color: var(--mix-green, #0ECB81); }
 .down { color: var(--mix-red, #F6465D); }
 .warn { color: var(--mix-accent, #F0B90B); }
-.marquee { padding: 6px 12px; border-radius: 6px; font-size: 12px; background: rgba(240,185,11,.08);
-  border: 1px solid rgba(240,185,11,.35); color: #F0B90B; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--el-border-color); margin-right: 6px;
-  &.on { background: #2DD4BF; } }
 </style>

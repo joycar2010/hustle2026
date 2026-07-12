@@ -36,7 +36,8 @@ async def site_brand_put(body: dict, admin=Depends(require_admin)):
     if pool is None:
         raise HTTPException(503, "mix_main 未配置")
     allowed = {k: str(v)[:300] for k, v in body.items()
-               if k in ("title", "loginTitle", "slogan", "logo", "docTitle") and v is not None}
+               if k in ("title", "loginTitle", "slogan", "logo", "docTitle",
+                        "footer", "contact", "icp") and v is not None}
     await pool.execute("UPDATE site_config SET brand=$1, updated_by=$2, updated_at=now() WHERE id=1",
                        json.dumps(allowed, ensure_ascii=False), admin["admin"])
     await proxy.audit(admin["admin"], admin.get("role", ""), "site.brand", "site_config", allowed, "saved")
@@ -78,6 +79,15 @@ async def llm_status(_who=Depends(require_viewer)):
             "latency_ms": d.get("latency_ms"), "ts": d.get("ts"),
             "usage": d.get("usage"), "commentary": (d.get("commentary") or "")[:2000],
             "note": "评审层只读只建议(治理:schema硬校验+越界丢弃);key/模型改 C 机 llm-advisor env 后重启生效"}
+
+
+@router.get("/system/llm/history")
+async def llm_history(_who=Depends(require_viewer)):
+    """建议历史（dcm_main.llm_advice_log 真账,mix_ro 只读）——shadow 对照证据链。"""
+    rows = await ds.fetch(
+        "SELECT ts, model, latency_ms, tokens, symbol, action, domain, reason "
+        "FROM llm_advice_log ORDER BY ts DESC LIMIT 60")
+    return [{**dict(r), "ts": r["ts"].strftime("%m-%d %H:%M")} for r in rows]
 
 
 # ---------------- 系统配置：状态 + 写操作（备份/快照/SSL） ----------------
@@ -220,6 +230,8 @@ async def user_update(uid: int, body: dict, admin=Depends(require_admin)):
         raise HTTPException(503, "mix_main 未配置")
     if "enabled" in body:
         await pool.execute("UPDATE mix_users SET enabled=$2 WHERE id=$1", uid, bool(body["enabled"]))
+    if body.get("role") in ("user", "operator", "admin", "owner"):
+        await pool.execute("UPDATE mix_users SET role=$2 WHERE id=$1", uid, body["role"])
     if body.get("password"):
         from .auth import hash_password, new_salt
         salt = new_salt()

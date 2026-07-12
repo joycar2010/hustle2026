@@ -14,7 +14,7 @@ const routes = [
     { path:'mix/monitor', name:'mix-monitor', meta:{hidden:true,title:'监控中心',icon:'Monitor',group:'总控',ord:0.35}, component:()=>import('../views/mix/MixMonitor.vue') },
     { path:'mix/blacklist', name:'mix-blacklist', meta:{title:'黑名单',icon:'CircleClose',group:'总控',ord:0.4}, component:()=>import('../views/mix/MixBlacklist.vue') },
     { path:'mix/coins', name:'mix-coins', meta:{title:'币管理',icon:'Coin',group:'总控',ord:0.45}, component:()=>import('../views/mix/MixCoins.vue') },
-    { path:'mix/report', name:'mix-report', meta:{title:'资金报表',icon:'TrendCharts',group:'总控',ord:0.5}, component:()=>import('../views/mix/MixReport.vue') },
+    { path:'mix/report', name:'mix-report', meta:{title:'资金收益',icon:'TrendCharts',group:'总控',ord:0.5}, component:()=>import('../views/mix/MixReport.vue') },
     // ===== 系统设置(Mix 版:qh 同名模块已由下列页面替代) =====
     { path:'mix/notify', name:'mix-notify', meta:{title:'通知模块',icon:'Bell',group:'系统设置',ord:2}, component:()=>import('../views/mix/MixNotify.vue') },
     { path:'mix/site', name:'mix-site', meta:{title:'官网管理',icon:'Link',group:'系统设置',ord:2.5}, component:()=>import('../views/mix/MixSite.vue') },
