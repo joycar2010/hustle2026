@@ -1,0 +1,221 @@
+openapi: 3.1.0
+info:
+  title: HustleCoin Mix API（设计稿反推 v0.1 · 联调基线）
+  version: 0.1.0
+  description: |
+    由 25 块设计画板反推的前后端契约。铁律：
+    1) PhaseCode/状态枚举以 /meta/enums 为单一来源，前端绝不推断状态；
+    2) 排序键用后端字段 opened_at / pnl；
+    3) 子账户行下发 executingAccount + accountKind（hedge_via_master 显主账号）；
+    4) 写操作一律 202 受理 + WS position:updates 对账，前端 inflight 防重入；
+    5) merged/self 口径必须显式参数，无默认。
+servers:
+  - url: /api/v1
+paths:
+  /meta/enums:
+    get:
+      summary: 枚举单一来源（PhaseCode/StrategyCode/AlertLevel/SubRowState…）
+      responses: { '200': { description: OK } }
+  /auth/login:
+    post: { summary: 登录（JWT）, responses: { '200': { description: OK } } }
+
+  /positions:
+    get:
+      summary: 坑位行（主控台平铺；币种行兼列头 + 账户子行）
+      parameters:
+        - { name: view, in: query, schema: { type: string, enum: [flat, grouped] }, required: true }
+        - { name: sort, in: query, schema: { type: string, enum: [opened_at, pnl] }, required: true }
+        - { name: dir, in: query, schema: { type: string, enum: [asc, desc] }, required: true }
+        - { name: strategy, in: query, schema: { $ref: '#/components/schemas/StrategyCode' } }
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/PositionRow' } } } }
+  /positions/{id}/actions:
+    post:
+      summary: 行内/右键菜单干预（补单/补对冲/手动还币/强制平仓/移/还…）
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action]
+              properties:
+                action: { type: string, description: 见 CONTEXT_MENUS key }
+                accountId: { type: string, description: 子账户行操作时必传 }
+                idempotencyKey: { type: string }
+      responses:
+        '202': { description: 受理（结果走 WS position:updates 对账） }
+        '409': { description: 状态机拒绝（如开仓态拆腿闸） }
+
+  /strategies:
+    get: { summary: 六策略总览（坑位/名义/今日/累计/E通过率/管道计数）, responses: { '200': { description: OK } } }
+  /strategies/{code}:
+    get:
+      summary: 策略明细（定制管道 + 币种行 + 专属监控 + 规则快照）
+      parameters: [{ name: code, in: path, required: true, schema: { $ref: '#/components/schemas/StrategyCode' } }]
+      responses: { '200': { description: OK } }
+  /strategies/{code}/toggle:
+    post: { summary: 策略启停 / AI 层摘除, responses: { '202': { description: OK } } }
+
+  /rules:
+    get:
+      summary: 五级作用域规则（全局›策略›venue›币种›账户，就近覆盖，每作用域唯一行）
+      parameters:
+        - { name: scope, in: query, required: true, schema: { type: string }, description: 'global | strategy:S3 | venue:binance | symbol:BNBUSDT | account:hustle-001' }
+      responses: { '200': { description: OK（含 inherited 标记） } }
+  /rules/{scopeKey}:
+    put: { summary: 保存（热生效 3s 回读；审计留痕）, responses: { '200': { description: OK } } }
+  /rules/{scopeKey}/audit:
+    get: { summary: 变更审计, responses: { '200': { description: OK } } }
+
+  /accounts:
+    get:
+      summary: 两级账户列表（主账号行→子账户行；KMS 钱包组按 platformType 并表）
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/AccountNode' } } } } }
+    post:
+      summary: 新建账户（kind 必选 master|sub）
+      requestBody: { content: { application/json: { schema: { type: object, required: [kind, venue], properties: { kind: { enum: [master, sub] }, venue: { type: string }, parentId: { type: string } } } } } }
+      responses: { '201': { description: Created } }
+  /accounts/{id}/actions:
+    post:
+      summary: 账户操作（toggle/verify/refresh/purge/set_api/ip_whitelist/ip_proxy）
+      responses: { '202': { description: OK } }
+
+  /kms/wallets:
+    get: { summary: KMS 钱包列表（私钥不出 KMS，仅地址掩码）, responses: { '200': { description: OK } } }
+  /kms/transfers:
+    post:
+      summary: 发起转账（白名单+限额校验；进入 pending_approval）
+      responses: { '202': { description: pending_approval } }
+  /kms/transfers/{id}/approve:
+    post: { summary: 审批（发起人 ≠ 审批人，强制）, responses: { '200': { description: executed } } }
+
+  /monitor/heartbeats: { get: { summary: 进程心跳（Redis 真相源）, responses: { '200': { description: OK } } } }
+  /monitor/freshness: { get: { summary: 数据新鲜度 stale/frozen/divergent, responses: { '200': { description: OK } } } }
+  /monitor/balance-watermarks:
+    get: { summary: 账户余额水位（两级阈值+建议动作，动作感知充提通道）, responses: { '200': { description: OK } } }
+  /monitor/transfer-suggestions/{id}/create-order:
+    post: { summary: 生成划转单（人工确认执行）, responses: { '202': { description: OK } } }
+  /monitor/spreads:
+    get: { summary: 币种利差监控（开/平点差·资金费·日息·净利差·可开状态）, responses: { '200': { description: OK } } }
+  /monitor/borrowables:
+    get: { summary: 可借监控（S3 进料口）, responses: { '200': { description: OK } } }
+
+  /blacklist:
+    get: { summary: 黑名单（生效范围=全局或指定策略）, responses: { '200': { description: OK } } }
+    post: { summary: 加入, responses: { '201': { description: OK } } }
+  /coins:
+    get: { summary: 币管理（状态流转 启用⇄观察⇄暂停→下架；冻结=风控态人工解）, responses: { '200': { description: OK } } }
+
+  /report/pnl:
+    get:
+      summary: 收益序列（柱形图数据源；周/月由前端聚合日粒度）
+      parameters:
+        - { name: range, in: query, required: true, schema: { enum: [30d, 90d, 180d, all] } }
+      responses: { '200': { description: '[{date, funding, spread, fee, net}]' } }
+  /report/attribution:
+    get: { summary: 归因矩阵（策略 S1-S6 × 科目）, responses: { '200': { description: OK } } }
+
+  /alerts:
+    get:
+      summary: 告警时间线（strategyCode 前缀徽章；间隔/次数/节流由通知设置统一管）
+      responses: { '200': { description: OK } }
+  /settings/notifications:
+    get: { summary: 通知设置（渠道/模板/间隔/次数/冷却/令牌桶）, responses: { '200': { description: OK } } }
+    put: { summary: 保存, responses: { '200': { description: OK } } }
+
+  # ---- 用户端（mix.hustle2026.xyz）----
+  /me/earnings/summary:
+    get:
+      summary: 今日/本周/累计（合并口径显式）
+      parameters: [{ name: view, in: query, required: true, schema: { enum: [merged, self] } }]
+      responses: { '200': { description: OK } }
+  /me/earnings/daily:
+    get: { summary: 日收益序列（柱/线共用）, responses: { '200': { description: OK } } }
+  /me/earnings/sources:
+    get: { summary: 怎么赚的（用户端科目口径 6 类）, responses: { '200': { description: OK } } }
+  /me/subaccounts:
+    get:
+      parameters: [{ name: view, in: query, required: true, schema: { enum: [merged, self] } }]
+      responses: { '200': { description: OK } }
+  /me/fund-flows:
+    get: { summary: 资金流向（充值/提现/划转/收益结算）, responses: { '200': { description: OK } } }
+  /me/ledger:
+    get: { summary: 手工对账（链式差值，向后传导）, responses: { '200': { description: OK } } }
+    post: { summary: 新增记账（入账/出账/余额校准，校准入审计）, responses: { '201': { description: OK } } }
+
+components:
+  schemas:
+    StrategyCode: { type: string, enum: [S1, S2, S3, S4, S5, S6] }
+    PhaseCode:
+      type: string
+      description: 仲裁契约状态机，唯一来源 /meta/enums；前端直接渲染不推断
+      enum: [CANDIDATE, ARBITRATING, ARMED, OPENING, HOLDING, EXITING, SETTLED,
+             BORROWABLE, PENDING_BORROW, REPAYING, COOLDOWN_3045, FROZEN,
+             QUOTA_CHECK, LENDING, ACCRUING, RECLAIMING,
+             EVENT_FEED, EVALUATING, MANUAL_CONFIRM, REVERTING]
+    CellValue:
+      type: object
+      properties: { value: { type: string }, tone: { enum: [up, down, muted, accent, strategy] }, dim: { type: boolean } }
+    ParamPair:
+      type: object
+      properties: { label: { type: string }, value: { type: string }, tone: { type: string } }
+    SubRowState:
+      type: object
+      description: 三态互斥：api_error(红)/borrowing(青)/repay_paused(金,可恢复)/holding/plain
+      properties: { kind: { enum: [api_error, borrowing, repay_paused, holding, plain] }, text: { type: string }, resumable: { type: boolean } }
+    AccountSubRow:
+      type: object
+      required: [executingAccount, accountKind, venue, platformType, values, state]
+      properties:
+        executingAccount: { type: string, description: hedge_via_master 下为平台主账号 }
+        accountKind: { enum: [master, sub] }
+        venue: { type: string }
+        platformType: { enum: [cex, kms_wallet] }
+        values: { type: array, items: { $ref: '#/components/schemas/CellValue' }, description: 与主行 columnLabels 同列位对齐 }
+        econParams: { type: [array, 'null'], items: { $ref: '#/components/schemas/ParamPair' }, description: 未借到为 null }
+        state: { $ref: '#/components/schemas/SubRowState' }
+        fundingRateRatio: { type: [string, 'null'] }
+        borrowRatePerSec: { type: [string, 'null'], description: 每账户 UID 权重余量不同 }
+        banCountdown: { type: [string, 'null'], description: 'M:SS' }
+        apiRestricted: { type: boolean }
+        apiStatus: { enum: [ok, restricted, healing] }
+    PositionRow:
+      type: object
+      required: [id, symbol, positionCount, strategyCode, phase, phaseLabel, columnLabels, marketParams, ruleScope, subRows]
+      properties:
+        id: { type: string }
+        symbol: { type: string }
+        positionCount: { type: integer }
+        mark: { enum: [dead, risk] }
+        strategyCode: { $ref: '#/components/schemas/StrategyCode' }
+        phase: { $ref: '#/components/schemas/PhaseCode' }
+        phaseLabel: { type: string }
+        columnLabels: { type: array, items: { type: string }, description: 币种行兼列头；混合平铺每行自带本策略标签 }
+        marketParams: { type: array, items: { $ref: '#/components/schemas/ParamPair' }, description: 开/平/资/时/限/息 }
+        pushStatus: { type: string }
+        fundingRateRatio: { type: string }
+        singleRuleBrief: { type: string }
+        allowRemove: { type: boolean }
+        allowRepay: { type: boolean }
+        pnl: { type: [number, 'null'] }
+        openedAt: { type: [string, 'null'], format: date-time }
+        keyDeadlineTs: { type: [integer, 'null'], description: 距今<30min 前端整行渐变 }
+        ruleScope: { enum: [template, override] }
+        subRows: { type: array, items: { $ref: '#/components/schemas/AccountSubRow' } }
+    AccountNode:
+      type: object
+      description: 账户列表两级行（rows=主账号，subRows=子账户/钱包地址）
+      properties:
+        id: { type: string }
+        kind: { enum: [master, sub, wallet] }
+        platformType: { enum: [cex, kms_wallet] }
+        venue: { type: string }
+        domain: { type: string, description: 域 A/B/C/链上 }
+        apiStatus: { enum: [ok, restricted, healing] }
+        metrics: { type: object, additionalProperties: { type: string } }
+        approvalState: { type: [string, 'null'], description: KMS 审批流 }
+        children: { type: array, items: { $ref: '#/components/schemas/AccountNode' } }

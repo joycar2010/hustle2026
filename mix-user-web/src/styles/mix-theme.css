@@ -1,0 +1,31 @@
+/* HustleCoin Mix — 黑金主题 tokens（与设计稿 SetVariables 一一对应，换肤只动此文件） */
+:root {
+  --mix-bg: #0B0E11;
+  --mix-panel: #12151A;
+  --mix-card: #181B21;
+  --mix-card2: #20242C;
+  --mix-border: #262B33;
+  --mix-accent: #F0B90B;
+  --mix-accent2: #FCD535;
+  --mix-green: #0ECB81;
+  --mix-green-hero: #3BE981;
+  --mix-red: #F6465D;
+  --mix-blue: #4A9CFF;
+  --mix-t1: #EAECEF;
+  --mix-t2: #848E9C;
+  --mix-t3: #5E6673;
+  /* 六策略色（用户端仅归因带用到） */
+  --mix-s1: #4A9CFF; --mix-s2: #F0B90B; --mix-s3: #A78BFA;
+  --mix-s4: #2DD4BF; --mix-s5: #FF9F43; --mix-s6: #F472B6;
+}
+
+.mix-card { background: var(--mix-card); border: 1px solid var(--mix-border); border-radius: 12px; }
+.mix-chip-on { background: var(--mix-accent); color: var(--mix-bg); font-weight: 700; }
+.mix-up { color: var(--mix-green); }
+.mix-dn { color: var(--mix-red); }
+.mix-gold { color: var(--mix-accent); }
+.mix-hero-num {
+  color: var(--mix-green-hero);
+  text-shadow: 0 0 28px rgba(14, 203, 129, .35);
+  font-weight: 800;
+}
