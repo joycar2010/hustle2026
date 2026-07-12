@@ -56,6 +56,8 @@ CMD_WHITELIST = {
     "manual_repay": ("POST", "/api/engine/manual-repay", {}),
     "manual_hedge": ("POST", "/api/engine/manual-hedge", {}),
     "push_symbol": ("POST", "/api/engine/push-symbol/{symbol}", {}),
+    # S3 规则写(coin 权威:schema 校验+审计+30s 热重载在 coin 侧原样生效;body=params 透传)
+    "rules_update": ("PUT", "/api/global-rules/", {}),
 }
 # S3 面板快照发布周期(dcm:coin:panel);原料=coin 引擎自己维护的缓存键+blacklist API,
 # 绝不直打交易所 REST(IP 权重预算课)
@@ -317,6 +319,45 @@ def _blacklist_rows():
     return resp.json()
 
 
+def _coin_rules():
+    """GET coin user1 全局规则(S3 模板真源;coin schema 权威)。失败返回 None。"""
+    secret = _coin_jwt_secret()
+    if not secret:
+        return None
+    import requests
+    headers = {"Authorization": "Bearer " + _mint_jwt(secret)}
+    resp = requests.get(f"{COIN_API}/api/global-rules/", headers=headers, timeout=10)
+    resp.raise_for_status()
+    return resp.json()
+
+
+SQL_CLOSED = """
+SELECT id, sub_account_id, user_id, symbol, base_asset, status, hedge_account,
+       borrow_qty, spot_sell_qty, spot_buy_qty, futures_long_qty, repay_qty,
+       open_usdt_amount,
+       EXTRACT(EPOCH FROM opened_at)::bigint AS opened_ts,
+       EXTRACT(EPOCH FROM closed_at)::bigint AS closed_ts
+FROM positions
+WHERE status IN ('CLOSED', 'FAILED') AND closed_at > now() - interval '7 days'
+ORDER BY closed_at DESC LIMIT 500
+"""
+
+
+def publish_closed(r):
+    """S3 终态仓透传(近7天)→ dcm:coin:closed(EX 900)。mix 交易历史落库的进料口。"""
+    conn = psycopg2.connect(COIN_PG_DSN)
+    try:
+        conn.set_session(readonly=True, autocommit=True)
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(SQL_CLOSED)
+            rows = [dict(x) for x in cur.fetchall()]
+    finally:
+        conn.close()
+    r.set("dcm:coin:closed", json.dumps(
+        {"ts": int(time.time()), "count": len(rows), "positions": rows}, default=str), ex=900)
+    return len(rows)
+
+
 def publish_panel(r):
     """S3 借币面板快照 → dcm:coin:panel(EX 300)。
     原料全部来自 coin 引擎已维护的缓存(coin Redis balance:latest/uid_weight/spreads/
@@ -373,11 +414,16 @@ def publish_panel(r):
         blacklist = _blacklist_rows()
     except Exception as e:
         log.warning("panel blacklist fetch failed: %r", e)
+    rules = None
+    try:
+        rules = _coin_rules()
+    except Exception as e:
+        log.warning("panel rules fetch failed: %r", e)
 
     raw = json.dumps({"ts": now, "source": "coin-bridge-panel",
                       "balances": slim_balances, "uid_weight": uid_weight, "weight": weight,
                       "pushed": pushed, "interest_rates": interest,
-                      "spreads": spreads, "blacklist": blacklist}, default=str)
+                      "spreads": spreads, "blacklist": blacklist, "rules": rules}, default=str)
     r.set("dcm:coin:panel", raw, ex=300)
     log.info("PANEL_OK bytes=%d pushed=%d relevant=%d bl=%s", len(raw), len(pushed),
              len(relevant), (len(blacklist) if isinstance(blacklist, list) else "n/a"))
@@ -400,6 +446,10 @@ def main():
                     publish_panel(r)         # S3 面板快照(60s)
                 except Exception as e:
                     log.warning("panel round failed: %r", e)
+                try:
+                    publish_closed(r)        # 终态仓透传(交易历史进料口)
+                except Exception as e:
+                    log.warning("closed round failed: %r", e)
                 last_panel_ts = time.time()
             if ROUTE_MUTEX and time.time() - last_mutex_ts >= 60:
                 try:

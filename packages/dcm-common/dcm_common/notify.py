@@ -41,6 +41,30 @@ def feishu_from_env() -> "FeishuTarget":
     )
 
 
+CONFIG_KEY = "dcm:notify:config"      # mixadmin 通知模块写入的全局节流配置(权威=mix_main,此键=分发)
+_CFG_CACHE: dict = {"ts": 0.0, "cfg": None}
+_CFG_TTL = 60.0
+
+
+def _global_config(redis_url: str) -> dict | None:
+    """读全局通知配置(60s 进程内缓存;fatal 300s/1 硬地板不受其影响)。失败=None 用构造参数。"""
+    import time as _t
+    if _t.monotonic() - _CFG_CACHE["ts"] < _CFG_TTL:
+        return _CFG_CACHE["cfg"]
+    cfg = None
+    try:
+        r = redis_sync.from_url(redis_url, decode_responses=True,
+                                socket_timeout=2, socket_connect_timeout=2)
+        raw = r.get(CONFIG_KEY)
+        r.close()
+        if raw:
+            cfg = json.loads(raw)
+    except Exception:  # noqa: BLE001
+        cfg = None
+    _CFG_CACHE.update(ts=_t.monotonic(), cfg=cfg)
+    return cfg
+
+
 class Notifier:
     def __init__(self, redis_url: str, service: str,
                  feishu: FeishuTarget | None = None,
@@ -58,15 +82,19 @@ class Notifier:
              color: str = "#3b82f6", blink: bool = False) -> dict:
         """发一条通知。key 用于节流分桶(自动加 service 前缀)。
         level=fatal 不绕过节流而是用 300s/1 硬地板——完全绕过曾造成巡检循环每 30s 重发同一致命告警
-        (告警风暴淹没真信号);300s 地板保证致命级最多被压制 5 分钟,不会被长节流吞掉。"""
+        (告警风暴淹没真信号);300s 地板保证致命级最多被压制 5 分钟,不会被长节流吞掉。
+        非 fatal 节流参数优先用 dcm:notify:config 全局配置(mixadmin 通知模块热下发),无则构造参数。"""
         results: dict = {}
         tkey = f"{self.service}:{key}"
         if level == "fatal":
             if not throttle_ok(self.redis_url, f"{tkey}:fatal", 300, 1):
                 return {"throttled": True}
-        elif not throttle_ok(
-                self.redis_url, tkey, self.throttle_interval_sec, self.throttle_max_count):
-            return {"throttled": True}
+        else:
+            g = _global_config(self.redis_url) or {}
+            interval = int(g.get("interval_sec") or self.throttle_interval_sec)
+            max_cnt = int(g.get("max_count") or self.throttle_max_count)
+            if not throttle_ok(self.redis_url, tkey, interval, max_cnt):
+                return {"throttled": True}
 
         if self.feishu.webhook_url:
             ok, detail = send_webhook_text(self.feishu.webhook_url, f"{self.service}|{title}", content)
