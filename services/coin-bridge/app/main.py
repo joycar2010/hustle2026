@@ -43,11 +43,17 @@ COIN_API = os.environ.get("COIN_API_BASE", "http://127.0.0.1:8000")
 CMD_QUEUE = "dcm:coin:cmd"
 # 白名单:action → (method, path)。v1 只放最安全的引擎启停;扩 manual-close 等须逐个评审
 # engine_status 为零副作用只读探针:验证 JWT铸造→coin鉴权→执行→回执 全链路,不动生产状态
+# P2 写代理:黑名单增删(coin 逻辑权威;{symbol} 路径参数经正则白名单校验后代入)
 CMD_WHITELIST = {
     "engine_status": ("GET", "/api/engine/workers/status", {}),
     "engine_start": ("POST", "/api/engine/workers/start", {}),
     "engine_stop": ("POST", "/api/engine/workers/stop", {}),
+    "blacklist_add": ("POST", "/api/blacklist/", {}),
+    "blacklist_remove": ("DELETE", "/api/blacklist/{symbol}", {}),
 }
+# S3 面板快照发布周期(dcm:coin:panel);原料=coin 引擎自己维护的缓存键+blacklist API,
+# 绝不直打交易所 REST(IP 权重预算课)
+PANEL_INTERVAL = int(os.environ.get("DCM_PANEL_INTERVAL_SEC", "60"))
 
 
 def _coin_jwt_secret() -> str | None:
@@ -77,7 +83,15 @@ def _exec_command(cmd: dict) -> dict:
     if not secret:
         return {"ok": False, "err": "coin jwt secret 不可读"}
     method, path, base_body = CMD_WHITELIST[action]
-    body = {**base_body, **(cmd.get("params") or {})}
+    params = cmd.get("params") or {}
+    if "{symbol}" in path:
+        sym = str(params.get("symbol", "")).upper()
+        if not re.fullmatch(r"[A-Z0-9]{1,20}", sym):
+            return {"ok": False, "err": "symbol 非法"}
+        path = path.replace("{symbol}", sym)
+        body = {}
+    else:
+        body = {**base_body, **params}
     try:
         tok = _mint_jwt(secret, int(cmd.get("user_id", 1)))
         resp = requests.request(method, f"{COIN_API}{path}", json=body,
@@ -280,6 +294,84 @@ def sync_arb_bids(r):
     return published
 
 
+def _blacklist_rows():
+    """GET coin blacklist(与 route_mutex 同一鉴权链路)。失败返回 None(消费端如实降级)。"""
+    secret = _coin_jwt_secret()
+    if not secret:
+        return None
+    import requests
+    headers = {"Authorization": "Bearer " + _mint_jwt(secret)}
+    resp = requests.get(f"{COIN_API}/api/blacklist/", headers=headers, timeout=10)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def publish_panel(r):
+    """S3 借币面板快照 → dcm:coin:panel(EX 300)。
+    原料全部来自 coin 引擎已维护的缓存(coin Redis balance:latest/uid_weight/spreads/
+    interest_rates/pushed)+ blacklist API —— 零新增交易所 REST 调用。
+    symbol_margin 只保留相关币(pushed ∪ 有余额/借款/利息的币),控制载荷体积。"""
+    rc = _get_coin_redis()
+    now = int(time.time())
+
+    def gj(key, default=None):
+        try:
+            raw = rc.get(key)
+            return json.loads(raw) if raw else default
+        except Exception:
+            return default
+
+    balances = gj("balance:latest:%s" % ARB_COIN_UID)
+    uid_weight = gj("engine:uid_weight:by_account")
+    weight = gj("engine:weight:latest")
+    pushed = list(gj("engine:pushed_symbols", []) or [])
+    pushed += list(gj("engine:%s:pushed_symbols" % ARB_COIN_UID, []) or [])
+    pushed = sorted({str(s).upper() for s in pushed})
+
+    relevant = set(pushed)
+    slim_balances = None
+    if isinstance(balances, dict):
+        for acct in balances.get("balances", []):
+            for sym, d in (acct.get("symbol_margin") or {}).items():
+                try:
+                    if any(float(d.get(f) or 0) != 0 for f in ("free", "borrowed", "interest")):
+                        relevant.add(sym.upper())
+                except Exception:
+                    pass
+        slim_balances = {k: v for k, v in balances.items() if k != "balances"}
+        slim_balances["balances"] = []
+        for acct in balances.get("balances", []):
+            a2 = {k: v for k, v in acct.items() if k != "symbol_margin"}
+            a2["symbol_margin"] = {s: d for s, d in (acct.get("symbol_margin") or {}).items()
+                                   if s.upper() in relevant}
+            slim_balances["balances"].append(a2)
+
+    ir = gj("market:interest_rates", {}) or {}
+    bases = {s[:-4] if s.endswith("USDT") else s for s in relevant}
+    interest = {b: ir[b] for b in bases if b in ir}
+    spreads = {}
+    for sym in relevant:
+        try:
+            v = rc.hget("spreads", sym if sym.endswith("USDT") else sym + "USDT")
+            if v:
+                spreads[sym] = json.loads(v)
+        except Exception:
+            pass
+    blacklist = None
+    try:
+        blacklist = _blacklist_rows()
+    except Exception as e:
+        log.warning("panel blacklist fetch failed: %r", e)
+
+    raw = json.dumps({"ts": now, "source": "coin-bridge-panel",
+                      "balances": slim_balances, "uid_weight": uid_weight, "weight": weight,
+                      "pushed": pushed, "interest_rates": interest,
+                      "spreads": spreads, "blacklist": blacklist}, default=str)
+    r.set("dcm:coin:panel", raw, ex=300)
+    log.info("PANEL_OK bytes=%d pushed=%d relevant=%d bl=%s", len(raw), len(pushed),
+             len(relevant), (len(blacklist) if isinstance(blacklist, list) else "n/a"))
+
+
 def main():
     global _last_mutex
     r = redis_sync.from_url(DCM_REDIS_URL, decode_responses=True)
@@ -288,9 +380,16 @@ def main():
     last_state = 0.0
     last_mutex_ts = 0.0
     last_arb_ts = 0.0
+    last_panel_ts = 0.0
     while True:
         try:
             consume_commands(r)              # 命令消费(~2s 响应)
+            if time.time() - last_panel_ts >= PANEL_INTERVAL:
+                try:
+                    publish_panel(r)         # S3 面板快照(60s)
+                except Exception as e:
+                    log.warning("panel round failed: %r", e)
+                last_panel_ts = time.time()
             if ROUTE_MUTEX and time.time() - last_mutex_ts >= 60:
                 try:
                     _last_mutex = sync_route_mutex(r)   # 路由互斥对账(60s)
