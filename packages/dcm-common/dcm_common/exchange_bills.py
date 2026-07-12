@@ -58,9 +58,8 @@ async def _binance(cli, cfg, since_ms) -> list[IncomeRec]:
     return out
 
 
-async def _bybit(cli, cfg, since_ms) -> list[IncomeRec]:
+async def _bybit_page(cli, cfg, query) -> dict:
     recv = "5000"
-    query = f"accountType=UNIFIED&category=linear&startTime={since_ms}&limit=50"
     ts = str(int(time.time() * 1000))
     pre = ts + cfg["key"] + recv + query
     sign = hmac.new(cfg["secret"].encode(), pre.encode(), hashlib.sha256).hexdigest()
@@ -69,9 +68,39 @@ async def _bybit(cli, cfg, since_ms) -> list[IncomeRec]:
     r = (await cli.get(f"https://api.bybit.com/v5/account/transaction-log?{query}", headers=h)).json()
     if r.get("retCode") != 0:
         raise RuntimeError(f"bybit txlog: {r.get('retCode')}:{r.get('retMsg')}")
+    return r.get("result") or {}
+
+
+async def _bybit(cli, cfg, since_ms) -> list[IncomeRec]:
+    """⚠️bybit 大坑:transaction-log 不带 endTime 时只返回 startTime 起 24h 窗内数据——
+    游标停在无交易的旧时点会永远拉空、永不前进(bybit 账单黑洞根因,2026-07-12 修)。
+    修法=显式 endTime 逐 24h 窗行走 + nextPageCursor 窗内翻页,单轮最多回补 8 天。"""
+    out = []
+    win = 24 * 3600 * 1000 - 60_000
+    start = int(since_ms)
+    now_ms = int(time.time() * 1000)
+    windows = 0
+    while start < now_ms and windows < 8:
+        end = min(start + win, now_ms)
+        cursor = ""
+        for _page in range(20):  # 窗内翻页上限,防异常死循环
+            query = (f"accountType=UNIFIED&category=linear&startTime={start}&endTime={end}&limit=50"
+                     + (f"&cursor={cursor}" if cursor else ""))
+            result = await _bybit_page(cli, cfg, query)
+            lst = result.get("list") or []
+            out.extend(_bybit_parse(lst))
+            cursor = result.get("nextPageCursor") or ""
+            if not cursor or len(lst) < 50:
+                break
+        start = end
+        windows += 1
+    return out
+
+
+def _bybit_parse(lst) -> list[IncomeRec]:
     out = []
     tmap = {"SETTLEMENT": "FUNDING", "TRADE": "FEE", "TRANSFER_IN": "TRANSFER", "TRANSFER_OUT": "TRANSFER"}
-    for x in r.get("result", {}).get("list", []) or []:
+    for x in lst:
         typ = x.get("type")
         # TRADE 行含 fee 与 change;fee 记 FEE,change(已实现)记 PNL;SETTLEMENT=资金费
         base_id = f"{x.get('id') or x.get('orderId')}_{x.get('transactionTime')}"
