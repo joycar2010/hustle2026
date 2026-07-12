@@ -43,6 +43,9 @@ MARGIN_LEV_WARN = float(os.environ.get("DCM_RISK_MARGIN_LEV_WARN", "5"))  # 逐�
 # R11 RECON v2 逆向对账(testgo 单腿噪音根治课的 dcm 版):实盘 perp 仓无 DB 行解释=孤儿仓。
 # 地板过滤(粉尘/结算残留不告警)+连续 2 轮命中才 fire(快照滞后/开仓瞬间的假阳性去抖)。
 ORPHAN_FLOOR_USDT = float(os.environ.get("DCM_RISK_ORPHAN_FLOOR_USDT", "5"))
+# 平仓过渡窗:账户快照 60s 轮询,行刚 CLOSED 时快照仍照着旧腿→R11 假阳性孤儿风暴
+# (GWEI/VANRY 2026-07-12 实例:closed_at 后 45s 触发 fatal)。R7 开仓侧新鲜度闸的平仓镜像。
+CLOSE_GRACE_SEC = int(os.environ.get("DCM_RISK_CLOSE_GRACE_SEC", "180"))
 _orphan_hits: dict = {}   # (venue,sym) -> 连续命中轮数(进程内即可,重启重数)
 
 # 期望在场的服务及其心跳最大年龄(秒)。缺失键==停更同罪。
@@ -63,6 +66,7 @@ EXPECTED_HB = {
     "depth-sampler": 400,
     "basis-sampler": 200,
     "engine-basis": 120,
+    "engine-lending": 900,   # S4 shadow 决策账,300s/轮
 }
 RECON_VENUES = ("binance", "bybit", "okx", "gate", "bitget", "hyperliquid")
 STALE_STATUSES = ("PENDING_BORROW", "BORROWED_IDLE", "PENDING_REPAY")
@@ -310,12 +314,15 @@ async def check_round(r: aioredis.Redis, self_pool) -> dict:
         try:
             drows = await self_pool.fetch(
                 "SELECT symbol,venue_long,venue_short FROM dualperp_positions "
-                "WHERE state NOT IN ('CLOSED','FAILED','ROLLBACK')")  # 含 OPENING/CLOSING 过渡态
+                "WHERE state NOT IN ('CLOSED','FAILED','ROLLBACK') "
+                "   OR closed_at > now() - make_interval(secs => $1)",  # 平仓过渡窗内仍算期望腿
+                float(CLOSE_GRACE_SEC))
             for p in drows:
                 expected_legs.add((p["venue_long"], p["symbol"]))
                 expected_legs.add((p["venue_short"], p["symbol"]))
             brows = await self_pool.fetch(
-                "SELECT symbol FROM basis_positions WHERE state NOT IN ('CLOSED','FAILED')")
+                "SELECT symbol FROM basis_positions WHERE state NOT IN ('CLOSED','FAILED') "
+                "   OR closed_at > now() - make_interval(secs => $1)", float(CLOSE_GRACE_SEC))
             for b in brows:   # basis=币安现货多+永续空,perp 腿在 binance
                 expected_legs.add(("binance", b["symbol"]))
         except Exception as e:

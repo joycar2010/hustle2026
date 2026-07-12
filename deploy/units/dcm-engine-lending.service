@@ -1,0 +1,17 @@
+[Unit]
+Description=DexCexMix lending arb engine (S4, shadow-only decision ledger)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=ec2-user
+Slice=dexcexmix.slice
+MemoryMax=384M
+WorkingDirectory=/home/ec2-user/dexcexmix/src
+EnvironmentFile=/home/ec2-user/dexcexmix/.env
+ExecStart=/home/ec2-user/dexcexmix/venv/bin/python services/engine-lending/app/main.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
