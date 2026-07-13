@@ -38,6 +38,14 @@ LLM_BASE = os.environ.get("DCM_LLM_BASE_URL", "https://api.chesspnt.com/v1").rst
 LLM_MODEL = os.environ.get("DCM_LLM_MODEL", "gpt-5.5")
 LLM_TIMEOUT = int(os.environ.get("DCM_LLM_TIMEOUT_SEC", "60"))
 LLM_MAX_TOKENS = int(os.environ.get("DCM_LLM_MAX_TOKENS", "1500"))
+# 中转站热配置(权威=mix_main.llm_relays,mix-backend 发布到此键;缺失=回落 env 单站)
+CONFIG_KEY = "dcm:llm:config"
+# 熔断器(testauto /infra 模式移植):整轮(所有中转站)失败连续 N 次 → 冷却 base×2^trips 指数退避;
+# 状态在 Redis 供 mix 展示/手动重置(DEL 即恢复)。
+BREAKER_KEY = "dcm:llm:breaker"
+CB_THRESHOLD = int(os.environ.get("DCM_LLM_CB_THRESHOLD", "2"))
+CB_BASE_COOLDOWN = int(os.environ.get("DCM_LLM_CB_BASE_COOLDOWN_SEC", "120"))
+CB_MAX_COOLDOWN = int(os.environ.get("DCM_LLM_CB_MAX_COOLDOWN_SEC", "3600"))
 FUNDING_FRESH_SEC = int(os.environ.get("DCM_LLM_FUNDING_FRESH_SEC", "1800"))
 TOP_CANDIDATES = int(os.environ.get("DCM_LLM_TOP_CANDIDATES", "15"))
 VENUES = ["binance", "okx", "bybit", "gate", "bitget", "hyperliquid"]
@@ -179,10 +187,41 @@ def _validate(obj: dict) -> dict | None:
     return {"commentary": commentary[:600], "recommendations": clean}
 
 
-async def call_llm(cli: httpx.AsyncClient, snapshot: dict) -> dict | None:
-    """调 openai 兼容 chat/completions。返回校验后的建议,失败/坏响应返回 None(整轮弃用)。"""
+async def load_relays(r) -> list[dict]:
+    """中转站清单:Redis 热配置优先(主站在前),缺失回落 env 单站。只返回 enabled 且有 key 的。"""
+    cfg = await _get_json(r, CONFIG_KEY) or {}
+    relays = [x for x in (cfg.get("relays") or [])
+              if x.get("enabled") and str(x.get("api_key") or "").strip()]
+    relays.sort(key=lambda x: 0 if x.get("role") == "primary" else 1)
+    if relays:
+        return relays
+    if LLM_KEY:
+        return [{"name": "env", "base_url": LLM_BASE, "api_key": LLM_KEY,
+                 "model": LLM_MODEL, "role": "primary", "enabled": True}]
+    return []
+
+
+async def _log_usage(pool, relay: str, model: str, usage: dict, latency_ms: int,
+                     ok: bool, error: str = ""):
+    """逐调用用量落账(0013 llm_usage_log)——每日消费明细数据源。失败只警告。"""
+    if pool is None:
+        return
+    try:
+        await pool.execute(
+            "INSERT INTO llm_usage_log(relay,model,tokens_in,tokens_out,latency_ms,ok,error)"
+            " VALUES($1,$2,$3,$4,$5,$6,$7)",
+            relay, model, int((usage or {}).get("prompt_tokens") or 0),
+            int((usage or {}).get("completion_tokens") or 0), latency_ms, ok, error[:300])
+    except Exception as e:
+        log.warning("usage log failed: %r", e)
+
+
+async def call_llm(cli: httpx.AsyncClient, snapshot: dict, relay: dict, pool=None) -> dict | None:
+    """调 openai 兼容 chat/completions(指定中转站)。失败/坏响应返回 None(由上层降级下一站)。"""
+    base = str(relay.get("base_url") or "").rstrip("/")
+    model = str(relay.get("model") or "")
     body = {
-        "model": LLM_MODEL,
+        "model": model,
         "messages": [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": json.dumps(snapshot, ensure_ascii=False)},
@@ -191,21 +230,29 @@ async def call_llm(cli: httpx.AsyncClient, snapshot: dict) -> dict | None:
         "max_tokens": LLM_MAX_TOKENS,
         "response_format": {"type": "json_object"},
     }
+    t0 = time.time()
     try:
-        resp = await cli.post(f"{LLM_BASE}/chat/completions", json=body,
-                              headers={"Authorization": f"Bearer {LLM_KEY}"})
+        resp = await cli.post(f"{base}/chat/completions", json=body,
+                              headers={"Authorization": f"Bearer {relay.get('api_key')}"})
     except Exception as e:
-        log.warning("llm request failed: %r", e)
+        log.warning("llm request failed relay=%s: %r", relay.get("name"), e)
+        await _log_usage(pool, str(relay.get("name") or ""), model, {},
+                         int((time.time() - t0) * 1000), False, repr(e))
         return None
+    lat = int((time.time() - t0) * 1000)
     if resp.status_code != 200:
-        log.warning("llm http %d: %s", resp.status_code, resp.text[:200])
+        log.warning("llm http %d relay=%s: %s", resp.status_code, relay.get("name"), resp.text[:200])
+        await _log_usage(pool, str(relay.get("name") or ""), model, {}, lat, False,
+                         f"http {resp.status_code}: {resp.text[:200]}")
         return None
     try:
         content = resp.json()["choices"][0]["message"]["content"]
         usage = resp.json().get("usage", {})
     except (KeyError, IndexError, json.JSONDecodeError) as e:
         log.warning("llm response shape bad: %r", e)
+        await _log_usage(pool, str(relay.get("name") or ""), model, {}, lat, False, f"bad shape {e!r}")
         return None
+    await _log_usage(pool, str(relay.get("name") or ""), model, usage, lat, True)
     # content 可能被包在 markdown ```json 里,剥一层
     txt = content.strip()
     if txt.startswith("```"):
@@ -255,41 +302,101 @@ async def main():
         log.warning("pg pool unavailable (journal disabled): %r", e)
     hb = Heartbeat(REDIS_URL, "llm-advisor", interval_sec=min(INTERVAL, 60), ttl_sec=max(INTERVAL * 2, 300))
     asyncio.create_task(hb.run_forever())
-    configured = bool(LLM_KEY)
-    log.info("llm-advisor up interval=%ss model=%s base=%s configured=%s",
-             INTERVAL, LLM_MODEL, LLM_BASE, configured)
-    if not configured:
-        # 降级态:不调 LLM,写一条 unconfigured 状态供面板显示,心跳照常
-        while True:
-            await r.set("dcm:advisor:llm", json.dumps(
-                {"ts": int(time.time()), "status": "unconfigured",
-                 "note": "DCM_LLM_KEY 未配置——填 key 并重启即武装"}, ensure_ascii=False),
-                ex=max(INTERVAL * 3, 3600))
-            hb.extra = {"status": "unconfigured"}
-            await asyncio.sleep(INTERVAL)
+    log.info("llm-advisor up interval=%ss env_model=%s env_base=%s cb=%d次→%ds×2^n",
+             INTERVAL, LLM_MODEL, LLM_BASE, CB_THRESHOLD, CB_BASE_COOLDOWN)
+
+    def _health(relays: list[dict], breaker: dict, now: float) -> dict:
+        """健康字段(testauto /llm-health 口径,随快照一起发)。"""
+        primary = next((x for x in relays if x.get("role") == "primary"), None)
+        backups = [x for x in relays if x.get("role") != "primary"]
+        trips = int(breaker.get("trips") or 0)
+        return {
+            "primary_model": (primary or {}).get("model"),
+            "primary_relay": (primary or {}).get("name"),
+            "fallback_model": backups[0].get("model") if backups else None,
+            "circuit_open": now < float(breaker.get("open_until") or 0),
+            "open_until": breaker.get("open_until"),
+            "recent_failures": int(breaker.get("fails") or 0),
+            "failure_threshold": CB_THRESHOLD,
+            "consecutive_trips": trips,
+            "current_cooldown_s": min(CB_BASE_COOLDOWN * (2 ** max(0, trips - 1)), CB_MAX_COOLDOWN),
+        }
 
     async with httpx.AsyncClient(timeout=LLM_TIMEOUT) as cli:
         while True:
             t0 = time.time()
             try:
+                relays = await load_relays(r)
+                breaker = await _get_json(r, BREAKER_KEY) or {}
+                if not relays:
+                    await r.set("dcm:advisor:llm", json.dumps(
+                        {"ts": int(time.time()), "status": "unconfigured",
+                         "note": "无可用中转站——mixadmin /mix/llm 中转站管理里添加,或配 DCM_LLM_KEY",
+                         **_health([], breaker, time.time())}, ensure_ascii=False),
+                        ex=max(INTERVAL * 3, 3600))
+                    hb.extra = {"status": "unconfigured"}
+                    await asyncio.sleep(INTERVAL)
+                    continue
+                if time.time() < float(breaker.get("open_until") or 0):
+                    # 熔断中:不调用,保留上轮建议,只刷健康态(手动恢复=mix DEL breaker 键)
+                    prev = await _get_json(r, "dcm:advisor:llm") or {}
+                    prev.update({"status": "circuit_open", "ts": int(time.time()),
+                                 **_health(relays, breaker, time.time())})
+                    await r.set("dcm:advisor:llm", json.dumps(prev, ensure_ascii=False),
+                                ex=max(INTERVAL * 3, 3600))
+                    hb.extra = {"status": "circuit_open"}
+                    log.warning("circuit open until %s, skipping round", breaker.get("open_until"))
+                    await asyncio.sleep(INTERVAL)
+                    continue
+
                 snap = await build_snapshot(r)
-                result = await call_llm(cli, snap)
+                result, used = None, None
+                for relay in relays:   # 主站在前,失败逐站降级(testauto 主从自动切换)
+                    result = await call_llm(cli, snap, relay, pool)
+                    if result is not None:
+                        used = relay
+                        break
                 if result is not None:
+                    if float(breaker.get("open_until") or 0) or breaker.get("fails") or breaker.get("trips"):
+                        await r.delete(BREAKER_KEY)   # 成功即完全复位
+                        breaker = {}
                     usage = result.pop("_usage", {})
-                    out = {"ts": int(time.time()), "status": "ok", "model": LLM_MODEL,
+                    out = {"ts": int(time.time()), "status": "ok",
+                           "model": used.get("model"), "relay": used.get("name"),
+                           "degraded": bool(used.get("role") != "primary"),
                            "latency_ms": int((time.time() - t0) * 1000),
-                           "snapshot_ts": snap["ts"], "usage": usage, **result}
+                           "snapshot_ts": snap["ts"], "usage": usage,
+                           **_health(relays, breaker, time.time()), **result}
                     await r.set("dcm:advisor:llm", json.dumps(out, ensure_ascii=False),
                                 ex=max(INTERVAL * 3, 3600))
-                    hb.extra = {"status": "ok", "recs": len(result.get("recommendations", [])),
+                    hb.extra = {"status": "ok", "model": used.get("model"),
+                                "recs": len(result.get("recommendations", [])),
                                 "tokens": usage.get("total_tokens")}
-                    log.info("LLM_OK recs=%d latency=%dms tokens=%s",
+                    log.info("LLM_OK relay=%s model=%s recs=%d latency=%dms tokens=%s%s",
+                             used.get("name"), used.get("model"),
                              len(result.get("recommendations", [])),
-                             out["latency_ms"], usage.get("total_tokens"))
+                             out["latency_ms"], usage.get("total_tokens"),
+                             " (降级备用站)" if out["degraded"] else "")
                     await _journal(pool, out)
                 else:
+                    # 整轮全站失败 → 熔断计数(阈值触发冷却,指数退避)
+                    fails = int(breaker.get("fails") or 0) + 1
+                    trips = int(breaker.get("trips") or 0)
+                    nb = {"fails": fails, "trips": trips, "open_until": 0, "updated": int(time.time())}
+                    if fails >= CB_THRESHOLD:
+                        cooldown = min(CB_BASE_COOLDOWN * (2 ** trips), CB_MAX_COOLDOWN)
+                        nb = {"fails": 0, "trips": trips + 1,
+                              "open_until": time.time() + cooldown, "updated": int(time.time())}
+                        log.warning("circuit TRIPPED (%d连败) cooldown=%ds trips=%d",
+                                    fails, cooldown, trips + 1)
+                    await r.set(BREAKER_KEY, json.dumps(nb), ex=86400)
+                    prev = await _get_json(r, "dcm:advisor:llm") or {}
+                    prev.update({"status": "bad_round", "ts": int(time.time()),
+                                 **_health(relays, nb, time.time())})
+                    await r.set("dcm:advisor:llm", json.dumps(prev, ensure_ascii=False),
+                                ex=max(INTERVAL * 3, 3600))
                     hb.extra = {"status": "bad_round"}
-                    log.warning("LLM round produced no valid output (keeping previous)")
+                    log.warning("LLM round produced no valid output on all relays (keeping previous)")
             except Exception:
                 log.exception("llm-advisor round crashed (continuing)")
             await asyncio.sleep(INTERVAL)
