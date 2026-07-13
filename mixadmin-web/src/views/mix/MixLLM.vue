@@ -238,16 +238,26 @@ async function resetCircuit() {
 }
 function openAdd(role) {
   showAdd.value = showAdd.value === role ? null : role
-  Object.assign(nr, { name: '', api_key: '', model: '', base_url: 'https://api.chesspnt.com/v1' })
+  // base_url 默认留空:避免误用 chesspnt 地址建重复站(用户多半在加不同 provider)
+  Object.assign(nr, { name: '', api_key: '', model: '', base_url: '' })
 }
 async function addRelay(role) {
+  // 客户端先校验四字段,缺就明确提示(不再让后端笼统报错或静默)
+  const miss = []
+  if (!String(nr.name || '').trim()) miss.push('名称')
+  if (!String(nr.base_url || '').trim()) miss.push('地址')
+  if (!String(nr.api_key || '').trim()) miss.push('API Key')
+  if (!String(nr.model || '').trim()) miss.push('模型')
+  if (miss.length) { ElMessage.warning('请填写:' + miss.join('、')); return }
   try {
-    const r = await mixApi.system.llmRelayAdd({ ...nr })
-    // 新增默认 role=backup;若加到主账号则移动过去
-    if (role === 'primary' && r?.item?.id) { try { await mixApi.system.llmRelayRole(r.item.id, 'primary') } catch (e) { /* 忽略 */ } }
+    // 一步原子创建并直接落到目标账号(role),不再"先备用再移主站"两步
+    const r = await mixApi.system.llmRelayAdd({ ...nr, role })
+    const newId = r?.item?.id
     ElMessage.success(`已添加到${role === 'primary' ? '主账号' : '备用账号'};热配置已发布`)
-    showAdd.value = null; Object.assign(nr, { name: '', api_key: '', model: '' })
-    loadRelays()
+    showAdd.value = null; Object.assign(nr, { name: '', api_key: '', model: '', base_url: '' })
+    await loadRelays()
+    // 自动展开新地址,确保用户立刻看到它在列表里(消除"添加后无法显示"的困惑)
+    if (newId) expand.value = newId
   } catch (e) { ElMessage.error(e?.detail || e?.error || '添加失败') }
 }
 async function save(rs) {

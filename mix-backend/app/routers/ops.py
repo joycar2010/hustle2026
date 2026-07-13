@@ -199,14 +199,20 @@ async def llm_relay_add(body: dict, op=Depends(require_operator)):
     base = str(body.get("base_url") or "").strip().rstrip("/")
     key = str(body.get("api_key") or "").strip()
     model = str(body.get("model") or "").strip()
-    if not (name and base and key and model):
-        raise HTTPException(400, "name/base_url/api_key/model 必填")
+    # 缺哪个字段就明说哪个(原来只笼统报"必填",前端难定位)
+    missing = [lbl for lbl, v in (("名称", name), ("地址", base), ("API Key", key), ("模型", model)) if not v]
+    if missing:
+        raise HTTPException(400, f"以下字段必填:{'、'.join(missing)}")
+    # 一步原子创建带账号 role(主/备),消除"先建备用再移主站"两步中途失败=行留错账号的窗口
+    role = str(body.get("role") or "backup")
+    if role not in ("primary", "backup"):
+        role = "backup"
     row = await pool.fetchrow(
         "INSERT INTO llm_relays(name,base_url,api_key,model,role,enabled) "
-        "VALUES($1,$2,$3,$4,'backup',TRUE) RETURNING *", name, base, key, model)
+        "VALUES($1,$2,$3,$4,$5,TRUE) RETURNING *", name, base, key, model, role)
     n = await _publish_llm_config(pool)
     await proxy.audit(op["operator"], op["role"], "llm.relay.add", name,
-                      {"base_url": base, "model": model}, f"published {n}")
+                      {"base_url": base, "model": model, "role": role}, f"published {n}")
     return {"ok": True, "item": _relay_row(row)}
 
 
