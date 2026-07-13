@@ -97,7 +97,9 @@ async def _log_usage(relay: str, model: str, usage: dict, latency_ms: int, ok: b
 @router.post("/ai/chat")
 async def ai_chat(body: dict, who=Depends(require_viewer)):
     """运维助手对话:中转站主备降级(与 advisor 同配置源),失败诚实报错不装聋。"""
-    msg = str(body.get("message") or "").strip()[:2000]
+    raw_msg = str(body.get("message") or "").strip()
+    msg = raw_msg[:4000]
+    truncated = len(raw_msg) > 4000
     if not msg:
         return {"reply": "请输入问题。", "conversation_id": body.get("conversation_id")}
     cid = str(body.get("conversation_id") or f"c{int(time.time()*1000)}")
@@ -120,8 +122,10 @@ async def ai_chat(body: dict, who=Depends(require_viewer)):
                  {"role": "system", "content": "实时系统快照:" + json.dumps(ctx, ensure_ascii=False)}]
                 + hist[-_MAX_TURNS:] + [{"role": "user", "content": msg}])
 
+    # 超时预算:前端 aiChat timeout=150s;逐站 55s × 2 站 + 开销必须 < 前端预算,
+    # 否则后端还在等第二站时前端已放弃——傍晚"长文本无回复"事故的根因(2×60s > 65s 旧前端超时)。
     reply, used, last_err = None, None, ""
-    async with httpx.AsyncClient(timeout=60) as cli:
+    async with httpx.AsyncClient(timeout=55) as cli:
         for relay in relays:   # 主站在前,失败逐站降级(与 llm-advisor 同语义)
             base = str(relay.get("base_url") or "").rstrip("/")
             model = str(relay.get("model") or "")
@@ -158,6 +162,8 @@ async def ai_chat(body: dict, who=Depends(require_viewer)):
     hist.append({"role": "user", "content": msg})
     hist.append({"role": "assistant", "content": reply})
     del hist[:-_MAX_TURNS * 2]
+    if truncated:
+        reply += "\n\n(提示:你的输入超过4000字,已截断处理——超长内容建议分段问)"
     return {"reply": reply, "conversation_id": cid,
             "model": used.get("model"), "relay": used.get("name"),
             "degraded": used.get("role") != "primary"}

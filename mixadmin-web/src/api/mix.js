@@ -86,7 +86,8 @@ export const mixApi = {
   channelsGet: () => http.get('/notify/channels'),
   channelsPut: (b) => http.put('/notify/channels', b),
   llmHistory: () => http.get('/system/llm/history'),
-  aiChat: (body) => http.post('/ai/chat', body, { timeout: 65000 }),
+  // 150s > 后端最坏路径(两站×55s+开销)——前端超时必须罩住后端降级链,否则答案生成完前端已放弃
+  aiChat: (body) => http.post('/ai/chat', body, { timeout: 150000 }),
   datasources: () => http.get('/meta/datasources'),
   feishuGet: () => http.get('/me/feishu'),
   feishuBind: (b) => http.post('/me/feishu', b),
