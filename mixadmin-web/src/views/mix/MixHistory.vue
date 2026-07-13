@@ -34,7 +34,7 @@
     <div class="tbl">
       <div class="tr th">
         <span>策略</span><span>币种</span><span>主账户平台</span><span>主账户</span>
-        <span>对冲平台</span><span>对冲账户</span><span class="r">数量</span><span class="r">名义U</span>
+        <span>对冲平台</span><span>对冲账户</span><span class="r">数量</span><span class="r">持仓U</span>
         <span class="r">资金费</span><span class="r">手续费</span><span class="r">返佣</span><span class="r">利润</span>
         <span>终态</span><span>开仓</span><span>平仓</span><span class="r">持仓h</span>
       </div>

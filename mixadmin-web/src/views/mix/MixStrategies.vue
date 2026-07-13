@@ -15,7 +15,7 @@
       </div>
       <div class="metrics">
         <div><em>坑位</em><b>{{ s.slots || '—' }}</b></div>
-        <div><em>名义</em><b>{{ fmt(s.notional) }}</b></div>
+        <div><em>持仓</em><b>{{ fmt(s.notional) }}</b></div>
         <div><em>今日</em><b class="up">+{{ s.pnlToday }}</b></div>
         <div><em>累计</em><b class="up">+{{ fmt(s.pnlTotal) }}</b></div>
         <div><em>E 通过</em><b>{{ s.ePass }}</b></div>

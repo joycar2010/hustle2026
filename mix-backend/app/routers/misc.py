@@ -63,6 +63,12 @@ async def monitor_events(_who=Depends(require_viewer)):
     return await adapters.monitor_events()
 
 
+@router.get("/monitor/advisors-chat")
+async def advisors_chat(_who=Depends(require_viewer)):
+    """AI 决策动态化：分域顾问的最新'发言'（对话气泡形式）。"""
+    return await adapters.advisors_chat()
+
+
 # ---- 黑名单（读=panel 透传；写=coin 命令队列代理，coin 逻辑权威） ----
 @router.get("/blacklist")
 async def blacklist(_who=Depends(require_viewer)):

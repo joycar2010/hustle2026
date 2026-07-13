@@ -38,7 +38,7 @@ SVC_STRATEGY = {
 }
 
 S2_LABELS = ["多腿数量", "空腿数量", "费率差%/d", "下次结费", "净Delta", "距强平%"]
-S1_LABELS = ["现货腿", "永续空", "日化%/d", "名义U", "开仓E bps", "距强平%"]
+S1_LABELS = ["现货腿", "永续空", "日化%/d", "持仓U", "开仓E bps", "距强平%"]
 S3_LABELS = ["现-期", "爆率", "最大可借", "现币", "借币", "借币金额", "风险", "保证金", "净值"]
 
 DASH = {"value": "—", "dim": True}
@@ -189,7 +189,7 @@ async def _s2_rows() -> list[dict]:
                 {"label": "多", "value": f"{vl} {float(fl.get('daily_pct')):.3f}%/d" if fl.get("daily_pct") is not None else vl},
                 {"label": "空", "value": f"{vs} {float(fs.get('daily_pct')):.3f}%/d" if fs.get("daily_pct") is not None else vs, "tone": "accent"},
                 {"label": "差", "value": f"{edge:+.3f}%/d" if edge is not None else "—", "tone": "up" if (edge or 0) > 0 else "down"},
-                {"label": "名义", "value": f"{notion:,.0f}U"},
+                {"label": "持仓", "value": f"{notion:,.0f}U"},
             ],
             "pushStatus": f"结费 {ddl_txt}" if ddl_ms else "—",
             "fundingRateRatio": f"{edge:+.3f}" if edge is not None else "—",
@@ -229,7 +229,7 @@ async def _s1_rows() -> list[dict]:
             "marketParams": [
                 {"label": "资", "value": f"{float(daily):.3f}%/d" if daily is not None else "—", "tone": "accent"},
                 {"label": "时", "value": f"{f.get('interval_h', '—')}h"},
-                {"label": "名义", "value": f"{float(r['notional_usdt']):,.0f}U"},
+                {"label": "持仓", "value": f"{float(r['notional_usdt']):,.0f}U"},
             ],
             "pushStatus": f"结费 {ddl_txt}" if ddl_ms else "—",
             "fundingRateRatio": f"{float(daily):.3f}" if daily is not None else "—",
@@ -751,6 +751,75 @@ async def monitor_events() -> list[dict]:
                         "at": x.get("ts") or x.get("first_seen") or ""})
         else:
             out.append({"type": "上市", "text": str(x), "at": ""})
+    return out
+
+
+async def advisors_chat() -> list[dict]:
+    """AI 决策动态化——分域顾问制,每个顾问的最新'发言'做成对话气泡。
+    数据全真：carry/借贷/折价/LLM 各读自己的总线快照,拿不到就如实'待启用/停更'。"""
+    hb = await heartbeats()
+    hb_map = {h["proc"]: h for h in hb}
+
+    def alive(svc):
+        return bool(hb_map.get(svc, {}).get("ok"))
+
+    out = []
+    # ① carry 组合顾问——说人话，不堆参数
+    carry_e = await ds.hgetall_json("dcm:arb:carry_e")
+    routes = await ds.hgetall_json("dcm:route:assignments")
+    adv_routes = [v for v in routes.values() if isinstance(v, dict)
+                  and str(v.get("actor", "")).startswith("advisor:carry")]
+    top_carry = sorted(
+        ([v.get("sym", k), float(v.get("e_daily_pct", 0))]
+         for k, v in (carry_e or {}).items() if isinstance(v, dict)),
+        key=lambda x: -x[1])[:2]
+    if top_carry:
+        best, be = top_carry[0]
+        base = best.replace("USDT", "")
+        carry_msg = f"我把几个所的费率差都过了一遍，这轮{base}最划算，一天能跑{be:.1f}%左右。"
+        if len(top_carry) > 1:
+            carry_msg += f"{top_carry[1][0].replace('USDT','')}也还行。"
+        carry_msg += f"手上{'铺了' + str(len(adv_routes)) + '对' if adv_routes else '暂时没铺新的'}，coin 那边在管的币我都让着走，不抢。"
+    else:
+        carry_msg = "这会儿几个所的费率差都压得很平，没啥值得下手的，我先按兵不动。"
+    out.append({"key": "carry", "name": "Carry 组合顾问", "avatar": "🦉", "cadence": "每小时看一次",
+                "role": "帮你挑哪个币走双合约、哪个走借币，什么时候该退", "online": alive("carry-advisor"),
+                "text": carry_msg if alive("carry-advisor") else "我先歇会儿（服务停更了），仓位我不动，只帮你盯着别出乱子。"})
+    # ② 借贷增强顾问
+    lending = await ds.get_json("dcm:lending:ranking") or {}
+    lt = (lending.get("top") or [])[:2]
+    if lt:
+        b0 = lt[0]["coin"].replace("USDT", "")
+        e0 = float(lt[0].get("net_daily_pct") or 0)
+        lend_msg = f"借贷这块我最看好{b0}，算上资金费、理财和借币成本，净赚差不多一天{e0:.1f}%。"
+        if len(lt) > 1:
+            lend_msg += f"{lt[1]['coin'].replace('USDT','')}也能捡一点。"
+    else:
+        lend_msg = "借贷榜现在没啥拿得出手的，要么数据旧了，我建议这轮先别进。"
+    out.append({"key": "lending", "name": "借贷增强顾问", "avatar": "🦫", "cadence": "每小时看一次",
+                "role": "盯着借币利率套利的机会", "online": alive("lending-advisor"),
+                "text": lend_msg if alive("lending-advisor") else "我先歇会儿（服务停更了）。"})
+    # ③ 折价分诊分析师
+    events = await monitor_events()
+    if events:
+        e = events[0]
+        ev_msg = f"刚注意到一条动静：{e['type']} {e['text']}。我先记下，够不着策略的话就当预警看。"
+    else:
+        ev_msg = "最近上市下架都挺平静，没什么新花样。"
+    out.append({"key": "discount", "name": "折价分诊分析师", "avatar": "🦊", "cadence": "有事才说话",
+                "role": "盯新币上市和 LST/锚定币折价", "online": alive("event-calendar"),
+                "text": ev_msg + "（折价这套策略还没开，我暂时只帮你放哨。）"})
+    # ④ LLM 评审层
+    llm = await ds.get_json("dcm:advisor:llm") or {}
+    llm_txt = (llm.get("commentary") or "").strip()
+    # 取第一两句人话，去掉纯数字堆砌的尾巴
+    if llm_txt:
+        parts = [p for p in llm_txt.replace("\n", " ").split("。") if p.strip()][:2]
+        llm_txt = "。".join(parts) + ("。" if parts else "")
+    out.append({"key": "llm", "name": "AI 复盘顾问", "avatar": "🤖", "cadence": "十几分钟复盘一次",
+                "role": "只动嘴不动手，帮你复盘和挑刺", "online": alive("llm-advisor"),
+                "text": (llm_txt[:200] if llm_txt else "这轮看下来没发现异常，一切正常。") if alive("llm-advisor")
+                else "我这边还没接上（缺配置），交易不受影响，就是暂时少个人帮你复盘。"})
     return out
 
 

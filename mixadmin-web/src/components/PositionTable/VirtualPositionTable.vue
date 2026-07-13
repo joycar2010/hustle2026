@@ -309,7 +309,7 @@ $t1: #EAECEF; $t2: #848E9C; $t3: #5E6673; $gold: #F0B90B;
     &.sub { background: rgba(132,142,156,.15); color: $t2; } } }
 .sbadge { width: 44px; text-align: center; padding: 1px 0; border-radius: 4px; font-size: 9px; font-weight: 800;
   &.dimb { background: $card2; color: $t3; font-weight: 500; } }
-.phase { width: 56px; color: $t2; font-size: 10px; }
+.phase { width: 92px; flex: none; color: $t2; font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cell { flex: 1; min-width: 62px; text-align: right; white-space: nowrap; overflow: hidden;
   &.lbl { color: $t3; font-size: 10px; font-weight: 500; }
   &.val { font-size: 11.5px; font-weight: 600; } }

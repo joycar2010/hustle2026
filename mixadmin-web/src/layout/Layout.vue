@@ -112,20 +112,43 @@
       <div class="page"><router-view v-slot="{Component}"><keep-alive><component :is="Component"/></keep-alive></router-view></div>
     </div>
 
-    <!-- AI 运维助手悬浮球(site=qhadmin, 接 qh 后端 LLM, 数据隔离) -->
-    <div class="ai-fab" @click="aiToggle" title="AI 运维助手" v-if="authed"><el-icon><Service/></el-icon></div>
+    <!-- AI 悬浮球（运维助手 + AI 顾问播报;新发言未读红点） -->
+    <div class="ai-fab" @click="aiToggle" title="AI 助手 / 顾问播报" v-if="authed">
+      <el-icon><Service/></el-icon>
+      <i v-if="advUnread && !aiOpen" class="fab-badge">{{ advUnread }}</i>
+    </div>
     <div class="ai-panel" v-if="aiOpen">
-      <div class="ai-hd"><span><el-icon><Service/></el-icon> AI 运维助手</span>
+      <div class="ai-hd">
+        <span class="ai-tabs">
+          <b :class="{on:aiTab==='chat'}" @click="aiTab='chat'"><el-icon><Service/></el-icon> 运维助手</b>
+          <b :class="{on:aiTab==='adv'}" @click="aiTab='adv'; advUnread=0">💬 顾问播报<i v-if="advUnread" class="tabdot">{{ advUnread }}</i></b>
+        </span>
         <span class="ai-hd-acts">
-          <span class="ai-cnt" v-if="aiMsgs.length">{{aiMsgs.length}} 条</span>
-          <el-icon class="x" @click="aiClear" title="清空对话"><Delete/></el-icon>
+          <el-icon class="x" :class="{muted:advDnd}" @click="toggleDnd" :title="advDnd?'免打扰已开(点击关闭)':'开启免打扰'"><MuteNotification v-if="advDnd"/><Bell v-else/></el-icon>
+          <el-icon class="x" @click="aiTab==='chat'?aiClear():null" v-if="aiTab==='chat'" title="清空对话"><Delete/></el-icon>
           <el-icon class="x" @click="aiToggle" title="关闭"><Close/></el-icon>
-        </span></div>
-      <div class="ai-body" ref="aiBodyEl">
+        </span>
+      </div>
+      <!-- 运维助手对话 -->
+      <div v-show="aiTab==='chat'" class="ai-body" ref="aiBodyEl">
         <div v-if="!aiMsgs.length" class="ai-empty">您好！我是 HustleCoin Mix 运维助手，可解答管理后台功能用法与系统监控口径。</div>
         <div v-for="(m,i) in aiMsgs" :key="m.id||i" :class="'ab '+m.who">{{m.txt}}<span class="ai-del" @click="aiDel(m.id)" title="删除">×</span></div>
       </div>
-      <div class="ai-foot">
+      <!-- AI 顾问播报（分域顾问最新发言） -->
+      <div v-show="aiTab==='adv'" class="ai-body adv">
+        <div v-if="!advisors.length" class="ai-empty">顾问播报加载中…</div>
+        <div v-for="a in advisors" :key="a.key" class="adv-msg" :class="{off:!a.online}">
+          <div class="adv-avatar">{{ a.avatar }}</div>
+          <div class="adv-bubble">
+            <div class="adv-top"><b>{{ a.name }}</b><span class="adv-cad">{{ a.cadence }}</span>
+              <i class="adv-dot" :class="{bad:!a.online}"></i></div>
+            <div class="adv-role">{{ a.role }}</div>
+            <div class="adv-text">{{ a.text }}</div>
+          </div>
+        </div>
+        <div class="adv-foot">播报每 30s 刷新 · {{ advDnd ? '免打扰已开(不自动弹屏)' : '有新发言自动弹屏' }}</div>
+      </div>
+      <div v-show="aiTab==='chat'" class="ai-foot">
         <el-input v-model="aiIn" size="small" placeholder="问运维/功能用法…" @keyup.enter="aiSend" autocomplete="off"/>
         <el-button size="small" type="primary" :loading="aiBusy" @click="aiSend">发送</el-button>
       </div>
@@ -288,7 +311,26 @@ const aiMsgs=ref((()=>{ try{ return JSON.parse(localStorage.getItem('qha_history
 try{ aiConvId.value=localStorage.getItem('qha_conv_id')||null }catch(e){}
 function aiSave(){ try{ localStorage.setItem('qha_history', JSON.stringify(aiMsgs.value.slice(-200))); if(aiConvId.value)localStorage.setItem('qha_conv_id',aiConvId.value) }catch(e){} }
 function aiId(){ return 'm'+Date.now()+Math.random().toString(36).slice(2,5) }
-function aiToggle(){ aiOpen.value=!aiOpen.value }
+const aiTab=ref('chat')
+function aiToggle(){ aiOpen.value=!aiOpen.value; if(aiOpen.value && aiTab.value==='adv') advUnread.value=0 }
+// AI 顾问播报（分域顾问最新发言;有新发言自动弹屏,可免打扰）
+const advisors=ref([]), advUnread=ref(0)
+const advDnd=ref(localStorage.getItem('mix_adv_dnd')==='1')
+let advSig=''
+function toggleDnd(){ advDnd.value=!advDnd.value; localStorage.setItem('mix_adv_dnd', advDnd.value?'1':'0'); ElMessage.info(advDnd.value?'顾问播报免打扰已开':'免打扰已关，有新发言会自动弹屏') }
+async function loadAdvisors(){
+  try{
+    const list=await mixApi.monitor.advisorsChat()
+    const sig=list.map(a=>a.key+':'+a.text).join('|')
+    const changed = advSig && sig!==advSig   // 首次加载不算新发言,不弹屏
+    advisors.value=list
+    if(changed){
+      if(!aiOpen.value || aiTab.value!=='adv') advUnread.value=Math.min(9,advUnread.value+1)
+      if(!advDnd.value && !aiOpen.value){ aiOpen.value=true; aiTab.value='adv'; advUnread.value=0 }  // 自动弹屏
+    }
+    advSig=sig
+  }catch(e){ /* 降级 */ }
+}
 function aiDel(id){ aiMsgs.value=aiMsgs.value.filter(m=>m.id!==id); aiSave() }
 function aiClear(){ if(!aiMsgs.value.length)return; if(!confirm('确定清空所有对话记录？此操作不可撤销。'))return; aiMsgs.value=[]; aiConvId.value=null; try{localStorage.removeItem('qha_conv_id')}catch(e){}; aiSave() }
 async function aiSend(){
@@ -301,20 +343,38 @@ async function aiSend(){
   }catch(e){ aiMsgs.value.push({id:aiId(),who:'ai',txt:'AI 服务调用失败: '+(e?.response?.data?.detail||'请稍后重试')}); aiSave() }
   finally{ aiBusy.value=false; await nextTick(()=>{ if(aiBodyEl.value)aiBodyEl.value.scrollTop=aiBodyEl.value.scrollHeight }) }
 }
-onMounted(()=>{ setInterval(()=>{ clock.value=new Date().toTimeString().slice(0,8) },1000); restoreOp(); loadBrand(); startMarquee() })
+onMounted(()=>{ setInterval(()=>{ clock.value=new Date().toTimeString().slice(0,8) },1000); restoreOp(); loadBrand(); startMarquee(); loadAdvisors(); setInterval(loadAdvisors, 30000) })
 </script>
 <style scoped>
 .ai-fab{position:fixed;right:24px;bottom:24px;width:52px;height:52px;border-radius:50%;background:var(--el-color-primary);color:#fff;
   display:flex;align-items:center;justify-content:center;cursor:pointer;z-index:2000;box-shadow:0 6px 20px rgba(8,17,58,.3);font-size:22px}
 .ai-fab:hover{filter:brightness(1.1)}
-.ai-panel{position:fixed;right:24px;bottom:88px;width:340px;height:480px;background:var(--el-bg-color);border:1px solid var(--el-border-color);
+.ai-fab .fab-badge{position:absolute;top:-2px;right:-2px;min-width:18px;height:18px;border-radius:9px;background:#F6465D;color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;padding:0 4px;box-shadow:0 0 0 2px var(--el-bg-color)}
+.ai-panel{position:fixed;right:24px;bottom:88px;width:360px;height:500px;background:var(--el-bg-color);border:1px solid var(--el-border-color);
   border-radius:14px;z-index:2001;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 12px 40px rgba(8,17,58,.28)}
-.ai-hd{background:var(--el-color-primary);color:#fff;padding:12px 14px;font-weight:700;font-size:14px;display:flex;align-items:center;justify-content:space-between;gap:6px}
-.ai-hd span{display:flex;align-items:center;gap:6px}
-.ai-hd .ai-hd-acts{gap:10px}
-.ai-hd .ai-cnt{font-size:10px;opacity:.75;font-weight:400}
+.ai-hd{background:var(--el-color-primary);color:#0B0E11;padding:10px 12px;font-weight:700;font-size:14px;display:flex;align-items:center;justify-content:space-between;gap:6px}
+.ai-hd .ai-tabs{display:flex;gap:4px}
+.ai-hd .ai-tabs b{display:inline-flex;align-items:center;gap:4px;font-size:12.5px;font-weight:600;opacity:.6;cursor:pointer;padding:3px 8px;border-radius:7px}
+.ai-hd .ai-tabs b.on{opacity:1;background:rgba(0,0,0,.14)}
+.ai-hd .ai-tabs .tabdot{font-style:normal;background:#F6465D;color:#fff;font-size:9px;border-radius:8px;padding:0 4px;min-width:14px;text-align:center}
+.ai-hd .ai-hd-acts{display:flex;gap:8px;align-items:center}
 .ai-hd .x{cursor:pointer;opacity:.85}
 .ai-hd .x:hover{opacity:1}
+.ai-hd .x.muted{color:#F6465D}
+/* 顾问播报气泡 */
+.ai-body.adv{padding:10px}
+.adv-msg{display:flex;gap:8px;margin-bottom:12px;align-items:flex-start}
+.adv-msg.off{opacity:.55}
+.adv-avatar{width:34px;height:34px;border-radius:50%;background:var(--el-fill-color);display:flex;align-items:center;justify-content:center;font-size:19px;flex:none;box-shadow:0 0 0 1px var(--el-border-color)}
+.adv-bubble{flex:1;min-width:0;background:var(--el-bg-color);border:1px solid var(--el-border-color-lighter);border-radius:10px;border-top-left-radius:2px;padding:7px 10px}
+.adv-top{display:flex;align-items:center;gap:6px}
+.adv-top b{font-size:12.5px;color:var(--el-text-color-primary)}
+.adv-top .adv-cad{font-size:10px;color:var(--el-text-color-placeholder)}
+.adv-top .adv-dot{width:6px;height:6px;border-radius:50%;background:#0ECB81;margin-left:auto}
+.adv-top .adv-dot.bad{background:#F6465D}
+.adv-role{font-size:10.5px;color:var(--el-text-color-placeholder);margin:1px 0 4px}
+.adv-text{font-size:12.5px;line-height:1.55;color:var(--el-text-color-regular);word-break:break-word}
+.adv-foot{text-align:center;font-size:10px;color:var(--el-text-color-placeholder);padding:4px 0}
 .ai-body{flex:1;overflow-y:auto;padding:12px;background:var(--el-fill-color-lighter);font-size:13px}
 .ai-body .ai-empty{text-align:center;color:var(--el-text-color-secondary);font-size:12px;padding:26px 10px}
 .ai-body .ab{position:relative;max-width:86%;padding:8px 11px;border-radius:9px;margin:6px 0;line-height:1.5;white-space:pre-wrap;word-break:break-word}

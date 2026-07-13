@@ -133,6 +133,10 @@ async function loadAux() {
     watermarks.value = await mixApi.monitor.watermarks()
   } catch (e) { /* 辅助区降级不阻断主表 */ }
 }
+// 水位秒级：单独高频轮询（后端读缓存快照,轻量）
+async function loadWater() {
+  try { watermarks.value = await mixApi.monitor.watermarks() } catch (e) { /* 降级 */ }
+}
 function setStrategy(code) { filterStrategy.value = code; load() }
 function flipDir() { sortDir.value = sortDir.value === 'asc' ? 'desc' : 'asc'; load() }
 
@@ -174,17 +178,33 @@ async function switchMode(s, mode) {
 
 let wsDisconnect = null
 let auxTimer = null
+let waterTimer = null
 
 onMounted(async () => {
   enums.value = await mixApi.enums()
   await load()
   loadAux()
   auxTimer = setInterval(loadAux, 15000)
+  waterTimer = setInterval(loadWater, 3000)   // 水位秒级(后端读8s快照,前端3s取最新)
+  // 坑位表毫秒级：直接用 Rust WS hub 中继的全量行换表（不再走 REST 回环）
   wsDisconnect = connectStream((msg) => {
-    if (msg.channel === 'position:updates') load()
+    if (msg.channel !== 'position:updates') return
+    if (Array.isArray(msg.rows) && msg.rows.length && typeof msg.rows[0] === 'object' && msg.rows[0].symbol) {
+      // 帧内是全量行：按当前策略过滤+排序客户端应用（毫秒级,无网络往返）
+      let rs = msg.rows
+      if (filterStrategy.value) rs = rs.filter(r => r.strategyCode === filterStrategy.value)
+      rs = [...rs].sort((a, b) => {
+        const d = sortDir.value === 'asc' ? 1 : -1
+        if (sortKey.value === 'pnl') return ((a.pnl ?? -Infinity) - (b.pnl ?? -Infinity)) * d
+        return (String(a.openedAt || '') > String(b.openedAt || '') ? 1 : -1) * d
+      })
+      rows.value = rs
+    } else {
+      load()  // 老式摘要帧兜底
+    }
   })
 })
-onUnmounted(() => { wsDisconnect && wsDisconnect(); auxTimer && clearInterval(auxTimer) })
+onUnmounted(() => { wsDisconnect && wsDisconnect(); auxTimer && clearInterval(auxTimer); waterTimer && clearInterval(waterTimer) })
 </script>
 
 <style scoped lang="scss">

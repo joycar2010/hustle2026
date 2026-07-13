@@ -26,24 +26,32 @@ FRAMES_CHANNEL = "mix:ws:frames"  # mix-backend 预打包帧 → Rust hub 透传
 
 
 async def position_frames_publisher():
-    """常驻后台任务（API 进程@8200）：坑位摘要变更 → PUBLISH 预打包帧。
-    Rust hub(mix-ws-hub@8201) 订阅 mix:ws:frames 纯中继——hub 不算业务，业务留在单一来源。"""
-    last = None
+    """常驻后台任务（API 进程@8200）：坑位全量行 → PUBLISH 预打包帧（1.5s 近实时）。
+    Rust hub(mix-ws-hub@8201) 订阅 mix:ws:frames 毫秒级中继——前端直接用帧内 rows 换表,
+    不再走 REST 回环（毫秒级坑位刷新;hub 不算业务,业务留单一来源）。
+    读缓存 3s TTL 会拖慢刷新,故本任务绕缓存现算（_no_cache）。"""
+    last_sig = None
     while True:
         try:
             r = ds.rds()
             if r is not None:
+                ds._cache.clear()   # 绕 3s 读缓存,取最新行情/快照
                 rows = await adapters.position_rows(None)
-                digest = [{"id": x["id"], "phase": x["phase"], "pnl": x.get("pnl")} for x in rows]
-                if digest != last:
+                # 变更签名：任何价/费/pnl/相位变动即推（价格几乎每帧变=近实时推）
+                sig = json.dumps([[x["id"], x.get("pnl"), x.get("fundingRateRatio"),
+                                   [(sr.get("venue"), sr.get("fundingRateRatio"),
+                                     (sr.get("values") or [{}])[-1].get("value"))
+                                    for sr in (x.get("subRows") or [])]]
+                                  for x in rows], default=str, ensure_ascii=False)
+                if sig != last_sig:
                     await r.publish(FRAMES_CHANNEL, json.dumps(
-                        {"channel": "position:updates", "rows": digest,
-                         "count": len(digest), "ts": int(time.time())},
+                        {"channel": "position:updates", "rows": rows,
+                         "count": len(rows), "ts": int(time.time() * 1000)},
                         ensure_ascii=False, default=str))
-                    last = digest
+                    last_sig = sig
         except Exception as e:  # noqa: BLE001
             log.warning("frames publisher: %s", e)
-        await asyncio.sleep(10)
+        await asyncio.sleep(1.5)
 
 
 def _try_json(raw):

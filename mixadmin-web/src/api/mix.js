@@ -56,6 +56,7 @@ export const mixApi = {
     borrowables: () => http.get('/monitor/borrowables'),
     overview: () => http.get('/monitor/overview'),
     events: () => http.get('/monitor/events'),
+    advisorsChat: () => http.get('/monitor/advisors-chat'),
   },
 
   blacklist: () => http.get('/blacklist'),
