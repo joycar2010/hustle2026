@@ -186,7 +186,9 @@ async def _bitget(cli, cfg, since_ms) -> list[IncomeRec]:
             itype = "FUNDING"
         elif "fee" in bt:
             itype = "FEE"
-        elif "pnl" in bt or "close" in bt:
+        # bitget v2 成交账单 businessType 实测为 buy/sell(开腿 amount=0,平腿 amount=已实现盈亏)——
+        # 此前落 OTHER 被 net 口径排除,对冲对里 bitget 腿盈亏隐身(EVAA -28.19 假盈利事故 2026-07-13)
+        elif "pnl" in bt or "close" in bt or bt in ("buy", "sell") or "open" in bt:
             itype = "PNL"
         elif "trans" in bt:
             itype = "TRANSFER"

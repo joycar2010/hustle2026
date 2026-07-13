@@ -50,6 +50,12 @@ ARB_FLAT_COST_DAILY_PCT = float(os.environ.get("DCM_ARB_FLAT_COST_DAILY_PCT", "0
 # PARTI 40min 开了又关的学费)。无仓路由照旧即时 off(shadow 翻路由零成本)。
 EXIT_STRIKES_N = int(os.environ.get("DCM_ADV_EXIT_STRIKES", "3"))
 STRIKES_KEY = "dcm:adv:exit_strikes"
+# 实收降权(P1,2026-07-13):pnl-recorder 逐仓归因(dualperp_carry_recon)发现某币
+# 连续 N 仓实收 net(资金费+盈亏+费)<0 → 冷却期内该币不入候选(有仓在场的不动,只拦新开)。
+# 榜面 edge 是预期,实收才是真相——连败=该币执行摩擦/资金费兑现系统性劣于预期。
+NEG_STRIKES_KEY = "dcm:carry:neg_strikes"
+REALIZED_NEG_N = int(os.environ.get("DCM_ADV_REALIZED_NEG_STRIKES", "2"))
+REALIZED_COOLDOWN_H = float(os.environ.get("DCM_ADV_REALIZED_COOLDOWN_H", "24"))
 
 
 async def load_funding(r: aioredis.Redis) -> dict[str, dict[str, dict]]:
@@ -159,11 +165,32 @@ async def advisor_round(r: aioredis.Redis, cli: httpx.AsyncClient) -> dict:
     # 胜出的币让给借币引擎——路由互斥从"先到先得"升级为"期望值裁决"。
     coin_bids = arb_contract.parse_bids(await r.hgetall(arb_contract.KEY_COIN_E))
 
-    # 候选:edge 达标 + 两腿 L1 新鲜 + 非 coin 已持有(跨引擎互斥)
+    # 实收连败降权名单(pnl-recorder 维护;有真金仓在场的币不拦——只拦新开,存量按退出滞回走)
+    neg_block: set[str] = set()
+    try:
+        now0 = time.time()
+        for sym, raw in (await r.hgetall(NEG_STRIKES_KEY) or {}).items():
+            try:
+                d = json.loads(raw)
+                import datetime as _dt
+                last = _dt.datetime.fromisoformat(d.get("last_close")).timestamp()
+                if (int(d.get("strikes", 0)) >= REALIZED_NEG_N
+                        and now0 - last < REALIZED_COOLDOWN_H * 3600
+                        and sym not in open_pos):
+                    neg_block.add(sym)
+            except Exception:  # noqa: BLE001
+                continue
+        if neg_block:
+            log.info("REALIZED_NEG block=%s (连续%d仓实收<0,冷却%.0fh)",
+                     sorted(neg_block), REALIZED_NEG_N, REALIZED_COOLDOWN_H)
+    except Exception:  # noqa: BLE001
+        pass  # 降权名单读失败不阻断铺路(fail-open:少一层过滤,不误杀)
+
+    # 候选:edge 达标 + 两腿 L1 新鲜 + 非 coin 已持有(跨引擎互斥) + 非实收连败冷却
     candidates: list[dict] = []
     yielded: list[dict] = []
     for sym, per_venue in funding.items():
-        if sym in coin_held:
+        if sym in coin_held or sym in neg_block:
             continue
         bp = best_pair(per_venue)
         if bp is None or bp[2] < MIN_EDGE:

@@ -92,6 +92,79 @@ async def equity_snapshot(r, pool):
                                v, float(d.get("equity_usdt") or 0))
 
 
+RECON_LOOKBACK_H = int(os.environ.get("DCM_RECON_LOOKBACK_HOURS", "72"))
+RECON_SETTLE_H = float(os.environ.get("DCM_RECON_SETTLE_HOURS", "3"))   # 平仓后账单结算窗(bybit walker 滞后)
+NEG_STRIKES_KEY = "dcm:carry:neg_strikes"
+
+
+async def carry_recon(r, pool):
+    """P1 逐仓 carry 归因对账:已平 dualperp 仓 → income_records 窗口归因(双腿 venue×symbol),
+    拆 funding/pnl/fee/net 落 dualperp_carry_recon;并维护 Redis 连败计数(advisor 降权用)。
+    窗口按同币下一仓开仓时间截断,防 GWEI 式高频重开的跨仓串账。
+    预期侧:advisor 只路由正 edge,故 net<0 即『实收违约』——无需持久化开仓时 E 值也可判定。"""
+    rows = await pool.fetch("""
+        SELECT p.id, p.symbol, p.venue_long, p.venue_short, p.notional_usdt,
+               p.opened_at, p.closed_at, p.open_gap_bps,
+               LEAD(p.opened_at) OVER (PARTITION BY p.symbol ORDER BY p.opened_at) AS next_open
+        FROM dualperp_positions p
+        WHERE p.closed_at IS NOT NULL AND p.closed_at > now() - ($1 || ' hours')::interval
+        ORDER BY p.closed_at""", str(RECON_LOOKBACK_H))
+    done = {x["position_id"]: True for x in await pool.fetch(
+        "SELECT position_id FROM dualperp_carry_recon WHERE complete")}
+    upserts = 0
+    for p in rows:
+        if done.get(p["id"]):
+            continue   # 已定案不重算(历史标签时间局部性)
+        bills = await pool.fetch("""
+            SELECT itype, coalesce(sum(amount),0) AS amt, count(*) AS n FROM income_records
+            WHERE symbol=$1 AND venue = ANY($2::text[])
+              AND ts >= $3::timestamptz - interval '5 minutes'
+              AND ts <= LEAST($4::timestamptz + interval '35 minutes',
+                              COALESCE($5::timestamptz, now()), now())
+            GROUP BY itype""",
+            p["symbol"], [p["venue_long"], p["venue_short"]],
+            p["opened_at"], p["closed_at"], p["next_open"])
+        agg = {b["itype"]: float(b["amt"]) for b in bills}
+        n = sum(int(b["n"]) for b in bills)
+        funding, pnl, fee = agg.get("FUNDING", 0.0), agg.get("PNL", 0.0), agg.get("FEE", 0.0)
+        net = round(funding + pnl + fee, 6)
+        hold_h = (p["closed_at"] - p["opened_at"]).total_seconds() / 3600.0
+        complete = (time.time() - p["closed_at"].timestamp()) > RECON_SETTLE_H * 3600
+        await pool.execute("""
+            INSERT INTO dualperp_carry_recon(position_id,symbol,venue_long,venue_short,notional_usdt,
+                opened_at,closed_at,hold_hours,open_gap_bps,funding_usdt,pnl_usdt,fee_usdt,net_usdt,
+                bills_n,complete,updated_at)
+            VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,now())
+            ON CONFLICT (position_id) DO UPDATE SET
+                funding_usdt=$10, pnl_usdt=$11, fee_usdt=$12, net_usdt=$13,
+                bills_n=$14, complete=$15, updated_at=now()""",
+            p["id"], p["symbol"], p["venue_long"], p["venue_short"], float(p["notional_usdt"]),
+            p["opened_at"], p["closed_at"], round(hold_h, 3),
+            float(p["open_gap_bps"]) if p["open_gap_bps"] is not None else None,
+            round(funding, 6), round(pnl, 6), round(fee, 6), net, n, complete)
+        upserts += 1
+    # 连败计数(只采信 complete 行,最近一仓往回数连续 net<0)
+    strikes = {}
+    for row in await pool.fetch("""
+        SELECT symbol, net_usdt, closed_at,
+               ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY closed_at DESC) rn
+        FROM dualperp_carry_recon WHERE complete ORDER BY symbol, closed_at DESC"""):
+        s = strikes.setdefault(row["symbol"], {"strikes": 0, "stopped": False,
+                                               "last_close": row["closed_at"].isoformat()})
+        if not s["stopped"]:
+            if float(row["net_usdt"]) < 0:
+                s["strikes"] += 1
+            else:
+                s["stopped"] = True
+    if strikes:
+        await r.delete(NEG_STRIKES_KEY)
+        payload = {sym: json.dumps({"strikes": v["strikes"], "last_close": v["last_close"]})
+                   for sym, v in strikes.items() if v["strikes"] > 0}
+        if payload:
+            await r.hset(NEG_STRIKES_KEY, mapping=payload)
+    return upserts
+
+
 async def summary(pool) -> dict:
     rows = await pool.fetch(
         "SELECT itype, round(sum(amount),4) AS total, "
@@ -123,13 +196,19 @@ async def main():
             if time.time() - last_snap > 3600:
                 await equity_snapshot(r, pool)
                 last_snap = time.time()
+            try:
+                rec_n = await carry_recon(r, pool)   # P1 逐仓归因(失败不阻断入账主流程)
+            except Exception:
+                rec_n = -1
+                log.exception("carry recon failed (continuing)")
             s = await summary(pool)
             await r.set("dcm:pnl:summary", json.dumps(s, ensure_ascii=False), ex=INTERVAL * 3)
             await r.set("dcm:hb:pnl-recorder", json.dumps(
                 {"service": "pnl-recorder", "ts": int(time.time()), "pid": os.getpid(),
                  "pulled": stats, "net_total": s["net_total"]}, ensure_ascii=False),
                 ex=max(INTERVAL * 3, 900))
-            log.info("PNL_OK pulled=%s net_total=%s net_today=%s", stats, s["net_total"], s["net_today"])
+            log.info("PNL_OK pulled=%s net_total=%s net_today=%s recon=%s",
+                     stats, s["net_total"], s["net_today"], rec_n)
         except Exception:
             log.exception("pnl round crashed (continuing)")
         await asyncio.sleep(INTERVAL)
