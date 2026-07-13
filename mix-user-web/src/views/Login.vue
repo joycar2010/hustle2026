@@ -1,11 +1,11 @@
 <template>
   <div class="min-h-screen bg-dark-200 flex flex-col items-center justify-center px-4 py-8">
     <div class="w-full max-w-sm">
-      <!-- Logo -->
+      <!-- Logo（CMS 区块 user_login 可配,留空=站点默认） -->
       <div class="text-center mb-8">
-        <img src="/logo.png?v=xau1" alt="HustleCoin Mix" class="w-14 h-14 mb-3 mx-auto object-contain" />
-        <h1 class="text-xl font-bold">HustleCoin Mix</h1>
-        <p class="text-sm text-text-tertiary mt-1">实时收益查看平台</p>
+        <img :src="cms.logo || '/logo.png?v=xau1'" :alt="cms.title || 'HustleCoin Mix'" class="w-14 h-14 mb-3 mx-auto object-contain" />
+        <h1 class="text-xl font-bold">{{ cms.title || 'HustleCoin Mix' }}</h1>
+        <p class="text-sm text-text-tertiary mt-1">{{ cms.subtitle || '实时收益查看平台' }}</p>
       </div>
 
       <div v-if="errMsg" class="mb-4 p-3 bg-red-900/30 border border-red-700 rounded-xl text-sm text-red-300 text-center">{{ errMsg }}</div>
@@ -43,17 +43,18 @@
         </form>
       </div>
 
-      <div class="mt-6 text-center space-y-2">
-        <a href="https://go.hustle2026.xyz" class="block text-sm text-text-tertiary hover:text-primary transition-colors">→ 交易操作面板</a>
+      <div class="mt-6 text-center space-y-2" v-if="footLink">
+        <a :href="footLink" class="block text-sm text-text-tertiary hover:text-primary transition-colors">{{ cms.footText || '→ 交易操作面板' }}</a>
       </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth.js'
+import { mixApi } from '@/services/mixApi.js'
 
 const router = useRouter()
 const auth = useAuthStore()
@@ -61,6 +62,12 @@ const form = ref({ username: '', password: '' })
 const loading = ref(false)
 const errMsg = ref('')
 const showPwd = ref(false)
+// CMS 区块(官网管理→用户端·登录框);拉不到=默认文案,登录不受影响
+const cms = ref({})
+const footLink = computed(() => (cms.value.footLink !== undefined && cms.value.footLink !== null && String(cms.value.footLink).trim() === '' ? '' : (cms.value.footLink || 'https://go.hustle2026.xyz')))
+onMounted(async () => {
+  try { cms.value = ((await mixApi.siteConfig()).blocks || {}).user_login || {} } catch (e) { /* 默认 */ }
+})
 
 async function handleLogin() {
   errMsg.value = ''

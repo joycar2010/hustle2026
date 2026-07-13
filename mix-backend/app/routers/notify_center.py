@@ -345,6 +345,72 @@ async def personas_del(pid: int, op=Depends(require_operator)):
     return {"deleted": True}
 
 
+# ---------------- edge-tts 真人声合成（甜妹/御姐等神经音;QH 方案落地 Mix） ----------------
+# 缓存键=(voice,rate,pitch,text) 哈希,重复文本零成本;edge-tts 缺席/失败时 5xx,前端回落浏览器 TTS。
+TTS_DIR = "/data/mix/tts_cache"
+_TTS_FALLBACK_VOICE = "zh-CN-XiaoxiaoNeural"
+
+
+@router.get("/notify/tts")
+async def notify_tts(text: str, persona: str = "", voice: str = "",
+                     rate_pct: int | None = None, pitch_pct: int | None = None,
+                     _who=Depends(require_viewer)):
+    """真人声试听/播报:persona=sound_personas.skey(取其 voice/rate/pitch);
+    voice/rate_pct/pitch_pct 显式传入时覆盖(人设编辑框'试听当前设置'不用先保存)。"""
+    try:
+        import edge_tts
+    except ImportError:
+        raise HTTPException(501, "edge-tts 未安装(服务器 venv: pip install edge-tts)")
+    import os
+    import hashlib
+    import asyncio
+    from fastapi.responses import FileResponse
+
+    text = (text or "").strip()[:300]
+    if not text:
+        raise HTTPException(400, "text 必填")
+    v, r_pct, p_pct = "", 0, 0
+    if persona:
+        pool = await _pool()
+        row = await pool.fetchrow("SELECT voice, rate_pct, pitch_pct FROM sound_personas WHERE skey=$1", persona)
+        if row:
+            v = row["voice"] or ""
+            r_pct = int(row["rate_pct"] or 0)
+            p_pct = int(row["pitch_pct"] or 0)
+    if voice:
+        v = voice
+    if rate_pct is not None:
+        r_pct = int(rate_pct)
+    if pitch_pct is not None:
+        p_pct = int(pitch_pct)
+    v = (v or _TTS_FALLBACK_VOICE)[:80]
+    r_pct = max(-50, min(50, r_pct))
+    p_pct = max(-50, min(50, p_pct))
+    key = hashlib.sha1(f"{v}|{r_pct}|{p_pct}|{text}".encode()).hexdigest()
+    os.makedirs(TTS_DIR, exist_ok=True)
+    path = os.path.join(TTS_DIR, f"{key}.mp3")
+    if not os.path.exists(path):
+        # edge-tts 语法:rate="+10%" / pitch="+20Hz"(pct 直接映射 Hz,±50 内听感线性)
+        rate = f"{'+' if r_pct >= 0 else ''}{r_pct}%"
+        pitch = f"{'+' if p_pct >= 0 else ''}{p_pct}Hz"
+        tmp = f"{path}.{os.getpid()}.tmp"
+        try:
+            await asyncio.wait_for(
+                edge_tts.Communicate(text, v, rate=rate, pitch=pitch).save(tmp), timeout=25)
+            if not os.path.getsize(tmp):
+                raise RuntimeError("合成产物为空")
+            os.replace(tmp, path)
+        except HTTPException:
+            raise
+        except Exception as e:  # noqa: BLE001
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+            raise HTTPException(502, f"edge-tts 合成失败:{e}")
+    return FileResponse(path, media_type="audio/mpeg", filename="tts.mp3")
+
+
 # ---------------- 渠道设置（飞书 webhook / 邮件配置留位;节流主体仍在 /settings/notifications） ----------------
 @router.get("/notify/channels")
 async def channels_get(_who=Depends(require_viewer)):

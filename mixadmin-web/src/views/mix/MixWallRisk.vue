@@ -60,7 +60,7 @@
 
     <!-- 第二排：变更审计（规则/干预/AI 决策留痕,自规则中心迁入） -->
     <div class="card">
-      <div class="chd">变更审计 <span class="sub">admin_audit 全量留痕 · S3 借币反向/点差 规则模板变更 + 干预 + AI 配置</span></div>
+      <div class="chd">变更审计 <span class="sub">admin_audit 全量留痕 · S3 借币点差 规则模板变更 + 干预 + AI 配置</span></div>
       <div class="audit3">
         <div v-for="(a,i) in audit" :key="i" class="arec">
           <span class="at">{{ a.at }}</span><b class="au">{{ a.user }}</b>

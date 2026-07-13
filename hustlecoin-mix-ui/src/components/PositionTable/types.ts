@@ -32,12 +32,12 @@ export interface StrategyMeta {
 }
 
 export const STRATEGY_META: Record<StrategyCode, StrategyMeta> = {
-  S1: { code: 'S1', name: '单所期现基差', color: '#4A9CFF', colorBg: 'rgba(74,156,255,.12)', icon: 'scale' },
-  S2: { code: 'S2', name: '双合约期期', color: '#F0B90B', colorBg: 'rgba(240,185,11,.12)', icon: 'layers' },
-  S3: { code: 'S3', name: '借币反向/点差', color: '#A78BFA', colorBg: 'rgba(167,139,250,.12)', icon: 'rotate-ccw' },
-  S4: { code: 'S4', name: '借贷利率', color: '#2DD4BF', colorBg: 'rgba(45,212,191,.12)', icon: 'hand-coins' },
-  S5: { code: 'S5', name: '事件/LST', color: '#FF9F43', colorBg: 'rgba(255,159,67,.12)', icon: 'zap' },
-  S6: { code: 'S6', name: '费率飞轮', color: '#F472B6', colorBg: 'rgba(244,114,182,.12)', icon: 'orbit' },
+  S1: { code: 'S1', name: '期现收费', color: '#4A9CFF', colorBg: 'rgba(74,156,255,.12)', icon: 'scale' },
+  S2: { code: 'S2', name: '跨所费差', color: '#F0B90B', colorBg: 'rgba(240,185,11,.12)', icon: 'layers' },
+  S3: { code: 'S3', name: '借币点差', color: '#A78BFA', colorBg: 'rgba(167,139,250,.12)', icon: 'rotate-ccw' },
+  S4: { code: 'S4', name: '三率利差', color: '#2DD4BF', colorBg: 'rgba(45,212,191,.12)', icon: 'hand-coins' },
+  S5: { code: 'S5', name: '事件折价', color: '#FF9F43', colorBg: 'rgba(255,159,67,.12)', icon: 'zap' },
+  S6: { code: 'S6', name: '做量降费', color: '#F472B6', colorBg: 'rgba(244,114,182,.12)', icon: 'orbit' },
 }
 
 /**

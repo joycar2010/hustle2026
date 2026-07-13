@@ -24,6 +24,7 @@ http.interceptors.response.use(r => r.data, e => {
 })
 
 export const mixApi = {
+  siteConfig: () => http.get('/site/config'),   // 开放读:登录框/品牌头 CMS 区块(登录前也能拉)
   earningsSummary: (view) => http.get('/me/earnings/summary', { params: { view } }),
   earningsDaily: () => http.get('/me/earnings/daily'),
   earningsSources: () => http.get('/me/earnings/sources'),

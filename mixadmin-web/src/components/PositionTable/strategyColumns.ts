@@ -85,12 +85,18 @@ export const INLINE_ACTIONS: Record<StrategyCode, Array<{ key: string; label: st
 /* ---------------- 右键菜单（右键 / ⋮ / 长按 同源） ---------------- */
 export const CONTEXT_MENUS: Record<StrategyCode, MenuItem[]> = {
   S3: [
-    { key: 'add_order', label: '补单', icon: 'plus' },
-    { key: 'add_hedge', label: '补对冲', icon: 'shuffle' },
-    { key: 'rule_override', label: '单独规则…', icon: 'scroll-text', kind: 'link', dividerBefore: true },
-    { key: 'blacklist', label: '移入黑名单', icon: 'ban' },
-    { key: 'manual_repay', label: '手动还币', icon: 'rotate-ccw', kind: 'strategy', dividerBefore: true, confirm: true },
+    { key: 'rule_override', label: '单一规则', icon: 'scroll-text', kind: 'link' },
+    { key: 'remove_slot', label: '移除币种（50U保护）', icon: 'minus-circle' },
+    { key: 'manual_open', label: '手动开仓', icon: 'plus' },
+    { key: 'resume_slot', label: '恢复下单', icon: 'play' },
+    { key: 'blacklist', label: '加入黑名单', icon: 'ban' },
+    { key: 'batch_remove', label: '批量移除无持仓', icon: 'trash-2' },
+    { key: 'max_borrowable', label: '刷新可借', icon: 'refresh-cw', kind: 'link', dividerBefore: true },
+    { key: 'partial_repay', label: '部分还币', icon: 'rotate-ccw', kind: 'strategy' },
+    { key: 'manual_hedge', label: '手动对冲', icon: 'shuffle', dividerBefore: true, confirm: true },
+    { key: 'manual_repay', label: '手动还币', icon: 'rotate-ccw', kind: 'strategy', confirm: true },
     { key: 'force_close', label: '强制平仓', icon: 'octagon-x', kind: 'danger', confirm: true },
+    { key: 'transfer', label: '划转资金', icon: 'arrow-left-right' },
   ],
   S2: [
     { key: 'add_order', label: '补单', icon: 'plus' },

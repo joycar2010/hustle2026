@@ -83,12 +83,12 @@ const positions = [
 ]
 
 const strategies = [
-  { code:'S1', name:'单所期现基差 Carry', layer:'底仓层', enabled:true, slots:4, notional:1240000, pnlToday:512.40, pnlTotal:48742, ePass:'62%', pipeline:{基差扫描:96,'E 仲裁':24,建仓:2,'持有·收费':4,回归监测:4,退出:8,结算:112} },
-  { code:'S2', name:'双合约期期 Carry', layer:'中层主力', enabled:true, slots:12, notional:5830000, pnlToday:2104.55, pnlTotal:128714, ePass:'48%', pipeline:{费差候选:1245,'E 仲裁':532,活跃路由:86,武装门控:32,开仓中:14,'持有·结算':12,退出:18} },
-  { code:'S3', name:'借币反向 Carry / 点差', layer:'存量业务', enabled:true, slots:5, notional:1120000, pnlToday:498.12, pnlTotal:34406, ePass:'54%', pipeline:{可借扫描:128,借币:8,卖出建仓:3,对冲:3,'收费率·在管':5,还币闸:2,回滚兜底:0} },
-  { code:'S4', name:'借贷利率套利', layer:'增强层', enabled:true, slots:2, notional:680000, pnlToday:182.20, pnlTotal:40141, ePass:'71%', pipeline:{利差扫描:42,额度校验:12,借入:3,'出借/申购':2,计息中:2,到期回收:1,结算:38} },
-  { code:'S5', name:'事件驱动 + LST/锚定折价', layer:'机会外挂', enabled:false, slots:1, notional:120000, pnlToday:36.80, pnlTotal:8912, ePass:'—', pipeline:{事件流:14,折价评估:3,人工确认:1,建仓:0,回归监测:1,退出:2,复盘:9} },
-  { code:'S6', name:'费率飞轮', layer:'元游戏', enabled:true, slots:0, notional:0, pnlToday:88.15, pnlTotal:25805, ePass:'—', pipeline:{目标量测算:3,挂单:1842,成交回填:'41%',返佣结算:3,'VIP 进度':'82%',费率下调:'-0.8bp'} },
+  { code:'S1', name:'期现收费', layer:'底仓层', enabled:true, slots:4, notional:1240000, pnlToday:512.40, pnlTotal:48742, ePass:'62%', pipeline:{基差扫描:96,'E 仲裁':24,建仓:2,'持有·收费':4,回归监测:4,退出:8,结算:112} },
+  { code:'S2', name:'跨所费差', layer:'中层主力', enabled:true, slots:12, notional:5830000, pnlToday:2104.55, pnlTotal:128714, ePass:'48%', pipeline:{费差候选:1245,'E 仲裁':532,活跃路由:86,武装门控:32,开仓中:14,'持有·结算':12,退出:18} },
+  { code:'S3', name:'借币点差', layer:'存量业务', enabled:true, slots:5, notional:1120000, pnlToday:498.12, pnlTotal:34406, ePass:'54%', pipeline:{可借扫描:128,借币:8,卖出建仓:3,对冲:3,'收费率·在管':5,还币闸:2,回滚兜底:0} },
+  { code:'S4', name:'三率利差', layer:'增强层', enabled:true, slots:2, notional:680000, pnlToday:182.20, pnlTotal:40141, ePass:'71%', pipeline:{利差扫描:42,额度校验:12,借入:3,'出借/申购':2,计息中:2,到期回收:1,结算:38} },
+  { code:'S5', name:'事件折价', layer:'机会外挂', enabled:false, slots:1, notional:120000, pnlToday:36.80, pnlTotal:8912, ePass:'—', pipeline:{事件流:14,折价评估:3,人工确认:1,建仓:0,回归监测:1,退出:2,复盘:9} },
+  { code:'S6', name:'做量降费', layer:'元游戏', enabled:true, slots:0, notional:0, pnlToday:88.15, pnlTotal:25805, ePass:'—', pipeline:{目标量测算:3,挂单:1842,成交回填:'41%',返佣结算:3,'VIP 进度':'82%',费率下调:'-0.8bp'} },
 ]
 
 const accounts = [
@@ -123,12 +123,12 @@ const spreads = [
 ]
 
 const attribution = [
-  { code:'S2', name:'双合约期期', total:128714, subjects:{ funding:98220, spread:38912, fee:-8418 } },
-  { code:'S1', name:'单所期现基差', total:48742, subjects:{ funding:31240, spread:19822, fee:-2320 } },
-  { code:'S4', name:'借贷利率套利', total:40141, subjects:{ interest:44890, fee:-4749 } },
-  { code:'S3', name:'借币反向/点差', total:34406, subjects:{ funding:41205, interest:-5320, fee:-1479 } },
-  { code:'S6', name:'费率飞轮', total:25805, subjects:{ rebate:31210, spread_cost:-5405 } },
-  { code:'S5', name:'事件/LST 折价', total:8912, subjects:{ spread:9420, fee:-508 } },
+  { code:'S2', name:'跨所费差', total:128714, subjects:{ funding:98220, spread:38912, fee:-8418 } },
+  { code:'S1', name:'期现收费', total:48742, subjects:{ funding:31240, spread:19822, fee:-2320 } },
+  { code:'S4', name:'三率利差', total:40141, subjects:{ interest:44890, fee:-4749 } },
+  { code:'S3', name:'借币点差', total:34406, subjects:{ funding:41205, interest:-5320, fee:-1479 } },
+  { code:'S6', name:'做量降费', total:25805, subjects:{ rebate:31210, spread_cost:-5405 } },
+  { code:'S5', name:'事件折价', total:8912, subjects:{ spread:9420, fee:-508 } },
 ]
 
 const pnlDaily = [67,16,-420,29,308,477,-7,137,-63,1500,2100,-3100,1000,-16,70,566,672,-395,-1600,-31,40,54,26,-247,211,193]
@@ -136,7 +136,7 @@ const pnlDaily = [67,16,-420,29,308,477,-7,137,-63,1500,2100,-3100,1000,-16,70,5
 
 const userSources = [
   { key:'funding_arb', name:'资金费率套利', share:0.28 }, { key:'dualperp', name:'双合约对冲 Carry', share:0.20 },
-  { key:'basis', name:'期现基差套利', share:0.17 }, { key:'lend_arb', name:'借贷利率套利（借币反向）', share:0.14 },
+  { key:'basis', name:'期现基差套利', share:0.17 }, { key:'lend_arb', name:'三率利差（借币反向）', share:0.14 },
   { key:'xvenue_spread', name:'跨所价差捕捉', share:0.12 }, { key:'maker_rebate', name:'做市返佣增强', share:0.09 },
 ]
 

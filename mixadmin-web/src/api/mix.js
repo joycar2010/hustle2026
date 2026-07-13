@@ -63,6 +63,7 @@ export const mixApi = {
     overview: () => http.get('/monitor/overview'),
     events: () => http.get('/monitor/events'),
     advisorsChat: () => http.get('/monitor/advisors-chat'),
+    decisionFeed: () => http.get('/monitor/decision-feed'),
   },
 
   blacklist: () => http.get('/blacklist'),
@@ -96,6 +97,9 @@ export const mixApi = {
   personas: () => http.get('/notify/personas'),
   personaPut: (b) => http.put('/notify/personas', b),
   personaDel: (id) => http.delete(`/notify/personas/${id}`),
+  // edge-tts 真人声(blob;失败时前端回落浏览器 speechSynthesis)
+  ttsBlob: (text, persona, opts = {}) =>
+    http.get('/notify/tts', { params: { text, persona, ...opts }, responseType: 'blob', timeout: 30000 }),
   // 账户簿 + 凭证托管
   registryTree: () => http.get('/accounts/registry-tree'),
   registryFull: (b) => http.post('/accounts/registry-full', b),
@@ -133,6 +137,8 @@ export const mixApi = {
   operatorsAudit: () => http.get('/operators/audit'),
   siteBrand: () => http.get('/site/brand'),
   siteBrandPut: (b) => http.put('/site/brand', b),
+  siteConfig: () => http.get('/site/config'),
+  siteBlockPut: (key, b) => http.put(`/site/blocks/${key}`, b),
   registryPut: (b) => http.put('/accounts/registry', b),
   coins: () => http.get('/coins'),
   alerts: (strategy = '') => http.get('/alerts', { params: strategy ? { strategy } : {} }),

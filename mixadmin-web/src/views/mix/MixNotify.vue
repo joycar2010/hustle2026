@@ -122,7 +122,7 @@
       <el-tab-pane label="声音人设" name="personas">
         <div class="card">
           <div class="hd"><b>人设列表</b>
-            <span class="sub">声音走前端浏览器 TTS 合成（按人设 语速/音调）；用户端播报时按模板 sound_key 取对应人设朗读</span>
+            <span class="sub">试听/播报走后端 edge-tts 真人声（按人设 嗓音/语速/音调,神经音合成）；后端不可用时自动回落浏览器 TTS</span>
             <el-button size="small" type="warning" @click="editPersona()">+ 新增人设</el-button>
           </div>
           <el-table :data="personas" size="small">
@@ -326,15 +326,30 @@ async function savePersona() {
   catch (e) { ElMessage.error(e?.detail || '保存失败') }
 }
 async function delPersona(row) { await ElMessageBox.confirm(`删除人设 ${row.name}？`, '删除', { type: 'warning' }); await mixApi.personaDel(row.id); loadPersonas() }
-// 浏览器 speechSynthesis 按人设调参朗读
-function speak(text, rate_pct, pitch_pct) {
+// 真人声优先(后端 edge-tts 神经音,甜妹/御姐真嗓);失败自动回落浏览器 speechSynthesis
+let ttsAudio = null
+async function speak(text, rate_pct, pitch_pct, opts = {}) {
+  const t = text || '测试语音'
+  try {
+    const blob = await mixApi.ttsBlob(t, opts.persona || '', {
+      ...(opts.voice ? { voice: opts.voice } : {}),
+      ...(rate_pct != null ? { rate_pct } : {}),
+      ...(pitch_pct != null ? { pitch_pct } : {}),
+    })
+    const url = URL.createObjectURL(blob)
+    if (ttsAudio) { try { ttsAudio.pause() } catch (e) { /* noop */ } }
+    ttsAudio = new Audio(url)
+    ttsAudio.onended = () => URL.revokeObjectURL(url)
+    await ttsAudio.play()
+    return
+  } catch (e) { /* 后端 TTS 不可用,回落浏览器 */ }
   if (!window.speechSynthesis) return ElMessage.warning('浏览器不支持语音合成')
-  const u = new SpeechSynthesisUtterance(text || '测试语音')
+  const u = new SpeechSynthesisUtterance(t)
   u.lang = 'zh-CN'; u.rate = 1 + (rate_pct || 0) / 100; u.pitch = 1 + (pitch_pct || 0) / 100
   window.speechSynthesis.cancel(); window.speechSynthesis.speak(u)
 }
-function tryTTS(p) { speak(p.sample || '亲，这是一条测试播报', p.rate_pct, p.pitch_pct) }
-function tryBroadcastTTS() { const p = personas.value.find(x => x.skey === bc.sound_key); speak(bc.text || bc.title || '测试', p?.rate_pct, p?.pitch_pct) }
+function tryTTS(p) { speak(p.sample || '亲，这是一条测试播报', p.rate_pct, p.pitch_pct, { voice: p.voice, persona: p.skey }) }
+function tryBroadcastTTS() { const p = personas.value.find(x => x.skey === bc.sound_key); speak(bc.text || bc.title || '测试', p?.rate_pct, p?.pitch_pct, { persona: bc.sound_key }) }
 
 async function loadLogs() { try { logs.value = await mixApi.notifyLogs() } catch (e) { logs.value = [] } }
 async function send() {

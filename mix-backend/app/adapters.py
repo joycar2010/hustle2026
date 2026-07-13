@@ -512,14 +512,14 @@ async def strategies_overview() -> list[dict]:
     n_listing = len(listings) if isinstance(listings, list) else (len(listings) if isinstance(listings, dict) else 0)
 
     return [
-        {"code": "S1", "name": "单所期现基差 Carry", "layer": "底仓层",
+        {"code": "S1", "name": "期现收费", "layer": "底仓层",
          "enabled": bool(bs_db), "slots": sum(int(r["n"]) for r in bs_db),
          "notional": float(sum(float(r["notion"]) for r in bs_db)),
          "mode": bs_mode, "modeSwitchable": False,
          "pnlToday": attr["S1"]["today"], "pnlTotal": attr["S1"]["total"], "ePass": "—",
          "pipeline": {"模式": bs_mode, "开仓中": agg(bs_db, "OPENING"), "持有": agg(bs_db, "OPEN"),
                       "平仓中": agg(bs_db, "CLOSING")}},
-        {"code": "S2", "name": "双合约期期 Carry", "layer": "中层主力",
+        {"code": "S2", "name": "跨所费差", "layer": "中层主力",
          "enabled": dp_mode in ("armed", "shadow"), "slots": agg(dp_db, "OPEN") + agg(dp_db, "OPENING"),
          "notional": float(sum(float(r["notion"]) for r in dp_db)),
          "mode": dp_mode, "modeSwitchable": True,
@@ -527,7 +527,7 @@ async def strategies_overview() -> list[dict]:
          "pipeline": {"模式": dp_mode, "活跃路由": len(dp_routes), "武装": len(dp_snap.get("armed_symbols") or []),
                       "开仓中": agg(dp_db, "OPENING"), "持有": agg(dp_db, "OPEN"),
                       "平仓中": agg(dp_db, "CLOSING") + agg(dp_db, "ROLLBACK")}},
-        {"code": "S3", "name": "借币反向 Carry / 点差", "layer": "存量业务",
+        {"code": "S3", "name": "借币点差", "layer": "存量业务",
          "enabled": running > 0, "slots": int(coin_pos.get("count") or 0), "notional": 0,
          "pnlToday": 0, "pnlTotal": 0, "ePass": "—",
          "pipeline": {"可借扫描": len((await ds.get_json("dcm:coin:panel") or {}).get("pushed") or []),
@@ -536,7 +536,7 @@ async def strategies_overview() -> list[dict]:
                       "收费率·在管": _coin_st.get("OPEN", 0),
                       "还币闸": _coin_st.get("PENDING_REPAY", 0),
                       "引擎": f"{running}/{len(scopes)}"}},
-        {"code": "S4", "name": "借贷利率套利", "layer": "增强层",
+        {"code": "S4", "name": "三率利差", "layer": "增强层",
          "enabled": bool(lend_snap), "slots": len((lend_snap or {}).get("would_hold") or []),
          "notional": 0, "mode": (lend_snap or {}).get("mode", "未启用"), "modeSwitchable": False,
          "pnlToday": 0, "pnlTotal": 0, "ePass": "—",
@@ -544,11 +544,11 @@ async def strategies_overview() -> list[dict]:
                       "would_hold": (lend_snap or {}).get("slots", "0"),
                       "候选榜": len(lend_top),
                       "榜首": f"{lend_top[0]['coin']} {lend_top[0]['net_daily_pct']:.2f}%/d" if lend_top else "—"}},
-        {"code": "S5", "name": "事件驱动 + LST/锚定折价", "layer": "机会外挂",
+        {"code": "S5", "name": "事件折价", "layer": "机会外挂",
          "enabled": False, "slots": 0, "notional": 0, "mode": "未启用", "modeSwitchable": False,
          "pnlToday": 0, "pnlTotal": 0, "ePass": "—",
          "pipeline": {"新上市监听": n_listing, "状态": "仅事件流·未启用"}},
-        {"code": "S6", "name": "费率飞轮", "layer": "元游戏",
+        {"code": "S6", "name": "做量降费", "layer": "元游戏",
          "enabled": False, "slots": 0, "notional": 0, "mode": "未启用", "modeSwitchable": False,
          "pnlToday": 0, "pnlTotal": 0, "ePass": "—",
          "pipeline": {"状态": "未启用"}},
@@ -776,6 +776,84 @@ async def monitor_events() -> list[dict]:
     return out
 
 
+async def decision_feed() -> list[dict]:
+    """真实决策事件流(主控台工作流管道动效的数据面)——三引擎决策流水+路由变更+结算入账+上市事件,
+    全真无演示;每个源独立降级:拿不到就缺席,绝不编造。"""
+    items: list[dict] = []
+
+    def _ts(v):
+        try:
+            return v.isoformat() if hasattr(v, "isoformat") else str(v or "")
+        except Exception:
+            return ""
+
+    try:  # S2 双合约:开仓/退出信号(would_hold 每轮都有=噪音,不进流)
+        for r in await ds.fetch(
+                "SELECT ts, symbol, decision, gap_bps, venue_long, venue_short FROM dualperp_shadow_log "
+                "WHERE decision IN ('would_open','would_close') AND ts > now() - interval '48 hours' "
+                "ORDER BY ts DESC LIMIT 15"):
+            act = "开仓信号" if r["decision"] == "would_open" else "退出信号"
+            items.append({"ts": _ts(r["ts"]), "code": "S2", "kind": act,
+                          "text": f"{r['symbol']} {r['venue_long']}多/{r['venue_short']}空 价差{float(r['gap_bps'] or 0):.1f}bps"})
+    except Exception:
+        pass
+    try:  # S1 期现:E 过闸/退出
+        for r in await ds.fetch(
+                "SELECT ts, symbol, decision, funding_daily, e_bps FROM basis_shadow_log "
+                "WHERE decision IN ('would_open','would_close') AND ts > now() - interval '48 hours' "
+                "ORDER BY ts DESC LIMIT 10"):
+            act = "开仓信号" if r["decision"] == "would_open" else "退出信号"
+            items.append({"ts": _ts(r["ts"]), "code": "S1", "kind": act,
+                          "text": f"{r['symbol']} 资金费{float(r['funding_daily'] or 0):.3f}%/d E={float(r['e_bps'] or 0):.1f}bps"})
+    except Exception:
+        pass
+    try:  # S4 三率利差:入场/退出
+        for r in await ds.fetch(
+                "SELECT ts, coin, decision, net_daily_pct FROM lending_shadow_log "
+                "WHERE decision IN ('would_enter','would_exit') AND ts > now() - interval '48 hours' "
+                "ORDER BY ts DESC LIMIT 10"):
+            act = "入场信号" if r["decision"] == "would_enter" else "退出信号"
+            items.append({"ts": _ts(r["ts"]), "code": "S4", "kind": act,
+                          "text": f"{r['coin']} 三率净差{float(r['net_daily_pct'] or 0):.2f}%/d"})
+    except Exception:
+        pass
+    try:  # 路由变更(decision 权威表审计,顾问/人工都留痕)
+        for r in await ds.fetch(
+                "SELECT created_at, symbol, actor, note FROM route_audit "
+                "WHERE created_at > now() - interval '48 hours' ORDER BY created_at DESC LIMIT 10"):
+            items.append({"ts": _ts(r["created_at"]), "code": "S2", "kind": "路由变更",
+                          "text": f"{r['symbol']} · {r['actor']}" + (f" · {r['note'][:40]}" if r["note"] else "")})
+    except Exception:
+        pass
+    try:  # 结算入账(资金费真金到账=carry 兑现时刻)
+        for r in await ds.fetch(
+                "SELECT ts, venue, symbol, amount, strategy_code FROM income_records "
+                "WHERE itype='FUNDING' AND ts > now() - interval '24 hours' ORDER BY ts DESC LIMIT 10"):
+            amt = float(r["amount"] or 0)
+            items.append({"ts": _ts(r["ts"]), "code": r["strategy_code"] or "S2", "kind": "结算入账",
+                          "text": f"{r['symbol'] or r['venue']} 资金费 {'+' if amt >= 0 else ''}{amt:.4f}U ({r['venue']})"})
+    except Exception:
+        pass
+    try:  # S5 事件流:新上市
+        listings = await ds.get_json("dcm:event:new_listings")
+        arr = listings if isinstance(listings, list) else []
+        for x in arr[:6]:
+            if isinstance(x, dict):
+                t = x.get("ts") or x.get("first_seen")
+                ts_txt = ""
+                try:
+                    import datetime as _dt
+                    ts_txt = _dt.datetime.fromtimestamp(float(t), _dt.timezone.utc).isoformat() if t else ""
+                except Exception:
+                    ts_txt = str(t or "")
+                items.append({"ts": ts_txt, "code": "S5", "kind": "新上市",
+                              "text": f"{x.get('venue', '')} {x.get('symbol') or x.get('native_sym') or ''}"})
+    except Exception:
+        pass
+    items.sort(key=lambda x: x["ts"], reverse=True)
+    return items[:40]
+
+
 async def advisors_chat() -> list[dict]:
     """AI 决策动态化——分域顾问制,每个顾问的最新'发言'做成对话气泡。
     数据全真：carry/借贷/折价/LLM 各读自己的总线快照,拿不到就如实'待启用/停更'。"""
@@ -921,12 +999,12 @@ async def _attribution_totals() -> dict:
 async def attribution() -> list[dict]:
     acc = await _attribution_totals()
     return [
-        {"code": "S2", "name": "双合约期期", "total": acc["S2"]["total"], "subjects": acc["S2"]["subjects"]},
-        {"code": "S1", "name": "单所期现基差", "total": acc["S1"]["total"], "subjects": acc["S1"]["subjects"]},
-        {"code": "S3", "name": "借币反向/点差", "total": 0, "subjects": {}, "note": "coin 账本待接入"},
-        {"code": "S4", "name": "借贷利率套利", "total": 0, "subjects": {}, "note": "未启用"},
-        {"code": "S5", "name": "事件/LST 折价", "total": 0, "subjects": {}, "note": "未启用"},
-        {"code": "S6", "name": "费率飞轮", "total": 0, "subjects": {}, "note": "未启用"},
+        {"code": "S2", "name": "跨所费差", "total": acc["S2"]["total"], "subjects": acc["S2"]["subjects"]},
+        {"code": "S1", "name": "期现收费", "total": acc["S1"]["total"], "subjects": acc["S1"]["subjects"]},
+        {"code": "S3", "name": "借币点差", "total": 0, "subjects": {}, "note": "coin 账本待接入"},
+        {"code": "S4", "name": "三率利差", "total": 0, "subjects": {}, "note": "未启用"},
+        {"code": "S5", "name": "事件折价", "total": 0, "subjects": {}, "note": "未启用"},
+        {"code": "S6", "name": "做量降费", "total": 0, "subjects": {}, "note": "未启用"},
     ]
 
 

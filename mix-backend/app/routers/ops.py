@@ -44,6 +44,49 @@ async def site_brand_put(body: dict, admin=Depends(require_admin)):
     return {"saved": True, "brand": allowed}
 
 
+# ---------------- 官网 CMS 内容区块（用户端登录框/品牌头可配,site_blocks 表） ----------------
+_BLOCK_KEYS = ("user_login", "user_brand")
+
+
+@router.get("/site/config")
+async def site_config():
+    """开放读——用户端登录页/品牌头渲染前需要(仅品牌与文案区块,无敏感内容)。"""
+    pool = await ds.pg_main()
+    if pool is None:
+        return {"brand": {}, "blocks": {}}
+    row = await pool.fetchrow("SELECT brand FROM site_config WHERE id=1")
+    blocks: dict = {}
+    try:
+        for r in await pool.fetch("SELECT block_key, content FROM site_blocks"):
+            blocks[r["block_key"]] = json.loads(r["content"]) if r["content"] else {}
+    except Exception:  # 表未迁移=空区块,前端回落硬编码默认,老行为不变
+        blocks = {}
+    return {"brand": json.loads(row["brand"]) if row and row["brand"] else {}, "blocks": blocks}
+
+
+@router.put("/site/blocks/{key}")
+async def site_block_put(key: str, body: dict, admin=Depends(require_admin)):
+    if key not in _BLOCK_KEYS:
+        raise HTTPException(400, f"未知区块 {key}(可用:{','.join(_BLOCK_KEYS)})")
+    pool = await ds.pg_main()
+    if pool is None:
+        raise HTTPException(503, "mix_main 未配置")
+    content: dict = {}
+    for k, v in (body or {}).items():
+        if v is None:
+            continue
+        s = str(v)
+        # logo 为 data URL 放宽到 280KB(与品牌 logo 同口径),其余文案 300 字
+        content[str(k)[:40]] = s[:280000] if k in ("logo", "logoUrl") else s[:300]
+    await pool.execute(
+        "INSERT INTO site_blocks(block_key, content, updated_by, updated_at) VALUES($1,$2,$3,now()) "
+        "ON CONFLICT (block_key) DO UPDATE SET content=$2, updated_by=$3, updated_at=now()",
+        key, json.dumps(content, ensure_ascii=False), admin["admin"])
+    await proxy.audit(admin["admin"], admin.get("role", ""), "site.block", key,
+                      {"keys": list(content)}, "saved")
+    return {"saved": True, "block": key}
+
+
 # ---------------- 账户别名簿 ----------------
 @router.get("/accounts/registry")
 async def registry_list(_who=Depends(require_viewer)):

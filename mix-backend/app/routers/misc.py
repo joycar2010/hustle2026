@@ -70,6 +70,12 @@ async def advisors_chat(_who=Depends(require_viewer)):
     return await adapters.advisors_chat()
 
 
+@router.get("/monitor/decision-feed")
+async def decision_feed(_who=Depends(require_viewer)):
+    """真实决策事件流：三引擎决策流水+路由变更+结算入账+上市事件（主控台管道动效数据面）。"""
+    return await adapters.decision_feed()
+
+
 # ---- 黑名单（读=panel 透传；写=coin 命令队列代理，coin 逻辑权威） ----
 @router.get("/blacklist")
 async def blacklist(_who=Depends(require_viewer)):

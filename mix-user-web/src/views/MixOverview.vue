@@ -1,11 +1,11 @@
 <template>
   <div class="mo" :style="{ background: 'var(--mix-bg)' }">
-    <!-- 品牌行 -->
+    <!-- 品牌行（CMS 区块 user_brand 可配,留空=站点默认） -->
     <div class="brand">
-      <span class="logo">📈</span>
-      <b>HustleCoin <i class="mix-gold">Mix</i></b>
-      <span class="slogan hidden md:inline">把复杂的事，交给系统；把结果，交给你</span>
-      <span class="pill">币安生态风格 · 透明 · 稳健 · 长期主义</span>
+      <span class="logo"><img v-if="cms.logo" :src="cms.logo" class="logoimg" /><template v-else>📈</template></span>
+      <b>{{ cms.name || 'HustleCoin' }} <i class="mix-gold">{{ cms.accent || 'Mix' }}</i></b>
+      <span class="slogan hidden md:inline">{{ cms.slogan || '把复杂的事，交给系统；把结果，交给你' }}</span>
+      <span class="pill">{{ cms.pill || '币安生态风格 · 透明 · 稳健 · 长期主义' }}</span>
     </div>
 
     <!-- Hero：累计收益（合并） -->
@@ -80,6 +80,7 @@ const summary = ref({ today: 0, week: 0, total: 0 })
 const daily = ref([])
 const sources = ref([])
 const accounts = ref([])
+const cms = ref({})   // 品牌头 CMS 区块(官网管理→用户端·品牌头)
 const chartType = ref('柱形图')
 const gran = ref('日')
 const range = ref('30天')
@@ -141,6 +142,7 @@ const lineData = computed(() => {
 const lineOpts = { ...barOpts, plugins: { datalabels: { display: false } } }
 
 onMounted(async () => {
+  mixApi.siteConfig().then(c => { cms.value = (c.blocks || {}).user_brand || {} }).catch(() => { /* 默认 */ })
   ;[summary.value, daily.value, sources.value, accounts.value] = await Promise.all([
     mixApi.earningsSummary('merged'),   // 口径显式：用户端首页 = merged
     mixApi.earningsDaily(),
@@ -153,7 +155,8 @@ onMounted(async () => {
 <style scoped>
 .mo { min-height: 100vh; padding: 14px 16px 20px; display: flex; flex-direction: column; gap: 14px; color: var(--mix-t1); }
 .brand { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.brand .logo { width: 30px; height: 30px; border-radius: 8px; background: linear-gradient(135deg,#FCD535,#F0B90B); display: inline-flex; align-items: center; justify-content: center; }
+.brand .logo { width: 30px; height: 30px; border-radius: 8px; background: linear-gradient(135deg,#FCD535,#F0B90B); display: inline-flex; align-items: center; justify-content: center; overflow: hidden; }
+.brand .logoimg { width: 100%; height: 100%; object-fit: contain; }
 .brand b { font-size: 17px; } .brand i { font-style: normal; }
 .brand .slogan { color: var(--mix-t2); font-size: 11px; }
 .brand .pill { margin-left: auto; border: 1px solid rgba(240,185,11,.35); color: var(--mix-accent); border-radius: 16px; padding: 3px 12px; font-size: 11px; background: rgba(240,185,11,.06); }

@@ -25,6 +25,46 @@
       <el-button type="warning" @click="save">保存（需 SUPER_ADMIN）</el-button>
     </div>
     <div class="card">
+      <div class="chd"><b>用户端 · 登录框</b><span class="sub">mix.hustle2026.xyz /login 实时消费；留空字段=站点默认</span></div>
+      <el-form label-width="110px" size="small">
+        <el-form-item label="登录框LOGO">
+          <div class="logobox">
+            <div class="preview" @click="pickBlockLogo(ul, 'logo')">
+              <img v-if="ul.logo" :src="ul.logo" />
+              <span v-else>点击上传</span>
+            </div>
+            <el-button v-if="ul.logo" link type="danger" size="small" @click="ul.logo=''">清除</el-button>
+          </div>
+          <el-input v-model="ul.logo" placeholder="/logo.png 或 https://…（也可点上方框上传）" style="margin-top:6px" />
+        </el-form-item>
+        <el-form-item label="标题"><el-input v-model="ul.title" placeholder="HustleCoin Mix" /></el-form-item>
+        <el-form-item label="副标题"><el-input v-model="ul.subtitle" placeholder="实时收益查看平台" /></el-form-item>
+        <el-form-item label="底部链接文字"><el-input v-model="ul.footText" placeholder="→ 交易操作面板" /></el-form-item>
+        <el-form-item label="底部链接URL"><el-input v-model="ul.footLink" placeholder="https://go.hustle2026.xyz（留空=不显示链接）" /></el-form-item>
+      </el-form>
+      <el-button type="warning" @click="saveBlock('user_login', ul)">保存登录框（需 SUPER_ADMIN）</el-button>
+    </div>
+    <div class="card">
+      <div class="chd"><b>用户端 · 品牌头</b><span class="sub">用户端首页顶部品牌行（LOGO/名称/标语/胶囊）；留空=站点默认</span></div>
+      <el-form label-width="110px" size="small">
+        <el-form-item label="品牌LOGO">
+          <div class="logobox">
+            <div class="preview" @click="pickBlockLogo(ub, 'logo')">
+              <img v-if="ub.logo" :src="ub.logo" />
+              <span v-else>点击上传</span>
+            </div>
+            <el-button v-if="ub.logo" link type="danger" size="small" @click="ub.logo=''">清除</el-button>
+          </div>
+          <div class="hint">留空=默认 📈 金底图标。</div>
+        </el-form-item>
+        <el-form-item label="品牌名(白)"><el-input v-model="ub.name" placeholder="HustleCoin" /></el-form-item>
+        <el-form-item label="品牌名(金)"><el-input v-model="ub.accent" placeholder="Mix" /></el-form-item>
+        <el-form-item label="标语"><el-input v-model="ub.slogan" placeholder="把复杂的事，交给系统；把结果，交给你" /></el-form-item>
+        <el-form-item label="右侧胶囊"><el-input v-model="ub.pill" placeholder="币安生态风格 · 透明 · 稳健 · 长期主义" /></el-form-item>
+      </el-form>
+      <el-button type="warning" @click="saveBlock('user_brand', ub)">保存品牌头（需 SUPER_ADMIN）</el-button>
+    </div>
+    <div class="card">
       <div class="chd"><b>网站维护与公告</b><span class="sub">已并入「通知模块 → 网站维护与公告」统一管理（单一权威源）</span></div>
       <el-button size="small" @click="$router.push('/mix/notify')">前往管理 →</el-button>
     </div>
@@ -42,6 +82,8 @@ import { onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { mixApi } from '../../api/mix'
 const b = ref({})
+const ul = ref({})   // 用户端登录框区块(user_login)
+const ub = ref({})   // 用户端品牌头区块(user_brand)
 function pickLogo() {
   const inp = document.createElement('input'); inp.type = 'file'; inp.accept = 'image/*'
   inp.onchange = () => {
@@ -51,7 +93,29 @@ function pickLogo() {
   }
   inp.click()
 }
-async function load() { try { b.value = await mixApi.siteBrand() } catch (e) { /* 降级 */ } }
+function pickBlockLogo(obj, key) {
+  const inp = document.createElement('input'); inp.type = 'file'; inp.accept = 'image/*'
+  inp.onchange = () => {
+    const f = inp.files[0]; if (!f) return
+    if (f.size > 200 * 1024) return ElMessage.warning('图片需 < 200KB')
+    const rd = new FileReader(); rd.onload = () => { obj[key] = rd.result }; rd.readAsDataURL(f)
+  }
+  inp.click()
+}
+async function load() {
+  try { b.value = await mixApi.siteBrand() } catch (e) { /* 降级 */ }
+  try {
+    const cfg = await mixApi.siteConfig()
+    ul.value = (cfg.blocks || {}).user_login || {}
+    ub.value = (cfg.blocks || {}).user_brand || {}
+  } catch (e) { /* 降级 */ }
+}
+async function saveBlock(key, obj) {
+  try {
+    await mixApi.siteBlockPut(key, obj)
+    ElMessage.success('已保存并热生效（用户端刷新可见）')
+  } catch (e) { ElMessage.error(e?.detail || '失败（需 SUPER_ADMIN）') }
+}
 async function save() {
   try {
     await mixApi.siteBrandPut(b.value)

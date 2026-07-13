@@ -1,4 +1,4 @@
-// S3(coin 借币反向/点差)规则元数据 —— 1:1 对齐 coin RulesPage 中文分组;主控台弹层与规则中心共用
+// S3(coin 借币点差)规则元数据 —— 1:1 对齐 coin RulesPage 中文分组;主控台弹层与规则中心共用
 export const S3_META = {
   auto_push_spread: { label: '自动推送点差', w: 56, tip: '点差≥此值自动推送进候选' },
   confirm_delay_sec: { label: '推送二次确认', suffix: '秒', w: 40 },

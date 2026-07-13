@@ -139,7 +139,7 @@ import TransferModal from './TransferModal.vue'
 
 const props = defineProps({ modelValue: Boolean, code: String })
 defineEmits(['update:modelValue'])
-const NAMES = { S1: '单所期现基差', S2: '双合约期期', S3: '借币反向/点差', S4: '借贷利率', S5: '事件/LST', S6: '费率飞轮' }
+const NAMES = { S1: '期现收费', S2: '跨所费差', S3: '借币点差', S4: '三率利差', S5: '事件折价', S6: '做量降费' }
 const nameOf = computed(() => NAMES[props.code] || '')
 const scopeOf = c => ({ S1: 'strategy:S1', S2: 'strategy:S2', S3: 'strategy:S3', S4: 'strategy:S4' }[c])
 

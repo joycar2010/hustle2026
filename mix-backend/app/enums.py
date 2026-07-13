@@ -8,12 +8,12 @@ from enum import Enum
 
 
 class StrategyCode(str, Enum):
-    S1 = "S1"  # 单所期现基差 Carry
-    S2 = "S2"  # 双合约期期 Carry
-    S3 = "S3"  # 借币反向 Carry / 点差
-    S4 = "S4"  # 借贷利率套利
-    S5 = "S5"  # 事件驱动 + LST/锚定折价
-    S6 = "S6"  # 费率飞轮
+    S1 = "S1"  # 期现收费(单所期现对冲收资金费)
+    S2 = "S2"  # 跨所费差(双合约跨所资金费率差)
+    S3 = "S3"  # 借币点差(借币做空·现-期点差,coin 引擎)
+    S4 = "S4"  # 三率利差(资金费+理财-借币利率净差)
+    S5 = "S5"  # 事件折价(事件窗口+LST/锚定折价回归)
+    S6 = "S6"  # 做量降费(交易量提VIP档降费率飞轮)
 
 
 class PhaseCode(str, Enum):
