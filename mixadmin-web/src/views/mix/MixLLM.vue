@@ -41,12 +41,20 @@
           <el-button size="small" type="warning" plain @click="openAdd(grp.role)">+ 添加地址</el-button>
         </div>
         <div v-if="showAdd===grp.role" class="addbox">
-          <input v-model="nr.name" class="inp" :placeholder="grp.role==='primary'?'名称,如 主站-地址2':'名称,如 shengshengToken'" />
-          <input v-model="nr.base_url" class="inp wide" placeholder="OpenAI兼容地址,如 https://api.xxx.com/v1" />
+          <input v-model="nr.name" class="inp" :placeholder="grp.role==='primary'?'名称,如 LiaryAI':'名称,如 shengshengToken'" />
+          <input v-model="nr.base_url" class="inp wide" placeholder="OpenAI兼容地址,须带 /v1,如 https://api.xxx.com/v1" />
           <input v-model="nr.api_key" class="inp wide" type="password" placeholder="API Key" />
-          <input v-model="nr.model" class="inp" placeholder="模型,如 gpt-5.5" />
+          <el-button size="small" :loading="nrProbing" @click="probeModels">🔄 拉取模型</el-button>
+          <template v-if="nrModels.length">
+            <select v-model="nr.model" class="sel" style="min-width:150px">
+              <option value="" disabled>选择模型</option>
+              <option v-for="m in nrModels" :key="m" :value="m">{{ m }}</option>
+            </select>
+          </template>
+          <input v-else v-model="nr.model" class="inp" placeholder="模型(可先拉取或手填)" />
           <el-button size="small" type="warning" @click="addRelay(grp.role)">添加到{{ grp.label }}</el-button>
           <el-button size="small" @click="showAdd=null">取消</el-button>
+          <span v-if="nrSt" class="dim" style="flex-basis:100%">{{ nrSt }}</span>
         </div>
         <div v-if="!grp.list.length" class="dim" style="padding:6px 4px 10px">此账号暂无地址,点「+ 添加地址」</div>
 
@@ -203,7 +211,8 @@ const usageDays = ref(14)
 const expand = ref(null)
 const showAdd = ref(null)   // 'primary' | 'backup' | null:哪个账号正在展开添加框
 const resetting = ref(false)
-const nr = reactive({ name: '', base_url: 'https://api.chesspnt.com/v1', api_key: '', model: '' })
+const nr = reactive({ name: '', base_url: '', api_key: '', model: '' })
+const nrModels = ref([]); const nrProbing = ref(false); const nrSt = ref('')
 const hostOf = u => String(u || '').replace(/^https?:\/\//, '').split('/')[0]
 const accountGroups = computed(() => [
   { role: 'primary', label: '主账号', list: relays.value.filter(x => x.role === 'primary') },
@@ -240,6 +249,23 @@ function openAdd(role) {
   showAdd.value = showAdd.value === role ? null : role
   // base_url 默认留空:避免误用 chesspnt 地址建重复站(用户多半在加不同 provider)
   Object.assign(nr, { name: '', api_key: '', model: '', base_url: '' })
+  nrModels.value = []; nrSt.value = ''
+}
+// 添加框内:无状态探测模型列表(不需先存库)——解决"要先填模型才能存但想先拉模型挑"
+async function probeModels() {
+  if (!String(nr.base_url || '').trim() || !String(nr.api_key || '').trim()) {
+    nrSt.value = '先填地址和 API Key 再拉取'; return
+  }
+  nrProbing.value = true; nrSt.value = '拉取中…'
+  try {
+    const r = await mixApi.system.llmProbeModels({ base_url: nr.base_url, api_key: nr.api_key })
+    if (r.ok) {
+      nrModels.value = r.models || []
+      if (!nr.model && nrModels.value.length) nr.model = nrModels.value[0]
+      nrSt.value = `✅ 拉到 ${r.count} 个模型,已可在下拉选择`
+    } else { nrModels.value = []; nrSt.value = '❌ ' + r.error }
+  } catch (e) { nrSt.value = '❌ ' + (e?.detail || e?.error || '拉取失败') }
+  finally { nrProbing.value = false }
 }
 async function addRelay(role) {
   // 客户端先校验四字段,缺就明确提示(不再让后端笼统报错或静默)
@@ -347,7 +373,13 @@ async function refreshModels(rs) {
     // 与本地未保存的手动名单合并——原先直接替换会把刚「加入列表」还没保存的模型冲掉(根因之二)
     if (r.ok) { rs.available_models = Array.from(new Set([...(r.available_models || []), ...(rs.custom_models || [])])).sort(); rs._st = `✅ ${r.count} 模型` }
     else rs._st = '❌ ' + r.error
-  } catch (e) { rs._st = '❌ ' + (e?.detail || e?.error || '失败') }
+  } catch (e) {
+    // 该地址在库里不存在(可能别处已删/列表过期)——自动刷新列表并提示,不留脏行
+    if (e?.status === 404 || /不存在/.test(e?.detail || '')) {
+      ElMessage.warning('该地址已不存在(可能已被删除),已刷新列表')
+      loadRelays()
+    } else rs._st = '❌ ' + (e?.detail || e?.error || '失败')
+  }
   finally { rs._refreshing = false; setTimeout(() => { rs._st = '' }, 5000) }
 }
 

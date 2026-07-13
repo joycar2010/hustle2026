@@ -281,6 +281,29 @@ async def llm_relay_toggle(rid: int, body: dict, op=Depends(require_operator)):
     return {"ok": True}
 
 
+@router.post("/system/llm/probe-models")
+async def llm_probe_models(body: dict, op=Depends(require_operator)):
+    """无状态探测:直接用传入的 base_url+api_key 拉 /models(不需先存库)——
+    解决添加新地址时「要先填模型才能存、但想先拉模型来挑」的鸡生蛋问题。"""
+    import httpx
+    base = str(body.get("base_url") or "").strip().rstrip("/")
+    key = str(body.get("api_key") or "").strip()
+    if not base or not key:
+        raise HTTPException(400, "base_url 和 api_key 必填")
+    try:
+        async with httpx.AsyncClient(timeout=15) as cli:
+            resp = await cli.get(f"{base}/models", headers={"Authorization": f"Bearer {key}"})
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": f"连接失败:{e!r}"[:200]}
+    if resp.status_code != 200:
+        return {"ok": False, "error": f"http {resp.status_code}: {resp.text[:150]}"}
+    try:
+        models = sorted({str(m.get("id")) for m in (resp.json().get("data") or []) if m.get("id")})
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": f"解析失败(可能地址少 /v1):{e!r}"[:150]}
+    return {"ok": True, "count": len(models), "models": models}
+
+
 @router.post("/system/llm/relays/{rid}/refresh-models")
 async def llm_relay_models(rid: int, op=Depends(require_operator)):
     """真调该站 /models 刷新可选模型列表(openai 兼容)。"""

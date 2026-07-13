@@ -129,6 +129,7 @@ export const mixApi = {
     llmRelayRole: (id, role = 'primary') => http.post(`/system/llm/relays/${id}/set-role`, { role }),
     llmRelayToggle: (id, enabled) => http.post(`/system/llm/relays/${id}/toggle`, { enabled }),
     llmRelayModels: (id) => http.post(`/system/llm/relays/${id}/refresh-models`),
+    llmProbeModels: (b) => http.post('/system/llm/probe-models', b),
     llmRelayTest: (id, model) => http.post(`/system/llm/relays/${id}/test-model`, { model }, { timeout: 35000 }),
     llmAgentsGet: () => http.get('/system/llm/agents'),
     llmAgentsPut: (b) => http.put('/system/llm/agents', b),
