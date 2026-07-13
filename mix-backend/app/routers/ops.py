@@ -226,6 +226,56 @@ async def operators_all(_who=Depends(require_viewer)):
             "note": "operators=dcm 权威表(只读,增删经 dcm 控制台);users=mix 用户体系(可管理)"}
 
 
+# ---------------- 角色权限矩阵（mix_roles：自定义角色→可见模块） ----------------
+@router.get("/operators/roles")
+async def roles_list(_who=Depends(require_viewer)):
+    pool = await ds.pg_main()
+    if pool is None:
+        return []
+    import json as _json
+    return [{**dict(r), "modules": _json.loads(r["modules"]) if isinstance(r["modules"], str) else r["modules"]}
+            for r in await pool.fetch("SELECT role_key, name, modules, is_builtin FROM mix_roles ORDER BY role_key")]
+
+
+@router.put("/operators/roles")
+async def role_put(body: dict, admin=Depends(require_admin)):
+    import json as _json
+    rk = str(body.get("role_key") or "").strip()
+    if not rk:
+        raise HTTPException(400, "role_key required")
+    pool = await ds.pg_main()
+    if pool is None:
+        raise HTTPException(503, "mix_main 未配置")
+    await pool.execute(
+        "INSERT INTO mix_roles(role_key,name,modules,updated_by,updated_at) VALUES($1,$2,$3,$4,now()) "
+        "ON CONFLICT (role_key) DO UPDATE SET name=$2, modules=$3, updated_by=$4, updated_at=now() "
+        "WHERE mix_roles.is_builtin=false OR mix_roles.role_key=$1",
+        rk, str(body.get("name") or "")[:40], _json.dumps(body.get("modules") or []), admin["admin"])
+    await proxy.audit(admin["admin"], admin.get("role", ""), "role.put", rk, body, "saved")
+    return {"saved": True}
+
+
+@router.delete("/operators/roles/{role_key}")
+async def role_del(role_key: str, admin=Depends(require_admin)):
+    pool = await ds.pg_main()
+    if pool is None:
+        raise HTTPException(503, "mix_main 未配置")
+    n = await pool.execute("DELETE FROM mix_roles WHERE role_key=$1 AND is_builtin=false", role_key)
+    if n.endswith("0"):
+        raise HTTPException(400, "内置角色不可删")
+    await proxy.audit(admin["admin"], admin.get("role", ""), "role.del", role_key, {}, "deleted")
+    return {"deleted": True}
+
+
+@router.get("/operators/audit")
+async def operators_audit(_who=Depends(require_viewer)):
+    """操作员行为日志（admin_audit 全量,最近 80 条）。"""
+    rows = await ds.fetch(
+        "SELECT ts, operator, role, action, target, result FROM admin_audit ORDER BY ts DESC LIMIT 80")
+    return [{"at": r["ts"].strftime("%m-%d %H:%M:%S"), "operator": r["operator"], "role": r["role"],
+             "action": r["action"], "target": r["target"], "result": str(r["result"])[:120]} for r in rows]
+
+
 @router.put("/operators/users/{uid}")
 async def user_update(uid: int, body: dict, admin=Depends(require_admin)):
     pool = await ds.pg_main()
@@ -233,8 +283,11 @@ async def user_update(uid: int, body: dict, admin=Depends(require_admin)):
         raise HTTPException(503, "mix_main 未配置")
     if "enabled" in body:
         await pool.execute("UPDATE mix_users SET enabled=$2 WHERE id=$1", uid, bool(body["enabled"]))
-    if body.get("role") in ("user", "operator", "admin", "owner"):
+    if body.get("role") in ("user", "operator", "admin", "owner", "viewer"):
         await pool.execute("UPDATE mix_users SET role=$2 WHERE id=$1", uid, body["role"])
+    if "ip_whitelist" in body:
+        await pool.execute("UPDATE mix_users SET ip_whitelist=$2 WHERE id=$1",
+                           uid, str(body["ip_whitelist"] or "")[:400])
     if body.get("password"):
         from .auth import hash_password, new_salt
         salt = new_salt()
