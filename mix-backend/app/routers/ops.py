@@ -44,6 +44,35 @@ async def site_brand_put(body: dict, admin=Depends(require_admin)):
     return {"saved": True, "brand": allowed}
 
 
+# ================= O1 现金流优化器(V4.0 §3.2/§7.3)+ 执行内核只读(§6) =================
+@router.post("/system/o1/evaluate")
+async def o1_evaluate(body: dict, _who=Depends(require_viewer)):
+    """给定腿集算带符号日现金流(替代 abs(funding))。body={legs:[{venue,symbol,side,notional_usdt,...}]}"""
+    from .. import o1
+    return await o1.evaluate(body.get("legs") or [])
+
+
+@router.get("/system/execution/state")
+async def execution_state(_who=Depends(require_viewer)):
+    """执行内核 shadow 态概览(供最终 UI):owner/intent/saga 计数 + 模板映射。表未迁移=空。"""
+    from .. import contracts
+    pool = await ds.pg_main()
+    out = {"owners": 0, "intents_by_status": {}, "sagas_by_state": {},
+           "templates": contracts.EXECUTION_TEMPLATES, "armed": False,
+           "note": "执行内核当前 SHADOW(不发真单);武装执行待契约稳定+混沌测试后门控"}
+    if pool is None:
+        return out
+    try:
+        out["owners"] = int((await pool.fetchrow("SELECT count(*) n FROM resource_ownership"))["n"])
+        for r in await pool.fetch("SELECT status, count(*) n FROM position_intent GROUP BY 1"):
+            out["intents_by_status"][r["status"]] = int(r["n"])
+        for r in await pool.fetch("SELECT state, count(*) n FROM pair_saga GROUP BY 1"):
+            out["sagas_by_state"][r["state"]] = int(r["n"])
+    except Exception:  # noqa: BLE001
+        pass
+    return out
+
+
 # ================= I1 合约矩阵(V4.0 §7.1)=================
 # 公开 exchangeInfo(无需 key)拉合约规格入库。首批 Binance(USDT-M linear + COIN-M inverse,
 # 含永续/交割);其余 venue 增量补。永续 deliveryDate 哨兵 4133404800000 → expiry=NULL。
