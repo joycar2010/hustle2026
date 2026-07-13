@@ -145,21 +145,44 @@ async def _populate_binance_instruments(pool) -> dict:
     return {"venue": "binance", "upserted": n}
 
 
+async def _upsert_instruments(pool, rows) -> int:
+    n = 0
+    for r in rows:
+        await pool.execute(
+            "INSERT INTO instrument_spec(venue,instrument_id,canonical_underlying,market_type,"
+            "linear_or_inverse,contract_multiplier,quote_asset,settlement_asset,collateral_asset,"
+            "contract_type,expiry,min_qty,tick_size,status,updated_at) "
+            "VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,now()) "
+            "ON CONFLICT (venue,instrument_id) DO UPDATE SET canonical_underlying=$3,market_type=$4,"
+            "linear_or_inverse=$5,contract_multiplier=$6,quote_asset=$7,settlement_asset=$8,"
+            "collateral_asset=$9,contract_type=$10,expiry=$11,min_qty=$12,tick_size=$13,status=$14,updated_at=now()",
+            *r)
+        n += 1
+    return n
+
+
 @router.post("/system/instruments/refresh")
 async def instruments_refresh(body: dict, op=Depends(require_operator)):
-    """拉取 exchangeInfo 刷新合约矩阵。venue 默认 binance(首批);其余增量补。"""
+    """拉合约矩阵。venue=binance|bybit|okx|gate|bitget|hyperliquid|all。公开端点无需 key。"""
     pool = await ds.pg_main()
     if pool is None:
         raise HTTPException(503, "mix_main 未配置")
-    venue = str(body.get("venue") or "binance")
-    if venue != "binance":
-        raise HTTPException(400, f"venue {venue} 采集器尚未实现(首批仅 binance)")
-    try:
-        res = await _populate_binance_instruments(pool)
-    except Exception as e:  # noqa: BLE001
-        raise HTTPException(502, f"exchangeInfo 拉取失败:{e!r}"[:200])
-    await proxy.audit(op["operator"], op["role"], "instruments.refresh", venue, res, "ok")
-    return {"ok": True, **res}
+    venue = str(body.get("venue") or "all").lower()
+    venues = ["binance", "bybit", "okx", "gate", "bitget", "hyperliquid"] if venue == "all" else [venue]
+    from .. import i1_collectors
+    res, errs = {}, {}
+    for v in venues:
+        try:
+            if v == "binance":
+                res[v] = (await _populate_binance_instruments(pool))["upserted"]
+            elif v in i1_collectors._COLLECTORS:
+                res[v] = await _upsert_instruments(pool, await i1_collectors.collect(v))
+            else:
+                errs[v] = "未知 venue"
+        except Exception as e:  # noqa: BLE001  (单所失败隔离,不影响其余)
+            errs[v] = f"{e!r}"[:150]
+    await proxy.audit(op["operator"], op["role"], "instruments.refresh", venue, {"res": res, "errs": errs}, "ok")
+    return {"ok": True, "upserted": res, "errors": errs}
 
 
 @router.get("/meta/instruments")
