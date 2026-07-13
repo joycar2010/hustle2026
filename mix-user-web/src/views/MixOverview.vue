@@ -11,10 +11,10 @@
     <!-- Hero：累计收益（合并） -->
     <div class="hero">
       <div class="lbl">累计收益 (合并) <i class="live">● 实时更新中</i></div>
-      <div class="num mix-hero-num">+{{ fmt(summary.total) }} <em>USDT</em></div>
+      <div class="num mix-hero-num" :class="{neg: (Number(summary.total)||0) < 0}">{{ sfmt(summary.total) }} <em>USDT</em></div>
       <div class="trip">
         <div v-for="t in [['今日收益',summary.today],['本周收益',summary.week],['累计收益',summary.total]]" :key="t[0]" class="mix-card cell">
-          <em>{{ t[0] }}</em><b class="mix-up">+{{ fmt(t[1]) }}</b><i>USDT</i>
+          <em>{{ t[0] }}</em><b :class="scls(t[1])">{{ sfmt(t[1]) }}</b><i>USDT</i>
         </div>
       </div>
     </div>
@@ -58,8 +58,8 @@
         <div v-for="a in accounts" :key="a.venue" class="arow">
           <b class="v">{{ a.venue }}</b>
           <span class="p"><em>资产</em><b>{{ fmt(a.asset) }}</b></span>
-          <span class="p"><em>今日</em><b class="mix-up">+{{ fmt(a.today) }}</b></span>
-          <span class="p"><em>累计</em><b class="mix-up">+{{ fmt(a.total) }}</b></span>
+          <span class="p"><em>今日</em><b :class="scls(a.today)">{{ sfmt(a.today) }}</b></span>
+          <span class="p"><em>累计</em><b :class="scls(a.total)">{{ sfmt(a.total) }}</b></span>
         </div>
         <div class="ft">只展示你的合并收益；同一用户名下所有子账户合并为一条净值曲线</div>
       </div>
@@ -86,6 +86,10 @@ const gran = ref('日')
 const range = ref('30天')
 
 const fmt = n => (n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+// 带符号显示：正数前缀 +,负数用数字自带的 -（不再硬编码 + 导致「+-37.47」）
+const sfmt = n => { const v = Number(n) || 0; return (v > 0 ? '+' : '') + fmt(v) }
+// 涨绿跌红：≥0 绿(mix-up)，<0 红(mix-dn)
+const scls = n => ((Number(n) || 0) < 0 ? 'mix-dn' : 'mix-up')
 
 /** 周/月前端聚合日粒度（契约约定） */
 const points = computed(() => {
@@ -164,6 +168,9 @@ onMounted(async () => {
 .hero .live { font-style: normal; color: var(--mix-green); font-size: 10.5px; margin-left: 8px; }
 .hero .num { font-size: clamp(30px, 6vw, 52px); }
 .hero .num em { font-style: normal; font-size: 14px; color: var(--mix-green); background: rgba(14,203,129,.14); border-radius: 5px; padding: 2px 8px; vertical-align: middle; }
+/* 累计为负：大数字+USDT 徽章转红（覆盖 mix-hero-num 的绿，3 类选择器胜过全局 1 类） */
+.hero .num.neg { color: var(--mix-red); text-shadow: 0 0 28px rgba(246,70,93,.35); }
+.hero .num.neg em { color: var(--mix-red); background: rgba(246,70,93,.14); }
 .trip { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 10px; }
 .trip .cell { padding: 10px 12px; display: flex; flex-direction: column; gap: 2px; }
 .trip em { font-style: normal; color: var(--mix-t2); font-size: 11px; }
