@@ -260,6 +260,8 @@ function stateStyle(s: SubRowState): { bg: string; fg: string } {
 
     <!-- 右键菜单（Teleport，右键 / ⋮ / 长按同源） -->
     <Teleport to="body">
+      <!-- 全屏透明背板：点任意处关菜单（修 Teleport 菜单点别处关不掉的 bug） -->
+      <div v-if="menu.open && menu.row" class="vpt-ctx-backdrop" @click="closeMenu" @contextmenu.prevent="closeMenu"></div>
       <div v-if="menu.open && menu.row" class="vpt-ctx" :style="{ left: menu.x + 'px', top: menu.y + 'px' }" @click.stop>
         <div class="ctx-h">{{ menu.row.symbol }}{{ menu.accountId ? ' · ↳ ' + menu.accountId : '' }}</div>
         <template v-for="it in menuItems" :key="it.key">
@@ -337,6 +339,7 @@ $t1: #EAECEF; $t2: #848E9C; $t3: #5E6673; $gold: #F0B90B;
 
 <style lang="scss">
 /* 菜单 Teleport 到 body，不能 scoped */
+.vpt-ctx-backdrop { position: fixed; inset: 0; z-index: 9998; }
 .vpt-ctx { position: fixed; z-index: 9999; width: 176px; background: #1E232B; border: 1px solid #262B33;
   border-radius: 10px; padding: 5px; box-shadow: 0 8px 24px rgba(0,0,0,.6); font-size: 10.5px; color: #EAECEF;
   .ctx-h { padding: 5px 10px 4px; color: #5E6673; font-size: 8.5px; font-weight: 600; }

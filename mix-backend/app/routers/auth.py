@@ -103,8 +103,12 @@ async def create_user(body: UserCreate, admin=Depends(require_admin)):
     pool = await ds.pg_main()
     if pool is None:
         raise HTTPException(503, "mix_main 未配置")
-    if body.role not in ("user", "owner", "admin"):
-        raise HTTPException(400, "role 必须是 user|owner|admin")
+    # 角色校验对齐 mix_roles 表（含 operator/viewer 等,不再写死三值）
+    valid = {r["role_key"] for r in await pool.fetch("SELECT role_key FROM mix_roles")}
+    if not valid:
+        valid = {"user", "owner", "admin", "operator", "viewer"}
+    if body.role not in valid:
+        raise HTTPException(400, f"role 必须是 {'/'.join(sorted(valid))} 之一")
     salt = new_salt()
     h = hash_password(body.password, salt)
     try:

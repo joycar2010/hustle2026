@@ -46,6 +46,7 @@
 
     <!-- 账户右键菜单（cex / kms_wallet 按 platformType 注入） -->
     <Teleport to="body">
+      <div v-if="menu.open" class="acct-ctx-backdrop" @click="menu.open=false" @contextmenu.prevent="menu.open=false"></div>
       <div v-if="menu.open" class="acct-ctx" :style="{left:menu.x+'px',top:menu.y+'px'}" @click.stop>
         <div class="h">{{ menu.node?.id }} · {{ menu.node?.venue }}</div>
         <template v-for="it in menuItems" :key="it.key">
@@ -76,6 +77,19 @@
       <template #footer>
         <el-button @click="apiDlg=false">取消</el-button>
         <el-button type="warning" :loading="apiSaving" @click="saveApi">加密并提交</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 分配作用域（勾选，不填空框） -->
+    <el-dialog v-model="scopeDlg" :title="`分配作用域 · ${scopeForm.account_key}`" width="480">
+      <el-radio-group v-model="scopeForm.machine" class="scoperadio">
+        <el-radio value="A" border>A 机 · 数据面<span class="sd">52.193.224.137（行情/采样）</span></el-radio>
+        <el-radio value="B" border>B 机 · 执行面<span class="sd">54.65.42.207（五所 key / 引擎 / 监控）</span></el-radio>
+        <el-radio value="C" border>C 机 · 控制面<span class="sd">57.181.130.126（gateway / 决策 / mix）</span></el-radio>
+      </el-radio-group>
+      <template #footer>
+        <el-button @click="scopeDlg=false">取消</el-button>
+        <el-button type="warning" @click="saveScope">保存</el-button>
       </template>
     </el-dialog>
 
@@ -163,6 +177,15 @@ const apiDlg = ref(false), apiSaving = ref(false)
 const apiForm = reactive({ account_key: '', venue: 'binance', label: '', apiKey: '', apiSecret: '', passphrase: '', proxy_url: '' })
 const proxyDlg = ref(false)
 const proxyForm = reactive({ account_key: '', proxy_url: '' })
+const scopeDlg = ref(false)
+const scopeForm = reactive({ account_key: '', machine: 'B' })
+async function saveScope() {
+  try {
+    const r = await mixApi.accountAction(scopeForm.account_key, 'assign_scope', { machine: scopeForm.machine })
+    ElMessage.success(`已分配 ${r.machine} 机：${r.desc}`)
+    scopeDlg.value = false; loadRegistry()
+  } catch (e) { ElMessage.error(e?.detail || e?.error || '失败') }
+}
 const masterKeys = computed(() => Object.values(reg.value).filter(r => r.account_type === 'master').map(r => r.account_key))
 
 async function encryptCred(apiKey, apiSecret, passphrase) {
@@ -195,13 +218,9 @@ async function doAction(it) {
       regDlg.value = true; return
     }
     if (it.key === 'assign_scope') {
-      const cur = reg.value[node.id]?.machine || 'B'
-      const { value } = await ElMessageBox.prompt(
-        '作用域=账户归属的执行机器。A=数据面(52.193.224.137) / B=执行面·五所key(54.65.42.207) / C=控制面(57.181.130.126)',
-        `分配作用域: ${node.id}`, { inputValue: cur, inputPattern: /^[ABCabc]$/, inputErrorMessage: '只能填 A / B / C' })
-      const r = await mixApi.accountAction(node.id, 'assign_scope', { machine: value.toUpperCase() })
-      ElMessage.success(`已分配 ${r.machine} 机：${r.desc}`)
-      return loadRegistry()
+      scopeForm.account_key = node.id
+      scopeForm.machine = reg.value[node.id]?.machine || 'B'
+      scopeDlg.value = true; return
     }
     if (it.key === 'create_sub' || it.key === 'create_wallet') { createDlg.value = true; return }
     if (it.key === 'set_api') {

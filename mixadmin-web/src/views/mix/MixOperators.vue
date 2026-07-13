@@ -98,6 +98,23 @@
       <template #footer><el-button @click="showCreate=false">取消</el-button><el-button type="warning" @click="create">创建</el-button></template>
     </el-dialog>
 
+    <!-- 改角色（下拉选择,不填空框） -->
+    <el-dialog v-model="chRoleDlg" :title="`改角色 · ${chForm.username}`" width="360">
+      <el-select v-model="chForm.role" style="width:100%">
+        <el-option v-for="r in roles" :key="r.role_key" :value="r.role_key" :label="`${r.name}（${r.role_key}）`" />
+      </el-select>
+      <template #footer><el-button @click="chRoleDlg=false">取消</el-button><el-button type="warning" @click="saveChRole">保存</el-button></template>
+    </el-dialog>
+
+    <!-- 改范围（勾选,不填空框） -->
+    <el-dialog v-model="chScopeDlg" :title="`改范围 · ${chForm.username}`" width="400">
+      <el-checkbox-group v-model="chForm.scopes">
+        <el-checkbox v-for="v in venues" :key="v" :value="v" style="width:110px">{{ v }}</el-checkbox>
+      </el-checkbox-group>
+      <div style="font-size:11px;color:var(--el-text-color-placeholder);margin-top:8px">不勾=零数据（默认拒绝）；owner/admin 角色天然全量。</div>
+      <template #footer><el-button @click="chScopeDlg=false">取消</el-button><el-button type="warning" @click="saveChScope">保存</el-button></template>
+    </el-dialog>
+
     <!-- 角色编辑 -->
     <el-dialog v-model="roleDlg" :title="rf.is_builtin?'编辑内置角色（仅改可见模块）':'角色编辑'" width="520">
       <el-form label-width="80">
@@ -120,7 +137,7 @@ import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { mixApi } from '../../api/mix'
 
-const ALL_MODULES = ['中控台', '策略总览', '规则中心', '交易历史', '账户列表', '黑名单', '币管理', '资金收益', '运维面板', '通知模块', '官网管理', '操作员管理', '系统配置', 'LLM设置']
+const ALL_MODULES = ['中控台', '策略总览', '规则中心', '交易历史', '账户列表', '黑名单', '币管理', '资金收益', '运维面板', '通知模块', '官网管理', '操作员管理', '系统配置', 'LLM设置', '用户端·mix站']
 const ROLE_CN = { SUPER_ADMIN: '超级管理员', OPERATOR: '操作员', VIEWER: '只读', USER: '用户', owner: '所有者', admin: '管理员', operator: '操作员', viewer: '只读', user: '用户' }
 const roleCn = r => ROLE_CN[r] || r
 const venues = ['binance', 'bybit', 'okx', 'gate', 'bitget', 'hyperliquid']
@@ -130,6 +147,8 @@ const nu = ref({ username: '', password: '', role: 'user', scopes: [] })
 const roles = ref([]); const audit = ref([])
 const roleDlg = ref(false)
 const rf = reactive({ role_key: '', name: '', modules: [], all: false, is_builtin: false, _edit: false })
+const chRoleDlg = ref(false), chScopeDlg = ref(false)
+const chForm = reactive({ id: null, username: '', role: '', scopes: [] })
 
 async function load() { try { data.value = await mixApi.operatorsAll() } catch (e) { ElMessage.error(e?.detail || '加载失败') } }
 async function loadRoles() { try { roles.value = await mixApi.roles() } catch (e) { roles.value = [] } }
@@ -139,19 +158,15 @@ async function create() {
   catch (e) { ElMessage.error(e?.detail || '失败（需 SUPER_ADMIN）') }
 }
 async function toggle(u) { try { await mixApi.userUpdate(u.id, { enabled: !u.enabled }); load() } catch (e) { ElMessage.error(e?.detail || '失败') } }
-async function editRole(u) {
-  try {
-    const opts = roles.value.map(r => r.role_key).join('/')
-    const { value } = await ElMessageBox.prompt(`角色键：${opts}`, `改角色: ${u.username}`, { inputValue: u.role })
-    await mixApi.userUpdate(u.id, { role: value }); ElMessage.success('已更新'); load()
-  } catch (e) { if (e !== 'cancel') ElMessage.error(e?.detail || '失败') }
+function editRole(u) { Object.assign(chForm, { id: u.id, username: u.username, role: u.role, scopes: [...(u.scopes || [])] }); chRoleDlg.value = true }
+async function saveChRole() {
+  try { await mixApi.userUpdate(chForm.id, { role: chForm.role }); ElMessage.success('已更新'); chRoleDlg.value = false; load() }
+  catch (e) { ElMessage.error(e?.detail || '失败') }
 }
-async function editScopes(u) {
-  try {
-    const { value } = await ElMessageBox.prompt('逗号分隔交易所范围（留空=清空）', `改范围: ${u.username}`, { inputValue: u.scopes.join(',') })
-    await mixApi.userUpdate(u.id, { scopes: value ? value.split(',').map(s => s.trim()).filter(Boolean) : [] })
-    ElMessage.success('已更新'); load()
-  } catch (e) { if (e !== 'cancel') ElMessage.error(e?.detail || '失败') }
+function editScopes(u) { Object.assign(chForm, { id: u.id, username: u.username, role: u.role, scopes: [...(u.scopes || [])] }); chScopeDlg.value = true }
+async function saveChScope() {
+  try { await mixApi.userUpdate(chForm.id, { scopes: chForm.scopes }); ElMessage.success('已更新'); chScopeDlg.value = false; load() }
+  catch (e) { ElMessage.error(e?.detail || '失败') }
 }
 async function editIp(u) {
   try {

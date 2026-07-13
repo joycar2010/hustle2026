@@ -45,7 +45,10 @@
     <!-- 底部横排三卡：策略总览缩略 / 账户余额水位预警 / 分策略管道总览 -->
     <div class="botrow">
       <div class="card">
-        <div class="chd">策略总览 <el-link type="warning" @click="$router.push('/mix/strategies')">全页 →</el-link></div>
+        <div class="chd">策略总览
+          <span class="hd-stat">在管 <b>{{ totalCount }}</b> · 当日收益 <b :class="(ov.pnl_today||0) >= 0 ? 'up' : 'down'">{{ fmtPnl(ov.pnl_today) }}</b> U</span>
+          <el-link type="warning" @click="$router.push('/mix/strategies')">全页 →</el-link>
+        </div>
         <div v-for="s in strategies" :key="s.code" class="srow">
           <span class="sbadge" :style="{background: SC[s.code]}" @click="$router.push('/mix/strategy/'+s.code)">{{ s.code }}</span>
           <span class="snm" @click="$router.push('/mix/strategy/'+s.code)">{{ s.name }}</span>
@@ -71,7 +74,15 @@
       </div>
 
       <div class="card">
-        <div class="chd">分策略管道总览</div>
+        <div class="chd">分策略管道总览
+          <!-- 真系统健康监控（原 footer 硬编码文字改为实时状态） -->
+          <span class="hd-health" @click="$router.push('/system')">
+            <i class="hdot" :class="{bad: healthBad}"></i>
+            服务 {{ ov.health?.ok ?? '—' }}/{{ ov.health?.total ?? '—' }} ·
+            护栏 <b :class="ov.risk?.alerts_this_round ? 'warn' : 'up'">{{ ov.risk?.alerts_this_round ?? 0 }} 告警</b> ·
+            WS <span class="hdot" :class="{bad: !wsOn}"></span>{{ wsOn ? '已连' : '重连中' }}
+          </span>
+        </div>
         <div v-for="s in strategies" :key="s.code" class="prow">
           <span class="sbadge" :style="{background: SC[s.code]}">{{ s.code }}</span>
           <span class="pipe-mini">
@@ -79,13 +90,6 @@
           </span>
         </div>
       </div>
-    </div>
-
-    <div class="foot">
-      在管 {{ totalCount }} · 当日收益
-      <b :class="(ov.pnl_today||0) >= 0 ? 'up' : 'down'">{{ fmtPnl(ov.pnl_today) }}</b> USDT ·
-      系统健康与风控护栏 → 屏3·风控墙 ·
-      WS <span class="dot" :class="{on: wsOn}"></span>{{ wsOn ? '已连接' : '重连中…' }}
     </div>
   </div>
 </template>
@@ -113,6 +117,7 @@ const loading = ref(false)
 
 const totalCount = computed(() => rows.value.reduce((n, r) => n + (r.positionCount || 0), 0))
 const warnCount = computed(() => watermarks.value.filter(w => w.threshold !== 'ok').length)
+const healthBad = computed(() => { const h = ov.value.health; return h ? (h.ok < h.total) : false })
 const fmtPnl = v => (v == null ? '—' : (v >= 0 ? '+' : '') + Number(v).toFixed(2))
 const wcolor = w => w.threshold === 'withdraw' ? '#F6465D' : w.threshold === 'topup' ? '#F0B90B' : '#0ECB81'
 const wlabel = w => w.threshold === 'ok' ? '正常'
@@ -133,9 +138,12 @@ async function loadAux() {
     watermarks.value = await mixApi.monitor.watermarks()
   } catch (e) { /* 辅助区降级不阻断主表 */ }
 }
-// 水位秒级：单独高频轮询（后端读缓存快照,轻量）
+// 秒级高频轮询：水位 + 当日收益 + 系统健康（后端读缓存快照,轻量）
 async function loadWater() {
-  try { watermarks.value = await mixApi.monitor.watermarks() } catch (e) { /* 降级 */ }
+  try {
+    const [wm, o] = await Promise.all([mixApi.monitor.watermarks(), mixApi.monitor.overview()])
+    watermarks.value = wm; ov.value = o
+  } catch (e) { /* 降级 */ }
 }
 function setStrategy(code) { filterStrategy.value = code; load() }
 function flipDir() { sortDir.value = sortDir.value === 'asc' ? 'desc' : 'asc'; load() }
@@ -225,7 +233,13 @@ onUnmounted(() => { wsDisconnect && wsDisconnect(); auxTimer && clearInterval(au
 
 .botrow { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 10px; }
 .card { background: var(--mix-card, #181B21); border: 1px solid var(--mix-border, #262B33); border-radius: 8px; padding: 10px 12px; }
-.chd { font-size: 12.5px; font-weight: 700; color: var(--mix-t1, #EAECEF); margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; }
+.chd { font-size: 12.5px; font-weight: 700; color: var(--mix-t1, #EAECEF); margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.hd-stat { margin-left: auto; margin-right: 8px; font-size: 11px; font-weight: 500; color: var(--mix-t2, #848E9C);
+  b { font-weight: 700; color: var(--mix-t1, #EAECEF); &.up { color: #0ECB81; } &.down { color: #F6465D; } } }
+.hd-health { margin-left: auto; font-size: 10.5px; font-weight: 500; color: var(--mix-t2, #848E9C); cursor: pointer; display: inline-flex; align-items: center; gap: 4px;
+  b { font-weight: 700; &.up { color: #0ECB81; } &.warn { color: #F0B90B; } }
+  &:hover { color: var(--mix-t1, #EAECEF); } }
+.hdot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #0ECB81; &.bad { background: #F6465D; } }
 .srow { display: flex; align-items: center; gap: 8px; font-size: 11.5px; padding: 3px 0; color: var(--mix-t2, #848E9C);
   &:hover { color: var(--mix-t1, #EAECEF); } }
 .snm { flex: 1; min-width: 60px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
