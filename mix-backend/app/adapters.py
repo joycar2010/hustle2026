@@ -126,6 +126,18 @@ async def _s2_rows() -> list[dict]:
     for r in db:
         by_sym.setdefault(r["symbol"], []).append(r)
 
+    async def _leg_gap(sym: str, vl: str, vs: str):
+        """两腿价差%（depth-sampler mid，90s 采样）：+ = 空腿贵于多腿（开仓有利方向）。"""
+        dl = await ds.get_json(f"dcm:depth:{vl}:perp:{sym}")
+        dsx = await ds.get_json(f"dcm:depth:{vs}:perp:{sym}")
+        try:
+            ml, ms = float((dl or {}).get("mid") or 0), float((dsx or {}).get("mid") or 0)
+            if ml > 0 and ms > 0:
+                return (ms - ml) / ml * 100.0
+        except Exception:  # noqa: BLE001
+            pass
+        return None
+
     out = []
     for sym, group in by_sym.items():
         r0 = group[-1]
@@ -151,6 +163,7 @@ async def _s2_rows() -> list[dict]:
         phase, label = DP_PHASE.get(r0["state"], ("HOLDING", r0["state"]))
         qty = sum(float(x["qty_base"]) for x in group)
         notion = sum(float(x["notional_usdt"]) for x in group)
+        gap = await _leg_gap(sym, vl, vs)
 
         def leg(venue, qty_cell, side, pd, dliq, own_fund):
             # 每腿显示各所自己的费率与结算时间（此前复用配对级 edge/ddl_txt 致两腿同值——bug 修复）
@@ -189,6 +202,10 @@ async def _s2_rows() -> list[dict]:
                 {"label": "多", "value": f"{vl} {float(fl.get('daily_pct')):.3f}%/d" if fl.get("daily_pct") is not None else vl},
                 {"label": "空", "value": f"{vs} {float(fs.get('daily_pct')):.3f}%/d" if fs.get("daily_pct") is not None else vs, "tone": "accent"},
                 {"label": "差", "value": f"{edge:+.3f}%/d" if edge is not None else "—", "tone": "up" if (edge or 0) > 0 else "down"},
+                # 开/平价差 = 两腿 perp mid 价差(depth-sampler);开=空贵多贱为正,平=反向
+                {"label": "开差", "value": f"{gap:+.3f}%" if gap is not None else "—",
+                 "tone": "up" if (gap or 0) > 0 else "down"},
+                {"label": "平差", "value": f"{-gap:+.3f}%" if gap is not None else "—"},
                 {"label": "持仓", "value": f"{notion:,.0f}U"},
             ],
             "pushStatus": f"结费 {ddl_txt}" if ddl_ms else "—",
@@ -287,6 +304,11 @@ async def _s3_rows() -> list[dict]:
     uid_w = panel.get("uid_weight") or {}
     interest = panel.get("interest_rates") or {}
     spreads = panel.get("spreads") or {}
+    # 实时点差快线（桥 2s 透传 coin rust spreads hash）覆盖 60s panel 快照——开/平列近实时
+    rt = await ds.get_json("dcm:coin:spreads_rt") or {}
+    rt_ts = rt.get("ts")
+    if isinstance(rt.get("spreads"), dict):
+        spreads = {**spreads, **rt["spreads"]}
     bl_syms = {str(b.get("symbol", "")).upper() for b in (panel.get("blacklist") or [])}
     fund_bn = await _funding("binance")
 
@@ -400,7 +422,7 @@ async def _s3_rows() -> list[dict]:
                 {"label": "时", "value": f"{f.get('interval_h', '—')}h"},
                 {"label": "息", "value": f"{float(ir) * 100:.3f}%" if ir is not None else "—", "tone": "accent"},
             ],
-            "pushStatus": "面板 " + _age_text(panel.get("ts")),
+            "pushStatus": ("点差 " + _age_text(rt_ts)) if rt_ts else ("面板 " + _age_text(panel.get("ts"))),
             "fundingRateRatio": f"{float(f['daily_pct']):.3f}" if f.get("daily_pct") is not None else "—",
             "singleRuleBrief": "-", "allowRemove": False, "allowRepay": False,
             "pnl": None,

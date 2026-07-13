@@ -1,4 +1,5 @@
 """监控/黑名单/币管理/报表/告警/通知 —— 读=真数据；写=P0 未接线 501。"""
+from typing import Optional
 from fastapi import APIRouter, Query, HTTPException, Depends
 from ..schemas import NotifySettings
 from ..enums import enums_payload
@@ -117,6 +118,113 @@ async def coins(_who=Depends(require_viewer)):
 @router.post("/coins/{symbol}/actions", status_code=202)
 async def coin_action(symbol: str, body: dict, op=Depends(require_operator)):
     not_wired(f"币状态流转 {symbol}[{body.get('action')}]")
+
+
+# ---- S3(coin) 右键菜单 1:1 干预（经桥 → coin 状态机+护栏权威） ----
+# 每个动作按 coin API 真实契约做参数变换(2026-07-13 真调验证课:此前 sub 传备注名/
+# symbol 带 USDT 后缀/参数键名对不上 coin pydantic,全部 422/校验拒——契约必须逐动作核对)。
+S3_MENU_CMDS = {"push_symbol", "remove_slot", "resume_slot", "manual_open", "blacklist",
+                "force_close", "manual_hedge", "manual_repay", "partial_repay",
+                "batch_remove", "max_borrowable", "transfer", "transfer_cross"}
+
+
+async def _sub_id_of(note_or_id) -> Optional[int]:
+    """子账户 备注名/id → coin SubAccount.id(桥/coin 只认整数 id)。"""
+    if note_or_id is None:
+        return None
+    s = str(note_or_id)
+    if s.isdigit():
+        return int(s)
+    panel = await ds.get_json("dcm:coin:panel") or {}
+    for a in (panel.get("balances") or {}).get("balances") or []:
+        if str(a.get("note")) == s:
+            return int(a["account_id"])
+    return None
+
+
+@router.post("/coins/{symbol}/menu", status_code=202)
+async def coin_menu_action(symbol: str, body: dict, op=Depends(require_operator)):
+    """S3 币种/账户/持仓行右键菜单动作代理。coin 状态机权威,桥只透传+校验。"""
+    action = str(body.get("action") or "")
+    if action not in S3_MENU_CMDS:
+        raise HTTPException(400, f"未知菜单动作：{action}")
+    sym = symbol.upper()
+    base = sym[:-4] if sym.endswith("USDT") else sym
+    sub_id = await _sub_id_of(body.get("sub"))
+
+    async def _need_sub() -> int:
+        if sub_id is None:
+            raise HTTPException(409, f"无法定位子账户：{body.get('sub')}（面板无此备注名）")
+        return sub_id
+
+    async def _need_pos() -> int:
+        pos = await adapters.resolve_coin_position(sym, body.get("sub"))
+        if not pos:
+            raise HTTPException(409, f"{sym} 无在管持仓行（候选币无仓可操作）")
+        return int(pos["id"])
+
+    if action in ("push_symbol", "remove_slot", "resume_slot"):
+        cmd, params = action, {"symbol": sym}
+    elif action == "blacklist":
+        cmd = "blacklist_add"
+        params = {"symbol": sym, "reason": str(body.get("reason") or f"mix:{op['operator']} 菜单移入")}
+    elif action == "batch_remove":
+        cmd, params = "batch_remove_empty", {"symbols": body.get("symbols") or [sym]}
+    elif action == "max_borrowable":
+        # coin 路径 /accounts/{sub}/max-borrowable/{asset}:asset=基础币(非交易对)
+        cmd, params = "max_borrowable", {"sub": await _need_sub(), "symbol": base}
+    elif action == "manual_open":
+        cmd = "manual_open"
+        params = {"sub_account_id": await _need_sub(), "symbol": sym}
+        if body.get("amount") is not None:
+            params["order_amount"] = str(body["amount"])
+    elif action == "partial_repay":
+        cmd = "partial_repay"
+        params = {"sub_account_id": await _need_sub(), "symbol": sym}
+        if body.get("amount") is not None:
+            params["amount"] = str(body["amount"])            # 币数量
+        if body.get("amount_usdt") is not None:
+            params["amount_usdt"] = str(body["amount_usdt"])  # USDT 金额(coin 按现价换算)
+        if body.get("sell_residual"):
+            params["sell_residual"] = True
+        if body.get("pause_borrow"):
+            params["pause_borrow"] = True
+    elif action in ("force_close", "manual_hedge", "manual_repay"):
+        cmd = {"force_close": "manual_force_close", "manual_hedge": "manual_hedge",
+               "manual_repay": "manual_repay"}[action]
+        params = {"position_id": await _need_pos()}
+    elif action == "transfer":
+        cmd = "account_transfer"
+        params = {"sub": await _need_sub(),
+                  "from_wallet": str(body.get("from_wallet") or body.get("from_type") or "futures"),
+                  "to_wallet": str(body.get("to_wallet") or body.get("to_type") or "margin"),
+                  "asset": str(body.get("asset") or "USDT"),
+                  "amount": str(body.get("amount") or 0)}
+    else:  # transfer_cross
+        cmd = "transfer_cross"
+        cp_sub = await _sub_id_of(body.get("counterparty_sub"))
+        params = {"sub": await _need_sub(),
+                  "direction": str(body.get("direction") or "out"),
+                  "counterparty_type": str(body.get("counterparty_type") or "master"),
+                  "from_wallet": str(body.get("from_wallet") or "spot"),
+                  "to_wallet": str(body.get("to_wallet") or "spot"),
+                  "asset": str(body.get("asset") or "USDT"),
+                  "amount": str(body.get("amount") or 0)}
+        if cp_sub is not None:
+            params["counterparty_sub_account_id"] = cp_sub
+    res = await proxy.coin_cmd(cmd, params, op["operator"], timeout_sec=12)
+    await proxy.audit(op["operator"], op["role"], f"coin.{action}", sym, params,
+                      "ok" if res.get("ok") else str(res)[:120])
+    if not res.get("ok"):
+        detail = res.get("body") or res.get("err")
+        if isinstance(detail, dict):
+            detail = detail.get("detail") or detail
+        # coin 的 max-borrowable 对 -3045(币安无券)未捕获直接 500——语义化提示,不猜测自愈
+        if action == "max_borrowable" and res.get("status") == 500:
+            detail = f"{detail}（该币大概率无券可借 -3045,与面板『无券』标记对照）"
+        raise HTTPException(409 if res.get("status") in (400, 404, 409, 422) else 502,
+                            f"coin 侧拒绝：{detail}")
+    return {"ok": True, "action": action, "coin": res.get("body")}
 
 
 # ---- 报表 ----

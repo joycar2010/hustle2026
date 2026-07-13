@@ -157,6 +157,149 @@ async def put_symbol_rule(symbol: str, body: dict, op=Depends(require_operator))
             "note": "coin 引擎 30s 轮询回读生效"}
 
 
+# ==== 单一规则矩阵（coin SymbolRuleDialog 1:1：批量行=SymbolRule 基线 + 各子账户行=AccountSymbolRule 覆盖） ====
+
+@router.get("/symbol/{symbol}/matrix")
+async def get_symbol_rule_matrix(symbol: str, op=Depends(require_operator)):
+    """S3 单一规则矩阵读：批量基线 + 逐子账户覆盖 + 持币（panel symbol_margin 实时快照）。"""
+    import asyncio as _aio
+    sym = symbol.upper()
+    panel = await ds.get_json("dcm:coin:panel") or {}
+    grules = panel.get("rules") or {}
+    accts = (panel.get("balances") or {}).get("balances") or []
+    results = await _aio.gather(
+        proxy.coin_cmd("symbol_rule_get", {"symbol": sym}, op["operator"], timeout_sec=12),
+        *[proxy.coin_cmd("account_symbol_rule_get", {"sub": a["account_id"], "symbol": sym},
+                         op["operator"], timeout_sec=12) for a in accts])
+    common_res, acct_res = results[0], results[1:]
+    common = common_res.get("body") if common_res.get("ok") and isinstance(common_res.get("body"), dict) else {}
+    keys = [k for k, _ in S3_SYMBOL_FIELDS]
+    rows = []
+    for a, res in zip(accts, acct_res):
+        r = res.get("body") if res.get("ok") and isinstance(res.get("body"), dict) else {}
+        sm = (a.get("symbol_margin") or {}).get(sym) or {}
+        rows.append({"sub": a["account_id"], "note": str(a.get("note") or f"sub:{a['account_id']}"),
+                     "held": {"borrowed": float(sm.get("borrowed") or 0),
+                              "interest": float(sm.get("interest") or 0)},
+                     "rules": {k: r.get(k) for k in keys}})
+    return {"symbol": sym, "writable": True,
+            "cols": [{"key": k, "label": lb} for k, lb in S3_SYMBOL_FIELDS],
+            "globalBaseline": {k: grules.get(k) for k in keys},
+            "common": {**{k: common.get(k) for k in keys},
+                       "allow_remove": common.get("allow_remove"),
+                       "allow_repay": common.get("allow_repay")},
+            "accounts": rows}
+
+
+@router.put("/symbol/{symbol}/matrix")
+async def put_symbol_rule_matrix(symbol: str, body: dict, op=Depends(require_operator)):
+    """S3 单一规则矩阵写：common→symbol_rule_put(批量基线)；accounts→account_symbol_rule_batch。
+    值语义对齐 coin：空串→null=清覆盖回落跟随；coin schema/审计/0 秒热重载权威。"""
+    sym = symbol.upper()
+    allowed = {k for k, _ in S3_SYMBOL_FIELDS}
+
+    def _san(fields: dict) -> dict:
+        out = {}
+        for k, v in (fields or {}).items():
+            if k not in allowed:
+                continue
+            out[k] = None if v in ("", None) else v
+        return out
+
+    applied = []
+    common = body.get("common")
+    if isinstance(common, dict):
+        payload = _san(common)
+        payload["is_temporary"] = True
+        for bk in ("allow_remove", "allow_repay"):
+            if common.get(bk) is not None:
+                payload[bk] = bool(common[bk])
+        res = await proxy.coin_cmd("symbol_rule_put", {"symbol": sym, **payload},
+                                   op["operator"], timeout_sec=12)
+        if not res.get("ok"):
+            raise HTTPException(502, f"coin 批量行拒绝：{res.get('err') or res.get('body')}")
+        applied.append("common")
+    items = []
+    for a in (body.get("accounts") or []):
+        try:
+            sub = int(a.get("sub"))
+        except (TypeError, ValueError):
+            continue
+        items.append({"sub_account_id": sub, "symbol": sym, "data": _san(a.get("fields") or {})})
+    if items:
+        res = await proxy.coin_cmd("account_symbol_rule_batch", {"items": items},
+                                   op["operator"], timeout_sec=12)
+        if not res.get("ok"):
+            raise HTTPException(502, f"coin 账户行拒绝：{res.get('err') or res.get('body')}")
+        applied += [f"sub:{i['sub_account_id']}" for i in items]
+    await proxy.audit(op["operator"], op["role"], "rules.symbol.matrix", sym,
+                      {"common": bool(common), "accounts": len(items)}, "ok")
+    return {"saved": bool(applied), "applied": applied, "hotReloadSec": 0,
+            "note": "coin 规则热重载事件驱动(0 秒),持币/挂单按新值立即生效"}
+
+
+# ==== 通用规则·自动划转 + 子账户资金参数表（coin RulesPage 红框区 1:1） ====
+
+@router.get("/fund/s3")
+async def get_fund_rules_s3(op=Depends(require_operator)):
+    """自动划转(fund-rules) + 主账户可转余额 + 子账户资金参数&实时余额。"""
+    import asyncio as _aio
+    fr_res, mb_res, sa_res = await _aio.gather(
+        proxy.coin_cmd("fund_rules_get", {}, op["operator"], timeout_sec=12),
+        proxy.coin_cmd("master_balance", {}, op["operator"], timeout_sec=12),
+        proxy.coin_cmd("sub_accounts_get", {}, op["operator"], timeout_sec=12))
+    panel = await ds.get_json("dcm:coin:panel") or {}
+    bal_by_id = {a.get("account_id"): a
+                 for a in (panel.get("balances") or {}).get("balances") or []}
+    accounts = []
+    sa = sa_res.get("body") if sa_res.get("ok") and isinstance(sa_res.get("body"), list) else []
+    for a in sa:
+        bal = bal_by_id.get(a.get("id")) or {}
+        accounts.append({
+            "sub": a.get("id"), "note": a.get("note"), "enabled": a.get("is_enabled"),
+            "balance": {k: bal.get(k) for k in
+                        ("bnb_free", "bnb_interest", "margin_usdt_borrowed", "futures_total",
+                         "futures_available", "margin_usdt_free", "margin_level")},
+            "params": {k: a.get(k) for k in
+                       ("risk_threshold", "single_transfer_amount", "min_balance",
+                        "single_order_amount", "max_borrow_amount")},
+        })
+    return {"fundRules": fr_res.get("body") if fr_res.get("ok") else None,
+            "masterBalance": mb_res.get("body") if mb_res.get("ok") else None,
+            "accounts": accounts}
+
+
+@router.put("/fund/s3")
+async def put_fund_rules_s3(body: dict, op=Depends(require_operator)):
+    """写：fundRules 差分→fund_rules_put；accounts[].params→fund_params_patch(逐账户)。"""
+    applied = []
+    fr = body.get("fundRules")
+    if isinstance(fr, dict) and fr:
+        res = await proxy.coin_cmd("fund_rules_put", fr, op["operator"], timeout_sec=12)
+        if not res.get("ok"):
+            raise HTTPException(502, f"coin fund-rules 拒绝：{res.get('err') or res.get('body')}")
+        applied.append("fund_rules")
+    for a in (body.get("accounts") or []):
+        try:
+            sub = int(a.get("sub"))
+        except (TypeError, ValueError):
+            continue
+        params = {k: (None if v == "" else v) for k, v in (a.get("params") or {}).items()
+                  if k in ("risk_threshold", "single_transfer_amount", "min_balance",
+                           "single_order_amount", "max_borrow_amount", "order_amount",
+                           "base_margin_amount")}
+        if not params:
+            continue
+        res = await proxy.coin_cmd("fund_params_patch", {"sub": sub, **params},
+                                   op["operator"], timeout_sec=12)
+        if not res.get("ok"):
+            raise HTTPException(502, f"coin 资金参数拒绝(sub {sub})：{res.get('err') or res.get('body')}")
+        applied.append(f"sub:{sub}")
+    await proxy.audit(op["operator"], op["role"], "rules.fund.s3", "coin.fund",
+                      {"applied": applied}, "ok")
+    return {"saved": bool(applied), "applied": applied}
+
+
 @router.get("/{scope_key}/audit")
 async def rules_audit(scope_key: str, _who=Depends(require_viewer)):
     rows = await ds.fetch(

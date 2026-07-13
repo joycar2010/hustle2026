@@ -42,9 +42,10 @@
       :rows="rows" :sort-key="sortKey" :sort-dir="sortDir" :height="0"
       @action="onAction" @rule-template="onRuleTemplate" @rule-symbol="onRuleSymbol" />
 
-    <!-- 通用规则(策略级) / 单一规则(某币) 弹层 -->
+    <!-- 通用规则(策略级) / 单一规则(某币) / 划转 弹层 -->
     <RuleSettingsModal v-model="ruleModal.open" :code="ruleModal.code" />
     <SymbolRuleModal v-model="symModal.open" :symbol="symModal.symbol" :code="symModal.code" />
+    <TransferModal v-model="transferModal.open" :accounts="transferModal.accounts" :default-sub="transferModal.sub" />
 
     <!-- 底部横排三卡：策略总览缩略 / 账户余额水位预警 / 分策略管道总览 -->
     <div class="botrow">
@@ -105,6 +106,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import VirtualPositionTable from '../../components/PositionTable/VirtualPositionTable.vue'
 import RuleSettingsModal from '../../components/rules/RuleSettingsModal.vue'
 import SymbolRuleModal from '../../components/rules/SymbolRuleModal.vue'
+import TransferModal from '../../components/rules/TransferModal.vue'
 import { STRATEGY_META as META } from '../../components/PositionTable/types'
 import { CONTEXT_MENUS } from '../../components/PositionTable/strategyColumns'
 import { mixApi } from '../../api/mix'
@@ -154,12 +156,45 @@ async function loadWater() {
 function setStrategy(code) { filterStrategy.value = code; load() }
 function flipDir() { sortDir.value = sortDir.value === 'asc' ? 'desc' : 'asc'; load() }
 
+// S3(coin) 菜单动作走 coin 菜单代理端点（桥→coin 状态机权威）
+const S3_MENU_KEYS = ['push_symbol', 'remove_slot', 'resume_slot', 'manual_open', 'blacklist',
+  'force_close', 'manual_hedge', 'manual_repay', 'partial_repay', 'batch_remove', 'max_borrowable', 'transfer']
 async function onAction({ action, rowId, accountId }) {
   const row = rows.value.find(r => r.id === rowId)
   const item = row ? (CONTEXT_MENUS[row.strategyCode] || []).find(i => i.key === action) : null
   try {
     if (item?.confirm) {
       await ElMessageBox.confirm(`确认对 ${row.symbol}${accountId ? ' · ' + accountId : ''} 执行「${item.label}」？`, '危险操作', { type: 'warning', confirmButtonText: '执行' })
+    }
+    // S3 走 coin 菜单代理（真实操作,coin 50U保护/还币闸/状态机原样生效）
+    if (row?.strategyCode === 'S3' && S3_MENU_KEYS.includes(action)) {
+      // 划转=弹窗（内部/跨账户,coin 契约 from_wallet/to_wallet）
+      if (action === 'transfer') { await openTransferModal(accountId); return }
+      const extra = {}
+      if (action === 'manual_open') {
+        const { value } = await ElMessageBox.prompt('手动开仓金额（USDT,留空=按规则 order_amount）', `手动开仓 · ${row.symbol}`, { inputValue: '10' })
+        if (value !== '' && value != null) extra.amount = parseFloat(value)
+      }
+      if (action === 'partial_repay') {
+        const { value } = await ElMessageBox.prompt(
+          '还币金额（USDT,coin 按现价换算币数量；后缀 p=还后暂停自动借币30分钟,如 20p）',
+          `部分还币 · ${row.symbol}`, { inputValue: '' })
+        const s = String(value || '').trim()
+        if (!s) { ElMessage.info('未输入金额,已取消'); return }
+        if (s.toLowerCase().endsWith('p')) { extra.pause_borrow = true; extra.amount_usdt = parseFloat(s.slice(0, -1)) }
+        else extra.amount_usdt = parseFloat(s)
+        if (!extra.amount_usdt || extra.amount_usdt <= 0) { ElMessage.error('金额非法'); return }
+      }
+      const r = await mixApi.coinMenu(row.symbol, { action, sub: accountId, ...extra })
+      if (action === 'max_borrowable') {
+        const c = r?.coin || {}
+        ElMessageBox.alert(
+          `${c.asset || row.symbol}：最大可借 ${c.max_borrowable ?? '—'}（借币限额 ${c.borrow_limit ?? '—'}）`,
+          `刷新可借 · ${accountId || ''}`, { confirmButtonText: '知道了' })
+        return
+      }
+      ElMessage.success(`已受理：${item?.label || action}（coin 状态机执行）`)
+      setTimeout(load, 900); return
     }
     const r = await mixApi.positionAction(rowId, action, accountId, `${action}:${rowId}:${Date.now()}`)
     ElMessage.success(r?.note || '已受理（202），结果以 WS 对账')
@@ -173,6 +208,19 @@ const ruleModal = ref({ open: false, code: 'S3' })
 const symModal = ref({ open: false, symbol: '', code: 'S3' })
 function onRuleTemplate({ code }) { ruleModal.value = { open: true, code } }
 function onRuleSymbol({ symbol, code }) { symModal.value = { open: true, symbol, code } }
+
+// 划转弹窗（账户清单=coin 面板子账户,实时余额随行）
+const transferModal = ref({ open: false, sub: null, accounts: [] })
+async function openTransferModal(accountId) {
+  try {
+    const f = await mixApi.fundRulesS3()
+    transferModal.value = {
+      open: true,
+      accounts: (f.accounts || []).map(a => ({ sub: a.sub, note: a.note, balance: a.balance })),
+      sub: (f.accounts || []).find(a => a.note === accountId || String(a.sub) === String(accountId))?.sub ?? null,
+    }
+  } catch (e) { ElMessage.error(e?.detail || e?.error || '账户清单读取失败') }
+}
 
 const modeLabel = m => ({ shadow: '影子', armed: '武装', 未启用: '未启用' }[m] || m || '—')
 async function switchMode(s, mode) {

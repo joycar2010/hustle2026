@@ -41,6 +41,10 @@ export const mixApi = {
   rulesSave: (scopeKey, body) => http.put(`/rules/${encodeURIComponent(scopeKey)}`, body),
   symbolRule: (symbol, strategy = 'S3') => http.get(`/rules/symbol/${symbol}`, { params: { strategy } }),
   symbolRuleSave: (symbol, body) => http.put(`/rules/symbol/${symbol}`, body),
+  symbolRuleMatrix: (symbol) => http.get(`/rules/symbol/${symbol}/matrix`, { timeout: 20000 }),
+  symbolRuleMatrixSave: (symbol, body) => http.put(`/rules/symbol/${symbol}/matrix`, body, { timeout: 20000 }),
+  fundRulesS3: () => http.get('/rules/fund/s3', { timeout: 20000 }),
+  fundRulesS3Save: (body) => http.put('/rules/fund/s3', body, { timeout: 20000 }),
 
   accounts: () => http.get('/accounts'),
   accountCreate: (body) => http.post('/accounts', body),
@@ -65,6 +69,7 @@ export const mixApi = {
   blacklistAdd: (symbol, reason) => http.post('/blacklist', { symbol, reason }),
   blacklistRemove: (symbol) => http.post('/blacklist/remove', { symbol }),
   coinAction: (symbol, action) => http.post(`/coins/${symbol}/actions`, { action }),
+  coinMenu: (symbol, body) => http.post(`/coins/${symbol}/menu`, body),
   transferCreateOrder: (account) => http.post(`/monitor/transfer-suggestions/${account}/create-order`),
   notifyGet: () => http.get('/settings/notifications'),
   notifySave: (b) => http.put('/settings/notifications', b),

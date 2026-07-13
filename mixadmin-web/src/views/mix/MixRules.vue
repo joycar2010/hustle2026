@@ -32,8 +32,18 @@
               <span v-else-if="fieldMap[k] && S3_META[k].type==='select'" class="ifield" :title="S3_META[k].tip">
                 <em>{{ S3_META[k].label }}</em>
                 <select v-model="fieldMap[k].value" class="sel">
+                  <option v-if="!S3_META[k].options.includes(String(fieldMap[k].value))" :value="fieldMap[k].value">{{ fieldMap[k].value }}(当前)</option>
                   <option v-for="o in S3_META[k].options" :key="o" :value="o">{{ o }}</option>
                 </select>
+              </span>
+              <span v-else-if="fieldMap[k] && S3_META[k].type==='venues'" class="ifield" :title="S3_META[k].tip">
+                <em>{{ S3_META[k].label }}</em>
+                <span class="venues">
+                  <label v-for="v in S3_META[k].options" :key="v" class="vpill"
+                         :class="{on: venueOrder(k).includes(v)}" @click="toggleVenue(k, v)">
+                    <i v-if="venueOrder(k).includes(v)" class="ord">{{ venueOrder(k).indexOf(v)+1 }}</i>{{ v }}
+                  </label>
+                </span>
               </span>
               <span v-else-if="fieldMap[k]" class="ifield" :title="S3_META[k].tip">
                 <em>{{ S3_META[k].label }}</em>
@@ -158,6 +168,13 @@ const fieldMap = computed(() => Object.fromEntries(fields.value.map(f => [f.key,
 const version = computed(() => fieldMap.value.version?.value)
 const isTrue = v => String(v) === 'True' || String(v) === 'true'
 function toggleBool(k) { fieldMap.value[k].value = isTrue(fieldMap.value[k].value) ? 'False' : 'True' }
+// venue 有序 pills（borrow_venues:点击加入=排队尾,再点移除;序号=优先级）
+const venueOrder = k => String(fieldMap.value[k]?.value || '').split(',').map(s => s.trim()).filter(Boolean)
+function toggleVenue(k, v) {
+  const cur = venueOrder(k)
+  const next = cur.includes(v) ? cur.filter(x => x !== v) : [...cur, v]
+  fieldMap.value[k].value = next.join(',')
+}
 
 const scopeLabel = computed(() => {
   const [, v] = scope.value.split(':')
@@ -233,6 +250,10 @@ onMounted(load)
 .ghd { font-size: 11px; font-weight: 800; color: #F0B90B; letter-spacing: 1px; margin-top: 8px;
   padding-bottom: 4px; border-bottom: 1px dashed rgba(240,185,11,.25); }
 .gflex { display: flex; flex-wrap: wrap; gap: 8px 14px; justify-content: center; padding: 8px 0 4px; }
+.venues { display: inline-flex; gap: 4px; }
+.vpill { display: inline-flex; align-items: center; gap: 3px; border: 1px solid var(--el-border-color); border-radius: 10px; padding: 2px 8px; font-size: 10px; color: var(--el-text-color-secondary); cursor: pointer; user-select: none;
+  .ord { font-style: normal; background: #F0B90B; color: #12151A; border-radius: 50%; width: 12px; height: 12px; line-height: 12px; text-align: center; font-size: 8.5px; font-weight: 800; }
+  &.on { border-color: #F0B90B; color: #F0B90B; } }
 .ifield { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--el-text-color-secondary); white-space: nowrap;
   em { font-style: normal; } i { font-style: normal; color: var(--el-text-color-placeholder); font-size: 10px; } }
 .inp { background: #12151A; border: 1px solid var(--el-border-color); border-radius: 5px; color: #EAECEF;
