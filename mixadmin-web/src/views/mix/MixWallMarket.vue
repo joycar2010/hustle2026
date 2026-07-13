@@ -8,11 +8,12 @@
       </div>
       <div class="grid">
         <div class="card">
-          <div class="hd">策略管道总览</div>
-          <div v-for="s in strategies" :key="s.code" class="prow">
-            <b class="code">{{ s.code }}</b><span class="nm">{{ s.name }}</span>
-            <span class="pipe"><i v-for="(v,k) in s.pipeline" :key="k"><em>{{ k }}</em><b>{{ v }}</b></i></span>
+          <div class="hd">公告监控 <small>event-calendar · 新上市预告 / universe 差分 / 下架去抖</small></div>
+          <div v-for="(e, i) in events.slice(0, 18)" :key="i" class="erow">
+            <i class="etag" :class="String(e.type||'').includes('下架')?'bad':'good'">{{ e.type }}</i>
+            <span class="etext">{{ e.text }}</span><em class="eat">{{ e.at }}</em>
           </div>
+          <div v-if="!events.length" class="erow"><span style="color:#5E6673">近期无新上市 / 下架事件 · 监听在岗</span></div>
         </div>
         <div class="card">
           <div class="hd">币种利差 <small>开/平点差 · 净利差 · 可开状态</small></div>
@@ -29,11 +30,6 @@
             <b>{{ b.symbol }}</b><span>{{ b.qty }}</span><span>{{ b.usd }}</span>
             <i class="st" :class="b.health==='正常'?'可开':'不可'">{{ b.health }}</i>
           </div>
-          <div class="hd" style="margin-top:10px">公告 / 新上市（event-calendar）</div>
-          <div v-for="(e, i) in events.slice(0, 8)" :key="i" class="srow">
-            <b>{{ e.type }}</b><span>{{ e.text }}</span><span>{{ e.at }}</span>
-          </div>
-          <div v-if="!events.length" class="srow"><span style="color:#5E6673">近期无新上市/下架事件</span></div>
         </div>
       </div>
     </template>
@@ -49,12 +45,12 @@ import { mixApi } from '../../api/mix'
 const route = useRoute()
 const authed = ref(!!route.query.token)
 if (route.query.token) localStorage.setItem('mix_token', String(route.query.token))  // 墙令牌引导同源 API 头   // mock 门槛；真实实现由后端校验只读墙令牌
-const strategies = ref([]); const spreads = ref([]); const borrowables = ref([])
+const spreads = ref([]); const borrowables = ref([])
 const clock = ref('')
 const sign = v => String(v).startsWith('-') ? 'dn' : 'up'
 async function load() {
-  ;[strategies.value, spreads.value, borrowables.value] =
-    await Promise.all([mixApi.strategies(), mixApi.monitor.spreads(), mixApi.monitor.borrowables()])
+  ;[spreads.value, borrowables.value] =
+    await Promise.all([mixApi.monitor.spreads(), mixApi.monitor.borrowables()])
   try { events.value = await mixApi.monitor.events() } catch (e) { /* 降级 */ }
 }
 let t1, t2
@@ -71,11 +67,12 @@ onUnmounted(() => { clearInterval(t1); clearInterval(t2) })
 .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 12px; }
 .card { background: #181B21; border: 1px solid #262B33; border-radius: 10px; padding: 12px 14px; }
 .hd { font-weight: 700; font-size: 13px; margin-bottom: 8px; small { color: #5E6673; font-weight: 400; margin-left: 8px; } }
-.prow { display: flex; gap: 10px; align-items: center; height: 30px;
-  .code { color: #F0B90B; } .nm { width: 110px; color: #848E9C; }
-  .pipe { display: flex; gap: 8px; overflow: hidden;
-    i { font-style: normal; background: #12151A; border-radius: 4px; padding: 2px 7px; display: inline-flex; gap: 4px;
-      em { font-style: normal; color: #5E6673; font-size: 9px; } b { font-size: 11px; } } } }
+.erow { display: flex; gap: 10px; align-items: center; min-height: 26px; border-bottom: 1px dashed rgba(38,43,51,.6);
+  .etag { font-style: normal; border-radius: 4px; padding: 1px 8px; font-size: 10px; font-weight: 800; flex: none;
+    &.good { background: rgba(14,203,129,.15); color: #0ECB81; }
+    &.bad { background: rgba(246,70,93,.15); color: #F6465D; } }
+  .etext { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #EAECEF; }
+  .eat { font-style: normal; color: #5E6673; font-size: 10px; flex: none; } }
 .srow { display: grid; grid-template-columns: 90px 1fr 1fr 1fr 60px 44px; gap: 6px; align-items: center; height: 24px; text-align: right;
   b:first-child { text-align: left; }
   .up { color: #0ECB81; } .dn { color: #F6465D; } .acc { color: #F0B90B; }

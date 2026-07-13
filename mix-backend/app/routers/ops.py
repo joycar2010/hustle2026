@@ -51,7 +51,7 @@ async def registry_list(_who=Depends(require_viewer)):
     if pool is None:
         return []
     return [dict(r) for r in await pool.fetch(
-        "SELECT account_key, alias, email, note FROM accounts_registry")]
+        "SELECT account_key, alias, email, note, machine, enabled FROM accounts_registry")]
 
 
 @router.put("/accounts/registry")
@@ -62,11 +62,14 @@ async def registry_put(body: dict, op=Depends(require_operator)):
     pool = await ds.pg_main()
     if pool is None:
         raise HTTPException(503, "mix_main 未配置")
+    machine = str(body.get("machine") or "").upper()
+    if machine and machine not in ("A", "B", "C"):
+        raise HTTPException(400, "machine 必须是 A/B/C 或空")
     await pool.execute(
-        "INSERT INTO accounts_registry(account_key, alias, email, note, updated_at) "
-        "VALUES($1,$2,$3,$4,now()) ON CONFLICT (account_key) "
-        "DO UPDATE SET alias=$2, email=$3, note=$4, updated_at=now()",
-        key, str(body.get("alias") or ""), str(body.get("email") or ""), str(body.get("note") or ""))
+        "INSERT INTO accounts_registry(account_key, alias, email, note, machine, updated_at) "
+        "VALUES($1,$2,$3,$4,$5,now()) ON CONFLICT (account_key) "
+        "DO UPDATE SET alias=$2, email=$3, note=$4, machine=$5, updated_at=now()",
+        key, str(body.get("alias") or ""), str(body.get("email") or ""), str(body.get("note") or ""), machine)
     await proxy.audit(op["operator"], op["role"], "registry.put", key, body, "saved")
     return {"saved": True}
 

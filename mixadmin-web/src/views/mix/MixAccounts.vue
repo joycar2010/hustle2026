@@ -12,7 +12,8 @@
         <div class="row master" @click="toggle(m.id)" @contextmenu.prevent="openMenu($event, m)">
           <span class="caret">{{ open.has(m.id) ? '▾' : '▸' }}</span>
           <span class="kind" :class="m.platformType">{{ m.platformType === 'kms_wallet' ? '链上' : '主' }}</span>
-          <span class="name">{{ m.id }}<i v-if="reg[m.id]?.alias" class="alias">{{ reg[m.id].alias }}</i></span>
+          <span class="name" :class="{off: reg[m.id]?.enabled===false}">{{ m.id }}</span>
+          <span class="acctname">{{ reg[m.id]?.alias || '—' }}<i v-if="reg[m.id]?.machine" class="mch">{{ reg[m.id].machine }}机</i></span>
           <span class="venue">{{ m.venue }} · 域 {{ m.domain }}</span>
           <span class="dot" :class="m.apiStatus" />
           <span v-for="(v,k) in m.metrics" :key="k" class="pair"><em>{{ k }}</em><b :class="{neg:String(v).startsWith('-')}">{{ v }}</b></span>
@@ -23,7 +24,8 @@
           <div v-for="c in m.children" :key="c.id" class="row sub" @contextmenu.prevent="openMenu($event, c, m)">
             <span class="caret"></span>
             <span class="kind" :class="c.kind === 'wallet' ? 'kms_wallet' : 'sub'">{{ c.kind === 'wallet' ? '址' : '子' }}</span>
-            <span class="name sm">↳ {{ c.id }}<i v-if="reg[c.id]?.alias" class="alias">{{ reg[c.id].alias }}</i></span>
+            <span class="name sm" :class="{off: reg[c.id]?.enabled===false}">↳ {{ c.id }}</span>
+            <span class="acctname">{{ reg[c.id]?.alias || '—' }}<i v-if="reg[c.id]?.machine" class="mch">{{ reg[c.id].machine }}机</i></span>
             <span class="venue">{{ c.venue }}</span>
             <span class="dot" :class="c.apiStatus" />
             <span v-if="c.apiStatus==='restricted'" class="restricted">受限 · -2015 IP 白名单</span>
@@ -104,7 +106,8 @@ const regForm = reactive({ account_key: '', alias: '', email: '', note: '' })
 
 const menuItems = computed(() => menu.node
   ? [...(ACCOUNT_MENUS[menu.node.platformType] || []),
-     { key: 'edit_registry', label: '别名 / 备注…', kind: 'registry', dividerBefore: true }]
+     { key: 'assign_scope', label: '分配作用域（A/B/C 机）…', kind: 'registry', dividerBefore: true },
+     { key: 'edit_registry', label: '别名 / 备注…', kind: 'registry' }]
   : [])
 
 function toggle(id) { open.has(id) ? open.delete(id) : open.add(id) }
@@ -123,17 +126,43 @@ async function doAction(it) {
       Object.assign(regForm, { account_key: node.id, alias: cur.alias || '', email: cur.email || '', note: cur.note || '' })
       regDlg.value = true; return
     }
+    if (it.key === 'assign_scope') {
+      const cur = reg.value[node.id]?.machine || 'B'
+      const { value } = await ElMessageBox.prompt(
+        '作用域=账户归属的执行机器。A=数据面(52.193.224.137) / B=执行面·五所key(54.65.42.207) / C=控制面(57.181.130.126)',
+        `分配作用域: ${node.id}`, { inputValue: cur, inputPattern: /^[ABCabc]$/, inputErrorMessage: '只能填 A / B / C' })
+      const r = await mixApi.accountAction(node.id, 'assign_scope', { machine: value.toUpperCase() })
+      ElMessage.success(`已分配 ${r.machine} 机：${r.desc}`)
+      return loadRegistry()
+    }
     if (it.key === 'create_sub' || it.key === 'create_wallet') { createDlg.value = true; return }
-    if (it.kind === 'link') { ElMessageBox.alert(`打开「${it.label}」配置弹窗（M4 接线）`, node.id); return }
     if (it.confirm) await ElMessageBox.confirm(`确认对 ${node.id} 执行「${it.label}」？`, '危险操作', { type: 'warning' })
     if (it.key === 'transfer') {
       const r = await mixApi.kmsTransfer({ from: node.id, amount: 1000 })
       ElMessage.warning(`转账已发起 → ${r.state}（发起人 ≠ 审批人，等待审批）`)
       return load()
     }
+    // 真实动作:verify/refresh 回活体状态;toggle 回标记;ip_whitelist 回白名单指引;purge 清别名簿
     const r = await mixApi.accountAction(node.id, it.key)
-    ElMessage.success(`已受理（202）：${it.label}`)
-  } catch (e) { if (e !== 'cancel') ElMessage.error(e?.error || '失败') }
+    if (it.key === 'verify' || it.key === 'refresh') {
+      ElMessageBox.alert(
+        `鉴权: ${r.auth}\n权益: ${r.equity_usdt ?? '—'} U\n快照龄: ${r.age_sec}s\n${r.note}`,
+        `${node.id} · ${it.label}`, { customStyle: { whiteSpace: 'pre-line' } })
+    } else if (it.key === 'toggle') {
+      ElMessage.success(`${node.id} 已${r.enabled ? '启用' : '停用'}（${r.note}）`)
+      loadRegistry()
+    } else if (it.key === 'ip_whitelist') {
+      ElMessageBox.alert(
+        Object.entries(r.machines).map(([k, v]) => `${k} 机 = ${v}`).join('\n')
+        + `\n\n当前鉴权: ${r.current_auth}\n${r.note}`,
+        'IP 白名单指引', { customStyle: { whiteSpace: 'pre-line' } })
+    } else if (it.key === 'purge') {
+      ElMessage.success(r.note); loadRegistry()
+    } else {
+      ElMessage.success(`完成：${it.label}`)
+    }
+    if (it.key === 'refresh') load()
+  } catch (e) { if (e !== 'cancel') ElMessage.error(e?.detail || e?.error || '失败') }
 }
 async function approve(c) {
   await ElMessageBox.confirm(`审批 ${c.id} 的待审批转账？（审批人身份校验由后端强制）`, 'KMS 审批', { type: 'warning' })
@@ -180,9 +209,11 @@ onMounted(() => { load(); loadRegistry() })
   &.cex { background: rgba(240,185,11,.15); color: #B8860B; }
   &.kms_wallet { background: rgba(45,212,191,.15); color: #0d9488; }
   &.sub { background: var(--el-fill-color-dark); color: var(--el-text-color-secondary); } }
-.name { min-width: 150px; &.sm { font-weight: 600; }
-  .alias { font-style: normal; margin-left: 6px; padding: 0 5px; border-radius: 4px; font-size: 10px;
-    background: rgba(240,185,11,.12); color: #B8860B; font-weight: 700; } }
+.name { min-width: 130px; &.sm { font-weight: 600; }
+  &.off { opacity: .45; text-decoration: line-through; } }
+.acctname { min-width: 120px; font-size: 11px; color: #F0B90B; font-weight: 700;
+  .mch { font-style: normal; margin-left: 6px; padding: 0 5px; border-radius: 4px; font-size: 9px;
+    background: rgba(45,212,191,.14); color: #2DD4BF; font-weight: 800; } }
 .venue { color: var(--el-text-color-secondary); font-size: 11px; min-width: 110px; }
 .dot { width: 7px; height: 7px; border-radius: 50%;
   &.ok { background: #0ECB81; } &.restricted { background: #F6465D; } &.healing { background: #F0B90B; } }

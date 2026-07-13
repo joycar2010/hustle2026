@@ -41,7 +41,7 @@ export const mixApi = {
 
   accounts: () => http.get('/accounts'),
   accountCreate: (body) => http.post('/accounts', body),
-  accountAction: (id, action) => http.post(`/accounts/${id}/actions`, { action }),
+  accountAction: (id, action, extra = {}) => http.post(`/accounts/${id}/actions`, { action, ...extra }),
 
   kmsWallets: () => http.get('/kms/wallets'),
   kmsTransfer: (body) => http.post('/kms/transfers', body),
@@ -79,6 +79,7 @@ export const mixApi = {
   rulesAudit: (scopeKey) => http.get(`/rules/${encodeURIComponent(scopeKey)}/audit`),
   registryList: () => http.get('/accounts/registry'),
   history: (range = '30d', strategy = '') => http.get('/history', { params: { range, ...(strategy ? { strategy } : {}) } }),
+  historyQ: (params) => http.get('/history', { params }),
   system: {
     status: () => http.get('/system/status'),
     backupDb: () => http.post('/system/backup-db'),

@@ -3,7 +3,7 @@
     <div class="w-full max-w-sm">
       <!-- Logo -->
       <div class="text-center mb-8">
-        <img src="/logo.png" alt="HustleCoin Mix" class="w-14 h-14 mb-3 mx-auto object-contain" />
+        <img src="/logo.png?v=xau1" alt="HustleCoin Mix" class="w-14 h-14 mb-3 mx-auto object-contain" />
         <h1 class="text-xl font-bold">HustleCoin Mix</h1>
         <p class="text-sm text-text-tertiary mt-1">实时收益查看平台</p>
       </div>

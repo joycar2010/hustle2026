@@ -94,35 +94,100 @@ async def history_sync_loop():
         await asyncio.sleep(SYNC_INTERVAL)
 
 
+async def _trade_economics(trades: list[dict]) -> None:
+    """逐笔经济学归因：income_records(交易所已入账账单)按 币种+持有窗 归到每笔。
+    口径=落袋(FUNDING/FEE/PNL/返佣=OTHER中REBATE),不含浮盈;S3(coin账本在coin库)给 None 如实标注。
+    窗口=开仓-5min ~ 平仓+30min(资金费结算/平仓账单落账延迟缓冲)。"""
+    wins = [t for t in trades if t["source"] in ("dualperp", "basis") and t["opened_at"] and t["closed_at"]]
+    if not wins:
+        return
+    syms = sorted({t["symbol"] for t in wins})
+    lo = min(t["opened_at"] for t in wins) - dt.timedelta(minutes=5)
+    hi = max(t["closed_at"] for t in wins) + dt.timedelta(minutes=30)
+    rows = await ds.fetch(
+        "SELECT symbol, itype, amount, ts, "
+        "(coalesce(raw->>'incomeType','') ILIKE '%REBATE%') AS is_rebate "
+        "FROM income_records WHERE symbol = ANY($1::text[]) AND ts BETWEEN $2 AND $3 "
+        "AND itype <> 'TRANSFER'", syms, lo, hi)
+    by_sym: dict[str, list] = {}
+    for r in rows:
+        by_sym.setdefault(r["symbol"], []).append(r)
+    for t in wins:
+        f = fee = pnl = reb = 0.0
+        for r in by_sym.get(t["symbol"], []):
+            if not (t["opened_at"] - dt.timedelta(minutes=5) <= r["ts"]
+                    <= t["closed_at"] + dt.timedelta(minutes=30)):
+                continue
+            amt = float(r["amount"])
+            if r["itype"] == "FUNDING":
+                f += amt
+            elif r["itype"] == "FEE":
+                fee += amt
+            elif r["itype"] == "PNL":
+                pnl += amt
+            elif r["is_rebate"]:
+                reb += amt
+        t["funding"] = round(f, 4)
+        t["fee"] = round(fee, 4)
+        t["rebate"] = round(reb, 4)
+        t["pnl"] = round(pnl, 4)
+        t["profit"] = round(f + fee + pnl + reb, 4)
+
+
+def _parse_ts(v: str):
+    try:
+        return dt.datetime.fromisoformat(v.replace("Z", "+00:00"))
+    except (ValueError, AttributeError):
+        return None
+
+
 @router.get("/history")
 async def get_history(
     range: str = Query(default="30d"),
     strategy: str = Query(default=""),
+    start: str = Query(default=""),
+    end: str = Query(default=""),
     limit: int = Query(default=200, le=1000),
     _who=Depends(require_viewer),
 ):
     pool = await ds.pg_main()
     if pool is None:
         raise HTTPException(503, "mix_main 未配置")
-    days = {"7d": 7, "30d": 30, "90d": 90, "all": 3650}.get(range, 30)
-    cond = "WHERE closed_at > now() - make_interval(days => $1)"
-    args: list = [days]
+    args: list = []
+    ts_s, ts_e = _parse_ts(start), _parse_ts(end)
+    if ts_s and ts_e:
+        cond = "WHERE closed_at BETWEEN $1 AND $2"
+        args = [ts_s, ts_e]
+    else:
+        days = {"7d": 7, "30d": 30, "90d": 90, "all": 3650}.get(range, 30)
+        cond = "WHERE closed_at > now() - make_interval(days => $1)"
+        args = [days]
     if strategy:
-        cond += " AND strategy_code = $2"
+        cond += f" AND strategy_code = ${len(args) + 1}"
         args.append(strategy)
     rows = await pool.fetch(
         f"SELECT source, source_id, strategy_code, symbol, master_venue, master_account, "
         f"hedge_venue, hedge_account, qty, notional, state, opened_at, closed_at "
         f"FROM trade_history {cond} ORDER BY closed_at DESC NULLS LAST LIMIT {int(limit)}", *args)
-    out = []
+    trades = []
     for r in rows:
         hold_h = None
         if r["opened_at"] and r["closed_at"]:
             hold_h = round((r["closed_at"] - r["opened_at"]).total_seconds() / 3600, 1)
-        out.append({**dict(r),
-                    "qty": float(r["qty"]) if r["qty"] is not None else None,
-                    "notional": float(r["notional"]) if r["notional"] is not None else None,
-                    "opened_at": r["opened_at"].isoformat() if r["opened_at"] else None,
-                    "closed_at": r["closed_at"].isoformat() if r["closed_at"] else None,
-                    "hold_hours": hold_h})
-    return out
+        trades.append({**dict(r),
+                       "qty": float(r["qty"]) if r["qty"] is not None else None,
+                       "notional": float(r["notional"]) if r["notional"] is not None else None,
+                       "hold_hours": hold_h,
+                       "funding": None, "fee": None, "rebate": None, "pnl": None, "profit": None})
+    await _trade_economics(trades)
+    stats = {"count": len(trades),
+             "notional": round(sum(t["notional"] or 0 for t in trades), 2),
+             "funding": round(sum(t["funding"] or 0 for t in trades), 4),
+             "fee": round(sum(t["fee"] or 0 for t in trades), 4),
+             "rebate": round(sum(t["rebate"] or 0 for t in trades), 4),
+             "profit": round(sum(t["profit"] or 0 for t in trades), 4),
+             "note": "口径=落袋账单(S1/S2);S3 账本在 coin 库暂标 —"}
+    for t in trades:
+        t["opened_at"] = t["opened_at"].isoformat() if t["opened_at"] else None
+        t["closed_at"] = t["closed_at"].isoformat() if t["closed_at"] else None
+    return {"rows": trades, "stats": stats}

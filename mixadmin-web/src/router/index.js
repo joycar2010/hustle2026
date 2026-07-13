@@ -10,8 +10,7 @@ const routes = [
     { path:'mix/rules', name:'mix-rules', meta:{title:'规则中心',icon:'Setting',group:'总控',ord:0.2}, component:()=>import('../views/mix/MixRules.vue') },
     { path:'mix/history', name:'mix-history', meta:{title:'交易历史',icon:'Files',group:'总控',ord:0.25}, component:()=>import('../views/mix/MixHistory.vue') },
     { path:'mix/accounts', name:'mix-accounts', meta:{title:'账户列表',icon:'CreditCard',group:'总控',ord:0.3}, component:()=>import('../views/mix/MixAccounts.vue') },
-    // 监控中心已解散:币种利差→屏1机会墙 / 进程心跳→屏3风控墙 / 水位→主控台底排(路由保留可直达)
-    { path:'mix/monitor', name:'mix-monitor', meta:{hidden:true,title:'监控中心',icon:'Monitor',group:'总控',ord:0.35}, component:()=>import('../views/mix/MixMonitor.vue') },
+    // 监控中心已移除(用户拍板):职能已分散到 屏1机会墙/屏3风控墙/主控台底排/系统设置·运维面板
     { path:'mix/blacklist', name:'mix-blacklist', meta:{title:'黑名单',icon:'CircleClose',group:'总控',ord:0.4}, component:()=>import('../views/mix/MixBlacklist.vue') },
     { path:'mix/coins', name:'mix-coins', meta:{title:'币管理',icon:'Coin',group:'总控',ord:0.45}, component:()=>import('../views/mix/MixCoins.vue') },
     { path:'mix/report', name:'mix-report', meta:{title:'资金收益',icon:'TrendCharts',group:'总控',ord:0.5}, component:()=>import('../views/mix/MixReport.vue') },

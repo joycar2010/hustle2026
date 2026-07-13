@@ -3,7 +3,7 @@
     <div class="nav-mask" @click="mnav=false"></div>
     <div class="sidebar" :class="{'as-drawer':true}" :style="{width: collapsed?'64px':'210px'}">
       <div class="logo">
-        <img :src="brand.logo||'/logo-white.png'" alt="Mix" class="brand-icon"/>
+        <img :src="brand.logo||'/logo-white.png?v=xau1'" alt="Mix" class="brand-icon"/>
         <span v-if="!collapsed" class="brand-text">
           <template v-if="brand.title">{{ brand.title }}</template>
           <template v-else>HustleCoin <em>Mix</em></template>
@@ -69,7 +69,7 @@
             <div class="opp-kv"><span>总线服务</span><b>{{ panelHealth.bus_services_seen ?? '—' }} 个心跳在线</b></div>
             <div class="opp-kv"><span>通知通道</span><b :class="wsOn?'ok':'warn'">{{ wsOn ? 'WS 已连' : '待命/重连中' }}</b></div>
             <div class="opp-acts">
-              <el-button size="small" @click="$router.push('/mix/monitor')">运维面板</el-button>
+              <el-button size="small" @click="$router.push('/system')">运维面板</el-button>
               <el-button size="small" @click="refreshIdentity">刷新身份</el-button>
               <el-button size="small" type="danger" plain @click="opLogout">退出 / 更换</el-button>
             </div>
@@ -112,7 +112,7 @@
     <!-- 强制登录门控: 未登录时全屏蒙皮遮挡, 必须登录(操作员账号 或 超管令牌)才能进入 -->
     <div v-if="!authed" class="login-gate">
       <div class="login-card">
-        <img class="lg-icon" src="/logo-white.png" alt="Mix" />
+        <img class="lg-icon" src="/logo-white.png?v=xau1" alt="Mix" />
         <div class="lg-logo">HustleCoin <em>Mix</em></div>
         <div class="lg-sub">多策略持股公司驾驶舱 · 请登录以继续</div>
         <el-tabs v-model="gateTab" stretch>
