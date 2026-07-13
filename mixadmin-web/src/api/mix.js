@@ -88,6 +88,7 @@ export const mixApi = {
   llmHistory: () => http.get('/system/llm/history'),
   // 150s > 后端最坏路径(两站×55s+开销)——前端超时必须罩住后端降级链,否则答案生成完前端已放弃
   aiChat: (body) => http.post('/ai/chat', body, { timeout: 150000 }),
+  aiModels: () => http.get('/ai/models'),
   datasources: () => http.get('/meta/datasources'),
   feishuGet: () => http.get('/me/feishu'),
   feishuBind: (b) => http.post('/me/feishu', b),
@@ -125,7 +126,7 @@ export const mixApi = {
     llmRelayAdd: (b) => http.post('/system/llm/relays', b),
     llmRelaySave: (id, b) => http.put(`/system/llm/relays/${id}`, b),
     llmRelayDel: (id) => http.delete(`/system/llm/relays/${id}`),
-    llmRelayRole: (id) => http.post(`/system/llm/relays/${id}/set-role`, { role: 'primary' }),
+    llmRelayRole: (id, role = 'primary') => http.post(`/system/llm/relays/${id}/set-role`, { role }),
     llmRelayToggle: (id, enabled) => http.post(`/system/llm/relays/${id}/toggle`, { enabled }),
     llmRelayModels: (id) => http.post(`/system/llm/relays/${id}/refresh-models`),
     llmRelayTest: (id, model) => http.post(`/system/llm/relays/${id}/test-model`, { model }, { timeout: 35000 }),

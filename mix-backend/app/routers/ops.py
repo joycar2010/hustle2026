@@ -250,17 +250,17 @@ async def llm_relay_del(rid: int, op=Depends(require_operator)):
 
 @router.post("/system/llm/relays/{rid}/set-role")
 async def llm_relay_role(rid: int, body: dict, op=Depends(require_operator)):
-    """设主站:其余全部降备(主站唯一)。"""
+    """移动地址到「主账号」或「备用账号」——不再强制主站唯一,每个账号可挂多个地址
+    (调用不同模型);失效转移=所有启用主账号地址优先,再所有启用备用地址。"""
     pool = await ds.pg_main()
-    if str(body.get("role")) != "primary":
-        raise HTTPException(400, "只支持 role=primary(备用=默认态)")
-    async with pool.acquire() as c, c.transaction():
-        await c.execute("UPDATE llm_relays SET role='backup', updated_at=now() WHERE role='primary'")
-        got = await c.execute("UPDATE llm_relays SET role='primary', enabled=TRUE, updated_at=now() WHERE id=$1", rid)
-        if got.endswith("0"):
-            raise HTTPException(404, "中转站不存在")
+    role = str(body.get("role") or "")
+    if role not in ("primary", "backup"):
+        raise HTTPException(400, "role 必须是 primary(主账号) 或 backup(备用账号)")
+    got = await pool.execute("UPDATE llm_relays SET role=$2, updated_at=now() WHERE id=$1", rid, role)
+    if got.endswith("0"):
+        raise HTTPException(404, "中转站不存在")
     n = await _publish_llm_config(pool)
-    await proxy.audit(op["operator"], op["role"], "llm.relay.primary", str(rid), {}, f"published {n}")
+    await proxy.audit(op["operator"], op["role"], "llm.relay.move", str(rid), {"role": role}, f"published {n}")
     return {"ok": True}
 
 

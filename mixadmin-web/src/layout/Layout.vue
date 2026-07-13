@@ -121,6 +121,7 @@
       <div class="ai-hd">
         <span class="ai-tabs">
           <b :class="{on:aiTab==='chat'}" @click="aiTab='chat'"><el-icon><Service/></el-icon> 运维助手</b>
+          <b :class="{on:aiTab==='fav'}" @click="aiTab='fav'">⭐ 收藏<i v-if="favs.length" class="tabdot">{{ favs.length }}</i></b>
           <b :class="{on:aiTab==='adv'}" @click="aiTab='adv'; advUnread=0">💬 顾问播报<i v-if="advUnread" class="tabdot">{{ advUnread }}</i></b>
         </span>
         <span class="ai-hd-acts">
@@ -132,11 +133,40 @@
       <!-- 运维助手对话 -->
       <div v-show="aiTab==='chat'" class="ai-body" ref="aiBodyEl">
         <div v-if="!aiMsgs.length" class="ai-empty">您好！我是 HustleCoin Mix 运维助手，可解答管理后台功能用法与系统监控口径。支持超长文本粘贴、多轮上下文（Shift+Enter 换行，Enter 发送）。</div>
-        <div v-for="(m,i) in aiMsgs" :key="m.id||i" :class="'ab '+m.who">{{m.txt}}<span class="ai-del" @click="aiDel(m.id)" title="删除">×</span></div>
+        <div v-for="(m,i) in aiMsgs" :key="m.id||i" :class="'ab '+m.who">
+          {{m.txt}}
+          <span class="ab-acts">
+            <i v-if="m.who==='me'" class="ab-act" title="重新问这个问题" @click="reAsk(m.txt)">↻</i>
+            <i v-if="m.who==='ai' && aiMsgs[i-1]" class="ab-act" title="收藏这组问答" @click="favAdd(aiMsgs[i-1]?.txt, m.txt)">☆</i>
+          </span>
+          <span class="ai-del" @click="aiDel(m.id)" title="删除">×</span>
+        </div>
         <!-- 思考状态 + 进度（LLM 中转站有时较慢,让用户看到在动而非卡死） -->
         <div v-if="aiBusy" class="ab ai thinking">
           <span class="tk-dots"><i></i><i></i><i></i></span>
           <span class="tk-txt">{{ aiThinkTxt }}<em v-if="aiElapsed>0"> · 已等待 {{ aiElapsed }}s</em></span>
+        </div>
+      </div>
+      <!-- 收藏夹（问答可分类·搜索） -->
+      <div v-show="aiTab==='fav'" class="ai-body fav">
+        <div class="fav-bar">
+          <input v-model="favQ" class="fav-search" placeholder="搜索问题/答案/分类…" />
+          <select v-model="favCat" class="fav-catsel">
+            <option value="">全部分类</option>
+            <option v-for="c in favCats" :key="c" :value="c">{{ c }}</option>
+          </select>
+        </div>
+        <div v-if="!favView.length" class="ai-empty">{{ favs.length ? '无匹配收藏' : '还没有收藏——在对话里点 AI 回答旁的 ☆ 收藏问答' }}</div>
+        <div v-for="f in favView" :key="f.id" class="fav-item">
+          <div class="fav-top">
+            <span class="fav-cat" @click="editFavCat(f)" title="点击改分类">{{ f.cat || '未分类' }}</span>
+            <span class="fav-time">{{ fmtFavTs(f.ts) }}</span>
+            <span class="spacer" />
+            <i class="fav-act" title="重新问这个问题" @click="reAsk(f.q)">↻ 重问</i>
+            <i class="fav-act del" title="删除收藏" @click="favDel(f.id)">×</i>
+          </div>
+          <div class="fav-q">Q：{{ f.q }}</div>
+          <div class="fav-a">A：{{ f.a }}</div>
         </div>
       </div>
       <!-- AI 顾问播报（分域顾问最新发言） -->
@@ -154,10 +184,22 @@
         <div class="adv-foot">播报每 30s 刷新 · {{ advDnd ? '免打扰已开(不自动弹屏)' : '有新发言自动弹屏' }}</div>
       </div>
       <div v-show="aiTab==='chat'" class="ai-foot">
-        <el-input v-model="aiIn" type="textarea" :autosize="{minRows:1,maxRows:6}" resize="none"
-                  placeholder="问运维/功能用法…（Shift+Enter 换行，Enter 发送，支持超长粘贴）"
-                  @keydown.enter="onAiKey" autocomplete="off"/>
-        <el-button size="small" type="primary" :loading="aiBusy" @click="aiSend">发送</el-button>
+        <!-- 模型切换：仅「无限制」模式显示,列出主/备账号所有启用地址 -->
+        <div v-if="aiScope==='open' && aiModels.length" class="ai-modelbar">
+          <span class="mb-lbl">模型</span>
+          <select v-model="aiRelayId" class="mb-sel" title="选择调用的地址/模型（无限制模式）">
+            <option :value="null">自动（主账号优先）</option>
+            <option v-for="mo in aiModels" :key="mo.id" :value="mo.id">
+              {{ mo.role==='primary'?'主':'备' }}·{{ mo.name }}·{{ mo.model }}
+            </option>
+          </select>
+        </div>
+        <div class="ai-inrow">
+          <el-input v-model="aiIn" type="textarea" :autosize="{minRows:1,maxRows:6}" resize="none"
+                    placeholder="问运维/功能用法…（Shift+Enter 换行，Enter 发送，支持超长粘贴）"
+                    @keydown.enter="onAiKey" autocomplete="off"/>
+          <el-button size="small" type="primary" :loading="aiBusy" @click="aiSend">发送</el-button>
+        </div>
       </div>
     </div>
 
@@ -316,6 +358,19 @@ import { nextTick } from 'vue'
 const aiOpen=ref(false),aiIn=ref(''),aiBusy=ref(false),aiConvId=ref(null),aiBodyEl=ref(null)
 const aiElapsed=ref(0),aiThinkTxt=ref('思考中…')
 let aiTimer=null
+// 模型切换（无限制模式）+ 收藏夹
+const aiScope=ref('site'),aiModels=ref([]),aiRelayId=ref(null)
+const favs=ref((()=>{ try{ return JSON.parse(localStorage.getItem('mix_ai_favs')||'[]') }catch(e){ return [] } })())
+const favQ=ref(''),favCat=ref('')
+function favSave(){ try{ localStorage.setItem('mix_ai_favs', JSON.stringify(favs.value.slice(0,500))) }catch(e){} }
+const favCats=computed(()=>[...new Set(favs.value.map(f=>f.cat).filter(Boolean))])
+const favView=computed(()=>{ const q=favQ.value.trim().toLowerCase(); return favs.value.filter(f=>(!favCat.value||f.cat===favCat.value)&&(!q||((f.q+f.a+(f.cat||'')).toLowerCase().includes(q))) ) })
+function fmtFavTs(ts){ try{ return new Date(ts).toLocaleString() }catch(e){ return '' } }
+function favAdd(q,a){ if(!q||!a)return; const cat=(prompt('收藏分类（可留空=未分类，之后可改）：','')||'').trim(); favs.value.unshift({id:'f'+Date.now()+Math.random().toString(36).slice(2,5),q,a:a.replace(/\n—— .*$/,''),cat,ts:Date.now()}); favSave(); ElMessage.success('已收藏'+(cat?('到「'+cat+'」'):'')) }
+function favDel(id){ favs.value=favs.value.filter(f=>f.id!==id); favSave() }
+function editFavCat(f){ const c=prompt('修改分类：',f.cat||''); if(c===null)return; f.cat=c.trim(); favSave() }
+function reAsk(q){ if(!q)return; aiTab.value='chat'; aiIn.value=q.replace(/\n—— .*$/,''); nextTick(()=>aiSend()) }
+async function loadAiModels(){ try{ const r=await mixApi.aiModels(); aiScope.value=r.scope||'site'; aiModels.value=r.models||[] }catch(e){ /* 降级:不显示切换 */ } }
 const aiMsgs=ref((()=>{ try{ return JSON.parse(localStorage.getItem('qha_history')||'[]') }catch(e){ return [] } })())
 try{ aiConvId.value=localStorage.getItem('qha_conv_id')||null }catch(e){}
 function aiSave(){ try{ localStorage.setItem('qha_history', JSON.stringify(aiMsgs.value.slice(-200))); if(aiConvId.value)localStorage.setItem('qha_conv_id',aiConvId.value) }catch(e){} }
@@ -353,7 +408,10 @@ async function aiSend(){
   await nextTick(()=>{ if(aiBodyEl.value)aiBodyEl.value.scrollTop=aiBodyEl.value.scrollHeight })
   try{
     // 走 mix 后端 /ai/chat(新 LLM 中转站链路:主备自动降级+用量落账+实时系统上下文;conversation_id 携带多轮上下文)
-    const r=await mixApi.aiChat({conversation_id:aiConvId.value,message:t})
+    // 无限制模式且用户指定了地址→带上 relay_id(后端优先用该地址,仍保留其余站兜底)
+    const payload={conversation_id:aiConvId.value,message:t}
+    if(aiScope.value==='open' && aiRelayId.value!=null) payload.relay_id=aiRelayId.value
+    const r=await mixApi.aiChat(payload)
     if(r.conversation_id)aiConvId.value=r.conversation_id
     const tail=r.model?`\n—— ${r.model}${r.degraded?'(备用站)':''}`:''
     aiMsgs.value.push({id:aiId(),who:'ai',txt:(r.reply||r.detail||'暂不可用')+tail}); aiSave()
@@ -364,7 +422,7 @@ async function aiSend(){
   }
   finally{ if(aiTimer){clearInterval(aiTimer);aiTimer=null} aiBusy.value=false; await nextTick(()=>{ if(aiBodyEl.value)aiBodyEl.value.scrollTop=aiBodyEl.value.scrollHeight }) }
 }
-onMounted(()=>{ setInterval(()=>{ clock.value=new Date().toTimeString().slice(0,8) },1000); restoreOp(); loadBrand(); startMarquee(); loadAdvisors(); setInterval(loadAdvisors, 30000) })
+onMounted(()=>{ setInterval(()=>{ clock.value=new Date().toTimeString().slice(0,8) },1000); restoreOp(); loadBrand(); startMarquee(); loadAdvisors(); setInterval(loadAdvisors, 30000); loadAiModels(); setInterval(loadAiModels, 60000) })
 </script>
 <style scoped>
 .ai-fab{position:fixed;right:24px;bottom:24px;width:52px;height:52px;border-radius:50%;background:var(--el-color-primary);color:#fff;
@@ -404,9 +462,33 @@ onMounted(()=>{ setInterval(()=>{ clock.value=new Date().toTimeString().slice(0,
 .ai-body .ai-del{display:none;position:absolute;top:-7px;width:18px;height:18px;border-radius:50%;background:var(--el-bg-color);border:1px solid var(--el-border-color);color:var(--el-text-color-secondary);font-size:12px;line-height:16px;text-align:center;cursor:pointer}
 .ai-body .ab:hover .ai-del{display:block}
 .ai-body .ab.me .ai-del{left:-7px} .ai-body .ab.ai .ai-del{right:-7px}
-.ai-foot{display:flex;gap:8px;padding:10px;border-top:1px solid var(--el-border-color-lighter);align-items:flex-end}
+.ai-foot{display:flex;flex-direction:column;gap:6px;padding:10px;border-top:1px solid var(--el-border-color-lighter)}
+.ai-inrow{display:flex;gap:8px;align-items:flex-end}
 .ai-foot :deep(.el-textarea){flex:1}
 .ai-foot :deep(.el-textarea__inner){font-size:13px;line-height:1.5}
+.ai-modelbar{display:flex;align-items:center;gap:6px}
+.ai-modelbar .mb-lbl{font-size:11px;color:var(--el-text-color-placeholder)}
+.ai-modelbar .mb-sel{flex:1;font-size:11px;padding:3px 6px;border:1px solid var(--el-border-color);border-radius:6px;background:var(--el-bg-color);color:var(--el-text-color-primary)}
+/* 消息内联操作(重问/收藏) */
+.ai-body .ab-acts{display:none;gap:4px;margin-left:6px}
+.ai-body .ab:hover .ab-acts{display:inline-flex}
+.ai-body .ab-act{font-style:normal;cursor:pointer;font-size:13px;opacity:.6;user-select:none}
+.ai-body .ab-act:hover{opacity:1;color:var(--el-color-primary)}
+.ai-body .ab.me .ab-act{color:#fff}
+/* 收藏夹 */
+.ai-body.fav{padding:10px}
+.fav-bar{display:flex;gap:6px;margin-bottom:10px;position:sticky;top:-10px;background:var(--el-fill-color-lighter);padding:2px 0;z-index:1}
+.fav-search{flex:1;font-size:12px;padding:5px 8px;border:1px solid var(--el-border-color);border-radius:6px;background:var(--el-bg-color);color:var(--el-text-color-primary)}
+.fav-catsel{font-size:11px;padding:5px 6px;border:1px solid var(--el-border-color);border-radius:6px;background:var(--el-bg-color);color:var(--el-text-color-primary)}
+.fav-item{border:1px solid var(--el-border-color-lighter);border-radius:8px;padding:8px 10px;margin-bottom:8px;background:var(--el-bg-color)}
+.fav-top{display:flex;align-items:center;gap:8px;margin-bottom:5px}
+.fav-top .spacer{flex:1}
+.fav-cat{font-size:10px;font-weight:700;color:#F0B90B;background:rgba(240,185,11,.12);border-radius:8px;padding:1px 8px;cursor:pointer}
+.fav-time{font-size:10px;color:var(--el-text-color-placeholder)}
+.fav-act{font-style:normal;font-size:11px;cursor:pointer;color:var(--el-text-color-secondary)}
+.fav-act:hover{color:var(--el-color-primary)} .fav-act.del:hover{color:#F6465D}
+.fav-q{font-size:12.5px;font-weight:600;color:var(--el-text-color-primary);margin-bottom:3px;white-space:pre-wrap;word-break:break-word}
+.fav-a{font-size:12px;color:var(--el-text-color-regular);line-height:1.5;white-space:pre-wrap;word-break:break-word;max-height:160px;overflow:auto}
 /* 思考状态气泡:三点脉冲 + 计时 */
 .ai-body .ab.thinking{display:inline-flex;align-items:center;gap:8px;background:var(--el-bg-color);border:1px dashed var(--el-border-color);color:var(--el-text-color-secondary)}
 .tk-dots{display:inline-flex;gap:3px}

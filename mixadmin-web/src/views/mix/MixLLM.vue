@@ -29,29 +29,37 @@
       <div v-if="d.circuit_open" class="cbline">⚠ 熔断中(第{{ d.consecutive_trips }}次):advisor 跳轮不调用,自动到期恢复;或点「手动恢复」立即复位</div>
     </div>
 
-    <!-- 中转站管理(主从自动切换·热加载,advisor 每轮 15min 生效) -->
+    <!-- 中转站管理(主账号/备用账号各可挂多地址·热加载,advisor 每轮 15min 生效) -->
     <div class="card">
-      <div class="chd"><b>中转站管理</b><small>主从自动切换 · 热加载(advisor 每轮生效,无需重启)</small>
-        <el-button size="small" type="warning" plain @click="showAdd = !showAdd">+ 添加中转站</el-button>
-      </div>
-      <div v-if="showAdd" class="addbox">
-        <input v-model="nr.name" class="inp" placeholder="名称,如 backup-relay" />
-        <input v-model="nr.base_url" class="inp wide" placeholder="OpenAI兼容地址,如 https://api.chesspnt.com/v1" />
-        <input v-model="nr.api_key" class="inp wide" type="password" placeholder="API Key" />
-        <input v-model="nr.model" class="inp" placeholder="模型,如 gpt-5.5" />
-        <el-button size="small" type="warning" @click="addRelay">添加</el-button>
-        <i class="dim">角色默认「备用」,添加后可设为主站</i>
-      </div>
+      <div class="chd"><b>中转站管理</b><small>主账号 + 备用账号,每个账号可挂多个地址(调用不同模型)· 失效转移=启用主账号地址优先,再启用备用地址 · 热加载</small></div>
 
-      <div v-for="rs in relays" :key="rs.id" class="rsrow" :class="{primary: rs.role==='primary'}">
+      <template v-for="grp in accountGroups" :key="grp.role">
+        <div class="acchd">
+          <span class="accname">{{ grp.label }}</span>
+          <span class="dim">{{ grp.list.length }} 个地址 · {{ grp.list.filter(x=>x.enabled).length }} 启用</span>
+          <span class="spacer" />
+          <el-button size="small" type="warning" plain @click="openAdd(grp.role)">+ 添加地址</el-button>
+        </div>
+        <div v-if="showAdd===grp.role" class="addbox">
+          <input v-model="nr.name" class="inp" :placeholder="grp.role==='primary'?'名称,如 主站-地址2':'名称,如 shengshengToken'" />
+          <input v-model="nr.base_url" class="inp wide" placeholder="OpenAI兼容地址,如 https://api.xxx.com/v1" />
+          <input v-model="nr.api_key" class="inp wide" type="password" placeholder="API Key" />
+          <input v-model="nr.model" class="inp" placeholder="模型,如 gpt-5.5" />
+          <el-button size="small" type="warning" @click="addRelay(grp.role)">添加到{{ grp.label }}</el-button>
+          <el-button size="small" @click="showAdd=null">取消</el-button>
+        </div>
+        <div v-if="!grp.list.length" class="dim" style="padding:6px 4px 10px">此账号暂无地址,点「+ 添加地址」</div>
+
+        <div v-for="rs in grp.list" :key="rs.id" class="rsrow" :class="{primary: rs.role==='primary'}">
         <div class="rshd" @click="expand = expand===rs.id ? null : rs.id">
           <span class="rolebadge" :class="rs.role">{{ rs.role==='primary' ? '主' : '备' }}</span>
           <b>{{ rs.name }}</b>
-          <span class="tagx" :class="rs.enabled ? 'ok' : 'bad'">{{ rs.enabled ? '启用' : '禁用' }}</span>
+          <span class="tagx" :class="rs.enabled ? 'ok' : 'bad'">{{ rs.enabled ? '启用' : '停用' }}</span>
           <span class="mono dim">{{ rs.model }}</span>
+          <span class="mono dim host">{{ hostOf(rs.base_url) }}</span>
           <span class="spacer" />
-          <el-button v-if="rs.role!=='primary'" size="small" text type="warning" @click.stop="setPrimary(rs)">设为主站</el-button>
-          <el-button size="small" text :type="rs.enabled ? 'danger' : 'success'" @click.stop="toggle(rs)">{{ rs.enabled ? '禁用' : '启用' }}</el-button>
+          <el-button size="small" text type="warning" @click.stop="moveAccount(rs)">移到{{ rs.role==='primary'?'备用':'主' }}账号</el-button>
+          <el-button size="small" text :type="rs.enabled ? 'danger' : 'success'" @click.stop="toggle(rs)">{{ rs.enabled ? '停用' : '启用' }}</el-button>
           <el-button size="small" text type="danger" @click.stop="del(rs)">删除</el-button>
           <span class="dim">{{ expand===rs.id ? '▼' : '▶' }}</span>
         </div>
@@ -91,7 +99,8 @@
             <span v-if="rs._st" class="stmsg" :class="{okc: rs._st.startsWith('✅')}">{{ rs._st }}</span>
           </div>
         </div>
-      </div>
+        </div>
+      </template>
       <div v-if="!relays.length" class="dim" style="text-align:center;padding:14px">尚无中转站——添加后 advisor 自动切换到管理配置;未添加时回落引擎 env 单站</div>
     </div>
 
@@ -192,9 +201,14 @@ const relays = ref([])
 const usage = ref({})
 const usageDays = ref(14)
 const expand = ref(null)
-const showAdd = ref(false)
+const showAdd = ref(null)   // 'primary' | 'backup' | null:哪个账号正在展开添加框
 const resetting = ref(false)
 const nr = reactive({ name: '', base_url: 'https://api.chesspnt.com/v1', api_key: '', model: '' })
+const hostOf = u => String(u || '').replace(/^https?:\/\//, '').split('/')[0]
+const accountGroups = computed(() => [
+  { role: 'primary', label: '主账号', list: relays.value.filter(x => x.role === 'primary') },
+  { role: 'backup', label: '备用账号', list: relays.value.filter(x => x.role !== 'primary') },
+])
 const ts = computed(() => d.value.ts ? new Date(d.value.ts * 1000).toLocaleString() : '—')
 const fmtInt = n => (n != null ? Number(n).toLocaleString() : '—')
 const today = () => new Date().toISOString().slice(0, 10)
@@ -222,11 +236,17 @@ async function resetCircuit() {
   catch (e) { ElMessage.error(e?.detail || e?.error || '重置失败') }
   finally { resetting.value = false }
 }
-async function addRelay() {
+function openAdd(role) {
+  showAdd.value = showAdd.value === role ? null : role
+  Object.assign(nr, { name: '', api_key: '', model: '', base_url: 'https://api.chesspnt.com/v1' })
+}
+async function addRelay(role) {
   try {
-    await mixApi.system.llmRelayAdd({ ...nr })
-    ElMessage.success('已添加(备用);热配置已发布')
-    showAdd.value = false; Object.assign(nr, { name: '', api_key: '', model: '' })
+    const r = await mixApi.system.llmRelayAdd({ ...nr })
+    // 新增默认 role=backup;若加到主账号则移动过去
+    if (role === 'primary' && r?.item?.id) { try { await mixApi.system.llmRelayRole(r.item.id, 'primary') } catch (e) { /* 忽略 */ } }
+    ElMessage.success(`已添加到${role === 'primary' ? '主账号' : '备用账号'};热配置已发布`)
+    showAdd.value = null; Object.assign(nr, { name: '', api_key: '', model: '' })
     loadRelays()
   } catch (e) { ElMessage.error(e?.detail || e?.error || '添加失败') }
 }
@@ -292,11 +312,13 @@ function useModel(rs, m) {
   rs.model = m
   rs._st = `已设为当前模型:${m}（点「保存配置」持久化并热发布）`
 }
-async function setPrimary(rs) {
+async function moveAccount(rs) {
+  const to = rs.role === 'primary' ? 'backup' : 'primary'
   try {
-    await ElMessageBox.confirm(`将「${rs.name}」设为主站?当前主站降为备用。`, '主从切换', { type: 'warning' })
-    await mixApi.system.llmRelayRole(rs.id); loadRelays()
-  } catch (e) { if (e !== 'cancel') ElMessage.error(e?.detail || e?.error || '失败') }
+    await mixApi.system.llmRelayRole(rs.id, to)
+    ElMessage.success(`已移到${to === 'primary' ? '主账号' : '备用账号'}`)
+    loadRelays()
+  } catch (e) { ElMessage.error(e?.detail || e?.error || '失败') }
 }
 async function toggle(rs) {
   try { await mixApi.system.llmRelayToggle(rs.id, !rs.enabled); loadRelays() }
@@ -355,7 +377,11 @@ onUnmounted(() => clearInterval(t))
 .warn2 { color: #f59e0b; }
 .dim { color: var(--el-text-color-placeholder); font-size: 11px; }
 .okc { color: #0ECB81 !important; }
+.acchd { display: flex; align-items: center; gap: 10px; margin: 12px 0 6px; padding-bottom: 4px; border-bottom: 1px solid var(--mix-border, #262B33);
+  .accname { font-size: 12.5px; font-weight: 800; color: #F0B90B; } .spacer { flex: 1; } }
+.acchd:first-of-type { margin-top: 4px; }
 .addbox { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; border: 1px dashed rgba(240,185,11,.4); border-radius: 6px; padding: 10px; margin-bottom: 10px; }
+.rshd .host { font-size: 10px; opacity: .7; }
 .inp { background: #12151A; border: 1px solid var(--el-border-color); border-radius: 5px; color: #EAECEF; font-size: 11.5px; padding: 5px 8px; width: 150px;
   &.wide { width: 300px; } &.num { width: 64px; text-align: right; }
   &:focus { outline: none; border-color: #F0B90B; } }

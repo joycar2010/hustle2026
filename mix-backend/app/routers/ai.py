@@ -103,9 +103,27 @@ async def _log_usage(relay: str, model: str, usage: dict, latency_ms: int, ok: b
         log.warning("chat usage log failed: %s", e)
 
 
+@router.get("/ai/models")
+async def ai_models(_who=Depends(require_viewer)):
+    """可切换的模型/地址清单(主账号+备用账号所有启用地址)——供运维助手「无限制」模式的
+    模型切换按钮;chat_scope 也一并返回,前端据此决定是否显示切换按钮。"""
+    cfg = await ds.get_json("dcm:llm:config") or {}
+    agents = cfg.get("agents") or {}
+    out = []
+    for x in (cfg.get("relays") or []):
+        if not x.get("enabled"):
+            continue
+        host = str(x.get("base_url") or "").replace("https://", "").replace("http://", "").split("/")[0]
+        out.append({"id": x.get("id"), "name": x.get("name"), "role": x.get("role"),
+                    "model": x.get("model"), "host": host})
+    return {"scope": agents.get("chat_scope", "site"),
+            "ops_chat_enabled": agents.get("ops_chat_enabled", True), "models": out}
+
+
 @router.post("/ai/chat")
 async def ai_chat(body: dict, who=Depends(require_viewer)):
-    """运维助手对话:中转站主备降级(与 advisor 同配置源),失败诚实报错不装聋。"""
+    """运维助手对话:中转站主备降级(与 advisor 同配置源),失败诚实报错不装聋。
+    可选 relay_id:无限制模式下用户指定某个启用地址,优先用它(仍保留其余站兜底)。"""
     raw_msg = str(body.get("message") or "").strip()
     msg = raw_msg[:4000]
     truncated = len(raw_msg) > 4000
@@ -129,6 +147,12 @@ async def ai_chat(body: dict, who=Depends(require_viewer)):
     relays.sort(key=lambda x: 0 if x.get("role") == "primary" else 1)
     if not relays:
         return {"reply": "LLM 中转站未配置——到 /mix/llm 中转站管理里添加。", "conversation_id": cid}
+    # 无限制模式:用户从模型切换按钮选定某地址→优先用它(排到队首),其余站仍兜底
+    pin_id = body.get("relay_id")
+    if pin_id is not None and agents.get("chat_scope") == "open":
+        pinned = [x for x in relays if x.get("id") == pin_id]
+        if pinned:
+            relays = pinned + [x for x in relays if x.get("id") != pin_id]
 
     ctx = await _live_context()
     sys_prompt = SYSTEM_PROMPT_OPEN if agents.get("chat_scope") == "open" else SYSTEM_PROMPT
@@ -190,4 +214,5 @@ async def ai_chat(body: dict, who=Depends(require_viewer)):
         reply += "\n\n(提示:你的输入超过4000字,已截断处理——超长内容建议分段问)"
     return {"reply": reply, "conversation_id": cid,
             "model": used.get("model"), "relay": used.get("name"),
+            "relay_id": used.get("id"),
             "degraded": used.get("role") != "primary"}
