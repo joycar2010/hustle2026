@@ -84,6 +84,7 @@ export const mixApi = {
   channelsGet: () => http.get('/notify/channels'),
   channelsPut: (b) => http.put('/notify/channels', b),
   llmHistory: () => http.get('/system/llm/history'),
+  aiChat: (body) => http.post('/ai/chat', body, { timeout: 65000 }),
   datasources: () => http.get('/meta/datasources'),
   feishuGet: () => http.get('/me/feishu'),
   feishuBind: (b) => http.post('/me/feishu', b),

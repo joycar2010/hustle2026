@@ -337,10 +337,12 @@ async function aiSend(){
   const t=(aiIn.value||'').trim(); if(!t)return; aiIn.value=''; aiMsgs.value.push({id:aiId(),who:'me',txt:t}); aiSave(); aiBusy.value=true
   await nextTick(()=>{ if(aiBodyEl.value)aiBodyEl.value.scrollTop=aiBodyEl.value.scrollHeight })
   try{
-    const r=await api.aiChat({site:'qhadmin',conversation_id:aiConvId.value,message:t,user_id:'admin'})
+    // 走 mix 后端 /ai/chat(新 LLM 中转站链路:主备自动降级+用量落账+实时系统上下文)
+    const r=await mixApi.aiChat({conversation_id:aiConvId.value,message:t})
     if(r.conversation_id)aiConvId.value=r.conversation_id
-    aiMsgs.value.push({id:aiId(),who:'ai',txt:r.reply||r.detail||'暂不可用'}); aiSave()
-  }catch(e){ aiMsgs.value.push({id:aiId(),who:'ai',txt:'AI 服务调用失败: '+(e?.response?.data?.detail||'请稍后重试')}); aiSave() }
+    const tail=r.model?`\n—— ${r.model}${r.degraded?'(备用站)':''}`:''
+    aiMsgs.value.push({id:aiId(),who:'ai',txt:(r.reply||r.detail||'暂不可用')+tail}); aiSave()
+  }catch(e){ aiMsgs.value.push({id:aiId(),who:'ai',txt:'AI 服务调用失败: '+(e?.detail||e?.error||'请稍后重试')}); aiSave() }
   finally{ aiBusy.value=false; await nextTick(()=>{ if(aiBodyEl.value)aiBodyEl.value.scrollTop=aiBodyEl.value.scrollHeight }) }
 }
 onMounted(()=>{ setInterval(()=>{ clock.value=new Date().toTimeString().slice(0,8) },1000); restoreOp(); loadBrand(); startMarquee(); loadAdvisors(); setInterval(loadAdvisors, 30000) })
