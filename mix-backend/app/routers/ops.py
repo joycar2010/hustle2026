@@ -141,16 +141,32 @@ def _mask_key(k: str) -> str:
     return (k[:6] + "***" + k[-4:]) if len(k) > 12 else ("***" if k else "")
 
 
+async def _agents_row(pool) -> dict:
+    """AI 智能体接入配置(单行权威;表未迁移=全开默认,老行为不变)。"""
+    try:
+        ag = await pool.fetchrow(
+            "SELECT advisor_enabled, ops_chat_enabled, chat_scope FROM llm_agent_settings WHERE id=1")
+        if ag:
+            return {"advisor_enabled": bool(ag["advisor_enabled"]),
+                    "ops_chat_enabled": bool(ag["ops_chat_enabled"]),
+                    "chat_scope": str(ag["chat_scope"] or "site")}
+    except Exception:  # noqa: BLE001
+        pass
+    return {"advisor_enabled": True, "ops_chat_enabled": True, "chat_scope": "site"}
+
+
 async def _publish_llm_config(pool):
-    """发布全量中转站配置到总线(含明文 key——总线仅内网;UI 响应永远掩码)。"""
+    """发布全量中转站配置+智能体开关到总线(含明文 key——总线仅内网;UI 响应永远掩码)。
+    llm-advisor/运维助手每轮热读同一键,开关零新增通道热生效。"""
     r = ds.rds()
     rows = await pool.fetch("SELECT * FROM llm_relays ORDER BY (role!='primary'), id")
     relays = [{"id": x["id"], "name": x["name"], "base_url": x["base_url"],
                "api_key": x["api_key"], "model": x["model"], "role": x["role"],
                "enabled": x["enabled"]} for x in rows]
     import time as _t
-    await r.set("dcm:llm:config", json.dumps({"ts": int(_t.time()), "relays": relays},
-                                             ensure_ascii=False))
+    await r.set("dcm:llm:config", json.dumps(
+        {"ts": int(_t.time()), "relays": relays, "agents": await _agents_row(pool)},
+        ensure_ascii=False))
     return len(relays)
 
 
@@ -282,6 +298,78 @@ async def llm_relay_models(rid: int, op=Depends(require_operator)):
     custom = json.loads(cur["custom_models"]) if cur["custom_models"] else []
     return {"ok": True, "count": len(models),
             "available_models": sorted(set(models) | set(custom))}
+
+
+@router.post("/system/llm/relays/{rid}/test-model")
+async def llm_relay_test_model(rid: int, body: dict, op=Depends(require_operator)):
+    """真调该站指定模型一次(chat/completions 最小请求),返回延迟/回复/错误——
+    「加入列表≠可用」,上架与价格配置只有真调才知道。"""
+    import time
+    import httpx
+    pool = await ds.pg_main()
+    cur = await pool.fetchrow("SELECT * FROM llm_relays WHERE id=$1", rid)
+    if not cur:
+        raise HTTPException(404, "中转站不存在")
+    model = str(body.get("model") or cur["model"]).strip()
+    if not model:
+        raise HTTPException(400, "model 必填")
+    t0 = time.time()
+    try:
+        async with httpx.AsyncClient(timeout=30) as cli:
+            resp = await cli.post(
+                f"{cur['base_url']}/chat/completions",
+                json={"model": model, "messages": [{"role": "user", "content": "回复两个字:OK"}],
+                      "max_tokens": 200},
+                headers={"Authorization": f"Bearer {cur['api_key']}"})
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "model": model, "latency_ms": int((time.time() - t0) * 1000),
+                "error": repr(e)[:200]}
+    lat = int((time.time() - t0) * 1000)
+    if resp.status_code != 200:
+        return {"ok": False, "model": model, "latency_ms": lat,
+                "error": f"http {resp.status_code}: {resp.text[:200]}"}
+    try:
+        data = resp.json()
+        reply = data["choices"][0]["message"]["content"]
+        return {"ok": True, "model": model, "latency_ms": lat,
+                "reply": str(reply)[:80], "usage": data.get("usage") or {}}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "model": model, "latency_ms": lat, "error": f"bad shape {e!r}"[:200]}
+
+
+@router.get("/system/llm/agents")
+async def llm_agents_get(_who=Depends(require_viewer)):
+    pool = await ds.pg_main()
+    if pool is None:
+        raise HTTPException(503, "mix_main 未配置")
+    return await _agents_row(pool)
+
+
+@router.put("/system/llm/agents")
+async def llm_agents_put(body: dict, op=Depends(require_operator)):
+    """AI 智能体接入开关+运维助手回答范围:写单行权威表→重发布 dcm:llm:config 热生效
+    (llm-advisor 每轮 15min 读;运维助手每次对话读=即时)。"""
+    pool = await ds.pg_main()
+    if pool is None:
+        raise HTTPException(503, "mix_main 未配置")
+    cur = await _agents_row(pool)
+    adv = bool(body.get("advisor_enabled")) if body.get("advisor_enabled") is not None else cur["advisor_enabled"]
+    chat = bool(body.get("ops_chat_enabled")) if body.get("ops_chat_enabled") is not None else cur["ops_chat_enabled"]
+    scope = str(body.get("chat_scope") or cur["chat_scope"])
+    if scope not in ("site", "open"):
+        raise HTTPException(400, "chat_scope 必须是 site(限本站) 或 open(无限制)")
+    try:
+        await pool.execute(
+            "INSERT INTO llm_agent_settings(id, advisor_enabled, ops_chat_enabled, chat_scope, updated_by, updated_at) "
+            "VALUES(1,$1,$2,$3,$4,now()) ON CONFLICT (id) DO UPDATE SET advisor_enabled=$1, "
+            "ops_chat_enabled=$2, chat_scope=$3, updated_by=$4, updated_at=now()",
+            adv, chat, scope, op["operator"])
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(503, f"llm_agent_settings 表未迁移或写失败:{e}")
+    await _publish_llm_config(pool)
+    await proxy.audit(op["operator"], op["role"], "llm.agents", "llm_agent_settings",
+                      {"advisor": adv, "ops_chat": chat, "scope": scope}, "published")
+    return {"ok": True, "agents": {"advisor_enabled": adv, "ops_chat_enabled": chat, "chat_scope": scope}}
 
 
 @router.post("/system/llm/circuit-reset")

@@ -64,9 +64,16 @@
                        placeholder="选择或输入任意模型名">
               <el-option v-for="m in rs.available_models" :key="m" :value="m" :label="m" />
             </el-select>
+            <el-button size="small" type="warning" plain :loading="rs._testing" @click="testModel(rs)">⚡ 测试模型</el-button>
             <el-button size="small" :loading="rs._refreshing" @click="refreshModels(rs)">🔄 拉取模型列表</el-button>
             <input v-model="rs._newModel" class="inp" placeholder="手动加模型名" @keyup.enter="addCustomModel(rs)" />
             <el-button size="small" @click="addCustomModel(rs)">+ 加入列表</el-button>
+          </div>
+          <div class="frow" v-if="(rs.custom_models||[]).length"><label>手动名单</label>
+            <span v-for="m in rs.custom_models" :key="m" class="cmchip" :class="{cur: m===rs.model}">
+              {{ m }}<i class="cmx" title="从手动名单移除(保存后生效)" @click="removeCustomModel(rs, m)">×</i>
+            </span>
+            <i class="dim">拉取刷新永不丢;点 × 移除后需「保存配置」</i>
           </div>
           <div class="frow"><label>单价 $/1M</label>
             <span class="dim">in</span><input v-model.number="rs.price_in_per_m" class="inp num" type="number" step="0.1" />
@@ -79,6 +86,29 @@
         </div>
       </div>
       <div v-if="!relays.length" class="dim" style="text-align:center;padding:14px">尚无中转站——添加后 advisor 自动切换到管理配置;未添加时回落引擎 env 单站</div>
+    </div>
+
+    <!-- AI 智能体接入(开关+运维助手回答范围;写单行权威表→dcm:llm:config 热生效) -->
+    <div class="card">
+      <div class="chd"><b>AI 智能体接入</b><small>开关热生效:运维助手=下次对话即生效;评审顾问=下轮(≤15min)生效,停用即跳轮不烧钱</small></div>
+      <div class="agrid">
+        <div class="agrow">
+          <el-switch v-model="ag.advisor_enabled" @change="saveAgents" />
+          <div class="agtxt"><b>LLM 评审顾问</b><i>每 15 分钟组合级评审(dcm:advisor:llm)·只读只建议,顾问播报的数据源</i></div>
+        </div>
+        <div class="agrow">
+          <el-switch v-model="ag.ops_chat_enabled" @change="saveAgents" />
+          <div class="agtxt"><b>运维助手</b><i>右下 AI 浮框对话·注入实时系统快照·永远无执行权</i></div>
+        </div>
+        <div class="agrow">
+          <el-radio-group v-model="ag.chat_scope" size="small" :disabled="!ag.ops_chat_enabled" @change="saveAgents">
+            <el-radio-button value="site">限本站</el-radio-button>
+            <el-radio-button value="open">无限制</el-radio-button>
+          </el-radio-group>
+          <div class="agtxt"><b>运维助手回答范围</b><i>限本站=只答系统运维话题,跑题礼貌拉回;无限制=可自由聊天,涉本站数据仍只依据快照绝不编造</i></div>
+        </div>
+      </div>
+      <div v-if="agSt" class="dim" style="margin-top:6px">{{ agSt }}</div>
     </div>
 
     <!-- 每日消费明细 -->
@@ -174,7 +204,7 @@ async function loadHist() { try { hist.value = await mixApi.llmHistory() } catch
 async function loadRelays() {
   try {
     const r = await mixApi.system.llmRelays()
-    relays.value = (r.items || []).map(x => ({ ...x, _newKey: '', _newModel: '', _refreshing: false, _st: '' }))
+    relays.value = (r.items || []).map(x => ({ ...x, _newKey: '', _newModel: '', _refreshing: false, _testing: false, _st: '' }))
   } catch (e) { relays.value = [] }
 }
 async function loadUsage() { try { usage.value = await mixApi.system.llmUsageDaily(usageDays.value) } catch (e) { usage.value = {} } }
@@ -195,13 +225,23 @@ async function addRelay() {
 }
 async function save(rs) {
   try {
+    // 防丢单:el-select allow-create 直接敲出来的模型名只落在 rs.model,不在名单里——
+    // 保存时自动并入手动名单,否则下次加载从列表消失(「保存后列表没新模型」的根因之一)
+    if (rs.model && !(rs.available_models || []).includes(rs.model)) {
+      rs.custom_models = Array.from(new Set([...(rs.custom_models || []), rs.model]))
+    }
     await mixApi.system.llmRelaySave(rs.id, {
       name: rs.name, base_url: rs.base_url, api_key: rs._newKey || '',
       model: rs.model, price_in_per_m: rs.price_in_per_m, price_out_per_m: rs.price_out_per_m,
       custom_models: rs.custom_models,
     })
-    rs._st = '✅ 已保存并发布(advisor 下轮生效)'; rs._newKey = ''
-    setTimeout(() => { rs._st = '' }, 4000)
+    // 保存后从服务器回读(权威口径),不再依赖本地态——所见即所存
+    await loadRelays()
+    const fresh = relays.value.find(x => x.id === rs.id)
+    if (fresh) {
+      fresh._st = '✅ 已保存并发布(advisor 下轮生效)'
+      setTimeout(() => { fresh._st = '' }, 4000)
+    }
   } catch (e) { rs._st = '❌ ' + (e?.detail || e?.error || '保存失败') }
 }
 function addCustomModel(rs) {
@@ -211,6 +251,24 @@ function addCustomModel(rs) {
   rs.available_models = Array.from(new Set([...(rs.available_models || []), m])).sort()
   rs._newModel = ''
   rs._st = `已加入列表:${m}(点「保存配置」持久化)`
+}
+function removeCustomModel(rs, m) {
+  rs.custom_models = (rs.custom_models || []).filter(x => x !== m)
+  rs.available_models = (rs.available_models || []).filter(x => x !== m)
+  rs._st = `已从手动名单移除:${m}(点「保存配置」持久化)`
+}
+// 真调一次当前选中模型(上架/价格配置只有真调才知道)
+async function testModel(rs) {
+  if (!rs.model) { rs._st = '❌ 先选择/输入模型'; return }
+  rs._testing = true
+  rs._st = `测试 ${rs.model} 中...`
+  try {
+    const r = await mixApi.system.llmRelayTest(rs.id, rs.model)
+    rs._st = r.ok
+      ? `✅ ${r.model} 可用 · ${r.latency_ms}ms · 回复:${r.reply}`
+      : `❌ ${r.model} 不可用(${r.latency_ms}ms):${r.error}`
+  } catch (e) { rs._st = '❌ ' + (e?.detail || e?.error || '测试失败') }
+  finally { rs._testing = false }
 }
 async function setPrimary(rs) {
   try {
@@ -232,13 +290,30 @@ async function refreshModels(rs) {
   rs._refreshing = true
   try {
     const r = await mixApi.system.llmRelayModels(rs.id)
-    if (r.ok) { rs.available_models = r.available_models; rs._st = `✅ ${r.count} 模型` }
+    // 与本地未保存的手动名单合并——原先直接替换会把刚「加入列表」还没保存的模型冲掉(根因之二)
+    if (r.ok) { rs.available_models = Array.from(new Set([...(r.available_models || []), ...(rs.custom_models || [])])).sort(); rs._st = `✅ ${r.count} 模型` }
     else rs._st = '❌ ' + r.error
   } catch (e) { rs._st = '❌ ' + (e?.detail || e?.error || '失败') }
   finally { rs._refreshing = false; setTimeout(() => { rs._st = '' }, 5000) }
 }
 
-onMounted(() => { load(); loadHist(); loadRelays(); loadUsage(); t = setInterval(load, 30000) })
+// ---- AI 智能体接入 ----
+const ag = reactive({ advisor_enabled: true, ops_chat_enabled: true, chat_scope: 'site' })
+const agSt = ref('')
+async function loadAgents() { try { Object.assign(ag, await mixApi.system.llmAgentsGet()) } catch (e) { /* 默认全开 */ } }
+async function saveAgents() {
+  try {
+    const r = await mixApi.system.llmAgentsPut({ ...ag })
+    Object.assign(ag, r.agents || {})
+    agSt.value = `✅ 已保存并热发布:评审顾问=${ag.advisor_enabled ? '开' : '关'} · 运维助手=${ag.ops_chat_enabled ? '开' : '关'} · 范围=${ag.chat_scope === 'open' ? '无限制' : '限本站'}`
+    setTimeout(() => { agSt.value = '' }, 5000)
+  } catch (e) {
+    agSt.value = '❌ ' + (e?.detail || e?.error || '保存失败')
+    loadAgents()
+  }
+}
+
+onMounted(() => { load(); loadHist(); loadRelays(); loadUsage(); loadAgents(); t = setInterval(load, 30000) })
 onUnmounted(() => clearInterval(t))
 </script>
 
@@ -277,5 +352,13 @@ onUnmounted(() => clearInterval(t))
 .stmsg { font-size: 11px; color: #F6465D; }
 .statbar { display: flex; gap: 18px; font-size: 11.5px; color: var(--el-text-color-secondary); padding: 4px 2px 10px;
   b { color: #EAECEF; } }
+.cmchip { display: inline-flex; align-items: center; gap: 4px; border: 1px solid rgba(240,185,11,.35); background: rgba(240,185,11,.08);
+  color: #F0B90B; border-radius: 10px; padding: 1px 8px; font-size: 10.5px; margin-right: 6px; font-family: monospace;
+  &.cur { border-color: #F0B90B; font-weight: 700; }
+  .cmx { font-style: normal; cursor: pointer; color: var(--el-text-color-placeholder); &:hover { color: #F6465D; } } }
+.agrid { display: flex; flex-direction: column; gap: 10px; }
+.agrow { display: flex; align-items: center; gap: 12px; }
+.agtxt { display: flex; flex-direction: column; gap: 1px;
+  b { font-size: 12px; } i { font-style: normal; font-size: 10.5px; color: var(--el-text-color-placeholder); } }
 .cmt { font-size: 12px; color: var(--mix-t1, #EAECEF); white-space: pre-wrap; max-height: 320px; overflow: auto; margin: 0; }
 </style>

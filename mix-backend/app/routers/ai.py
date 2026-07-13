@@ -22,13 +22,22 @@ _conv_ts: dict[str, float] = {}
 _MAX_TURNS = 12
 _CONV_TTL = 3600 * 6
 
-SYSTEM_PROMPT = (
+_PROMPT_BASE = (
     "你是 HustleCoin Mix(多策略套利控制台)的运维助手,面向操作员回答系统运维/策略状态/数据口径问题。"
     "你只提供解答与指路,绝无任何执行权——涉及操作时告诉用户在哪个页面哪个按钮完成"
     "(主控台=/mix/dashboard,规则中心=/mix/rules,通知模块=/mix/notify,账户=/mix/accounts,"
     "运维面板=/system,LLM管理=/mix/llm,交易历史=/mix/history,资金收益=/mix/report)。"
     "六策略:S1期现收费(单所期现对冲收资金费)/S2跨所费差(双合约跨所费率差,dcm引擎)/S3借币点差(借币做空吃现-期点差,coin引擎)/S4三率利差(资金费+理财-借币利率)/S5事件折价/S6做量降费(未建)。"
     "回答用中文,简洁直接,基于给你的实时系统快照说话;快照里没有的数据就说不知道,绝不编造数字。"
+)
+# 回答范围由 /mix/llm「AI 智能体接入」的 chat_scope 决定(site=限本站/open=无限制),对话时热读
+SYSTEM_PROMPT = _PROMPT_BASE + (
+    "你只回答与本系统(套利策略/运维/数据/页面操作)相关的问题;无关话题礼貌说明"
+    "「运维助手当前限定本站话题(管理员可在 /mix/llm 切换为无限制)」并把话题拉回系统。"
+)
+SYSTEM_PROMPT_OPEN = _PROMPT_BASE + (
+    "除系统运维问题外,你也可以自由回答任何话题(市场观点/技术/闲聊均可),"
+    "但涉及本系统数据时仍只依据快照,绝不编造;任何话题下都没有执行权。"
 )
 
 
@@ -111,6 +120,10 @@ async def ai_chat(body: dict, who=Depends(require_viewer)):
     _conv_ts[cid] = now
 
     cfg = await ds.get_json("dcm:llm:config") or {}
+    agents = cfg.get("agents") or {}
+    if agents.get("ops_chat_enabled") is False:
+        return {"reply": "运维助手已被管理员停用——在 /mix/llm「AI 智能体接入」处可重新开启。",
+                "conversation_id": cid}
     relays = [x for x in (cfg.get("relays") or [])
               if x.get("enabled") and str(x.get("api_key") or "").strip()]
     relays.sort(key=lambda x: 0 if x.get("role") == "primary" else 1)
@@ -118,7 +131,8 @@ async def ai_chat(body: dict, who=Depends(require_viewer)):
         return {"reply": "LLM 中转站未配置——到 /mix/llm 中转站管理里添加。", "conversation_id": cid}
 
     ctx = await _live_context()
-    messages = ([{"role": "system", "content": SYSTEM_PROMPT},
+    sys_prompt = SYSTEM_PROMPT_OPEN if agents.get("chat_scope") == "open" else SYSTEM_PROMPT
+    messages = ([{"role": "system", "content": sys_prompt},
                  {"role": "system", "content": "实时系统快照:" + json.dumps(ctx, ensure_ascii=False)}]
                 + hist[-_MAX_TURNS:] + [{"role": "user", "content": msg}])
 
