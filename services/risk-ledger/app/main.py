@@ -263,17 +263,20 @@ async def check_round(r: aioredis.Redis, self_pool) -> dict:
                 for leg, d in (("long", dl), ("short", ds)):
                     dist = d.get("dist_liq_pct")
                     adl = d.get("adl")
+                    legcn = "多头腿" if leg == "long" else "空头腿"
                     if dist is not None and dist < DIST_LIQ_CRIT:
-                        await fire(f"liq-crit:{sym}:{leg}", f"双合约腿逼近强平 {sym}",
-                                   f"{leg}腿距强平仅 {dist}%(<{DIST_LIQ_CRIT}%)—补保证金或减双腿", level="fatal")
+                        await fire(f"liq-crit:{sym}:{leg}", f"{sym} 快要爆仓了",
+                                   f"{sym} 的{legcn}离强平只剩 {dist}% 的安全垫，很危险。赶紧补点保证金，或者把两条腿一起减一减。",
+                                   level="fatal")
                         alerts += 1
                     elif dist is not None and dist < DIST_LIQ_WARN:
-                        await fire(f"liq-warn:{sym}:{leg}", f"双合约腿保证金侵蚀 {sym}",
-                                   f"{leg}腿距强平 {dist}%(<{DIST_LIQ_WARN}%)", level="warn")
+                        await fire(f"liq-warn:{sym}:{leg}", f"{sym} 保证金有点吃紧",
+                                   f"{sym} 的{legcn}离强平还有 {dist}%，垫子在变薄，留意一下。", level="warn")
                         alerts += 1
                     if adl is not None and adl >= ADL_WARN:
-                        await fire(f"adl:{sym}:{leg}", f"双合约腿 ADL 高位 {sym}",
-                                   f"{leg}腿 ADL={adl}(≥{ADL_WARN})—盈利腿或被自动减仓", level="warn")
+                        await fire(f"adl:{sym}:{leg}", f"{sym} 可能被交易所强减",
+                                   f"{sym} 的{legcn}排到了自动减仓队列前面（ADL {adl}）。这通常是赚钱那条腿，交易所可能替你减掉一部分，盯着点别单腿裸奔。",
+                                   level="warn")
                         alerts += 1
                 pg["dist_liq"] = {"long": dl.get("dist_liq_pct"), "short": ds.get("dist_liq_pct")}
                 pg["adl"] = {"long": dl.get("adl"), "short": ds.get("adl")}
