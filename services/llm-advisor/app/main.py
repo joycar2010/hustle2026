@@ -328,6 +328,19 @@ async def main():
             try:
                 relays = await load_relays(r)
                 breaker = await _get_json(r, BREAKER_KEY) or {}
+                # 管理员停用闸(mixadmin /mix/llm「AI 智能体接入」,随 dcm:llm:config 热生效):
+                # 停用=跳轮不调用不烧钱,保留上轮建议,心跳照常——绝不装死
+                _agents = (await _get_json(r, CONFIG_KEY) or {}).get("agents") or {}
+                if _agents.get("advisor_enabled") is False:
+                    prev = await _get_json(r, "dcm:advisor:llm") or {}
+                    prev.update({"status": "disabled", "ts": int(time.time()),
+                                 "note": "LLM评审顾问已被管理员停用(/mix/llm AI智能体接入处开启)",
+                                 **_health(relays, breaker, time.time())})
+                    await r.set("dcm:advisor:llm", json.dumps(prev, ensure_ascii=False),
+                                ex=max(INTERVAL * 3, 3600))
+                    hb.extra = {"status": "disabled"}
+                    await asyncio.sleep(INTERVAL)
+                    continue
                 if not relays:
                     await r.set("dcm:advisor:llm", json.dumps(
                         {"ts": int(time.time()), "status": "unconfigured",
