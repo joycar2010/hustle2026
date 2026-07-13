@@ -40,7 +40,11 @@
     <!-- 坑位行（全宽,自适应填满剩余高度=页面级无滚动条） -->
     <VirtualPositionTable
       :rows="rows" :sort-key="sortKey" :sort-dir="sortDir" :height="0"
-      @action="onAction" @rule-override="onRuleOverride" />
+      @action="onAction" @rule-template="onRuleTemplate" @rule-symbol="onRuleSymbol" />
+
+    <!-- 通用规则(策略级) / 单一规则(某币) 弹层 -->
+    <RuleSettingsModal v-model="ruleModal.open" :code="ruleModal.code" />
+    <SymbolRuleModal v-model="symModal.open" :symbol="symModal.symbol" :code="symModal.code" />
 
     <!-- 底部横排三卡：策略总览缩略 / 账户余额水位预警 / 分策略管道总览 -->
     <div class="botrow">
@@ -99,6 +103,8 @@ import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { connectStream } from '../../api/mixWs'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import VirtualPositionTable from '../../components/PositionTable/VirtualPositionTable.vue'
+import RuleSettingsModal from '../../components/rules/RuleSettingsModal.vue'
+import SymbolRuleModal from '../../components/rules/SymbolRuleModal.vue'
 import { STRATEGY_META as META } from '../../components/PositionTable/types'
 import { CONTEXT_MENUS } from '../../components/PositionTable/strategyColumns'
 import { mixApi } from '../../api/mix'
@@ -163,10 +169,10 @@ async function onAction({ action, rowId, accountId }) {
     ElMessage.error(e?.error || e?.detail || '被拒绝')
   }
 }
-function onRuleOverride(rowId) {
-  const row = rows.value.find(r => r.id === rowId)
-  ElMessageBox.alert(`打开规则中心 · 币种覆盖：${row?.symbol}（当前 ${row?.ruleScope === 'template' ? '通用规则' : '单独规则'}）`, '单独规则')
-}
+const ruleModal = ref({ open: false, code: 'S3' })
+const symModal = ref({ open: false, symbol: '', code: 'S3' })
+function onRuleTemplate({ code }) { ruleModal.value = { open: true, code } }
+function onRuleSymbol({ symbol, code }) { symModal.value = { open: true, symbol, code } }
 
 const modeLabel = m => ({ shadow: '影子', armed: '武装', 未启用: '未启用' }[m] || m || '—')
 async function switchMode(s, mode) {

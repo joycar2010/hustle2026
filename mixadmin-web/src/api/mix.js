@@ -39,6 +39,8 @@ export const mixApi = {
 
   rules: (scope) => http.get('/rules', { params: { scope } }),
   rulesSave: (scopeKey, body) => http.put(`/rules/${encodeURIComponent(scopeKey)}`, body),
+  symbolRule: (symbol, strategy = 'S3') => http.get(`/rules/symbol/${symbol}`, { params: { strategy } }),
+  symbolRuleSave: (symbol, body) => http.put(`/rules/symbol/${symbol}`, body),
 
   accounts: () => http.get('/accounts'),
   accountCreate: (body) => http.post('/accounts', body),

@@ -28,7 +28,14 @@ const props = withDefaults(defineProps<{
 const emit = defineEmits<{
   action: [payload: { action: string; rowId: string; accountId?: string; confirm?: boolean }]
   ruleOverride: [rowId: string]
+  ruleTemplate: [payload: { code: string }]
+  ruleSymbol: [payload: { rowId: string; symbol: string; code: string }]
 }>()
+function onRuleCell(row: PositionRow) {
+  // ruleScope='template' → 通用规则(策略级);'override' → 单一规则(该币)
+  if (row.ruleScope === 'override') emit('ruleSymbol', { rowId: row.id, symbol: row.symbol, code: row.strategyCode })
+  else emit('ruleTemplate', { code: row.strategyCode })
+}
 
 const ROW_H = 27
 const SUB_H = 24
@@ -144,7 +151,7 @@ async function fire(action: string, row: PositionRow, accountId?: string, confir
 }
 function onMenuClick(it: MenuItem) {
   if (!menu.row) return
-  if (it.key === 'rule_override') { emit('ruleOverride', menu.row.id); closeMenu(); return }
+  if (it.key === 'rule_override') { emit('ruleSymbol', { rowId: menu.row.id, symbol: menu.row.symbol, code: menu.row.strategyCode }); closeMenu(); return }
   fire(it.key, menu.row, menu.accountId, it.confirm)
 }
 function inlineDisabled(row: PositionRow, key: string): boolean {
@@ -220,7 +227,7 @@ function stateStyle(s: SubRowState): { bg: string; fg: string } {
                         @click="fire(a.key, it.row)">{{ isInflight(keyOf(a.key, it.row.id)) ? '…' : a.label }}</button>
                 <button class="op more" @click="openMenu($event, it.row)">⋮</button>
               </span>
-              <span class="rule" :class="{ gold: it.row.ruleScope === 'override' }" @click.stop="emit('ruleOverride', it.row.id)">
+              <span class="rule" :class="{ gold: it.row.ruleScope === 'override' }" @click.stop="onRuleCell(it.row)">
                 {{ it.row.ruleScope === 'template' ? '通用规则' : '单一规则' }}
               </span>
             </div>
