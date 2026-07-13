@@ -328,7 +328,7 @@ class BalancePusher:
             if not sa:
                 continue
             uid = sa.user_id
-            name = sa.account_name or f"sub#{sid}"
+            name = sa.note or f"sub#{sid}"   # SubAccount 字段是 note,非 account_name(原误致心跳检测每轮抛错跳过)
             try:
                 raw = await self._redis.get(f"engine:{uid}:borrow_hb:{sid}")
             except Exception:

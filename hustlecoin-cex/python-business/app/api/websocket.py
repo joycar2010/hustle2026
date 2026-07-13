@@ -153,19 +153,33 @@ async def websocket_stream(ws: WebSocket, token: str = ""):
         pubsub = redis_conn.pubsub()
         await pubsub.subscribe("spread:updates", "position:updates", "worker:status", "balance:updates", "notification:broadcast", "ban:updates", "symbol_status:updates", "account_restriction:updates", "market:updates", "pushed:updates")
 
-        batch: dict[str, dict] = {}
+        # 待取点差 symbol 集合(去重,天然只留最新):listener 只 add symbol(纯内存),
+        # 真正的取数(HGET)推迟到 flush 批量做,避免 per-message HGET 洪水拖垮事件循环。
+        pending_spread: set[str] = set()
         batch_lock = asyncio.Lock()
 
         async def flush_loop():
             while True:
                 await asyncio.sleep(0.2)
                 async with batch_lock:
-                    if not batch:
-                        continue
-                    items = list(batch.values())
-                    batch.clear()
+                    syms = list(pending_spread)
+                    pending_spread.clear()
+                if not syms:
+                    continue
                 try:
-                    await ws.send_json({"type": "spread_batch", "data": items})
+                    # 批量 HMGET:一次跨机往返取回本批(0.2s内)所有变化币的最新点差,替代
+                    # listener 里每条 spread:updates 一次 HGET(2376条/秒→2376次/秒远程HGET,
+                    # 占满事件循环→pong 送不出→前端 10s 判半开假死断连重连的根因)。
+                    raws = await redis_conn.hmget("spreads", syms)
+                    items = []
+                    for sym, raw in zip(syms, raws):
+                        if not raw:
+                            continue
+                        parsed = json.loads(raw)
+                        parsed["no_inventory"] = sym in noinv_syms
+                        items.append(parsed)
+                    if items:
+                        await ws.send_json({"type": "spread_batch", "data": items})
                 except Exception:
                     break
 
@@ -177,14 +191,12 @@ async def websocket_stream(ws: WebSocket, token: str = ""):
                 data_str = msg["data"]
 
                 if channel == "spread:updates":
-                    if _excluded(str(data_str)):
+                    sym = str(data_str)
+                    if _excluded(sym):
                         continue  # 黑名单/死币/退市(不在 universe)不推送;无券币不再排除(标 no_inventory)
-                    raw = await redis_conn.hget("spreads", data_str)
-                    if raw:
-                        parsed = json.loads(raw)
-                        parsed["no_inventory"] = str(data_str) in noinv_syms
-                        async with batch_lock:
-                            batch[data_str] = parsed
+                    # 只登记 symbol(纯内存,零 Redis 往返);取数交给 flush_loop 批量 HMGET
+                    async with batch_lock:
+                        pending_spread.add(sym)
 
                 elif channel == "position:updates":
                     try:
