@@ -44,13 +44,20 @@
     <div class="botrow">
       <div class="card">
         <div class="chd">策略总览 <el-link type="warning" @click="$router.push('/mix/strategies')">全页 →</el-link></div>
-        <div v-for="s in strategies" :key="s.code" class="srow" @click="$router.push('/mix/strategy/'+s.code)">
-          <span class="sbadge" :style="{background: SC[s.code]}">{{ s.code }}</span>
-          <span class="snm">{{ s.name }}</span>
+        <div v-for="s in strategies" :key="s.code" class="srow">
+          <span class="sbadge" :style="{background: SC[s.code]}" @click="$router.push('/mix/strategy/'+s.code)">{{ s.code }}</span>
+          <span class="snm" @click="$router.push('/mix/strategy/'+s.code)">{{ s.name }}</span>
           <span class="skpi">{{ s.slots }} 仓</span>
           <span class="skpi">{{ (s.notional||0).toLocaleString() }}U</span>
           <b class="skpi" :class="(s.pnlTotal||0) >= 0 ? 'up' : 'down'">{{ (s.pnlTotal||0).toFixed(2) }}</b>
-          <i class="sdot2" :class="{off: !s.enabled}"></i>
+          <!-- 模式切换（S2 可网页热切,armed 需 ARM 确认；其余只读标注） -->
+          <span class="smode" @click.stop>
+            <el-radio-group v-if="s.modeSwitchable" :model-value="s.mode" size="small" @change="switchMode(s, $event)">
+              <el-radio-button value="shadow">影子</el-radio-button>
+              <el-radio-button value="armed">武装</el-radio-button>
+            </el-radio-group>
+            <i v-else class="mtag" :class="s.mode">{{ modeLabel(s.mode) }}</i>
+          </span>
         </div>
       </div>
 
@@ -151,6 +158,22 @@ function onRuleOverride(rowId) {
   ElMessageBox.alert(`打开规则中心 · 币种覆盖：${row?.symbol}（当前 ${row?.ruleScope === 'template' ? '通用规则' : '单独规则'}）`, '单独规则')
 }
 
+const modeLabel = m => ({ shadow: '影子', armed: '武装', 未启用: '未启用' }[m] || m || '—')
+async function switchMode(s, mode) {
+  try {
+    let confirm
+    if (mode === 'armed') {
+      const { value } = await ElMessageBox.prompt(`切换 ${s.code} 为「武装」= 真金下单。输入 ARM 确认（风控联锁）`, '武装确认', { inputPattern: /^ARM$/, inputErrorMessage: '必须输入 ARM' })
+      confirm = value
+    } else {
+      await ElMessageBox.confirm(`切换 ${s.code} 为「影子」（停真金下单）？`, '模式切换', { type: 'warning' })
+    }
+    await mixApi.strategyMode(s.code, mode, confirm)
+    ElMessage.success(`${s.code} 已切 ${modeLabel(mode)}`)
+    loadAux()
+  } catch (e) { if (e !== 'cancel') { ElMessage.error(e?.detail || e?.error || '切换失败'); loadAux() } }
+}
+
 let wsDisconnect = null
 let auxTimer = null
 
@@ -185,9 +208,15 @@ onUnmounted(() => { wsDisconnect && wsDisconnect(); auxTimer && clearInterval(au
 .botrow { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 10px; }
 .card { background: var(--mix-card, #181B21); border: 1px solid var(--mix-border, #262B33); border-radius: 8px; padding: 10px 12px; }
 .chd { font-size: 12.5px; font-weight: 700; color: var(--mix-t1, #EAECEF); margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; }
-.srow { display: flex; align-items: center; gap: 8px; font-size: 11.5px; padding: 3px 0; cursor: pointer; color: var(--mix-t2, #848E9C);
+.srow { display: flex; align-items: center; gap: 8px; font-size: 11.5px; padding: 3px 0; color: var(--mix-t2, #848E9C);
   &:hover { color: var(--mix-t1, #EAECEF); } }
-.snm { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.snm { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+.smode { display: inline-flex; align-items: center;
+  :deep(.el-radio-button__inner) { padding: 2px 7px; font-size: 10px; }
+  .mtag { font-style: normal; font-size: 9.5px; padding: 1px 6px; border-radius: 4px; font-weight: 700;
+    &.armed { background: rgba(246,70,93,.15); color: #F6465D; }
+    &.shadow { background: rgba(74,156,255,.15); color: #4A9CFF; }
+    color: var(--mix-t3, #5E6673); background: var(--mix-fill, rgba(94,102,115,.15)); } }
 .skpi { min-width: 52px; text-align: right; }
 .sbadge { min-width: 24px; text-align: center; font-size: 9.5px; font-weight: 800; color: #0B0E11; border-radius: 3px; padding: 1px 4px; }
 .sdot2 { width: 7px; height: 7px; border-radius: 50%; background: var(--mix-green, #0ECB81); &.off { background: var(--mix-t3, #5E6673); } }

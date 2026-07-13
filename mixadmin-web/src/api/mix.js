@@ -35,6 +35,7 @@ export const mixApi = {
   strategies: () => http.get('/strategies'),
   strategy: (code) => http.get(`/strategies/${code}`),
   strategyToggle: (code) => http.post(`/strategies/${code}/toggle`),
+  strategyMode: (code, mode, confirm) => http.post(`/strategies/${code}/mode`, { mode, ...(confirm ? { confirm } : {}) }),
 
   rules: (scope) => http.get('/rules', { params: { scope } }),
   rulesSave: (scopeKey, body) => http.put(`/rules/${encodeURIComponent(scopeKey)}`, body),

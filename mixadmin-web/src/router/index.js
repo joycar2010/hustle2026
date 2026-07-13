@@ -4,7 +4,7 @@ import Layout from '../layout/Layout.vue'
 const routes = [
   { path:'/', component:Layout, redirect:'/mix/dashboard', children:[
     // ===== Mix 主控(置顶, 不收缩) —— HustleCoin Mix 多策略持股公司 =====
-    { path:'mix/dashboard', name:'mix-dashboard', meta:{title:'Mix主控台',icon:'Odometer',group:'总控',ord:0}, component:()=>import('../views/mix/MixDashboard.vue') },
+    { path:'mix/dashboard', name:'mix-dashboard', meta:{title:'中控台',icon:'Odometer',group:'总控',ord:0}, component:()=>import('../views/mix/MixDashboard.vue') },
     { path:'mix/strategies', name:'mix-strategies', meta:{title:'策略总览',icon:'Share',group:'总控',ord:0.1}, component:()=>import('../views/mix/MixStrategies.vue') },
     { path:'mix/strategy/:code', name:'mix-strategy-detail', meta:{title:'策略明细',icon:'Share',group:'总控',hidden:true}, component:()=>import('../views/mix/MixStrategyDetail.vue') },
     { path:'mix/rules', name:'mix-rules', meta:{title:'规则中心',icon:'Setting',group:'总控',ord:0.2}, component:()=>import('../views/mix/MixRules.vue') },
@@ -42,7 +42,7 @@ const routes = [
     // 全渠道看板: 已并入「经营分析」页, 菜单隐藏(路由保留可直达)
     { path:'overview', name:'overview', meta:{title:'全渠道看板',icon:'DataAnalysis',group:'分析',hidden:true}, component:()=>import('../views/Overview.vue') },
     // ===== 系统设置（运维面板/通知模块/操作员管理/系统配置：版本·数据库·SSL/LLM 设置） =====
-    { path:'system', name:'system', meta:{title:'运维面板',icon:'Monitor',group:'系统设置',ord:1}, component:()=>import('../views/System.vue') },
+    { path:'system', name:'system', meta:{title:'运维面板',icon:'Monitor',group:'系统设置',ord:1}, component:()=>import('../views/mix/MixOps.vue') },
     { path:'params', name:'params', meta:{hidden:true,title:'参数下发',icon:'Setting',group:'系统设置',ord:1.5}, component:()=>import('../views/Params.vue') },
     { path:'notify', name:'notify', meta:{hidden:true,title:'通知模块',icon:'Bell',group:'系统设置',ord:2}, component:()=>import('../views/Notify.vue') },
     { path:'sitemgr', name:'sitemgr', meta:{hidden:true,title:'官网管理',icon:'Link',group:'系统设置',ord:2.5}, component:()=>import('../views/SiteMgr.vue') },

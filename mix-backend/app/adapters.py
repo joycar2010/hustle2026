@@ -152,15 +152,19 @@ async def _s2_rows() -> list[dict]:
         qty = sum(float(x["qty_base"]) for x in group)
         notion = sum(float(x["notional_usdt"]) for x in group)
 
-        def leg(venue, qty_cell, side, pd, dliq):
+        def leg(venue, qty_cell, side, pd, dliq, own_fund):
+            # 每腿显示各所自己的费率与结算时间（此前复用配对级 edge/ddl_txt 致两腿同值——bug 修复）
+            own_daily = own_fund.get("daily_pct")
+            _, own_settle = _next_settle(own_fund.get("interval_h"))
             return {
                 "executingAccount": f"{venue}", "accountKind": "master",
                 "venue": venue, "platformType": "cex",
                 "values": [
                     qty_cell if side == "L" else DASH,
                     qty_cell if side == "S" else DASH,
-                    {"value": f"{edge:+.3f}" if edge is not None else "—", "tone": "up" if (edge or 0) > 0 else "down"},
-                    {"value": ddl_txt, "tone": "accent"},
+                    {"value": f"{float(own_daily):+.3f}" if own_daily is not None else "—",
+                     "tone": "up" if (own_daily is not None and float(own_daily) > 0) else "down"},
+                    {"value": own_settle or "—", "tone": "accent"},
                     {"value": f"{delta:+.4f}" if delta is not None else "—",
                      "tone": "up" if abs(delta or 0) < 1e-9 else "down"},
                     {"value": f"{dliq:.1f}%" if dliq is not None else "—",
@@ -173,7 +177,7 @@ async def _s2_rows() -> list[dict]:
                     {"label": "标记", "value": _num(pd.get("mark"), 6) if pd.get("mark") is not None else "—"},
                 ],
                 "state": {"kind": "holding", "text": _hours_since(r0["opened_at"])},
-                "fundingRateRatio": f"{edge:+.3f}" if edge is not None else None,
+                "fundingRateRatio": f"{float(own_daily):+.3f}" if own_daily is not None else None,
                 "apiRestricted": False, "apiStatus": "ok",
             }
 
@@ -194,8 +198,8 @@ async def _s2_rows() -> list[dict]:
             "openedAt": str(r0["opened_at"]) if r0["opened_at"] else None,
             "keyDeadlineTs": ddl_ms, "ruleScope": "template",
             "subRows": [
-                leg(vl, {"value": _num(qty, 4), "tone": "strategy"}, "L", pdl, dl.get("long")),
-                leg(vs, {"value": _num(qty, 4), "tone": "strategy"}, "S", pds, dl.get("short")),
+                leg(vl, {"value": _num(qty, 4), "tone": "strategy"}, "L", pdl, dl.get("long"), fl),
+                leg(vs, {"value": _num(qty, 4), "tone": "strategy"}, "S", pds, dl.get("short"), fs),
             ],
         })
     return out
@@ -489,12 +493,14 @@ async def strategies_overview() -> list[dict]:
         {"code": "S1", "name": "单所期现基差 Carry", "layer": "底仓层",
          "enabled": bool(bs_db), "slots": sum(int(r["n"]) for r in bs_db),
          "notional": float(sum(float(r["notion"]) for r in bs_db)),
+         "mode": bs_mode, "modeSwitchable": False,
          "pnlToday": attr["S1"]["today"], "pnlTotal": attr["S1"]["total"], "ePass": "—",
          "pipeline": {"模式": bs_mode, "开仓中": agg(bs_db, "OPENING"), "持有": agg(bs_db, "OPEN"),
                       "平仓中": agg(bs_db, "CLOSING")}},
         {"code": "S2", "name": "双合约期期 Carry", "layer": "中层主力",
          "enabled": dp_mode in ("armed", "shadow"), "slots": agg(dp_db, "OPEN") + agg(dp_db, "OPENING"),
          "notional": float(sum(float(r["notion"]) for r in dp_db)),
+         "mode": dp_mode, "modeSwitchable": True,
          "pnlToday": attr["S2"]["today"], "pnlTotal": attr["S2"]["total"], "ePass": "—",
          "pipeline": {"模式": dp_mode, "活跃路由": len(dp_routes), "武装": len(dp_snap.get("armed_symbols") or []),
                       "开仓中": agg(dp_db, "OPENING"), "持有": agg(dp_db, "OPEN"),
@@ -510,16 +516,19 @@ async def strategies_overview() -> list[dict]:
                       "引擎": f"{running}/{len(scopes)}"}},
         {"code": "S4", "name": "借贷利率套利", "layer": "增强层",
          "enabled": bool(lend_snap), "slots": len((lend_snap or {}).get("would_hold") or []),
-         "notional": 0, "pnlToday": 0, "pnlTotal": 0, "ePass": "—",
+         "notional": 0, "mode": (lend_snap or {}).get("mode", "未启用"), "modeSwitchable": False,
+         "pnlToday": 0, "pnlTotal": 0, "ePass": "—",
          "pipeline": {"模式": (lend_snap or {}).get("mode", "未启用"),
                       "would_hold": (lend_snap or {}).get("slots", "0"),
                       "候选榜": len(lend_top),
                       "榜首": f"{lend_top[0]['coin']} {lend_top[0]['net_daily_pct']:.2f}%/d" if lend_top else "—"}},
         {"code": "S5", "name": "事件驱动 + LST/锚定折价", "layer": "机会外挂",
-         "enabled": False, "slots": 0, "notional": 0, "pnlToday": 0, "pnlTotal": 0, "ePass": "—",
+         "enabled": False, "slots": 0, "notional": 0, "mode": "未启用", "modeSwitchable": False,
+         "pnlToday": 0, "pnlTotal": 0, "ePass": "—",
          "pipeline": {"新上市监听": n_listing, "状态": "仅事件流·未启用"}},
         {"code": "S6", "name": "费率飞轮", "layer": "元游戏",
-         "enabled": False, "slots": 0, "notional": 0, "pnlToday": 0, "pnlTotal": 0, "ePass": "—",
+         "enabled": False, "slots": 0, "notional": 0, "mode": "未启用", "modeSwitchable": False,
+         "pnlToday": 0, "pnlTotal": 0, "ePass": "—",
          "pipeline": {"状态": "未启用"}},
     ]
 
@@ -551,13 +560,18 @@ async def freshness() -> dict:
 
 
 async def watermarks() -> list[dict]:
+    # target 来自 fund-scheduler 小时级提案（变化慢,可容忍龄）；equity 改读实时 account-snapshot
+    # (60s 刷新)——修水位 bug:提案 equity 是 1h 前快照,充值后页面仍显旧值提示补款。
     prop = await ds.get_json("dcm:fund:proposal") or {}
     out = []
     for v in prop.get("venues") or []:
-        eq, tgt = float(v.get("equity") or 0), float(v.get("target") or 0)
+        vid = v.get("venue")
+        tgt = float(v.get("target") or 0)
         if tgt <= 0:
             continue
-        level = min(1.0, eq / tgt)
+        live = await ds.get_json(f"dcm:account:{vid}") or {}
+        eq = float(live.get("equity_usdt")) if live.get("equity_usdt") is not None else float(v.get("equity") or 0)
+        level = min(1.0, eq / tgt) if tgt else 1.0
         threshold = "ok"
         sug = None
         if level < 1.0:
