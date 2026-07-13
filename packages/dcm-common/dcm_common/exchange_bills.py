@@ -14,6 +14,7 @@ import base64
 import hashlib
 import hmac
 import json
+import logging
 import time
 from dataclasses import dataclass
 from urllib.parse import urlencode
@@ -92,6 +93,22 @@ async def _bybit(cli, cfg, since_ms) -> list[IncomeRec]:
             cursor = result.get("nextPageCursor") or ""
             if not cursor or len(lst) < 50:
                 break
+        # 划转补走:入金/出金是账户级行,category=linear 会把它们滤掉(61U 入金失踪根因)。
+        # 失败只告警不阻断——TRADE/FUNDING 是主流水;划转缺口由 pnl-recorder 日度对账断言兜底暴露。
+        for ttyp in ("TRANSFER_IN", "TRANSFER_OUT"):
+            try:
+                tcur = ""
+                for _tpage in range(5):
+                    tq = (f"accountType=UNIFIED&type={ttyp}&startTime={start}&endTime={end}&limit=50"
+                          + (f"&cursor={tcur}" if tcur else ""))
+                    tres = await _bybit_page(cli, cfg, tq)
+                    tlst = tres.get("list") or []
+                    out.extend(_bybit_parse(tlst))
+                    tcur = tres.get("nextPageCursor") or ""
+                    if not tcur or len(tlst) < 50:
+                        break
+            except Exception as e:  # noqa: BLE001
+                logging.getLogger("exchange_bills").warning("bybit transfer walk %s failed: %r", ttyp, e)
         start = end
         windows += 1
     return out
@@ -102,17 +119,24 @@ def _bybit_parse(lst) -> list[IncomeRec]:
     tmap = {"SETTLEMENT": "FUNDING", "TRADE": "FEE", "TRANSFER_IN": "TRANSFER", "TRANSFER_OUT": "TRANSFER"}
     for x in lst:
         typ = x.get("type")
-        # TRADE 行含 fee 与 change;fee 记 FEE,change(已实现)记 PNL;SETTLEMENT=资金费
+        # TRADE 行字段关系:change = cashFlow − fee;fee 记 FEE,cashFlow 记 PNL;SETTLEMENT=资金费
         base_id = f"{x.get('id') or x.get('orderId')}_{x.get('transactionTime')}"
         if typ == "SETTLEMENT":
             out.append(IncomeRec("bybit", f"{base_id}_F", _norm(x.get("symbol") or ""),
                                  "FUNDING", _f(x.get("funding")) * -1 if _f(x.get("funding")) else _f(x.get("change")),
                                  int(x.get("transactionTime") or 0), x))
         elif typ == "TRADE":
+            # ⚠️2026-07-13 黑洞:此前只取 fee 把 cashFlow(逐笔平仓已实现盈亏)整个丢弃→
+            # bybit 全程 0 条 PNL 行,含 bybit 腿的对冲对只记单腿盈亏(三天账面-37.6 实为-25.0)。
+            # _pnl 后缀与存量回填 SQL 的 ext_id 约定一致,重走游标时唯一约束吸收。
             fee = _f(x.get("fee"))
             if fee:
                 out.append(IncomeRec("bybit", f"{base_id}_fee", _norm(x.get("symbol") or ""),
                                      "FEE", -abs(fee), int(x.get("transactionTime") or 0), x))
+            cash = _f(x.get("cashFlow"))
+            if cash:
+                out.append(IncomeRec("bybit", f"{base_id}_pnl", _norm(x.get("symbol") or ""),
+                                     "PNL", cash, int(x.get("transactionTime") or 0), x))
         else:
             out.append(IncomeRec("bybit", f"{base_id}_{typ}", _norm(x.get("symbol") or ""),
                                  tmap.get(typ, "OTHER"), _f(x.get("change")),

@@ -17,6 +17,7 @@ import httpx
 import redis.asyncio as aioredis
 
 from dcm_common.exchange_bills import fetch_income
+from dcm_common.notify import Notifier, feishu_from_env
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 log = logging.getLogger("pnl-recorder")
@@ -88,8 +89,15 @@ async def equity_snapshot(r, pool):
             continue
         d = json.loads(raw)
         if d.get("ok"):
-            await pool.execute("INSERT INTO equity_snapshots(venue,equity_usdt) VALUES($1,$2)",
-                               v, float(d.get("equity_usdt") or 0))
+            # upnl 合计一并落库:对账断言要用 Δ权益−Δ未实现−账单=残差(权益含浮盈,账单只含已实现)
+            try:
+                upnl = round(sum(float(p.get("upnl") or 0)
+                                 for p in (d.get("pos_detail") or {}).values()), 6)
+            except Exception:  # noqa: BLE001
+                upnl = None
+            await pool.execute(
+                "INSERT INTO equity_snapshots(venue,equity_usdt,upnl_usdt) VALUES($1,$2,$3)",
+                v, float(d.get("equity_usdt") or 0), upnl)
 
 
 RECON_LOOKBACK_H = int(os.environ.get("DCM_RECON_LOOKBACK_HOURS", "72"))
@@ -165,6 +173,59 @@ async def carry_recon(r, pool):
     return upserts
 
 
+GUARD_ABS = float(os.environ.get("DCM_RECON_GUARD_ABS_USDT", "5"))
+GUARD_PCT = float(os.environ.get("DCM_RECON_GUARD_PCT", "0.02"))
+GUARD_WINDOW_H = float(os.environ.get("DCM_RECON_GUARD_WINDOW_H", "24"))
+GUARD_COOLDOWN = int(os.environ.get("DCM_RECON_GUARD_COOLDOWN_SEC", "21600"))
+
+
+async def venue_recon_guard(r, pool, notifier):
+    """步⑤ 日度对账断言:逐所 Δ权益 − Δ未实现盈亏 − 账单全类型合计 ≈ 0。
+    账单黑洞三连发(bybit 24h窗/bitget buy-sell 分类/bybit cashFlow)全是"HTTP 200 但账本失真",
+    只有拿交易所权益这个外部真相对账才能在一天内暴露下一个洞。
+    快照对=最新 upnl 非空快照 vs ≥GUARD_WINDOW_H 前最近一张(升级前旧快照无 upnl 自动跳过)。"""
+    report = {}
+    for v in VENUE_CFG:
+        cur = await pool.fetchrow(
+            "SELECT equity_usdt, upnl_usdt, ts FROM equity_snapshots "
+            "WHERE venue=$1 AND upnl_usdt IS NOT NULL ORDER BY ts DESC LIMIT 1", v)
+        if not cur:
+            continue
+        ref = await pool.fetchrow(
+            "SELECT equity_usdt, upnl_usdt, ts FROM equity_snapshots "
+            "WHERE venue=$1 AND upnl_usdt IS NOT NULL AND ts <= $2::timestamptz - ($3 || ' hours')::interval "
+            "ORDER BY ts DESC LIMIT 1", v, cur["ts"], str(GUARD_WINDOW_H))
+        if not ref:
+            continue
+        bills = float(await pool.fetchval(
+            "SELECT coalesce(sum(amount),0) FROM income_records WHERE venue=$1 AND ts>$2 AND ts<=$3",
+            v, ref["ts"], cur["ts"]))
+        eq_d = float(cur["equity_usdt"]) - float(ref["equity_usdt"])
+        up_d = float(cur["upnl_usdt"]) - float(ref["upnl_usdt"])
+        residual = round(eq_d - up_d - bills, 2)
+        thr = round(max(GUARD_ABS, GUARD_PCT * max(float(cur["equity_usdt"]), 50.0)), 2)
+        window_h = round((cur["ts"] - ref["ts"]).total_seconds() / 3600, 1)
+        report[v] = {"residual": residual, "eq_delta": round(eq_d, 2), "upnl_delta": round(up_d, 2),
+                     "bills": round(bills, 2), "window_h": window_h, "thr": thr}
+        if abs(residual) > thr:
+            content = (f"近{window_h}h:Δ权益{eq_d:+.2f} − Δ未实现{up_d:+.2f} − 账单{bills:+.2f}"
+                       f" = 残差{residual:+.2f}U(阈±{thr})。疑账单缺记:入金未入账/新账单类型落OTHER/"
+                       f"分类映射错——按 bybit cashFlow 黑洞流程核 raw 逐类型对账。")
+            # 告警(alerts_log+飞书)同门进冷却:缺口是持续态,每轮重发=告警风暴稀释真信号
+            if await r.set(f"dcm:pnl:recon_gap:{v}", "1", nx=True, ex=GUARD_COOLDOWN):
+                await pool.execute(
+                    "INSERT INTO alerts_log(service,akey,level,title,content) VALUES($1,$2,$3,$4,$5)",
+                    "pnl-recorder", f"recon_gap:{v}", "warn",
+                    f"{v} 账单-权益对账缺口 {residual:+.2f}U", content)
+                await asyncio.to_thread(notifier.fire, f"recon_gap:{v}",
+                                        f"{v} 账单-权益对账缺口 {residual:+.2f}U", content, "warn")
+    if report:
+        await r.set("dcm:pnl:recon_guard",
+                    json.dumps({"ts": int(time.time()), "venues": report}, ensure_ascii=False),
+                    ex=3 * 3600)
+    return report
+
+
 async def summary(pool) -> dict:
     rows = await pool.fetch(
         "SELECT itype, round(sum(amount),4) AS total, "
@@ -184,6 +245,7 @@ async def main():
     r = aioredis.from_url(REDIS_URL, decode_responses=True)
     pool = await asyncpg.create_pool(PG_DSN, min_size=1, max_size=3)
     active = {v: c for v, c in VENUE_CFG.items() if c.get("key")}
+    notifier = Notifier(REDIS_URL, "pnl-recorder", feishu_from_env())
     log.info("pnl-recorder up interval=%ss venues=%s", INTERVAL, list(active))
     last_snap = 0.0
     while True:
@@ -201,6 +263,10 @@ async def main():
             except Exception:
                 rec_n = -1
                 log.exception("carry recon failed (continuing)")
+            try:
+                await venue_recon_guard(r, pool, notifier)   # 步⑤ 账单-权益对账断言
+            except Exception:
+                log.exception("recon guard failed (continuing)")
             s = await summary(pool)
             await r.set("dcm:pnl:summary", json.dumps(s, ensure_ascii=False), ex=INTERVAL * 3)
             await r.set("dcm:hb:pnl-recorder", json.dumps(
