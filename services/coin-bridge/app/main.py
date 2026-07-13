@@ -61,6 +61,25 @@ CMD_WHITELIST = {
     # 单一规则(某币的 SymbolRule 基线,coin schema 权威):读+写
     "symbol_rule_get": ("GET", "/api/symbol-rules/{symbol}", {}),
     "symbol_rule_put": ("PUT", "/api/symbol-rules/{symbol}", {}),
+    # coin 右键菜单 1:1（币种行/账户行/持仓行操作,coin 状态机+护栏原样生效）
+    "remove_slot": ("DELETE", "/api/engine/push-symbol/{symbol}", {}),      # 移除币种(50U保护在 coin 侧)
+    "resume_slot": ("DELETE", "/api/engine/repay-hold/{symbol}", {}),       # 恢复下单(解还币冻结)
+    "manual_open": ("POST", "/api/engine/manual-open", {}),                 # 手动开仓(body: symbol,sub_account_id,amount)
+    "manual_force_close": ("POST", "/api/engine/manual-close", {}),        # 强制平仓(body: position_id)
+    "partial_repay": ("POST", "/api/engine/partial-repay", {}),             # 部分还币(body: position_id,ratio/amount)
+    "batch_remove_empty": ("POST", "/api/blacklist/bulk", {}),             # 批量移除无持仓(body: symbols[])
+    "account_symbol_rule_get": ("GET", "/api/account-symbol-rules/{sub}/{symbol}", {}),
+    "account_symbol_rule_put": ("PUT", "/api/account-symbol-rules/{sub}/{symbol}", {}),
+    "account_symbol_rule_batch": ("POST", "/api/account-symbol-rules/batch", {}),  # S3 批量子账户单一规则
+    "max_borrowable": ("GET", "/api/engine/accounts/{sub}/max-borrowable/{symbol}", {}),  # 刷新可借
+    "account_transfer": ("POST", "/api/engine/accounts/{sub}/transfer", {}),        # 划转资金
+    "transfer_cross": ("POST", "/api/engine/accounts/{sub}/transfer-cross", {}),    # 跨账户万向划转
+    # 通用规则「自动划转+账户资金参数表」(coin RulesPage 数据面 1:1;写侧 coin schema 权威)
+    "fund_rules_get": ("GET", "/api/fund-rules/", {}),
+    "fund_rules_put": ("PUT", "/api/fund-rules/", {}),
+    "fund_params_patch": ("PATCH", "/api/sub-accounts/{sub}/fund-params", {}),
+    "sub_accounts_get": ("GET", "/api/sub-accounts/", {}),
+    "master_balance": ("GET", "/api/master-account/balance", {}),
 }
 # S3 面板快照发布周期(dcm:coin:panel);原料=coin 引擎自己维护的缓存键+blacklist API,
 # 绝不直打交易所 REST(IP 权重预算课)
@@ -94,17 +113,24 @@ def _exec_command(cmd: dict) -> dict:
     if not secret:
         return {"ok": False, "err": "coin jwt secret 不可读"}
     method, path, base_body = CMD_WHITELIST[action]
-    params = cmd.get("params") or {}
+    params = dict(cmd.get("params") or {})
+    consumed = set()
     if "{symbol}" in path:
         sym = str(params.get("symbol", "")).upper()
         if not re.fullmatch(r"[A-Z0-9]{1,20}", sym):
             return {"ok": False, "err": "symbol 非法"}
         path = path.replace("{symbol}", sym)
-        # 路径含 symbol 时,body 仍取 params 剩余键(单一规则 PUT 需带字段);symbol 自身不入 body
-        body = {**base_body, **{k: v for k, v in params.items() if k != "symbol"}}
-    else:
-        body = {**base_body, **params}
-    if action.startswith("manual_"):
+        consumed.add("symbol")
+    if "{sub}" in path:
+        sub = str(params.get("sub", ""))
+        if not re.fullmatch(r"[0-9]{1,12}", sub):
+            return {"ok": False, "err": "sub(子账户 id) 非法"}
+        path = path.replace("{sub}", sub)
+        consumed.add("sub")
+    # 路径参数消费后,body 取剩余 params(PUT/POST 带字段;GET/DELETE body 被 coin 忽略无害)
+    body = {**base_body, **{k: v for k, v in params.items() if k not in consumed}}
+    # position_id 整数校验:仅需要它的动作(manual_open/partial_repay 用 sub_account_id+symbol 不需要)
+    if action in ("manual_close", "manual_repay", "manual_hedge", "manual_force_close"):
         try:
             body["position_id"] = int(body.get("position_id"))
         except (TypeError, ValueError):
@@ -429,8 +455,34 @@ def publish_panel(r):
                       "pushed": pushed, "interest_rates": interest,
                       "spreads": spreads, "blacklist": blacklist, "rules": rules}, default=str)
     r.set("dcm:coin:panel", raw, ex=300)
+    global _rt_relevant
+    _rt_relevant = sorted(relevant)   # 实时点差快线的币集(随 panel 60s 更新)
     log.info("PANEL_OK bytes=%d pushed=%d relevant=%d bl=%s", len(raw), len(pushed),
              len(relevant), (len(blacklist) if isinstance(blacklist, list) else "n/a"))
+
+
+# 实时点差快线:coin rust 引擎持续维护 spreads hash(逐 tick 更新),panel 60s 太钝。
+# 每个主循环 tick(2s) HMGET 相关币透传 dcm:coin:spreads_rt —— 载荷 ~几KB,coin 本机 Redis 零压力。
+_rt_relevant = []
+
+
+def publish_spreads_rt(r):
+    if not _rt_relevant:
+        return
+    rc = _get_coin_redis()
+    keys = [s if s.endswith("USDT") else s + "USDT" for s in _rt_relevant]
+    vals = rc.hmget("spreads", keys)
+    out = {}
+    for sym, raw in zip(_rt_relevant, vals):
+        if not raw:
+            continue
+        try:
+            out[sym] = json.loads(raw)
+        except Exception:
+            pass
+    if out:
+        r.set("dcm:coin:spreads_rt", json.dumps(
+            {"ts": int(time.time()), "spreads": out}, default=str), ex=30)
 
 
 def main():
@@ -445,6 +497,10 @@ def main():
     while True:
         try:
             consume_commands(r)              # 命令消费(~2s 响应)
+            try:
+                publish_spreads_rt(r)        # 实时点差快线(每 tick ~2s)
+            except Exception as e:
+                log.warning("spreads_rt round failed: %r", e)
             if time.time() - last_panel_ts >= PANEL_INTERVAL:
                 try:
                     publish_panel(r)         # S3 面板快照(60s)
