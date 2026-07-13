@@ -260,9 +260,11 @@ async function probeModels() {
   try {
     const r = await mixApi.system.llmProbeModels({ base_url: nr.base_url, api_key: nr.api_key })
     if (r.ok) {
+      // 后端若自动补全了 /v1,把生效地址回填,保证保存的是能用的地址
+      if (r.effective_base_url && r.effective_base_url !== nr.base_url) nr.base_url = r.effective_base_url
       nrModels.value = r.models || []
       if (!nr.model && nrModels.value.length) nr.model = nrModels.value[0]
-      nrSt.value = `✅ 拉到 ${r.count} 个模型,已可在下拉选择`
+      nrSt.value = `✅ 拉到 ${r.count} 个模型,已可在下拉选择` + (r.note ? `（${r.note}）` : '')
     } else { nrModels.value = []; nrSt.value = '❌ ' + r.error }
   } catch (e) { nrSt.value = '❌ ' + (e?.detail || e?.error || '拉取失败') }
   finally { nrProbing.value = false }

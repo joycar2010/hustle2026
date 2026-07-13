@@ -20,7 +20,7 @@
         <span class="code" :style="{background:META[a.code].colorBg,color:META[a.code].color}">{{ a.code }}</span>
         <span class="nm">{{ a.name }}</span>
         <span class="track"><i :style="{ width: (a.total/maxTotal*100)+'%', background: META[a.code].color }" /></span>
-        <b class="up">+{{ a.total.toLocaleString() }}</b>
+        <b :class="a.total>=0?'up':'dn'">{{ a.total>=0?'+':'' }}{{ a.total.toLocaleString() }}</b>
         <span class="caret">{{ expanded===a.code ? '⌄' : '›' }}</span>
         <div v-if="expanded===a.code" class="subjects" @click.stop>
           <span v-for="(v,k) in a.subjects" :key="k" class="sj">

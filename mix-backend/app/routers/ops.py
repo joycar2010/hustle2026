@@ -284,24 +284,42 @@ async def llm_relay_toggle(rid: int, body: dict, op=Depends(require_operator)):
 @router.post("/system/llm/probe-models")
 async def llm_probe_models(body: dict, op=Depends(require_operator)):
     """无状态探测:直接用传入的 base_url+api_key 拉 /models(不需先存库)——
-    解决添加新地址时「要先填模型才能存、但想先拉模型来挑」的鸡生蛋问题。"""
+    解决添加新地址时「要先填模型才能存、但想先拉模型来挑」的鸡生蛋问题。
+    地址缺 /v1 时自动补齐重试(OpenAI 兼容站几乎都在 /v1 下),返回真正生效的 base_url。"""
     import httpx
-    base = str(body.get("base_url") or "").strip().rstrip("/")
+    raw = str(body.get("base_url") or "").strip().rstrip("/")
     key = str(body.get("api_key") or "").strip()
-    if not base or not key:
+    if not raw or not key:
         raise HTTPException(400, "base_url 和 api_key 必填")
-    try:
+    # 候选地址:原样优先;若结尾不是已知版本段(/v1 /v1beta 等),追加 /v1 兜底
+    import re
+    candidates = [raw]
+    if not re.search(r"/v\d[a-z]*$", raw):
+        candidates.append(raw + "/v1")
+
+    async def _try(base):
         async with httpx.AsyncClient(timeout=15) as cli:
-            resp = await cli.get(f"{base}/models", headers={"Authorization": f"Bearer {key}"})
-    except Exception as e:  # noqa: BLE001
-        return {"ok": False, "error": f"连接失败:{e!r}"[:200]}
-    if resp.status_code != 200:
-        return {"ok": False, "error": f"http {resp.status_code}: {resp.text[:150]}"}
-    try:
-        models = sorted({str(m.get("id")) for m in (resp.json().get("data") or []) if m.get("id")})
-    except Exception as e:  # noqa: BLE001
-        return {"ok": False, "error": f"解析失败(可能地址少 /v1):{e!r}"[:150]}
-    return {"ok": True, "count": len(models), "models": models}
+            r = await cli.get(f"{base}/models", headers={"Authorization": f"Bearer {key}"})
+        if r.status_code != 200:
+            return None, f"http {r.status_code}: {r.text[:120]}"
+        data = r.json()  # 非 JSON(HTML 落地页)会抛,交给外层按候选换下一个
+        models = sorted({str(m.get("id")) for m in (data.get("data") or []) if m.get("id")})
+        return models, None
+
+    last_err = ""
+    for base in candidates:
+        try:
+            models, err = await _try(base)
+        except Exception as e:  # noqa: BLE001  (非JSON/连接错→换候选)
+            last_err = f"{e!r}"[:120]
+            continue
+        if models is not None:
+            return {"ok": True, "count": len(models), "models": models,
+                    "effective_base_url": base,
+                    "note": ("已自动补全为 " + base) if base != raw else ""}
+        last_err = err
+    hint = "" if raw.endswith("/v1") else "(试过原地址与 /v1 均失败,请确认地址正确)"
+    return {"ok": False, "error": f"探测失败{hint}:{last_err}"[:200]}
 
 
 @router.post("/system/llm/relays/{rid}/refresh-models")
