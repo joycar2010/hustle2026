@@ -136,43 +136,53 @@ async def ai_chat(body: dict, who=Depends(require_viewer)):
                  {"role": "system", "content": "实时系统快照:" + json.dumps(ctx, ensure_ascii=False)}]
                 + hist[-_MAX_TURNS:] + [{"role": "user", "content": msg}])
 
-    # 超时预算:前端 aiChat timeout=150s;逐站 55s × 2 站 + 开销必须 < 前端预算,
-    # 否则后端还在等第二站时前端已放弃——傍晚"长文本无回复"事故的根因(2×60s > 65s 旧前端超时)。
+    # 超时/重试预算:chesspnt 会间歇性单连接卡死(正常 2-3s,偶发挂到 30s+),
+    # 而主/备是同一 provider——降级到备用无冗余意义。对策=每站用「全新连接」尝试,
+    # 单次 28s 超时(正常远快于此,超时即判定连接卡死而非模型慢),超时/网络错自动
+    # 换新连接重试 1 次(换连接常绕开被挂住的旧连接)。总最坏 = 站数×2×28 + 开销,
+    # 双站≈112s < 前端 150s < nginx 180s(层级顺序不倒挂)。
+    ATTEMPT_TIMEOUT = 28.0
+    RETRY_PER_RELAY = 1  # 每站失败后换新连接重试次数
+
+    async def _one_call(relay, timeout):
+        base = str(relay.get("base_url") or "").rstrip("/")
+        model = str(relay.get("model") or "")
+        t0 = time.time()
+        # 每次尝试独立 client=独立连接池,不复用可能已卡死的连接
+        async with httpx.AsyncClient(timeout=timeout) as cli:
+            resp = await cli.post(f"{base}/chat/completions",
+                                  json={"model": model, "messages": messages,
+                                        "temperature": 0.3, "max_tokens": 900},
+                                  headers={"Authorization": f"Bearer {relay.get('api_key')}"})
+        lat = int((time.time() - t0) * 1000)
+        if resp.status_code != 200:
+            return None, f"http {resp.status_code}: {resp.text[:120]}", lat, model, {}
+        data = resp.json()
+        return data["choices"][0]["message"]["content"], None, lat, model, (data.get("usage") or {})
+
     reply, used, last_err = None, None, ""
-    async with httpx.AsyncClient(timeout=55) as cli:
-        for relay in relays:   # 主站在前,失败逐站降级(与 llm-advisor 同语义)
-            base = str(relay.get("base_url") or "").rstrip("/")
-            model = str(relay.get("model") or "")
-            t0 = time.time()
+    for relay in relays:   # 主站在前,失败逐站降级
+        name = str(relay.get("name") or "")
+        for attempt in range(RETRY_PER_RELAY + 1):
             try:
-                resp = await cli.post(f"{base}/chat/completions",
-                                      json={"model": model, "messages": messages,
-                                            "temperature": 0.3, "max_tokens": 900},
-                                      headers={"Authorization": f"Bearer {relay.get('api_key')}"})
-            except Exception as e:  # noqa: BLE001
+                r_reply, err, lat, model, usage = await _one_call(relay, ATTEMPT_TIMEOUT)
+            except Exception as e:  # noqa: BLE001  (超时/网络=换新连接重试的目标)
                 last_err = repr(e)[:120]
-                await _log_usage(str(relay.get("name") or ""), model, {},
-                                 int((time.time() - t0) * 1000), False, last_err)
-                continue
-            lat = int((time.time() - t0) * 1000)
-            if resp.status_code != 200:
-                last_err = f"http {resp.status_code}: {resp.text[:120]}"
-                await _log_usage(str(relay.get("name") or ""), model, {}, lat, False, last_err)
-                continue
-            try:
-                data = resp.json()
-                reply = data["choices"][0]["message"]["content"]
-                await _log_usage(str(relay.get("name") or ""), model,
-                                 data.get("usage") or {}, lat, True)
-                used = relay
-                break
-            except Exception as e:  # noqa: BLE001
-                last_err = f"bad shape {e!r}"[:120]
-                await _log_usage(str(relay.get("name") or ""), model, {}, lat, False, last_err)
-                continue
+                await _log_usage(name, str(relay.get("model") or ""), {}, int(ATTEMPT_TIMEOUT * 1000),
+                                 False, f"try{attempt + 1} {last_err}")
+                continue   # 换新连接再来一次(同站),用完重试次数才降级到下一站
+            if err:
+                last_err = err
+                await _log_usage(name, model, {}, lat, False, err)
+                break      # HTTP 非超时错(如模型不存在/价格未配)重试无益,直接降级下一站
+            reply, used = r_reply, relay
+            await _log_usage(name, model, usage, lat, True)
+            break
+        if reply is not None:
+            break
     if reply is None:
-        return {"reply": f"LLM 全部中转站调用失败({last_err})——看 /mix/llm 服务健康。",
-                "conversation_id": cid}
+        friendly = "所有中转站暂时无响应(可能是上游临时拥塞)——请稍等片刻重试;若持续,到 /mix/llm 看服务健康或切换主站模型。"
+        return {"reply": f"{friendly}\n（诊断:{last_err}）", "conversation_id": cid}
     hist.append({"role": "user", "content": msg})
     hist.append({"role": "assistant", "content": reply})
     del hist[:-_MAX_TURNS * 2]
