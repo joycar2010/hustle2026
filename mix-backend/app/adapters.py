@@ -776,6 +776,27 @@ async def monitor_events() -> list[dict]:
     return out
 
 
+async def repay_panel(symbol: str) -> dict:
+    """部分还币弹窗数据面(coin PartialRepayDialog 1:1)——逐子账户 现币/借币本金/利息,
+    源=dcm:coin:panel(60s 快照,桥透传 coin balance:latest);真相在 coin,这里只展示不判断。"""
+    sym = symbol.upper()
+    panel = await ds.get_json("dcm:coin:panel") or {}
+    accounts = (panel.get("balances") or {}).get("balances") or []
+    rows = []
+    for a in accounts:
+        sm = (a.get("symbol_margin") or {}).get(sym) or {}
+        free = float(sm.get("free") or 0)
+        borrowed = float(sm.get("borrowed") or 0)
+        interest = float(sm.get("interest") or 0)
+        rows.append({"sub": a.get("account_id"),
+                     "note": str(a.get("note") or f"sub:{a.get('account_id')}"),
+                     "free": free, "borrowed": borrowed, "interest": interest,
+                     "total": borrowed + interest})
+    rows.sort(key=lambda r: r["total"], reverse=True)
+    return {"symbol": sym, "rows": rows,
+            "panelAgeSec": int(_now() - float(panel.get("ts") or _now()))}
+
+
 async def decision_feed() -> list[dict]:
     """真实决策事件流(主控台工作流管道动效的数据面)——三引擎决策流水+路由变更+结算入账+上市事件,
     全真无演示;每个源独立降级:拿不到就缺席,绝不编造。"""

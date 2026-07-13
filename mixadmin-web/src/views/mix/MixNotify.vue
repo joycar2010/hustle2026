@@ -87,8 +87,9 @@
       <!-- ④ 通知模板 -->
       <el-tab-pane label="通知模板" name="templates">
         <div class="card">
-          <div class="hd"><b>模板列表</b><span class="sub">正文支持 {var} 占位；模板供手动广播与自动事件套用</span>
+          <div class="hd"><b>模板列表</b><span class="sub">正文支持 {var} 占位；模板供手动广播与自动事件套用；提示音=edge-tts 按模板绑定人设合成</span>
             <el-button size="small" type="warning" @click="editTpl()">+ 新增模板</el-button>
+            <el-button size="small" :loading="pregening" @click="pregenTTS">生成全部提示音</el-button>
             <el-button size="small" @click="loadTpls">刷新</el-button>
           </div>
           <el-table :data="templates" size="small">
@@ -107,8 +108,9 @@
             <el-table-column label="启用" width="60">
               <template #default="{row}"><span :class="row.enabled?'up':'dim'">{{ row.enabled?'是':'否' }}</span></template>
             </el-table-column>
-            <el-table-column label="操作" width="150">
+            <el-table-column label="操作" width="190">
               <template #default="{row}">
+                <el-button v-if="row.sound_key" size="small" link @click="speakTpl(row)">试听</el-button>
                 <el-button size="small" link type="warning" @click="editTpl(row)">编辑</el-button>
                 <el-button size="small" link @click="useTpl(row)">去广播</el-button>
                 <el-button size="small" link type="danger" @click="delTpl(row)">删</el-button>
@@ -224,6 +226,7 @@
           <el-select v-model="tf.sound_key" clearable placeholder="无" style="width:180px">
             <el-option v-for="p in personas" :key="p.skey" :label="p.name" :value="p.skey" />
           </el-select>
+          <el-button size="small" link style="margin-left:8px" :disabled="!tf.sound_key" @click="tryTplTTS">▶ 试听</el-button>
         </el-form-item>
       </el-form>
       <template #footer><el-button @click="tplDlg=false">取消</el-button><el-button type="warning" @click="saveTpl">保存</el-button></template>
@@ -350,6 +353,21 @@ async function speak(text, rate_pct, pitch_pct, opts = {}) {
 }
 function tryTTS(p) { speak(p.sample || '亲，这是一条测试播报', p.rate_pct, p.pitch_pct, { voice: p.voice, persona: p.skey }) }
 function tryBroadcastTTS() { const p = personas.value.find(x => x.skey === bc.sound_key); speak(bc.text || bc.title || '测试', p?.rate_pct, p?.pitch_pct, { persona: bc.sound_key }) }
+// 模板提示音:标题+正文,剥 {var} 占位后朗读(与后端预生成同一文本口径=命中同一缓存)
+const tplSpeech = (title, body) => `${title || ''}，${body || ''}`.replace(/\{[^}]*\}/g, '').replace(/\s+/g, ' ').trim()
+function speakTpl(row) { const p = personas.value.find(x => x.skey === row.sound_key); speak(tplSpeech(row.title, row.body), p?.rate_pct, p?.pitch_pct, { persona: row.sound_key }) }
+function tryTplTTS() { const p = personas.value.find(x => x.skey === tf.sound_key); speak(tplSpeech(tf.title, tf.body), p?.rate_pct, p?.pitch_pct, { persona: tf.sound_key }) }
+// 批量预生成:全部启用模板×绑定人设(未绑=每个人设各一份),后端 edge-tts 落盘缓存
+const pregening = ref(false)
+async function pregenTTS() {
+  pregening.value = true
+  try {
+    const r = await mixApi.ttsPregen()
+    ElMessage.success(`提示音生成完成:新合成 ${r.generated} / 命中缓存 ${r.cached} / 失败 ${r.failed?.length || 0}（模板 ${r.templates} × 人设 → ${r.jobs} 项）`)
+    if (r.failed?.length) ElMessage.warning(`失败样例: ${r.failed[0]}`)
+  } catch (e) { ElMessage.error(e?.detail || '生成失败') }
+  finally { pregening.value = false }
+}
 
 async function loadLogs() { try { logs.value = await mixApi.notifyLogs() } catch (e) { logs.value = [] } }
 async function send() {

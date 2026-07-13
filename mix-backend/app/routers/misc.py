@@ -148,6 +148,12 @@ async def _sub_id_of(note_or_id) -> Optional[int]:
     return None
 
 
+@router.get("/coins/{symbol}/repay-panel")
+async def coin_repay_panel(symbol: str, _who=Depends(require_viewer)):
+    """部分还币弹窗数据面：逐子账户 现币/借币本金/利息（coin panel 快照透传）。"""
+    return await adapters.repay_panel(symbol)
+
+
 @router.post("/coins/{symbol}/menu", status_code=202)
 async def coin_menu_action(symbol: str, body: dict, op=Depends(require_operator)):
     """S3 币种/账户/持仓行右键菜单动作代理。coin 状态机权威,桥只透传+校验。"""

@@ -12,50 +12,21 @@
       <div class="note">保存=差分写(只发变更键)·热生效引擎回读校验；变更审计移驻 屏3·风控墙</div>
     </div>
 
-    <!-- 中：设定台（S3=coin 规则模态框 1:1 复刻;S2=人性化开关;整体居中收窄） -->
+    <!-- 中：设定台（S3=共享面板,与中控台通用规则弹层同源;S2=人性化开关） -->
     <div class="stage">
       <div class="crumb">
         <b>{{ scopeLabel }}</b>
         <el-tag v-if="scope==='strategy:S3'" size="small" type="warning" effect="plain">coin 权威 · 30s 热重载</el-tag>
         <el-tag v-else-if="scope==='strategy:S2'" size="small" type="warning" effect="plain">gateway 权威 · 3s 热生效</el-tag>
-        <span class="ver" v-if="version">v{{ version }}</span>
+        <span class="ver" v-if="scope!=='strategy:S3' && version">v{{ version }}</span>
       </div>
 
-      <!-- S3：分组 inline 字段,flex 自动折行,绝不产生空单元格 -->
-      <div v-if="scope==='strategy:S3'" class="s3form" v-loading="loading">
-        <template v-for="grp in S3_GROUPS" :key="grp.title">
-          <div class="ghd">{{ grp.title }}</div>
-          <div class="gflex">
-            <template v-for="k in grp.keys" :key="k">
-              <label v-if="fieldMap[k] && S3_META[k].type==='bool'" class="pill" :class="{on: isTrue(fieldMap[k].value)}"
-                     :title="S3_META[k].tip" @click="toggleBool(k)">{{ S3_META[k].label }}</label>
-              <span v-else-if="fieldMap[k] && S3_META[k].type==='select'" class="ifield" :title="S3_META[k].tip">
-                <em>{{ S3_META[k].label }}</em>
-                <select v-model="fieldMap[k].value" class="sel">
-                  <option v-if="!S3_META[k].options.includes(String(fieldMap[k].value))" :value="fieldMap[k].value">{{ fieldMap[k].value }}(当前)</option>
-                  <option v-for="o in S3_META[k].options" :key="o" :value="o">{{ o }}</option>
-                </select>
-              </span>
-              <span v-else-if="fieldMap[k] && S3_META[k].type==='venues'" class="ifield" :title="S3_META[k].tip">
-                <em>{{ S3_META[k].label }}</em>
-                <span class="venues">
-                  <label v-for="v in S3_META[k].options" :key="v" class="vpill"
-                         :class="{on: venueOrder(k).includes(v)}" @click="toggleVenue(k, v)">
-                    <i v-if="venueOrder(k).includes(v)" class="ord">{{ venueOrder(k).indexOf(v)+1 }}</i>{{ v }}
-                  </label>
-                </span>
-              </span>
-              <span v-else-if="fieldMap[k]" class="ifield" :title="S3_META[k].tip">
-                <em>{{ S3_META[k].label }}</em>
-                <input v-model="fieldMap[k].value" class="inp" :style="{width:(S3_META[k].w||64)+'px'}" />
-                <i v-if="S3_META[k].suffix">{{ S3_META[k].suffix }}</i>
-              </span>
-            </template>
-          </div>
-        </template>
+      <!-- S3：S3RulePanel 共享组件（40 字段五分组 + 自动划转 + 账户资金参数表,与中控台弹层同一实现） -->
+      <div v-if="scope==='strategy:S3'">
+        <S3RulePanel ref="s3p" />
         <div class="acts">
-          <el-button type="warning" :loading="saving" @click="save">保存设置（差分热生效）</el-button>
-          <el-button @click="load">还原</el-button>
+          <el-button type="warning" :loading="!!s3p?.saving" @click="s3p?.save()">保存设置（差分热生效）</el-button>
+          <el-button @click="s3p?.load()">还原</el-button>
         </div>
       </div>
 
@@ -105,6 +76,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { STRATEGY_META as META } from '../../components/PositionTable/types'
+import S3RulePanel from '../../components/rules/S3RulePanel.vue'
 import { mixApi } from '../../api/mix'
 
 const strategyList = Object.values(META)
@@ -112,69 +84,11 @@ const scope = ref('strategy:S3')
 const fields = ref([])
 const loading = ref(false)
 const saving = ref(false)
+const s3p = ref(null)
 const s2 = ref({ mode: '', arm_mode: '', arm_symbols: '', max_notional_hard: '', max_portfolio_notional: '' })
-
-/* S3 字段元数据 —— 1:1 对齐 coin 规则模态框的中文语汇/分组(coin RulesPage/SymbolRuleDialog 同源) */
-const S3_META = {
-  auto_push_spread: { label: '自动推送点差', w: 56, tip: '点差≥此值自动推送进候选' },
-  confirm_delay_sec: { label: '推送二次确认', suffix: '秒', w: 40 },
-  confirm_skip_spread: { label: '点差≥直推(免确认)', w: 56 },
-  interest_filter: { label: '日利息拦截', suffix: '%', w: 48, tip: '日利率高于此值的币不进候选' },
-  remove_spread: { label: '点差不足移除', w: 56 },
-  removed_cooldown_minutes: { label: '移除后冷却', suffix: '分', w: 40 },
-  spread_stale_sec: { label: '点差过期', suffix: '秒', w: 48 },
-  borrow_spread: { label: '挂单点差', w: 56 },
-  open_spread: { label: '开仓点差', w: 56 },
-  open_spread_buffer: { label: '开仓点差缓冲', w: 56 },
-  order_amount: { label: '单笔下单额', suffix: 'U', w: 56 },
-  borrow_delay_sec: { label: '借币延迟开仓', suffix: '秒', w: 40 },
-  stabilize_sec: { label: '点差稳定期', suffix: '秒', w: 48 },
-  slippage_pct: { label: '滑点保护', suffix: '%', w: 48 },
-  follow_type: { label: '跟单方式', type: 'select', options: ['market', 'limit'] },
-  tier_ratios: { label: '阶梯比例', w: 90, tip: '逗号分隔;空=不分层' },
-  max_spread_pct: { label: '最大点差', suffix: '%', w: 48 },
-  min_volume_24h: { label: '24h最小成交额·现货', w: 72 },
-  min_volume_24h_futures: { label: '24h最小成交额·合约', w: 72 },
-  filter_duration_ms: { label: '过滤持续', suffix: 'ms', w: 48 },
-  min_borrow_usdt: { label: '最小借币额', suffix: 'U', w: 56 },
-  block_risky_open: { label: '风险开仓拦截', type: 'bool' },
-  close_spread: { label: '平仓点差', w: 56 },
-  close_funding_ratio: { label: '平仓:资息倍率<', w: 48 },
-  repay_funding_ratio: { label: '还币:资息倍率<', w: 48 },
-  repay_ban_minutes: { label: '首借后禁自动还币', suffix: '分', w: 40 },
-  borrow_rate_per_sec: { label: '借币速率', suffix: '/秒', w: 40 },
-  borrow_via_otoco: { label: 'OTOCO 借币', type: 'bool', tip: 'OTOCO=1500 权重独立预算' },
-  otoco_legs: { label: 'OTOCO 腿数', w: 32 },
-  borrow_mode: { label: '借币方式', w: 72, tip: '4 模式;None=默认' },
-  borrow_venues: { label: '借币 venue', w: 100, tip: '逗号分隔,如 binance,okx' },
-  multi_max_accounts_per_symbol: { label: '单币最多账户', w: 32 },
-  collateral_ratio: { label: '质押率', w: 48 },
-  hedge_via_master: { label: '主账户对冲', type: 'bool', tip: 'hedge_via_master:合约对冲腿走主账户' },
-  hedge_auto_converge: { label: '对冲自动收敛', type: 'bool' },
-  max_loss_per_position: { label: '单仓最大亏损', suffix: 'U', w: 56, tip: 'None=不启用' },
-  taker_fee_spot: { label: '现货 taker 费率', w: 72 },
-  taker_fee_futures: { label: '合约 taker 费率', w: 72 },
-  bnb_burn_enabled: { label: 'BNB 抵扣手续费', type: 'bool' },
-}
-const S3_GROUPS = [
-  { title: '推送 / 候选', keys: ['auto_push_spread', 'confirm_delay_sec', 'confirm_skip_spread', 'interest_filter', 'remove_spread', 'removed_cooldown_minutes', 'spread_stale_sec'] },
-  { title: '开仓', keys: ['borrow_spread', 'open_spread', 'open_spread_buffer', 'order_amount', 'borrow_delay_sec', 'stabilize_sec', 'slippage_pct', 'follow_type', 'tier_ratios', 'max_spread_pct', 'min_volume_24h', 'min_volume_24h_futures', 'filter_duration_ms', 'min_borrow_usdt', 'block_risky_open'] },
-  { title: '平仓 / 还币', keys: ['close_spread', 'close_funding_ratio', 'repay_funding_ratio', 'repay_ban_minutes'] },
-  { title: '借币执行', keys: ['borrow_rate_per_sec', 'borrow_via_otoco', 'otoco_legs', 'borrow_mode', 'borrow_venues', 'multi_max_accounts_per_symbol', 'collateral_ratio'] },
-  { title: '对冲 / 风控 / 费率', keys: ['hedge_via_master', 'hedge_auto_converge', 'max_loss_per_position', 'taker_fee_spot', 'taker_fee_futures', 'bnb_burn_enabled'] },
-]
 
 const fieldMap = computed(() => Object.fromEntries(fields.value.map(f => [f.key, f])))
 const version = computed(() => fieldMap.value.version?.value)
-const isTrue = v => String(v) === 'True' || String(v) === 'true'
-function toggleBool(k) { fieldMap.value[k].value = isTrue(fieldMap.value[k].value) ? 'False' : 'True' }
-// venue 有序 pills（borrow_venues:点击加入=排队尾,再点移除;序号=优先级）
-const venueOrder = k => String(fieldMap.value[k]?.value || '').split(',').map(s => s.trim()).filter(Boolean)
-function toggleVenue(k, v) {
-  const cur = venueOrder(k)
-  const next = cur.includes(v) ? cur.filter(x => x !== v) : [...cur, v]
-  fieldMap.value[k].value = next.join(',')
-}
 
 const scopeLabel = computed(() => {
   const [, v] = scope.value.split(':')
@@ -182,6 +96,7 @@ const scopeLabel = computed(() => {
 })
 
 async function load() {
+  if (scope.value === 'strategy:S3') return   // S3=共享面板自管加载
   loading.value = true
   try {
     const data = await mixApi.rules(scope.value)
@@ -195,15 +110,6 @@ async function load() {
 }
 function setScope(s) { scope.value = s; load() }
 
-async function save() {
-  saving.value = true
-  try {
-    const r = await mixApi.rulesSave(scope.value, { fields: fields.value })
-    if (r.saved) ElMessage.success(`已保存 ${r.applied?.length || 0} 项 · ${r.hotReloadSec}s 热生效`)
-    else ElMessage.info(r.note || '无变更')
-  } catch (e) { ElMessage.error(e?.detail || e?.error || '保存失败') }
-  finally { saving.value = false }
-}
 async function saveS2() {
   const orig = Object.fromEntries(fields.value.map(f => [f.key, f.value]))
   const out = []
@@ -241,29 +147,9 @@ onMounted(load)
   .note { margin-top: 8px; font-size: 10px; color: var(--el-text-color-placeholder); padding: 6px 8px; border-top: 1px dashed var(--el-border-color); } }
 
 /* 设定台整体收窄居中 */
-.stage { max-width: 920px; margin: 0 auto; width: 100%; border: 1px solid var(--el-border-color); border-radius: 10px; padding: 14px 20px; background: var(--mix-card, #181B21); }
+.stage { max-width: 980px; margin: 0 auto; width: 100%; border: 1px solid var(--el-border-color); border-radius: 10px; padding: 14px 20px; background: var(--mix-card, #181B21); }
 .crumb { display: flex; align-items: center; gap: 10px; font-size: 13px; margin-bottom: 12px;
   b { font-weight: 800; } .ver { margin-left: auto; color: var(--el-text-color-placeholder); font-size: 11px; } }
-
-/* S3：coin 模态框同款——分组标题+行内小字段,flex 折行,无空单元格,组内容居中 */
-.s3form { display: flex; flex-direction: column; gap: 6px; }
-.ghd { font-size: 11px; font-weight: 800; color: #F0B90B; letter-spacing: 1px; margin-top: 8px;
-  padding-bottom: 4px; border-bottom: 1px dashed rgba(240,185,11,.25); }
-.gflex { display: flex; flex-wrap: wrap; gap: 8px 14px; justify-content: center; padding: 8px 0 4px; }
-.venues { display: inline-flex; gap: 4px; }
-.vpill { display: inline-flex; align-items: center; gap: 3px; border: 1px solid var(--el-border-color); border-radius: 10px; padding: 2px 8px; font-size: 10px; color: var(--el-text-color-secondary); cursor: pointer; user-select: none;
-  .ord { font-style: normal; background: #F0B90B; color: #12151A; border-radius: 50%; width: 12px; height: 12px; line-height: 12px; text-align: center; font-size: 8.5px; font-weight: 800; }
-  &.on { border-color: #F0B90B; color: #F0B90B; } }
-.ifield { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--el-text-color-secondary); white-space: nowrap;
-  em { font-style: normal; } i { font-style: normal; color: var(--el-text-color-placeholder); font-size: 10px; } }
-.inp { background: #12151A; border: 1px solid var(--el-border-color); border-radius: 5px; color: #EAECEF;
-  font-size: 11px; padding: 3px 6px; text-align: right;
-  &:focus { outline: none; border-color: #F0B90B; } }
-.sel { background: #12151A; border: 1px solid var(--el-border-color); border-radius: 5px; color: #EAECEF; font-size: 11px; padding: 3px 4px;
-  &:focus { outline: none; border-color: #F0B90B; } }
-.pill { display: inline-flex; align-items: center; border: 1px solid var(--el-border-color); border-radius: 20px;
-  padding: 3px 12px; font-size: 11px; color: var(--el-text-color-secondary); cursor: pointer; user-select: none;
-  &.on { background: rgba(240,185,11,.16); border-color: #F0B90B; color: #F0B90B; font-weight: 700; } }
 .acts { margin-top: 16px; display: flex; gap: 8px; justify-content: center; }
 
 /* S2：人性化卡片 */
@@ -274,5 +160,10 @@ onMounted(load)
 .s2sub { margin-top: 10px; display: flex; flex-direction: column; gap: 6px;
   em { font-style: normal; font-size: 11px; color: var(--el-text-color-secondary); } }
 .s2flex { display: flex; gap: 18px; flex-wrap: wrap; }
+.ifield { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--el-text-color-secondary); white-space: nowrap;
+  em { font-style: normal; } i { font-style: normal; color: var(--el-text-color-placeholder); font-size: 10px; } }
+.inp { background: #12151A; border: 1px solid var(--el-border-color); border-radius: 5px; color: #EAECEF;
+  font-size: 11px; padding: 3px 6px; text-align: right;
+  &:focus { outline: none; border-color: #F0B90B; } }
 .empty { color: var(--el-text-color-secondary); font-size: 12px; padding: 30px 10px; text-align: center; }
 </style>

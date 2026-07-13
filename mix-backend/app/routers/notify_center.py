@@ -411,6 +411,75 @@ async def notify_tts(text: str, persona: str = "", voice: str = "",
     return FileResponse(path, media_type="audio/mpeg", filename="tts.mp3")
 
 
+def _tpl_speech_text(title: str, body: str) -> str:
+    """模板朗读文本:标题+正文,剥 {var} 占位,空白折叠——与前端 tplSpeech 同一口径(命中同一缓存键)。"""
+    import re
+    t = re.sub(r"\{[^}]*\}", "", f"{title or ''}，{body or ''}")
+    return re.sub(r"\s+", " ", t).strip()[:300]
+
+
+@router.post("/notify/tts/pregen")
+async def notify_tts_pregen(op=Depends(require_operator)):
+    """全部启用模板 × 声音人设 批量预合成提示音(落盘缓存,重复文本零成本)。
+    模板绑定 sound_key 用其人设;未绑定=每个人设各合成一份。文本变更=新缓存键,自动重合成。"""
+    try:
+        import edge_tts  # noqa: F401
+    except ImportError:
+        raise HTTPException(501, "edge-tts 未安装(服务器 venv: pip install edge-tts)")
+    import os
+    import hashlib
+    import asyncio
+
+    pool = await _pool()
+    tpls = await pool.fetch("SELECT tkey, title, body, sound_key FROM notify_templates WHERE enabled")
+    pers = {r["skey"]: r for r in await pool.fetch("SELECT skey, voice, rate_pct, pitch_pct FROM sound_personas")}
+    if not pers:
+        raise HTTPException(409, "无声音人设,先在「声音人设」页建甜妹/御姐")
+    jobs = []
+    for t in tpls:
+        text = _tpl_speech_text(t["title"], t["body"])
+        if not text:
+            continue
+        keys = [t["sound_key"]] if t["sound_key"] in pers else list(pers)
+        for sk in keys:
+            p = pers[sk]
+            jobs.append((t["tkey"], sk, text, (p["voice"] or _TTS_FALLBACK_VOICE)[:80],
+                         max(-50, min(50, int(p["rate_pct"] or 0))), max(-50, min(50, int(p["pitch_pct"] or 0)))))
+    os.makedirs(TTS_DIR, exist_ok=True)
+    sem = asyncio.Semaphore(4)
+    done, cached, failed = 0, 0, []
+
+    async def synth(tkey, sk, text, voice, r_pct, p_pct):
+        nonlocal done, cached
+        key = hashlib.sha1(f"{voice}|{r_pct}|{p_pct}|{text}".encode()).hexdigest()
+        path = os.path.join(TTS_DIR, f"{key}.mp3")
+        if os.path.exists(path):
+            cached += 1
+            return
+        tmp = f"{path}.{os.getpid()}.tmp"
+        rate = f"{'+' if r_pct >= 0 else ''}{r_pct}%"
+        pitch = f"{'+' if p_pct >= 0 else ''}{p_pct}Hz"
+        async with sem:
+            try:
+                import edge_tts as _et
+                await asyncio.wait_for(_et.Communicate(text, voice, rate=rate, pitch=pitch).save(tmp), timeout=25)
+                if not os.path.getsize(tmp):
+                    raise RuntimeError("合成产物为空")
+                os.replace(tmp, path)
+                done += 1
+            except Exception as e:  # noqa: BLE001
+                try:
+                    os.remove(tmp)
+                except OSError:
+                    pass
+                failed.append(f"{tkey}×{sk}:{e}")
+
+    await asyncio.gather(*(synth(*j) for j in jobs))
+    await proxy.audit(op["operator"], op["role"], "tts.pregen", "notify_templates",
+                      {"jobs": len(jobs)}, f"gen={done} cached={cached} fail={len(failed)}")
+    return {"templates": len(tpls), "jobs": len(jobs), "generated": done, "cached": cached, "failed": failed[:10]}
+
+
 # ---------------- 渠道设置（飞书 webhook / 邮件配置留位;节流主体仍在 /settings/notifications） ----------------
 @router.get("/notify/channels")
 async def channels_get(_who=Depends(require_viewer)):

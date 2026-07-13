@@ -55,10 +55,11 @@
       :rows="rows" :sort-key="sortKey" :sort-dir="sortDir" :height="0"
       @action="onAction" @rule-template="onRuleTemplate" @rule-symbol="onRuleSymbol" />
 
-    <!-- 通用规则(策略级) / 单一规则(某币) / 划转 弹层 -->
+    <!-- 通用规则(策略级) / 单一规则(某币) / 划转 / 部分还币 弹层 -->
     <RuleSettingsModal v-model="ruleModal.open" :code="ruleModal.code" />
     <SymbolRuleModal v-model="symModal.open" :symbol="symModal.symbol" :code="symModal.code" />
     <TransferModal v-model="transferModal.open" :accounts="transferModal.accounts" :default-sub="transferModal.sub" />
+    <PartialRepayModal v-model="repayModal.open" :symbol="repayModal.symbol" @done="onRepayDone" />
 
     <!-- 底部横排三卡：策略总览缩略 / 账户余额水位预警 / 分策略管道总览 -->
     <div class="botrow">
@@ -120,6 +121,7 @@ import VirtualPositionTable from '../../components/PositionTable/VirtualPosition
 import RuleSettingsModal from '../../components/rules/RuleSettingsModal.vue'
 import SymbolRuleModal from '../../components/rules/SymbolRuleModal.vue'
 import TransferModal from '../../components/rules/TransferModal.vue'
+import PartialRepayModal from '../../components/rules/PartialRepayModal.vue'
 import { STRATEGY_META as META } from '../../components/PositionTable/types'
 import { CONTEXT_MENUS } from '../../components/PositionTable/strategyColumns'
 import { mixApi } from '../../api/mix'
@@ -197,16 +199,8 @@ async function onAction({ action, rowId, accountId }) {
         const { value } = await ElMessageBox.prompt('手动开仓金额（USDT,留空=按规则 order_amount）', `手动开仓 · ${row.symbol}`, { inputValue: '10' })
         if (value !== '' && value != null) extra.amount = parseFloat(value)
       }
-      if (action === 'partial_repay') {
-        const { value } = await ElMessageBox.prompt(
-          '还币金额（USDT,coin 按现价换算币数量；后缀 p=还后暂停自动借币30分钟,如 20p）',
-          `部分还币 · ${row.symbol}`, { inputValue: '' })
-        const s = String(value || '').trim()
-        if (!s) { ElMessage.info('未输入金额,已取消'); return }
-        if (s.toLowerCase().endsWith('p')) { extra.pause_borrow = true; extra.amount_usdt = parseFloat(s.slice(0, -1)) }
-        else extra.amount_usdt = parseFloat(s)
-        if (!extra.amount_usdt || extra.amount_usdt <= 0) { ElMessage.error('金额非法'); return }
-      }
+      // 部分还币=coin PartialRepayDialog 1:1 弹窗(逐账户 现币/借币/待还+数量/金额互斥+卖回残留)
+      if (action === 'partial_repay') { repayModal.value = { open: true, symbol: row.symbol }; return }
       const r = await mixApi.coinMenu(row.symbol, { action, sub: accountId, ...extra })
       if (action === 'max_borrowable') {
         const c = r?.coin || {}
@@ -228,6 +222,8 @@ async function onAction({ action, rowId, accountId }) {
 }
 const ruleModal = ref({ open: false, code: 'S3' })
 const symModal = ref({ open: false, symbol: '', code: 'S3' })
+const repayModal = ref({ open: false, symbol: '' })
+function onRepayDone() { setTimeout(load, 900) }
 function onRuleTemplate({ code }) { ruleModal.value = { open: true, code } }
 function onRuleSymbol({ symbol, code }) { symModal.value = { open: true, symbol, code } }
 

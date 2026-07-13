@@ -71,6 +71,7 @@ export const mixApi = {
   blacklistRemove: (symbol) => http.post('/blacklist/remove', { symbol }),
   coinAction: (symbol, action) => http.post(`/coins/${symbol}/actions`, { action }),
   coinMenu: (symbol, body) => http.post(`/coins/${symbol}/menu`, body),
+  repayPanel: (symbol) => http.get(`/coins/${symbol}/repay-panel`),
   transferCreateOrder: (account) => http.post(`/monitor/transfer-suggestions/${account}/create-order`),
   notifyGet: () => http.get('/settings/notifications'),
   notifySave: (b) => http.put('/settings/notifications', b),
@@ -100,6 +101,7 @@ export const mixApi = {
   // edge-tts 真人声(blob;失败时前端回落浏览器 speechSynthesis)
   ttsBlob: (text, persona, opts = {}) =>
     http.get('/notify/tts', { params: { text, persona, ...opts }, responseType: 'blob', timeout: 30000 }),
+  ttsPregen: () => http.post('/notify/tts/pregen', null, { timeout: 180000 }),
   // 账户簿 + 凭证托管
   registryTree: () => http.get('/accounts/registry-tree'),
   registryFull: (b) => http.post('/accounts/registry-full', b),
