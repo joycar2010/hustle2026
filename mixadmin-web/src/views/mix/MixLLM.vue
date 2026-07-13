@@ -69,11 +69,18 @@
             <input v-model="rs._newModel" class="inp" placeholder="手动加模型名" @keyup.enter="addCustomModel(rs)" />
             <el-button size="small" @click="addCustomModel(rs)">+ 加入列表</el-button>
           </div>
-          <div class="frow" v-if="(rs.custom_models||[]).length"><label>手动名单</label>
-            <span v-for="m in rs.custom_models" :key="m" class="cmchip" :class="{cur: m===rs.model}">
-              {{ m }}<i class="cmx" title="从手动名单移除(保存后生效)" @click="removeCustomModel(rs, m)">×</i>
+          <div class="frow cmrow" v-if="(rs.custom_models||[]).length"><label>手动名单</label>
+            <span v-for="m in rs.custom_models" :key="m" class="cmchip" :class="{cur: m===rs.model, ok: (rs._chipTest||{})[m]==='ok', bad: (rs._chipTest||{})[m]==='bad'}">
+              <b class="cmname" :title="m===rs.model ? '当前使用中' : '点击设为当前模型'" @click="useModel(rs, m)">
+                <i v-if="m===rs.model" class="cmcur">●</i>{{ m }}
+              </b>
+              <i class="cmact test" title="测试此模型(真调一次)" @click="testModel(rs, m)">
+                {{ (rs._chipTesting||{})[m] ? '…' : ((rs._chipTest||{})[m]==='ok' ? '✓' : (rs._chipTest||{})[m]==='bad' ? '✗' : '⚡') }}
+              </i>
+              <i class="cmact use" v-if="m!==rs.model" title="设为当前模型" @click="useModel(rs, m)">启用</i>
+              <i class="cmact rm" title="从手动名单移除(保存后生效)" @click="removeCustomModel(rs, m)">×</i>
             </span>
-            <i class="dim">拉取刷新永不丢;点 × 移除后需「保存配置」</i>
+            <i class="dim">⚡测试真调一次 · 「启用」设为当前模型 · ×移除;测试/移除/启用后点「保存配置」持久化</i>
           </div>
           <div class="frow"><label>单价 $/1M</label>
             <span class="dim">in</span><input v-model.number="rs.price_in_per_m" class="inp num" type="number" step="0.1" />
@@ -204,7 +211,7 @@ async function loadHist() { try { hist.value = await mixApi.llmHistory() } catch
 async function loadRelays() {
   try {
     const r = await mixApi.system.llmRelays()
-    relays.value = (r.items || []).map(x => ({ ...x, _newKey: '', _newModel: '', _refreshing: false, _testing: false, _st: '' }))
+    relays.value = (r.items || []).map(x => ({ ...x, _newKey: '', _newModel: '', _refreshing: false, _testing: false, _chipTesting: {}, _chipTest: {}, _st: '' }))
   } catch (e) { relays.value = [] }
 }
 async function loadUsage() { try { usage.value = await mixApi.system.llmUsageDaily(usageDays.value) } catch (e) { usage.value = {} } }
@@ -257,18 +264,33 @@ function removeCustomModel(rs, m) {
   rs.available_models = (rs.available_models || []).filter(x => x !== m)
   rs._st = `已从手动名单移除:${m}(点「保存配置」持久化)`
 }
-// 真调一次当前选中模型(上架/价格配置只有真调才知道)
-async function testModel(rs) {
-  if (!rs.model) { rs._st = '❌ 先选择/输入模型'; return }
-  rs._testing = true
-  rs._st = `测试 ${rs.model} 中...`
+// 真调一次指定模型(不传=下拉当前选中);手动名单 chip 也复用此函数,按 model 记录 ✓/✗
+async function testModel(rs, model) {
+  const m = String(model || rs.model || '').trim()
+  if (!m) { rs._st = '❌ 先选择/输入模型'; return }
+  const chip = model != null
+  if (chip) { rs._chipTesting = { ...(rs._chipTesting || {}), [m]: true } }
+  else { rs._testing = true }
+  rs._st = `测试 ${m} 中...`
   try {
-    const r = await mixApi.system.llmRelayTest(rs.id, rs.model)
+    const r = await mixApi.system.llmRelayTest(rs.id, m)
     rs._st = r.ok
       ? `✅ ${r.model} 可用 · ${r.latency_ms}ms · 回复:${r.reply}`
       : `❌ ${r.model} 不可用(${r.latency_ms}ms):${r.error}`
-  } catch (e) { rs._st = '❌ ' + (e?.detail || e?.error || '测试失败') }
-  finally { rs._testing = false }
+    if (chip) rs._chipTest = { ...(rs._chipTest || {}), [m]: r.ok ? 'ok' : 'bad' }
+  } catch (e) {
+    rs._st = '❌ ' + (e?.detail || e?.error || '测试失败')
+    if (chip) rs._chipTest = { ...(rs._chipTest || {}), [m]: 'bad' }
+  } finally {
+    if (chip) { const t = { ...(rs._chipTesting || {}) }; delete t[m]; rs._chipTesting = t }
+    else rs._testing = false
+  }
+}
+// 从名单里把某模型设为该站当前生效模型(启用);写下拉 v-model,需「保存配置」持久化+发布
+function useModel(rs, m) {
+  if (rs.model === m) return
+  rs.model = m
+  rs._st = `已设为当前模型:${m}（点「保存配置」持久化并热发布）`
 }
 async function setPrimary(rs) {
   try {
@@ -352,10 +374,18 @@ onUnmounted(() => clearInterval(t))
 .stmsg { font-size: 11px; color: #F6465D; }
 .statbar { display: flex; gap: 18px; font-size: 11.5px; color: var(--el-text-color-secondary); padding: 4px 2px 10px;
   b { color: #EAECEF; } }
-.cmchip { display: inline-flex; align-items: center; gap: 4px; border: 1px solid rgba(240,185,11,.35); background: rgba(240,185,11,.08);
-  color: #F0B90B; border-radius: 10px; padding: 1px 8px; font-size: 10.5px; margin-right: 6px; font-family: monospace;
-  &.cur { border-color: #F0B90B; font-weight: 700; }
-  .cmx { font-style: normal; cursor: pointer; color: var(--el-text-color-placeholder); &:hover { color: #F6465D; } } }
+.cmrow { align-items: flex-start; }
+.cmchip { display: inline-flex; align-items: center; gap: 6px; border: 1px solid rgba(240,185,11,.35); background: rgba(240,185,11,.08);
+  color: #F0B90B; border-radius: 12px; padding: 2px 6px 2px 9px; font-size: 10.5px; margin: 0 6px 6px 0; font-family: monospace;
+  &.cur { border-color: #F0B90B; font-weight: 700; background: rgba(240,185,11,.16); }
+  &.ok { border-color: rgba(14,203,129,.5); } &.bad { border-color: rgba(246,70,93,.5); }
+  .cmname { display: inline-flex; align-items: center; gap: 3px; cursor: pointer; &:hover { text-decoration: underline; }
+    .cmcur { font-style: normal; color: #0ECB81; font-size: 8px; } }
+  .cmact { font-style: normal; cursor: pointer; border-radius: 8px; padding: 0 5px; font-size: 10px; line-height: 16px;
+    &.test { background: rgba(240,185,11,.18); &:hover { background: rgba(240,185,11,.35); } }
+    &.use { background: rgba(14,203,129,.16); color: #0ECB81; &:hover { background: rgba(14,203,129,.32); } }
+    &.rm { color: var(--el-text-color-placeholder); &:hover { color: #F6465D; } } }
+  &.ok .cmact.test { color: #0ECB81; } &.bad .cmact.test { color: #F6465D; } }
 .agrid { display: flex; flex-direction: column; gap: 10px; }
 .agrow { display: flex; align-items: center; gap: 12px; }
 .agtxt { display: flex; flex-direction: column; gap: 1px;
