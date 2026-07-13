@@ -18,10 +18,13 @@ import os
 import time
 
 import asyncpg
+import httpx
 import redis.asyncio as aioredis
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("engine-lending")
+
+from armed import MODE as ARM_MODE, ARM_SYMBOLS, make_executor  # noqa: E402
 
 REDIS_URL = os.environ.get("DCM_REDIS_URL", "redis://10.0.1.212:6379/0")
 PG_DSN = os.environ.get("DCM_PG_DSN", "")
@@ -40,8 +43,13 @@ HB_KEY = "dcm:hb:engine-lending"
 async def main():
     r = aioredis.from_url(REDIS_URL, decode_responses=True)
     pool = await asyncpg.create_pool(PG_DSN, min_size=1, max_size=2) if PG_DSN else None
-    log.info("engine-lending up mode=shadow interval=%ss enter=%s%%/d exit=%s%%/d slots=%s",
-             INTERVAL, ENTER_PCT, EXIT_PCT, MAX_SLOTS)
+    # 执行器:有 key 即常驻构造(reconcile 认领);下单按 MODE+ARM_SYMBOLS 双门闸,默认 shadow 零行为变化
+    executor = make_executor(r, pool)
+    cli = httpx.AsyncClient(timeout=15) if executor else None
+    if executor:
+        await executor.reconcile_startup(cli)
+    log.info("engine-lending up mode=%s arm=%s interval=%ss enter=%s%%/d exit=%s%%/d slots=%s pid=%s",
+             ARM_MODE, sorted(ARM_SYMBOLS), INTERVAL, ENTER_PCT, EXIT_PCT, MAX_SLOTS, os.getpid())
 
     # 重启恢复：现读自己的快照认领 would_hold（回放旧快照课：只认领 coin 名单，指标全部现算）
     held: dict[str, dict] = {}
@@ -56,7 +64,7 @@ async def main():
 
     while True:
         try:
-            await _round(r, pool, held, strikes)
+            await _round(r, pool, held, strikes, executor, cli)
         except Exception as e:  # noqa: BLE001
             log.warning("round failed: %r", e)
         await asyncio.sleep(INTERVAL)
@@ -75,7 +83,7 @@ async def _log_row(pool, coin, rk, decision, note=""):
         log.warning("shadow log write failed: %r", e)
 
 
-async def _round(r, pool, held: dict, strikes: dict):
+async def _round(r, pool, held: dict, strikes: dict, executor=None, cli=None):
     now = int(time.time())
     raw = await r.get("dcm:lending:ranking")
     ranking = json.loads(raw) if raw else None
@@ -117,9 +125,22 @@ async def _round(r, pool, held: dict, strikes: dict):
             rk = by_coin.get(coin)
             if rk:
                 await _log_row(pool, coin, rk, "hold")
+        # armed 开仓:候选=shadow held ∩ 武装名单;签核权威=执行器带符号经济学闸
+        # (shadow 榜的 |资金费| 只作粗筛——正费率币在执行器闸被正确拒绝,绝不真金开)
+        if executor:
+            from decimal import Decimal as _D
+            for coin in sorted(held):
+                if executor.armed_for(coin) and coin not in executor.open_syms:
+                    await executor.open_position(cli, coin, _D(str(TARGET_USDT)), by_coin.get(coin) or {})
 
-    snap = {"ts": now, "mode": "shadow", "slots": f"{len(held)}/{MAX_SLOTS}",
+    # 持仓管理无论 mode/榜鲜度都执行(带符号净差退出滞回;数据缺失=持有并如实记日志)
+    if executor:
+        await executor.manage(cli, by_coin)
+
+    snap = {"ts": now, "mode": ARM_MODE, "arm": sorted(ARM_SYMBOLS),
+            "slots": f"{len(held)}/{MAX_SLOTS}",
             "target_usdt": TARGET_USDT,
+            "armed_holdings": sorted(executor.open_syms) if executor else [],
             "would_hold": [{"coin": c, "since": v["since"],
                             "net_daily_pct": (by_coin.get(c) or {}).get("net_daily_pct")}
                            for c, v in sorted(held.items())],
