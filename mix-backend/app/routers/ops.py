@@ -44,6 +44,197 @@ async def site_brand_put(body: dict, admin=Depends(require_admin)):
     return {"saved": True, "brand": allowed}
 
 
+# ================= 投资份额账本 / NAV 管道(V4.0 §11-12,操作员侧) =================
+# CORE_POOL NAV 权威源 = risk-ledger 的 reconciled 跨所权益(实盘对账后的真值)。
+# 纪律:share_event append-only(表层已无 UPDATE/DELETE 权);NAV 快照不覆盖;发行份额须
+# 关联 external_flow + 选定 FINALIZED NAV;所有份额操作全审计。
+
+async def _pool_nav_source() -> dict:
+    """读 CORE_POOL 的 reconciled 权益(dcm:risk:status.reconcile.total_equity_usdt)。
+    当前 HOUSE_RND 未从 CORE 分账,先取全量并如实标注(§2.2 分账为后续 Phase)。"""
+    risk = await ds.get_json("dcm:risk:status") or {}
+    rec = risk.get("reconcile") or {}
+    return {"total_equity_usdt": rec.get("total_equity_usdt"),
+            "configured": bool(rec.get("configured")),
+            "note": "含 HOUSE_RND(未分账);CORE/HOUSE 物理隔离为后续 Phase"}
+
+
+@router.get("/system/nav/current")
+async def nav_current(_who=Depends(require_viewer)):
+    """当前池净值源 + 最近快照 + 总 Units(操作员发行份额前的对账视图)。"""
+    pool = await ds.pg_main()
+    src = await _pool_nav_source()
+    snap = units = None
+    if pool is not None:
+        r = await pool.fetchrow("SELECT id, nav_status, pool_nav, total_units, nav_per_unit, as_of "
+                                "FROM pool_nav_snapshot ORDER BY as_of DESC LIMIT 1")
+        snap = dict(r) if r else None
+        u = await pool.fetchrow("SELECT coalesce(sum(units),0) tu FROM share_event")
+        units = float(u["tu"]) if u else 0.0
+    if snap and snap.get("as_of"):
+        snap["as_of"] = snap["as_of"].isoformat()
+        for k in ("pool_nav", "total_units", "nav_per_unit"):
+            snap[k] = float(snap[k]) if snap[k] is not None else None
+    return {"source": src, "latest_snapshot": snap, "issued_units": units}
+
+
+@router.post("/system/nav/snapshot")
+async def nav_snapshot(body: dict, op=Depends(require_operator)):
+    """写一条池净值快照。status=ESTIMATED(盘中可修订)/FINALIZED(日度定版不覆盖)。
+    total_units 取当前已发行 units;nav_per_unit=pool_nav/total_units(units=0 时首日种 1.0)。"""
+    pool = await ds.pg_main()
+    if pool is None:
+        raise HTTPException(503, "mix_main 未配置")
+    status = str(body.get("nav_status") or "ESTIMATED")
+    if status not in ("ESTIMATED", "CALCULATED", "RECONCILED", "FINALIZED", "PUBLISHED"):
+        raise HTTPException(400, "nav_status 非法")
+    src = await _pool_nav_source()
+    pool_nav = body.get("pool_nav")
+    if pool_nav is None:
+        pool_nav = src["total_equity_usdt"]
+    if pool_nav is None:
+        raise HTTPException(409, "无法取得池净值(risk-ledger 未对账),请显式传 pool_nav")
+    pool_nav = float(pool_nav)
+    u = await pool.fetchrow("SELECT coalesce(sum(units),0) tu FROM share_event")
+    total_units = float(u["tu"]) if u else 0.0
+    # units=0(首日尚未发行)→ nav_per_unit 种 1.0,便于首发按实缴金额=Units
+    nav_per_unit = (pool_nav / total_units) if total_units > 1e-9 else 1.0
+    import datetime as _dt
+    as_of = _dt.datetime.now(_dt.timezone.utc)
+    row = await pool.fetchrow(
+        "INSERT INTO pool_nav_snapshot(nav_status,pool_nav,total_units,nav_per_unit,net_flow,as_of,source) "
+        "VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id",
+        status, pool_nav, total_units, nav_per_unit, float(body.get("net_flow") or 0), as_of,
+        str(body.get("source") or src["note"]))
+    await proxy.audit(op["operator"], op["role"], "nav.snapshot", str(row["id"]),
+                      {"status": status, "pool_nav": pool_nav, "nav_per_unit": nav_per_unit}, "written")
+    return {"ok": True, "nav_id": row["id"], "pool_nav": pool_nav,
+            "total_units": total_units, "nav_per_unit": nav_per_unit, "nav_status": status}
+
+
+@router.get("/system/share/accounts")
+async def share_accounts(_who=Depends(require_viewer)):
+    pool = await ds.pg_main()
+    if pool is None:
+        return []
+    rows = await pool.fetch(
+        "SELECT sa.investor_id, sa.display_name, sa.is_house, sa.status, sa.login_user_id, "
+        "coalesce(sum(se.units),0) AS units "
+        "FROM share_account sa LEFT JOIN share_event se ON se.investor_id=sa.investor_id "
+        "GROUP BY sa.investor_id ORDER BY sa.investor_id")
+    return [{"investor_id": r["investor_id"], "name": r["display_name"], "is_house": r["is_house"],
+             "status": r["status"], "login_user_id": r["login_user_id"], "units": float(r["units"])} for r in rows]
+
+
+@router.post("/system/share/accounts")
+async def share_account_create(body: dict, op=Depends(require_operator)):
+    """建份额账户(不发份额)。login_user_id 绑定 mix_users 用于门户登录。"""
+    pool = await ds.pg_main()
+    if pool is None:
+        raise HTTPException(503, "mix_main 未配置")
+    name = str(body.get("display_name") or "").strip()
+    if not name:
+        raise HTTPException(400, "display_name 必填")
+    row = await pool.fetchrow(
+        "INSERT INTO share_account(login_user_id, display_name, is_house, note) VALUES($1,$2,$3,$4) "
+        "RETURNING investor_id", body.get("login_user_id"), name,
+        bool(body.get("is_house")), str(body.get("note") or ""))
+    await proxy.audit(op["operator"], op["role"], "share.account.create", str(row["investor_id"]), {"name": name}, "ok")
+    return {"ok": True, "investor_id": row["investor_id"]}
+
+
+@router.post("/system/share/issue/dry-run")
+async def share_issue_dryrun(body: dict, op=Depends(require_operator)):
+    """发行 dry-run(§12.3):给定 investor + 实缴 USDT + 选定 NAV,算 Units,不落库。"""
+    pool = await ds.pg_main()
+    if pool is None:
+        raise HTTPException(503, "mix_main 未配置")
+    nav_id = body.get("nav_id")
+    nav = await pool.fetchrow(
+        "SELECT id, nav_per_unit, nav_status FROM pool_nav_snapshot WHERE id=$1", nav_id) if nav_id else \
+        await pool.fetchrow("SELECT id, nav_per_unit, nav_status FROM pool_nav_snapshot "
+                            "WHERE nav_status='FINALIZED' ORDER BY as_of DESC LIMIT 1")
+    if not nav:
+        raise HTTPException(409, "无可用 NAV 快照(先 POST /system/nav/snapshot,发行须用 FINALIZED)")
+    npu = float(nav["nav_per_unit"])
+    amt = float(body.get("amount_usdt") or 0)
+    if amt <= 0:
+        raise HTTPException(400, "amount_usdt 必须为正")
+    units = amt / npu if npu > 1e-9 else 0.0
+    return {"nav_id": nav["id"], "nav_status": nav["nav_status"], "nav_per_unit": npu,
+            "amount_usdt": amt, "units": round(units, 10),
+            "warn": None if nav["nav_status"] == "FINALIZED" else "该 NAV 非 FINALIZED,正式发行须用 FINALIZED"}
+
+
+@router.post("/system/share/issue")
+async def share_issue(body: dict, op=Depends(require_operator)):
+    """正式发行/赎回份额 —— append-only share_event。发行须:①FINALIZED NAV ②关联 external_flow
+    ③idempotency_key 防重放。event_type=ISSUE(units+)/REDEEM(units-)/ADJUST。"""
+    pool = await ds.pg_main()
+    if pool is None:
+        raise HTTPException(503, "mix_main 未配置")
+    inv = body.get("investor_id")
+    etype = str(body.get("event_type") or "ISSUE")
+    if etype not in ("ISSUE", "REDEEM", "TRANSFER", "ADJUST"):
+        raise HTTPException(400, "event_type 非法")
+    units = body.get("units")
+    if units is None:
+        raise HTTPException(400, "units 必填(发行+/赎回-,前端由 dry-run 得到)")
+    units = float(units)
+    flow = str(body.get("external_flow_id") or "").strip()
+    if etype in ("ISSUE", "REDEEM") and not flow:
+        raise HTTPException(400, "发行/赎回必须关联 external_flow_id(真实入金/出金流水)")
+    idem = str(body.get("idempotency_key") or "").strip() or None
+    nav_id = body.get("effective_nav_id")
+    try:
+        row = await pool.fetchrow(
+            "INSERT INTO share_event(investor_id,event_type,units,effective_nav_id,external_flow_id,"
+            "idempotency_key,approved_by,note) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id",
+            inv, etype, units, nav_id, flow, idem, op["operator"], str(body.get("note") or ""))
+    except Exception as e:  # noqa: BLE001  (唯一 idem 冲突=重放,幂等拒绝)
+        if "idempotency" in str(e).lower() or "unique" in str(e).lower():
+            raise HTTPException(409, "该资金流已发行过份额(idempotency_key 重复)")
+        raise HTTPException(400, f"发行失败:{e}")
+    await proxy.audit(op["operator"], op["role"], f"share.{etype.lower()}", str(inv),
+                      {"units": units, "flow": flow, "nav_id": nav_id}, f"event {row['id']}")
+    return {"ok": True, "event_id": row["id"]}
+
+
+@router.post("/system/share/project")
+async def share_project(body: dict, op=Depends(require_operator)):
+    """按某 NAV 快照重算全体投资者投影(§12.2 公式)。可重算=先删该 nav_id 旧投影再生成。"""
+    pool = await ds.pg_main()
+    if pool is None:
+        raise HTTPException(503, "mix_main 未配置")
+    nav_id = body.get("nav_id")
+    nav = await pool.fetchrow("SELECT id,pool_nav,total_units,nav_per_unit,as_of FROM pool_nav_snapshot WHERE id=$1", nav_id)
+    if not nav:
+        raise HTTPException(404, "nav 快照不存在")
+    npu = float(nav["nav_per_unit"])
+    # 组合收益率:与上一快照比(NAV_t - NAV_(t-1) - net_flow)/NAV_(t-1);首个快照为 None
+    prev = await pool.fetchrow("SELECT pool_nav FROM pool_nav_snapshot WHERE as_of < $1 ORDER BY as_of DESC LIMIT 1", nav["as_of"])
+    net_flow_row = await pool.fetchrow("SELECT net_flow FROM pool_nav_snapshot WHERE id=$1", nav_id)
+    pool_ret = None
+    if prev and float(prev["pool_nav"]) > 1e-9:
+        pool_ret = (float(nav["pool_nav"]) - float(prev["pool_nav"]) - float(net_flow_row["net_flow"] or 0)) / float(prev["pool_nav"])
+    # 逐投资者:units = 截至该快照时点的累计份额
+    accts = await pool.fetch(
+        "SELECT sa.investor_id, coalesce(sum(se.units),0) units FROM share_account sa "
+        "LEFT JOIN share_event se ON se.investor_id=sa.investor_id AND se.approved_at<=$1 "
+        "GROUP BY sa.investor_id", nav["as_of"])
+    await pool.execute("DELETE FROM investor_projection WHERE nav_id=$1", nav_id)
+    n = 0
+    for a in accts:
+        units = float(a["units"])
+        await pool.execute(
+            "INSERT INTO investor_projection(investor_id,nav_id,units,nav_per_unit,investor_equity,pool_return_pct,as_of) "
+            "VALUES($1,$2,$3,$4,$5,$6,$7)",
+            a["investor_id"], nav_id, units, npu, round(units * npu, 8), pool_ret, nav["as_of"])
+        n += 1
+    await proxy.audit(op["operator"], op["role"], "share.project", str(nav_id), {"investors": n}, "ok")
+    return {"ok": True, "projected": n, "nav_per_unit": npu, "pool_return_pct": pool_ret}
+
+
 # ---------------- 官网 CMS 内容区块（用户端登录框/品牌头可配,site_blocks 表） ----------------
 _BLOCK_KEYS = ("user_login", "user_brand")
 
@@ -281,36 +472,40 @@ async def llm_relay_toggle(rid: int, body: dict, op=Depends(require_operator)):
     return {"ok": True}
 
 
+def _base_candidates(raw: str) -> list:
+    """地址候选:原样优先;结尾非 /v数字 版本段则追加 /v1 兜底(OpenAI 兼容站几乎都在 /v1)。"""
+    import re
+    raw = str(raw or "").strip().rstrip("/")
+    out = [raw]
+    if raw and not re.search(r"/v\d[a-z]*$", raw):
+        out.append(raw + "/v1")
+    return out
+
+
 @router.post("/system/llm/probe-models")
 async def llm_probe_models(body: dict, op=Depends(require_operator)):
     """无状态探测:直接用传入的 base_url+api_key 拉 /models(不需先存库)——
     解决添加新地址时「要先填模型才能存、但想先拉模型来挑」的鸡生蛋问题。
-    地址缺 /v1 时自动补齐重试(OpenAI 兼容站几乎都在 /v1 下),返回真正生效的 base_url。"""
+    地址缺 /v1 时自动补齐重试,返回真正生效的 base_url。"""
     import httpx
     raw = str(body.get("base_url") or "").strip().rstrip("/")
     key = str(body.get("api_key") or "").strip()
     if not raw or not key:
         raise HTTPException(400, "base_url 和 api_key 必填")
-    # 候选地址:原样优先;若结尾不是已知版本段(/v1 /v1beta 等),追加 /v1 兜底
-    import re
-    candidates = [raw]
-    if not re.search(r"/v\d[a-z]*$", raw):
-        candidates.append(raw + "/v1")
 
     async def _try(base):
         async with httpx.AsyncClient(timeout=15) as cli:
             r = await cli.get(f"{base}/models", headers={"Authorization": f"Bearer {key}"})
         if r.status_code != 200:
             return None, f"http {r.status_code}: {r.text[:120]}"
-        data = r.json()  # 非 JSON(HTML 落地页)会抛,交给外层按候选换下一个
-        models = sorted({str(m.get("id")) for m in (data.get("data") or []) if m.get("id")})
-        return models, None
+        data = r.json()  # 非 JSON(HTML 落地页)会抛,交给外层换候选
+        return sorted({str(m.get("id")) for m in (data.get("data") or []) if m.get("id")}), None
 
     last_err = ""
-    for base in candidates:
+    for base in _base_candidates(raw):
         try:
             models, err = await _try(base)
-        except Exception as e:  # noqa: BLE001  (非JSON/连接错→换候选)
+        except Exception as e:  # noqa: BLE001
             last_err = f"{e!r}"[:120]
             continue
         if models is not None:
@@ -322,35 +517,58 @@ async def llm_probe_models(body: dict, op=Depends(require_operator)):
     return {"ok": False, "error": f"探测失败{hint}:{last_err}"[:200]}
 
 
+async def _heal_base_url(pool, rid, cur_base, working_base, op):
+    """测试/刷新时发现库里地址缺 /v1、而补全版能用→自愈:把库里地址纠正为能用的那个+重发布。
+    避免坏地址留库致 ai.py 生产真调也失败。"""
+    if working_base == cur_base:
+        return False
+    await pool.execute("UPDATE llm_relays SET base_url=$2, updated_at=now() WHERE id=$1", rid, working_base)
+    await _publish_llm_config(pool)
+    await proxy.audit(op["operator"], op["role"], "llm.relay.heal_base", str(rid),
+                      {"from": cur_base, "to": working_base}, "auto-fixed /v1")
+    return True
+
+
 @router.post("/system/llm/relays/{rid}/refresh-models")
 async def llm_relay_models(rid: int, op=Depends(require_operator)):
-    """真调该站 /models 刷新可选模型列表(openai 兼容)。"""
+    """真调该站 /models 刷新可选模型列表(openai 兼容);地址缺 /v1 自动补并自愈库里地址。"""
     import httpx
     pool = await ds.pg_main()
     cur = await pool.fetchrow("SELECT * FROM llm_relays WHERE id=$1", rid)
     if not cur:
         raise HTTPException(404, "中转站不存在")
-    resp = None
-    try:
+
+    async def _try(base):
         async with httpx.AsyncClient(timeout=15) as cli:
-            resp = await cli.get(f"{cur['base_url']}/models",
-                                 headers={"Authorization": f"Bearer {cur['api_key']}"})
-        models = sorted({str(m.get("id")) for m in (resp.json().get("data") or []) if m.get("id")})
-    except Exception as e:  # noqa: BLE001
-        return {"ok": False, "error": f"{e!r}"[:200]}
-    if not models:
-        return {"ok": False, "error": f"http {resp.status_code}: {resp.text[:150]}"}
-    await pool.execute("UPDATE llm_relays SET available_models=$2, updated_at=now() WHERE id=$1",
-                       rid, json.dumps(models))
-    custom = json.loads(cur["custom_models"]) if cur["custom_models"] else []
-    return {"ok": True, "count": len(models),
-            "available_models": sorted(set(models) | set(custom))}
+            r = await cli.get(f"{base}/models", headers={"Authorization": f"Bearer {cur['api_key']}"})
+        if r.status_code != 200:
+            return None, f"http {r.status_code}: {r.text[:120]}"
+        data = r.json()
+        return sorted({str(m.get("id")) for m in (data.get("data") or []) if m.get("id")}), None
+
+    last_err = ""
+    for base in _base_candidates(cur["base_url"]):
+        try:
+            models, err = await _try(base)
+        except Exception as e:  # noqa: BLE001
+            last_err = f"{e!r}"[:120]
+            continue
+        if models is not None:
+            healed = await _heal_base_url(pool, rid, cur["base_url"], base, op)
+            await pool.execute("UPDATE llm_relays SET available_models=$2, updated_at=now() WHERE id=$1",
+                               rid, json.dumps(models))
+            custom = json.loads(cur["custom_models"]) if cur["custom_models"] else []
+            return {"ok": True, "count": len(models),
+                    "available_models": sorted(set(models) | set(custom)),
+                    "note": (f"地址已自愈为 {base}") if healed else ""}
+        last_err = err
+    return {"ok": False, "error": f"拉取失败:{last_err}"[:200]}
 
 
 @router.post("/system/llm/relays/{rid}/test-model")
 async def llm_relay_test_model(rid: int, body: dict, op=Depends(require_operator)):
-    """真调该站指定模型一次(chat/completions 最小请求),返回延迟/回复/错误——
-    「加入列表≠可用」,上架与价格配置只有真调才知道。"""
+    """真调该站指定模型一次(chat/completions 最小请求),返回延迟/回复/错误。
+    地址缺 /v1 自动补并自愈库里地址;非 JSON 响应如实回显首段(HTML 落地页一眼看出)。"""
     import time
     import httpx
     pool = await ds.pg_main()
@@ -360,28 +578,43 @@ async def llm_relay_test_model(rid: int, body: dict, op=Depends(require_operator
     model = str(body.get("model") or cur["model"]).strip()
     if not model:
         raise HTTPException(400, "model 必填")
-    t0 = time.time()
-    try:
+
+    async def _try(base):
         async with httpx.AsyncClient(timeout=30) as cli:
-            resp = await cli.post(
-                f"{cur['base_url']}/chat/completions",
+            r = await cli.post(
+                f"{base}/chat/completions",
                 json={"model": model, "messages": [{"role": "user", "content": "回复两个字:OK"}],
                       "max_tokens": 200},
                 headers={"Authorization": f"Bearer {cur['api_key']}"})
-    except Exception as e:  # noqa: BLE001
-        return {"ok": False, "model": model, "latency_ms": int((time.time() - t0) * 1000),
-                "error": repr(e)[:200]}
-    lat = int((time.time() - t0) * 1000)
-    if resp.status_code != 200:
-        return {"ok": False, "model": model, "latency_ms": lat,
-                "error": f"http {resp.status_code}: {resp.text[:200]}"}
-    try:
-        data = resp.json()
-        reply = data["choices"][0]["message"]["content"]
+        # 非 200:确定的服务端错(如 401/404/价格未配),不试下一个候选,直接回报
+        if r.status_code != 200:
+            return {"fatal": True, "err": f"http {r.status_code}: {r.text[:180]}"}
+        try:
+            data = r.json()
+        except Exception:  # noqa: BLE001  (非 JSON=可能地址缺 /v1 命中落地页,换候选)
+            return {"nonjson": True, "err": f"200 但非 JSON(疑似地址缺 /v1 命中网页):{r.text[:120]}"}
+        return {"reply": str(data["choices"][0]["message"]["content"])[:80], "usage": data.get("usage") or {}}
+
+    t0 = time.time()
+    last_err = ""
+    for base in _base_candidates(cur["base_url"]):
+        try:
+            res = await _try(base)
+        except Exception as e:  # noqa: BLE001
+            last_err = repr(e)[:180]
+            continue
+        lat = int((time.time() - t0) * 1000)
+        if res.get("fatal"):
+            return {"ok": False, "model": model, "latency_ms": lat, "error": res["err"]}
+        if res.get("nonjson"):
+            last_err = res["err"]
+            continue   # 换 /v1 候选再试
+        healed = await _heal_base_url(pool, rid, cur["base_url"], base, op)
         return {"ok": True, "model": model, "latency_ms": lat,
-                "reply": str(reply)[:80], "usage": data.get("usage") or {}}
-    except Exception as e:  # noqa: BLE001
-        return {"ok": False, "model": model, "latency_ms": lat, "error": f"bad shape {e!r}"[:200]}
+                "reply": res["reply"], "usage": res["usage"],
+                "note": (f"地址已自愈为 {base}") if healed else ""}
+    lat = int((time.time() - t0) * 1000)
+    return {"ok": False, "model": model, "latency_ms": lat, "error": last_err}
 
 
 @router.get("/system/llm/agents")
