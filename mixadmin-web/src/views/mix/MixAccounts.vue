@@ -11,9 +11,13 @@
         <!-- 主账号 / 钱包组 行 -->
         <div class="row master" @click="toggle(m.id)" @contextmenu.prevent="openMenu($event, m)">
           <span class="caret">{{ open.has(m.id) ? '▾' : '▸' }}</span>
-          <span class="kind" :class="m.platformType">{{ m.platformType === 'kms_wallet' ? '链上' : '主' }}</span>
+          <span class="kind" :class="typeOf(m.id)==='sub' ? 'sub' : m.platformType">
+            {{ m.platformType === 'kms_wallet' ? '链上' : (typeOf(m.id)==='sub' ? '子' : '主') }}</span>
           <span class="name" :class="{off: reg[m.id]?.enabled===false}">{{ m.id }}</span>
-          <span class="acctname">{{ reg[m.id]?.alias || '—' }}<i v-if="reg[m.id]?.machine" class="mch">{{ reg[m.id].machine }}机</i></span>
+          <span class="acctname">{{ reg[m.id]?.alias || '—' }}
+            <i v-if="reg[m.id]?.machine" class="mch">{{ reg[m.id].machine }}机</i>
+            <i v-if="reg[m.id]?.credential" class="cred" :class="reg[m.id].credential.state">{{ credLabel(reg[m.id].credential) }}</i>
+          </span>
           <span class="venue">{{ m.venue }} · 域 {{ m.domain }}</span>
           <span class="dot" :class="m.apiStatus" />
           <span v-for="(v,k) in m.metrics" :key="k" class="pair"><em>{{ k }}</em><b :class="{neg:String(v).startsWith('-')}">{{ v }}</b></span>
@@ -25,7 +29,10 @@
             <span class="caret"></span>
             <span class="kind" :class="c.kind === 'wallet' ? 'kms_wallet' : 'sub'">{{ c.kind === 'wallet' ? '址' : '子' }}</span>
             <span class="name sm" :class="{off: reg[c.id]?.enabled===false}">↳ {{ c.id }}</span>
-            <span class="acctname">{{ reg[c.id]?.alias || '—' }}<i v-if="reg[c.id]?.machine" class="mch">{{ reg[c.id].machine }}机</i></span>
+            <span class="acctname">{{ reg[c.id]?.alias || '—' }}
+              <i v-if="reg[c.id]?.machine" class="mch">{{ reg[c.id].machine }}机</i>
+              <i v-if="reg[c.id]?.credential" class="cred" :class="reg[c.id].credential.state">{{ credLabel(reg[c.id].credential) }}</i>
+            </span>
             <span class="venue">{{ c.venue }}</span>
             <span class="dot" :class="c.apiStatus" />
             <span v-if="c.apiStatus==='restricted'" class="restricted">受限 · -2015 IP 白名单</span>
@@ -48,6 +55,42 @@
       </div>
     </Teleport>
 
+    <!-- 设置 API（浏览器端 sealed box 加密，明文永不离开本机） -->
+    <el-dialog v-model="apiDlg" :title="`设置 API · ${apiForm.account_key}`" width="480">
+      <el-alert type="success" :closable="false" show-icon style="margin-bottom:12px"
+        title="明文在你的浏览器内加密后才提交，服务端与数据库全程只见密文；私钥只在 B 机。" />
+      <el-form label-width="90">
+        <el-form-item label="交易所">
+          <el-select v-model="apiForm.venue" style="width:180px">
+            <el-option v-for="v in ['binance','okx','bybit','gate','bitget','hyperliquid']" :key="v" :value="v" :label="v" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="标签"><el-input v-model="apiForm.label" placeholder="如 合约+借币权限" /></el-form-item>
+        <el-form-item label="API Key"><el-input v-model="apiForm.apiKey" show-password autocomplete="new-password" /></el-form-item>
+        <el-form-item label="API Secret"><el-input v-model="apiForm.apiSecret" type="password" show-password autocomplete="new-password" /></el-form-item>
+        <el-form-item label="Passphrase"><el-input v-model="apiForm.passphrase" type="password" show-password placeholder="OKX/Bitget 需要，其余留空" autocomplete="new-password" /></el-form-item>
+        <el-form-item label="IP 代理">
+          <el-input v-model="apiForm.proxy_url" placeholder="socks5://user:pass@host:port（留空=直连）" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="apiDlg=false">取消</el-button>
+        <el-button type="warning" :loading="apiSaving" @click="saveApi">加密并提交</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- IP 代理（单改，不动密钥） -->
+    <el-dialog v-model="proxyDlg" :title="`IP 代理 · ${proxyForm.account_key}`" width="440">
+      <el-form label-width="80">
+        <el-form-item label="代理出口"><el-input v-model="proxyForm.proxy_url" placeholder="socks5://user:pass@host:port（留空=直连）" /></el-form-item>
+      </el-form>
+      <div style="font-size:11px;color:var(--el-text-color-placeholder);padding:0 10px">保存后 B 机 cred-agent 下发到该账户交易客户端。当前架构默认直连+交易所 IP 白名单。</div>
+      <template #footer>
+        <el-button @click="proxyDlg=false">取消</el-button>
+        <el-button type="warning" @click="saveProxy">保存</el-button>
+      </template>
+    </el-dialog>
+
     <!-- 别名簿（accounts_registry：别名/邮箱/备注,mix 自有域直写） -->
     <el-dialog v-model="regDlg" :title="`别名/备注 · ${regForm.account_key}`" width="420">
       <el-form label-width="70">
@@ -61,29 +104,41 @@
       </template>
     </el-dialog>
 
-    <!-- 新建账户：主 / 子 二选一（对齐设计确认项） -->
-    <el-dialog v-model="createDlg" title="新建账户" width="420">
-      <el-form label-width="90">
+    <!-- 新建账户：主 / 子 + 别名/邮箱 + 可选 API Key/密码（一步录入，密钥仍浏览器端加密） -->
+    <el-dialog v-model="createDlg" title="新建账户" width="480">
+      <el-form label-width="96">
         <el-form-item label="账户类型">
-          <el-radio-group v-model="createForm.kind">
+          <el-radio-group v-model="createForm.account_type">
             <el-radio-button value="master">主账户</el-radio-button>
             <el-radio-button value="sub">子账户</el-radio-button>
           </el-radio-group>
         </el-form-item>
+        <el-form-item label="账户标识"><el-input v-model="createForm.account_key" placeholder="唯一键，如 joycar003 / binance-master" /></el-form-item>
         <el-form-item label="交易所">
-          <el-select v-model="createForm.venue" style="width:200px">
-            <el-option v-for="v in ['币安','OKX','Bybit','Gate','MEXC']" :key="v" :label="v" :value="v" />
+          <el-select v-model="createForm.venue" style="width:180px">
+            <el-option v-for="v in ['binance','okx','bybit','gate','bitget','hyperliquid']" :key="v" :value="v" :label="v" />
           </el-select>
         </el-form-item>
-        <el-form-item v-if="createForm.kind==='sub'" label="挂载主账户">
-          <el-select v-model="createForm.parentId" style="width:200px">
-            <el-option v-for="m in tree.filter(t=>t.platformType==='cex')" :key="m.id" :label="m.id" :value="m.id" />
+        <el-form-item v-if="createForm.account_type==='sub'" label="挂载主账户">
+          <el-select v-model="createForm.parent_key" style="width:220px" filterable allow-create default-first-option>
+            <el-option v-for="m in masterKeys" :key="m" :label="m" :value="m" />
           </el-select>
         </el-form-item>
+        <el-form-item label="别名"><el-input v-model="createForm.alias" placeholder="如 套利1号" /></el-form-item>
+        <el-form-item label="邮箱"><el-input v-model="createForm.email" /></el-form-item>
+        <el-form-item label="作用域机">
+          <el-radio-group v-model="createForm.machine" size="small">
+            <el-radio-button value="A">A</el-radio-button><el-radio-button value="B">B</el-radio-button><el-radio-button value="C">C</el-radio-button>
+          </el-radio-group>
+        </el-form-item>
+        <el-divider content-position="left" style="font-size:12px">API 凭证（选填，浏览器端加密）</el-divider>
+        <el-form-item label="API Key"><el-input v-model="createForm.apiKey" show-password autocomplete="new-password" /></el-form-item>
+        <el-form-item label="API Secret"><el-input v-model="createForm.apiSecret" type="password" show-password autocomplete="new-password" /></el-form-item>
+        <el-form-item label="Passphrase"><el-input v-model="createForm.passphrase" type="password" show-password placeholder="OKX/Bitget 需要" autocomplete="new-password" /></el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="createDlg=false">取消</el-button>
-        <el-button type="warning" @click="createAccount">创建</el-button>
+        <el-button type="warning" :loading="apiSaving" @click="createAccount">创建</el-button>
       </template>
     </el-dialog>
   </div>
@@ -94,15 +149,28 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ACCOUNT_MENUS } from '../../components/PositionTable/strategyColumns'
 import { mixApi } from '../../api/mix'
+import { sealCredential, maskKey } from '../../api/credCrypto'
 
 const tree = ref([])
 const open = reactive(new Set())
 const menu = reactive({ open: false, x: 0, y: 0, node: null })
 const createDlg = ref(false)
-const createForm = reactive({ kind: 'sub', venue: '币安', parentId: '' })
+const createForm = reactive({ account_type: 'sub', account_key: '', venue: 'binance', parent_key: '', alias: '', email: '', machine: 'B', apiKey: '', apiSecret: '', passphrase: '' })
 const reg = ref({})
 const regDlg = ref(false)
 const regForm = reactive({ account_key: '', alias: '', email: '', note: '' })
+const apiDlg = ref(false), apiSaving = ref(false)
+const apiForm = reactive({ account_key: '', venue: 'binance', label: '', apiKey: '', apiSecret: '', passphrase: '', proxy_url: '' })
+const proxyDlg = ref(false)
+const proxyForm = reactive({ account_key: '', proxy_url: '' })
+const masterKeys = computed(() => Object.values(reg.value).filter(r => r.account_type === 'master').map(r => r.account_key))
+
+async function encryptCred(apiKey, apiSecret, passphrase) {
+  const { pubkey } = await mixApi.credPubkey()
+  return { ciphertext: sealCredential(pubkey, apiKey, apiSecret, passphrase || ''), key_mask: maskKey(apiKey) }
+}
+const typeOf = id => reg.value[id]?.account_type || 'master'
+const credLabel = c => ({ active: `🔑${c.key_mask||'已配'}`, pending: '🔑下发中', error: '🔑异常', revoked: '🔑已吊销' }[c.state] || '')
 
 const menuItems = computed(() => menu.node
   ? [...(ACCOUNT_MENUS[menu.node.platformType] || []),
@@ -136,6 +204,17 @@ async function doAction(it) {
       return loadRegistry()
     }
     if (it.key === 'create_sub' || it.key === 'create_wallet') { createDlg.value = true; return }
+    if (it.key === 'set_api') {
+      const cur = reg.value[node.id]?.credential || {}
+      Object.assign(apiForm, { account_key: node.id, venue: node.venue || 'binance', label: '',
+        apiKey: '', apiSecret: '', passphrase: '', proxy_url: cur.proxy_url || '' })
+      apiDlg.value = true; return
+    }
+    if (it.key === 'ip_proxy') {
+      const cur = reg.value[node.id]?.credential || {}
+      Object.assign(proxyForm, { account_key: node.id, proxy_url: cur.proxy_url || '' })
+      proxyDlg.value = true; return
+    }
     if (it.confirm) await ElMessageBox.confirm(`确认对 ${node.id} 执行「${it.label}」？`, '危险操作', { type: 'warning' })
     if (it.key === 'transfer') {
       const r = await mixApi.kmsTransfer({ from: node.id, amount: 1000 })
@@ -169,12 +248,34 @@ async function approve(c) {
   const r = await mixApi.kmsApprove(c.id)
   ElMessage.success(`已执行：${r.state} · 审计 ${r.auditId}`)
 }
-async function createAccount() {
+async function saveApi() {
+  if (!apiForm.apiKey || !apiForm.apiSecret) return ElMessage.warning('API Key/Secret 必填')
+  apiSaving.value = true
   try {
-    await mixApi.accountCreate({ ...createForm })
-    ElMessage.success(`已创建${createForm.kind === 'master' ? '主账户' : '子账户'}（201）`)
-    createDlg.value = false; load()
-  } catch (e) { ElMessage.error(e?.error || '创建失败') }
+    const enc = await encryptCred(apiForm.apiKey, apiForm.apiSecret, apiForm.passphrase)
+    await mixApi.credPut({ account_key: apiForm.account_key, venue: apiForm.venue, label: apiForm.label,
+      proxy_url: apiForm.proxy_url, ...enc })
+    ElMessage.success('已加密提交，B 机 agent 60s 内下发生效')
+    apiDlg.value = false; loadRegistry()
+  } catch (e) { ElMessage.error(e?.detail || e?.error || '提交失败') } finally { apiSaving.value = false }
+}
+async function saveProxy() {
+  try { await mixApi.credProxy(proxyForm.account_key, { proxy_url: proxyForm.proxy_url }); ElMessage.success('代理已保存'); proxyDlg.value = false; loadRegistry() }
+  catch (e) { ElMessage.error(e?.detail || e?.error || '保存失败（先设置 API）') }
+}
+async function createAccount() {
+  if (!createForm.account_key) return ElMessage.warning('账户标识必填')
+  apiSaving.value = true
+  try {
+    await mixApi.registryFull({ account_key: createForm.account_key, account_type: createForm.account_type,
+      parent_key: createForm.parent_key, alias: createForm.alias, email: createForm.email, machine: createForm.machine })
+    if (createForm.apiKey && createForm.apiSecret) {
+      const enc = await encryptCred(createForm.apiKey, createForm.apiSecret, createForm.passphrase)
+      await mixApi.credPut({ account_key: createForm.account_key, venue: createForm.venue, ...enc })
+    }
+    ElMessage.success(`已创建${createForm.account_type === 'master' ? '主账户' : '子账户'}`)
+    createDlg.value = false; loadRegistry()
+  } catch (e) { ElMessage.error(e?.detail || e?.error || '创建失败') } finally { apiSaving.value = false }
 }
 async function saveRegistry() {
   try {
@@ -187,6 +288,10 @@ async function loadRegistry() {
   try {
     const rows = await mixApi.registryList()
     reg.value = Object.fromEntries((rows || []).map(r => [r.account_key, r]))
+    const tree2 = await mixApi.registryTree()
+    for (const m of (tree2.masters || [])) reg.value[m.account_key] = { ...reg.value[m.account_key], ...m }
+    for (const m of (tree2.masters || [])) for (const s of (m.children || [])) reg.value[s.account_key] = { ...reg.value[s.account_key], ...s }
+    for (const o of (tree2.orphans || [])) reg.value[o.account_key] = { ...reg.value[o.account_key], ...o }
   } catch (e) { /* 降级：无别名不阻塞账户树 */ }
 }
 async function load() {
@@ -213,7 +318,12 @@ onMounted(() => { load(); loadRegistry() })
   &.off { opacity: .45; text-decoration: line-through; } }
 .acctname { min-width: 120px; font-size: 11px; color: #F0B90B; font-weight: 700;
   .mch { font-style: normal; margin-left: 6px; padding: 0 5px; border-radius: 4px; font-size: 9px;
-    background: rgba(45,212,191,.14); color: #2DD4BF; font-weight: 800; } }
+    background: rgba(45,212,191,.14); color: #2DD4BF; font-weight: 800; }
+  .cred { font-style: normal; margin-left: 4px; padding: 0 5px; border-radius: 4px; font-size: 9px; font-weight: 700;
+    &.active { background: rgba(14,203,129,.14); color: #0ECB81; }
+    &.pending { background: rgba(240,185,11,.14); color: #F0B90B; }
+    &.error { background: rgba(246,70,93,.14); color: #F6465D; }
+    &.revoked { background: rgba(94,102,115,.14); color: #5E6673; } } }
 .venue { color: var(--el-text-color-secondary); font-size: 11px; min-width: 110px; }
 .dot { width: 7px; height: 7px; border-radius: 50%;
   &.ok { background: #0ECB81; } &.restricted { background: #F6465D; } &.healing { background: #F0B90B; } }

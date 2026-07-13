@@ -64,7 +64,7 @@ async def require_operator(x_op_token: str | None = Header(default=None)) -> dic
         raise HTTPException(401, "missing operator token")
     if _ROLE_RANK.get(who["role"], 0) < _ROLE_RANK["OPERATOR"]:
         raise HTTPException(403, f"需要 OPERATOR 权限（当前 {who['role']}）")
-    return who
+    return {**who, "token": x_op_token}   # token 供写代理透传(gateway 审计留操作者身份)
 
 
 async def require_admin(x_op_token: str | None = Header(default=None)) -> dict:

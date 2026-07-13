@@ -287,10 +287,10 @@ $t1: #EAECEF; $t2: #848E9C; $t3: #5E6673; $gold: #F0B90B;
   .chip { background: $card2; border: 1px solid $border; color: $t2; border-radius: 5px; padding: 3px 10px; cursor: pointer;
     &.chip-on { background: $gold; border-color: $gold; color: $bg; font-weight: 700; } }
   .hint { margin-left: auto; color: $t3; font-size: 11px; } }
-.vpt-viewport { overflow-y: auto; }
+.vpt-viewport { overflow-y: auto; overflow-x: auto; }
 
 .row { display: flex; align-items: center; gap: 9px; padding: 0 12px; cursor: pointer; line-height: 1;
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: tabular-nums; min-width: 1460px; /* 窄窗横向滚动兜底,列绝不压碎 */
   &.main { font-weight: 600;
     &.warn { background: linear-gradient(90deg, rgba(240,185,11,.19), rgba(240,185,11,.02)); box-shadow: inset 0 0 0 1px rgba(240,185,11,.4); border-radius: 5px; }
     &.frozen { box-shadow: inset 0 0 0 1px rgba(246,70,93,.4); border-radius: 5px; } }
@@ -310,12 +310,13 @@ $t1: #EAECEF; $t2: #848E9C; $t3: #5E6673; $gold: #F0B90B;
 .sbadge { width: 44px; text-align: center; padding: 1px 0; border-radius: 4px; font-size: 9px; font-weight: 800;
   &.dimb { background: $card2; color: $t3; font-weight: 500; } }
 .phase { width: 56px; color: $t2; font-size: 10px; }
-.cell { flex: 1; min-width: 0; text-align: right; white-space: nowrap; overflow: hidden;
+.cell { flex: 1; min-width: 62px; text-align: right; white-space: nowrap; overflow: hidden;
   &.lbl { color: $t3; font-size: 10px; font-weight: 500; }
   &.val { font-size: 11.5px; font-weight: 600; } }
-/* 右侧信息区: 列宽/字号放大+列间呼吸感(曾 9px 字挤成一团不可读) */
-.params { width: 216px; display: inline-flex; gap: 9px; justify-content: flex-end; overflow: hidden; flex: none;
-  i { font-style: normal; display: inline-flex; gap: 3px; align-items: baseline;
+/* 右侧信息区: 弹性宽(min~max)+逐项 nowrap,长条目(费差 venue)不再把列挤成竖条 */
+.params { flex: 1 1 230px; min-width: 170px; max-width: 320px; display: inline-flex; gap: 9px;
+  justify-content: flex-end; overflow: hidden; white-space: nowrap;
+  i { font-style: normal; display: inline-flex; gap: 3px; align-items: baseline; white-space: nowrap; flex: none;
     em { font-style: normal; color: $t3; font-size: 9.5px; } b { font-size: 10.5px; font-weight: 600; } } }
 .push { width: 96px; text-align: right; color: $t3; font-size: 10.5px; flex: none;
   .stchip { font-style: normal; padding: 1px 6px; border-radius: 3px; font-size: 9.5px; font-weight: 700; } }

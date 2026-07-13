@@ -112,11 +112,15 @@ async def templates_put(body: dict, op=Depends(require_operator)):
     level = body.get("level") if body.get("level") in ("info", "warn", "fatal") else "info"
     pool = await _pool()
     await pool.execute(
-        "INSERT INTO notify_templates(tkey,title,body,level,channels,enabled,updated_by,updated_at) "
-        "VALUES($1,$2,$3,$4,$5,$6,$7,now()) ON CONFLICT (tkey) DO UPDATE SET "
-        "title=$2, body=$3, level=$4, channels=$5, enabled=$6, updated_by=$7, updated_at=now()",
+        "INSERT INTO notify_templates(tkey,title,body,level,channels,enabled,updated_by,updated_at,"
+        "category,sound_key,color,blink) "
+        "VALUES($1,$2,$3,$4,$5,$6,$7,now(),$8,$9,$10,$11) ON CONFLICT (tkey) DO UPDATE SET "
+        "title=$2, body=$3, level=$4, channels=$5, enabled=$6, updated_by=$7, updated_at=now(), "
+        "category=$8, sound_key=$9, color=$10, blink=$11",
         tkey, str(body.get("title") or "")[:200], str(body.get("body") or "")[:4000], level,
-        json.dumps(body.get("channels") or ["marquee"]), bool(body.get("enabled", True)), op["operator"])
+        json.dumps(body.get("channels") or ["marquee"]), bool(body.get("enabled", True)), op["operator"],
+        str(body.get("category") or "system")[:40], str(body.get("sound_key") or "")[:40],
+        str(body.get("color") or "")[:20], bool(body.get("blink")))
     await proxy.audit(op["operator"], op["role"], "template.put", tkey, body, "saved")
     return {"saved": True}
 
@@ -176,7 +180,9 @@ async def broadcast(body: dict, op=Depends(require_operator)):
             try:
                 await r.publish(MARQUEE_CHANNEL, json.dumps({
                     "service": "mixadmin", "title": title, "content": text,
-                    "level": level, "color": LEVEL_COLOR[level], "blink": level == "fatal",
+                    "level": level, "color": str(body.get("color") or LEVEL_COLOR[level]),
+                    "blink": bool(body.get("blink")) or level == "fatal",
+                    "sound_key": str(body.get("sound_key") or ""),
                 }, ensure_ascii=False))
                 results["marquee"] = "sent"
                 await _log_send(pool, "marquee", "all", title, text, True, "published", op["operator"])
@@ -201,6 +207,144 @@ async def broadcast(body: dict, op=Depends(require_operator)):
     return {"results": results}
 
 
+# ---------------- 网站维护 / 一键全停（停自动策略=gateway Kill Switch,权威门闸,用户已拍板映射） ----------------
+MAINT_KEY = "mix:maintenance"
+
+
+async def _maint_row(pool):
+    return await pool.fetchrow("SELECT * FROM maintenance WHERE id=1")
+
+
+def _maint_payload(row) -> dict:
+    return {"enabled": row["enabled"], "stop_strategy": row["stop_strategy"],
+            "block_trading": row["block_trading"], "block_login": row["block_login"],
+            "title": row["title"], "content": row["content"],
+            "until_at": row["until_at"].isoformat() if row["until_at"] else None,
+            "updated_by": row["updated_by"]}
+
+
+async def maintenance_state() -> dict:
+    """给鉴权/写代理层用的活状态(Redis 优先,库兜底)。"""
+    d = await ds.get_json(MAINT_KEY)
+    if d is not None:
+        return d
+    pool = await ds.pg_main()
+    if pool is None:
+        return {}
+    row = await _maint_row(pool)
+    return _maint_payload(row) if row else {}
+
+
+@router.get("/system/maintenance")
+async def maintenance_get(_who=Depends(require_viewer)):
+    pool = await _pool()
+    row = await _maint_row(pool)
+    return _maint_payload(row)
+
+
+async def _apply_maintenance(pool, r, body: dict, op, one_click=False):
+    import datetime as _dt
+
+    def _ts(v):
+        try:
+            return _dt.datetime.fromisoformat(str(v).replace("Z", "+00:00")) if v else None
+        except ValueError:
+            return None
+    enabled = bool(body.get("enabled"))
+    vals = {
+        "enabled": enabled,
+        "stop_strategy": bool(body.get("stop_strategy", True)),
+        "block_trading": bool(body.get("block_trading", True)),
+        "block_login": bool(body.get("block_login", False)),
+        "title": str(body.get("title") or "系统维护中")[:120],
+        "content": str(body.get("content") or "")[:2000],
+        "until_at": _ts(body.get("until_at")),
+    }
+    await pool.execute(
+        "UPDATE maintenance SET enabled=$1, stop_strategy=$2, block_trading=$3, block_login=$4, "
+        "title=$5, content=$6, until_at=$7, updated_by=$8, updated_at=now() WHERE id=1",
+        *vals.values(), op["operator"])
+    payload = {**{k: (v.isoformat() if hasattr(v, "isoformat") else v) for k, v in vals.items()},
+               "updated_by": op["operator"]}
+    if r is not None:
+        await r.set(MAINT_KEY, json.dumps(payload, ensure_ascii=False))
+    results = {"saved": True}
+    # 停自动策略 → gateway Kill Switch(全组合置 shadow+清白名单;权威闸,不发明第三套)
+    if enabled and vals["stop_strategy"]:
+        token = op.get("token") or ""
+        st, data = await proxy.gateway_kill(token)
+        results["kill_switch"] = data if st < 400 else {"error": data, "status": st}
+        await _log_send(pool, "kill", "gateway", "维护全停", "Kill Switch", st < 400, str(data)[:200], op["operator"])
+    # 维护公告 → 跑马灯 + site_notices(kind=maintenance,用户端蒙层/横幅消费)
+    if r is not None:
+        try:
+            await r.publish(MARQUEE_CHANNEL, json.dumps({
+                "service": "mixadmin", "title": vals["title"],
+                "content": (vals["content"] or vals["title"]) if enabled else "维护已解除,系统恢复正常",
+                "level": "warn" if enabled else "info",
+                "color": "#F0B90B", "blink": enabled}, ensure_ascii=False))
+        except Exception as e:  # noqa: BLE001
+            results["marquee"] = repr(e)[:120]
+    await pool.execute(
+        "INSERT INTO site_notices(kind,title,content,enabled,ends_at,updated_by) "
+        "VALUES('maintenance',$1,$2,$3,$4,$5) "
+        "ON CONFLICT DO NOTHING", vals["title"], vals["content"], enabled, vals["until_at"], op["operator"])
+    await pool.execute(
+        "UPDATE site_notices SET title=$1, content=$2, enabled=$3, ends_at=$4, updated_by=$5, updated_at=now() "
+        "WHERE kind='maintenance'", vals["title"], vals["content"], enabled, vals["until_at"], op["operator"])
+    await proxy.audit(op["operator"], op["role"], "maintenance.allstop" if one_click else "maintenance.set",
+                      "维护开关", payload, str(results)[:180])
+    return {**results, "state": payload}
+
+
+@router.put("/system/maintenance")
+async def maintenance_put(body: dict, op=Depends(require_operator)):
+    pool = await _pool()
+    return await _apply_maintenance(pool, ds.rds(), body, op)
+
+
+@router.post("/system/maintenance/all-stop")
+async def maintenance_all_stop(body: dict, op=Depends(require_operator)):
+    """一键维护全停=维护开+停策略(Kill)+禁下单三档全开(禁登录按传入)。"""
+    pool = await _pool()
+    row = await _maint_row(pool)
+    merged = {**_maint_payload(row), **body,
+              "enabled": True, "stop_strategy": True, "block_trading": True}
+    return await _apply_maintenance(pool, ds.rds(), merged, op, one_click=True)
+
+
+# ---------------- 声音人设（浏览器端 TTS:speechSynthesis 按人设调参朗读,零后端算力） ----------------
+@router.get("/notify/personas")
+async def personas_list(_who=Depends(require_viewer)):
+    pool = await _pool()
+    return [dict(r) for r in await pool.fetch(
+        "SELECT id, skey, name, voice, style, rate_pct, pitch_pct, sample FROM sound_personas ORDER BY id")]
+
+
+@router.put("/notify/personas")
+async def personas_put(body: dict, op=Depends(require_operator)):
+    skey = str(body.get("skey") or "").strip()
+    if not skey:
+        raise HTTPException(400, "skey required")
+    pool = await _pool()
+    await pool.execute(
+        "INSERT INTO sound_personas(skey,name,voice,style,rate_pct,pitch_pct,sample,updated_by,updated_at) "
+        "VALUES($1,$2,$3,$4,$5,$6,$7,$8,now()) ON CONFLICT (skey) DO UPDATE SET "
+        "name=$2, voice=$3, style=$4, rate_pct=$5, pitch_pct=$6, sample=$7, updated_by=$8, updated_at=now()",
+        skey, str(body.get("name") or "")[:60], str(body.get("voice") or "zh-CN-XiaoxiaoNeural")[:80],
+        str(body.get("style") or "")[:80], int(body.get("rate_pct") or 0), int(body.get("pitch_pct") or 0),
+        str(body.get("sample") or "")[:300], op["operator"])
+    await proxy.audit(op["operator"], op["role"], "persona.put", skey, body, "saved")
+    return {"saved": True}
+
+
+@router.delete("/notify/personas/{pid}")
+async def personas_del(pid: int, op=Depends(require_operator)):
+    pool = await _pool()
+    await pool.execute("DELETE FROM sound_personas WHERE id=$1", pid)
+    return {"deleted": True}
+
+
 # ---------------- 渠道设置（飞书 webhook / 邮件配置留位;节流主体仍在 /settings/notifications） ----------------
 @router.get("/notify/channels")
 async def channels_get(_who=Depends(require_viewer)):
@@ -223,6 +367,10 @@ async def channels_put(body: dict, op=Depends(require_operator)):
     if "feishuWebhook" in body and "…" not in str(body["feishuWebhook"]):
         args.append(str(body["feishuWebhook"] or "").strip())
         sets.append(f"feishu_webhook=${len(args)}")
+    if isinstance(body.get("feishuConf"), dict):
+        fc = {k: str(body["feishuConf"].get(k, ""))[:160] for k in ("app_id", "secret", "open_id")}
+        args.append(json.dumps({k: v for k, v in fc.items() if v}))
+        sets.append(f"feishu_conf=${len(args)}::jsonb")
     if isinstance(body.get("email"), dict):
         args.append(json.dumps({k: str(body["email"].get(k, ""))[:120]
                                 for k in ("host", "port", "user", "sender", "password")}))

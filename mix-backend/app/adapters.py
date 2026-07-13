@@ -566,7 +566,9 @@ async def watermarks() -> list[dict]:
                    "feasible": True}
         out.append({"account": v.get("venue"), "venue": v.get("venue"),
                     "available": f"{eq:,.2f}", "level": round(level, 3),
-                    "threshold": threshold, "suggestion": sug})
+                    "threshold": threshold, "suggestion": sug,
+                    "deficit_usdt": round(max(0.0, tgt - eq), 2),
+                    "target_usdt": round(tgt, 2)})
     return out
 
 

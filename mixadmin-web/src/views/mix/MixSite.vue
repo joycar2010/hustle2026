@@ -6,7 +6,17 @@
         <el-form-item label="侧栏标题"><el-input v-model="b.title" placeholder="HustleCoin Mix" /></el-form-item>
         <el-form-item label="登录门大字"><el-input v-model="b.loginTitle" placeholder="HUSTLECOIN MIX" /></el-form-item>
         <el-form-item label="标语"><el-input v-model="b.slogan" placeholder="把复杂的事，交给系统；把结果，交给你" /></el-form-item>
-        <el-form-item label="LOGO URL"><el-input v-model="b.logo" placeholder="/logo-white.png（默认画板金柱版）" /></el-form-item>
+        <el-form-item label="LOGO">
+          <div class="logobox">
+            <div class="preview" @click="pickLogo">
+              <img v-if="b.logo" :src="b.logo" />
+              <span v-else>点击上传</span>
+            </div>
+            <el-button v-if="b.logo" link type="danger" size="small" @click="b.logo=''">清除</el-button>
+          </div>
+          <el-input v-model="b.logo" placeholder="/logo-white.png 或 https://…（也可点上方框上传图片）" style="margin-top:6px" />
+          <div class="hint">支持 URL 或上传图片（&lt;200KB，存配置为 data URL）；侧栏深底，建议透明底浅色图。留空=默认金标。</div>
+        </el-form-item>
         <el-form-item label="浏览器标题"><el-input v-model="b.docTitle" placeholder="HustleCoin Mix 管理后台" /></el-form-item>
         <el-form-item label="页脚文案"><el-input v-model="b.footer" placeholder="© HustleCoin Mix" /></el-form-item>
         <el-form-item label="联系方式"><el-input v-model="b.contact" placeholder="support@…（用户端页脚展示）" /></el-form-item>
@@ -32,6 +42,15 @@ import { onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { mixApi } from '../../api/mix'
 const b = ref({})
+function pickLogo() {
+  const inp = document.createElement('input'); inp.type = 'file'; inp.accept = 'image/*'
+  inp.onchange = () => {
+    const f = inp.files[0]; if (!f) return
+    if (f.size > 200 * 1024) return ElMessage.warning('图片需 < 200KB')
+    const rd = new FileReader(); rd.onload = () => { b.value.logo = rd.result }; rd.readAsDataURL(f)
+  }
+  inp.click()
+}
 async function load() { try { b.value = await mixApi.siteBrand() } catch (e) { /* 降级 */ } }
 async function save() {
   try {
@@ -49,5 +68,11 @@ onMounted(load)
 .chd { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 10px;
   b { font-size: 13px; } .sub { font-size: 10.5px; color: var(--mix-t3, #5E6673); } }
 .kv { display: flex; gap: 12px; font-size: 12px; color: var(--mix-t2, #848E9C); padding: 3px 0; b { color: var(--mix-t1, #EAECEF); font-weight: 500; } }
+.logobox { display: flex; align-items: center; gap: 10px; }
+.preview { width: 120px; height: 44px; border: 1px dashed var(--el-border-color); border-radius: 8px; background: #0B0E11;
+  display: flex; align-items: center; justify-content: center; cursor: pointer; overflow: hidden;
+  img { max-height: 36px; max-width: 108px; object-fit: contain; }
+  span { font-size: 11px; color: var(--mix-t3, #5E6673); } }
+.hint { font-size: 10.5px; color: var(--mix-t3, #5E6673); margin-top: 4px; }
 .fnote { font-size: 10.5px; color: var(--mix-t3, #5E6673); margin-top: 6px; }
 </style>

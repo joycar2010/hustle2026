@@ -19,6 +19,27 @@ GATEWAY_BASE = "http://127.0.0.1:8000"
 CMD_QUEUE = "dcm:coin:cmd"
 
 
+async def gateway_kill(op_token):
+    """全局急停代理(维护全停映射,用户已拍板):gateway 权威闸,SUPER_ADMIN 令牌透传。"""
+    import httpx
+    async with httpx.AsyncClient(timeout=10) as c:
+        resp = await c.post(f"{GATEWAY_BASE}/api/admin/kill", headers={"X-Op-Token": op_token or ""})
+        try:
+            data = resp.json()
+        except Exception:  # noqa: BLE001
+            data = {"error": resp.text[:200]}
+        return resp.status_code, data
+
+
+async def block_trading_check():
+    """维护「禁下单交易」闸:写代理入口统一拦截(coin 命令/规则写)。"""
+    from .routers.notify_center import maintenance_state
+    st = await maintenance_state()
+    if st.get("enabled") and st.get("block_trading"):
+        from fastapi import HTTPException
+        raise HTTPException(423, f"维护中已禁下单交易:{st.get('title') or '系统维护'}(通知模块→网站维护 可解除)")
+
+
 async def audit(operator: str, role: str, action: str, target: str, payload: dict, result: str):
     """写审计（失败只记日志，不阻断主流程）。"""
     pool = await ds.pg()
@@ -34,6 +55,7 @@ async def audit(operator: str, role: str, action: str, target: str, payload: dic
 
 
 async def coin_cmd(action: str, params: dict, operator: str, timeout_sec: float = 8.0) -> dict:
+    await block_trading_check()
     """入队 coin 命令并等回执（bridge 白名单校验 + coin FastAPI 权威执行）。"""
     r = ds.rds()
     if r is None:
@@ -57,6 +79,7 @@ async def coin_cmd(action: str, params: dict, operator: str, timeout_sec: float 
 async def gateway_engine_config(op_token: str, key: str, val: str,
                                 confirm: Optional[str] = None) -> tuple[int, dict]:
     """代理 gateway engine_config 写（令牌透传保留操作者身份；联锁/审计在 gateway）。"""
+    await block_trading_check()
     import httpx
     body = {"engine": "dualperp", "key": key, "val": val}
     if confirm:

@@ -110,7 +110,8 @@ const totalCount = computed(() => rows.value.reduce((n, r) => n + (r.positionCou
 const warnCount = computed(() => watermarks.value.filter(w => w.threshold !== 'ok').length)
 const fmtPnl = v => (v == null ? '—' : (v >= 0 ? '+' : '') + Number(v).toFixed(2))
 const wcolor = w => w.threshold === 'withdraw' ? '#F6465D' : w.threshold === 'topup' ? '#F0B90B' : '#0ECB81'
-const wlabel = w => ({ topup: '补仓线', withdraw: '提现线' }[w.threshold] || '正常')
+const wlabel = w => w.threshold === 'ok' ? '正常'
+  : `${{ topup: '补仓线', withdraw: '提现线' }[w.threshold] || ''}·需补 ${Math.ceil(w.deficit_usdt || 0)}U`
 
 async function load() {
   loading.value = true
@@ -166,8 +167,10 @@ onUnmounted(() => { wsDisconnect && wsDisconnect(); auxTimer && clearInterval(au
 </script>
 
 <style scoped lang="scss">
-/* 满高布局: 坑位表 flex 填余量,主控台整页不出浏览器滚动条(窗口过矮时回落到 .page 内滚动) */
-.mixdash { display: flex; flex-direction: column; gap: 10px; height: 100%; }
+/* 满高布局: 坑位表 flex 填余量,主控台整页不出浏览器滚动条(窗口过矮时回落到 .page 内滚动)
+   注意:固定行必须 flex:none,否则被 flex 压缩产生遮挡(管道条被剪的回归课) */
+.mixdash { display: flex; flex-direction: column; gap: 10px; height: 100%;
+  > .pipeline, > .bar, > .botrow, > .foot { flex: none; } }
 
 .pipeline { display: flex; gap: 8px; align-items: stretch; overflow-x: auto; padding: 2px 0; }
 .pseg { position: relative; flex: 1; min-width: 104px; background: var(--mix-card, #181B21); border: 1px solid var(--mix-border, #262B33);
@@ -193,7 +196,7 @@ onUnmounted(() => { wsDisconnect && wsDisconnect(); auxTimer && clearInterval(au
 .wamt { min-width: 60px; text-align: right; }
 .wbar { flex: 1; height: 5px; background: var(--mix-border, #262B33); border-radius: 3px; overflow: hidden;
   i { display: block; height: 100%; border-radius: 3px; } }
-.wth { min-width: 44px; font-weight: 700; font-size: 10.5px; }
+.wth { min-width: 90px; text-align: right; font-weight: 700; font-size: 10.5px; }
 .prow { display: flex; gap: 8px; align-items: baseline; padding: 3px 0; }
 .pipe-mini { display: flex; gap: 8px; flex-wrap: wrap; font-size: 10.5px; color: var(--mix-t2, #848E9C);
   i { font-style: normal; em { font-style: normal; margin-right: 3px; } b { color: var(--mix-t1, #EAECEF); } } }

@@ -3,7 +3,7 @@
     <!-- Header -->
     <header class="hidden md:flex bg-dark-100 border-b border-border-primary px-6 py-3 items-center justify-between sticky top-0 z-40">
       <div class="flex items-center gap-3">
-        <img src="/logo.png" alt="HustleCoin Mix" class="w-8 h-8 object-contain" />
+        <img src="/logo.png?v=xau1" alt="HustleCoin Mix" class="w-8 h-8 object-contain" />
         <span class="font-semibold">HustleCoin Mix · 我的收益</span>
       </div>
       <div class="flex items-center gap-4">

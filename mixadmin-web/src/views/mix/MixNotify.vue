@@ -2,123 +2,142 @@
   <div class="mixnotify">
     <el-tabs v-model="tab" class="ntabs">
 
-      <!-- ① 渠道与节流（全局统一,dcm:notify:config 热下发） -->
-      <el-tab-pane label="渠道与节流" name="throttle">
-        <div class="cards2">
-          <div class="card">
-            <div class="hd"><b>全局节流</b><span class="sub">策略只声明事件与级别；间隔/次数/令牌桶在此统一配置（保存即热下发 dcm 全家）</span></div>
-            <el-form label-width="130" style="max-width:520px">
-              <el-form-item label="通知渠道">
-                <el-checkbox-group v-model="cfg.channels">
-                  <el-checkbox value="feishu">飞书</el-checkbox>
-                  <el-checkbox value="marquee">跑马灯</el-checkbox>
-                  <el-checkbox value="modal">大红弹框（强平级）</el-checkbox>
-                  <el-checkbox value="email">邮件</el-checkbox>
-                </el-checkbox-group>
-              </el-form-item>
-              <el-form-item label="提醒间隔 (秒)"><el-input-number v-model="cfg.intervalSec" :min="30" :step="30" /></el-form-item>
-              <el-form-item label="每小时上限 (次)"><el-input-number v-model="cfg.maxPerHour" :min="1" :max="60" /></el-form-item>
-              <el-form-item label="冷却时间 (秒)"><el-input-number v-model="cfg.cooldownSec" :min="0" :step="60" /></el-form-item>
-              <el-form-item label="令牌桶节流">
-                <div class="tb">
-                  <span>速率</span><el-input-number v-model="cfg.tokenBucket.rate" :min="0.1" :step="0.5" :precision="1" size="small" />
-                  <span>突发</span><el-input-number v-model="cfg.tokenBucket.burst" :min="1" :max="10" size="small" />
-                  <em>（rate 条/秒 · burst 突发容量；FATAL 级 300s/1 硬地板不受影响）</em>
-                </div>
-              </el-form-item>
-              <el-form-item>
-                <el-button type="warning" :loading="saving" @click="saveThrottle">保存并热下发</el-button>
-                <el-button @click="loadThrottle">还原</el-button>
-              </el-form-item>
-            </el-form>
+      <!-- ① 网站维护/全停 -->
+      <el-tab-pane label="网站维护/全停" name="maint">
+        <div class="card" style="max-width:640px">
+          <div class="banner" :class="mt.enabled?'warn':'ok'">
+            {{ mt.enabled ? '⚠ 维护中（用户端已置顶维护公告）' : '✓ 系统正常运行中' }}
           </div>
-          <div class="card">
-            <div class="hd"><b>渠道接入</b><span class="sub">飞书=群机器人 webhook；邮件=SMTP 配置留位（未接线前不假发送）</span></div>
-            <el-form label-width="130" style="max-width:520px">
-              <el-form-item label="飞书 Webhook">
-                <el-input v-model="ch.feishuWebhook" placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/…" />
-              </el-form-item>
-              <el-form-item label="SMTP 主机"><el-input v-model="ch.email.host" placeholder="留位,暂不发送" /></el-form-item>
-              <el-form-item label="SMTP 端口"><el-input v-model="ch.email.port" style="max-width:140px" /></el-form-item>
-              <el-form-item label="发件账号"><el-input v-model="ch.email.user" /></el-form-item>
-              <el-form-item label="发件人显示"><el-input v-model="ch.email.sender" /></el-form-item>
-              <el-form-item>
-                <el-button type="warning" @click="saveChannels">保存渠道</el-button>
-                <el-tag v-if="ch.feishuConfigured" type="success" effect="plain" size="small" style="margin-left:8px">飞书已配置</el-tag>
-              </el-form-item>
-            </el-form>
-            <div class="note">
-              <b>分级策略</b>
-              <p>FATAL（强平/裸空/借币服务异常）：绕过常规节流（300s/1 硬地板），飞书 + 大红弹框即时；WARN：受令牌桶节流，飞书 + 跑马灯；INFO：仅跑马灯 + 告警时间线落库。告警条目统一带策略徽章（S1–S6）。</p>
-            </div>
-          </div>
+          <el-form label-width="130">
+            <el-form-item label="维护总开关">
+              <el-switch v-model="mt.enabled" active-text="维护中" inactive-text="正常运行" inline-prompt />
+            </el-form-item>
+            <el-form-item label="停自动策略">
+              <el-switch v-model="mt.stop_strategy" :disabled="!mt.enabled" />
+              <span class="tip">开启维护时执行 gateway Kill Switch（全组合置 shadow + 清白名单，停新开；存量仓位需手动路由 off 平仓）</span>
+            </el-form-item>
+            <el-form-item label="禁下单交易">
+              <el-switch v-model="mt.block_trading" :disabled="!mt.enabled" />
+              <span class="tip">拦截开仓/平仓/补腿/规则写（返回维护中提示 423）</span>
+            </el-form-item>
+            <el-form-item label="禁登录(全站)">
+              <el-switch v-model="mt.block_login" :disabled="!mt.enabled" />
+              <span class="tip">非操作员挡在门外，用户端显示维护公告（操作后台不受影响）</span>
+            </el-form-item>
+            <el-form-item label="公告标题"><el-input v-model="mt.title" placeholder="系统维护中" /></el-form-item>
+            <el-form-item label="公告内容"><el-input v-model="mt.content" type="textarea" :rows="2" placeholder="例: 系统升级维护, 预计30分钟" /></el-form-item>
+            <el-form-item label="预计恢复时间">
+              <el-date-picker v-model="mt.until_at" type="datetime" placeholder="可选，到点提示自动解除" style="width:260px" />
+            </el-form-item>
+            <el-form-item>
+              <el-button type="warning" :loading="saving" @click="saveMaint">保存维护设置</el-button>
+              <el-button type="danger" @click="allStop">一键维护全停</el-button>
+            </el-form-item>
+          </el-form>
+          <div class="note">维护态存 Redis（重启不丢）；开启即向用户端跑马灯置顶维护公告 + Kill Switch。「一键维护全停」=三档全开。</div>
         </div>
       </el-tab-pane>
 
-      <!-- ② 网站维护与公告（原网站通知并入,kind 区分） -->
-      <el-tab-pane label="网站维护与公告" name="notices">
-        <div class="card">
-          <div class="hd"><b>维护 / 公告列表</b>
-            <el-button size="small" type="warning" @click="editNotice()">新建</el-button>
-          </div>
-          <el-table :data="notices" size="small">
-            <el-table-column label="类型" width="90">
-              <template #default="{row}"><el-tag :type="row.kind==='maintenance'?'danger':'warning'" size="small" effect="plain">{{ row.kind==='maintenance'?'维护':'公告' }}</el-tag></template>
-            </el-table-column>
-            <el-table-column prop="title" label="标题" min-width="160" />
-            <el-table-column prop="content" label="内容" min-width="240" show-overflow-tooltip />
-            <el-table-column label="生效" width="70">
-              <template #default="{row}"><span :class="row.enabled?'up':'dim'">{{ row.enabled?'启用':'停用' }}</span></template>
-            </el-table-column>
-            <el-table-column label="时间窗" width="200">
-              <template #default="{row}">{{ (row.starts_at||'').slice(5,16) || '—' }} ~ {{ (row.ends_at||'').slice(5,16) || '—' }}</template>
-            </el-table-column>
-            <el-table-column prop="updated_at" label="更新" width="100" />
-            <el-table-column label="操作" width="130">
-              <template #default="{row}">
-                <el-button size="small" link type="warning" @click="editNotice(row)">编辑</el-button>
-                <el-button size="small" link type="danger" @click="delNotice(row)">删除</el-button>
-              </template>
-            </el-table-column>
-          </el-table>
-          <div class="note"><p>启用的「维护」在用户端渲染全屏蒙层，「公告」渲染顶部横幅（用户端读开放端点 /site/notices/active）。</p></div>
+      <!-- ② 飞书通知 -->
+      <el-tab-pane label="飞书通知" name="feishu">
+        <div class="card" style="max-width:600px">
+          <el-alert v-if="!ch.feishuConfigured" title="未连通: 飞书 Webhook 未配置" type="warning" :closable="false" show-icon style="margin-bottom:12px" />
+          <el-form label-width="120">
+            <el-form-item label="Webhook URL">
+              <el-input v-model="ch.feishuWebhook" placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/…（留空=不改）" />
+            </el-form-item>
+            <el-form-item>
+              <el-button type="warning" @click="saveChannels">保存凭证</el-button>
+              <el-tag v-if="ch.feishuConfigured" type="success" effect="plain" size="small" style="margin-left:8px">已配置</el-tag>
+            </el-form-item>
+          </el-form>
+          <div class="note">飞书群机器人 webhook（存服务端自管，非对话 open_id 方式）。fatal 级绕常规节流（300s/1 硬地板）。</div>
         </div>
       </el-tab-pane>
 
-      <!-- ③ 通知模板 -->
+      <!-- ③ 邮件(SMTP) -->
+      <el-tab-pane label="邮件(SMTP)" name="email">
+        <div class="card" style="max-width:600px">
+          <el-alert title="邮件通道配置留位（未接 SMTP 前不真发送）" type="info" :closable="false" show-icon style="margin-bottom:12px" />
+          <el-form label-width="120">
+            <el-form-item label="SMTP 主机"><el-input v-model="ch.email.host" /></el-form-item>
+            <el-form-item label="端口"><el-input v-model="ch.email.port" style="max-width:140px" /></el-form-item>
+            <el-form-item label="发件账号"><el-input v-model="ch.email.user" /></el-form-item>
+            <el-form-item label="发件人显示"><el-input v-model="ch.email.sender" /></el-form-item>
+            <el-form-item><el-button type="warning" @click="saveChannels">保存配置</el-button></el-form-item>
+          </el-form>
+        </div>
+      </el-tab-pane>
+
+      <!-- ④ 通知模板 -->
       <el-tab-pane label="通知模板" name="templates">
         <div class="card">
-          <div class="hd"><b>模板列表</b><span class="sub">正文支持 {var} 占位；模板供手动广播与将来自动事件套用</span>
-            <el-button size="small" type="warning" @click="editTpl()">新建</el-button>
+          <div class="hd"><b>模板列表</b><span class="sub">正文支持 {var} 占位；模板供手动广播与自动事件套用</span>
+            <el-button size="small" type="warning" @click="editTpl()">+ 新增模板</el-button>
+            <el-button size="small" @click="loadTpls">刷新</el-button>
           </div>
           <el-table :data="templates" size="small">
-            <el-table-column prop="tkey" label="模板键" width="160" />
-            <el-table-column prop="title" label="标题" min-width="140" />
-            <el-table-column prop="body" label="正文" min-width="220" show-overflow-tooltip />
-            <el-table-column label="级别" width="80">
+            <el-table-column prop="tkey" label="模板键" width="150" />
+            <el-table-column prop="category" label="分类" width="90" />
+            <el-table-column prop="title" label="标题模板" min-width="130" />
+            <el-table-column label="级别" width="72">
               <template #default="{row}"><el-tag :type="{info:'info',warn:'warning',fatal:'danger'}[row.level]" size="small" effect="plain">{{ row.level }}</el-tag></template>
             </el-table-column>
-            <el-table-column label="渠道" width="140">
-              <template #default="{row}">{{ (row.channels||[]).join(' / ') }}</template>
+            <el-table-column label="渠道" width="180">
+              <template #default="{row}">
+                <el-tag v-for="c in row.channels" :key="c" size="small" effect="plain" style="margin:1px">{{ chLabel(c) }}</el-tag>
+                <el-tag v-if="row.sound_key" size="small" type="warning" effect="plain">声音·{{ personaName(row.sound_key) }}</el-tag>
+              </template>
             </el-table-column>
-            <el-table-column label="操作" width="170">
+            <el-table-column label="启用" width="60">
+              <template #default="{row}"><span :class="row.enabled?'up':'dim'">{{ row.enabled?'是':'否' }}</span></template>
+            </el-table-column>
+            <el-table-column label="操作" width="150">
               <template #default="{row}">
                 <el-button size="small" link type="warning" @click="editTpl(row)">编辑</el-button>
                 <el-button size="small" link @click="useTpl(row)">去广播</el-button>
-                <el-button size="small" link type="danger" @click="delTpl(row)">删除</el-button>
+                <el-button size="small" link type="danger" @click="delTpl(row)">删</el-button>
               </template>
             </el-table-column>
           </el-table>
         </div>
       </el-tab-pane>
 
-      <!-- ④ 手动广播 -->
-      <el-tab-pane label="手动广播" name="broadcast">
+      <!-- ⑤ 声音人设（浏览器端 TTS） -->
+      <el-tab-pane label="声音人设" name="personas">
+        <div class="card">
+          <div class="hd"><b>人设列表</b>
+            <span class="sub">声音走前端浏览器 TTS 合成（按人设 语速/音调）；用户端播报时按模板 sound_key 取对应人设朗读</span>
+            <el-button size="small" type="warning" @click="editPersona()">+ 新增人设</el-button>
+          </div>
+          <el-table :data="personas" size="small">
+            <el-table-column prop="skey" label="标识" width="120" />
+            <el-table-column prop="name" label="名称" width="90" />
+            <el-table-column prop="voice" label="嗓音" min-width="120" />
+            <el-table-column prop="style" label="人设风格" min-width="130" />
+            <el-table-column label="调参" width="120">
+              <template #default="{row}">{{ row.rate_pct>=0?'+':'' }}{{ row.rate_pct }}% / {{ row.pitch_pct>=0?'+':'' }}{{ row.pitch_pct }}Hz</template>
+            </el-table-column>
+            <el-table-column label="试听文本" min-width="200" show-overflow-tooltip>
+              <template #default="{row}"><span @click="tryTTS(row)" style="cursor:pointer;color:#F0B90B">▶ {{ row.sample }}</span></template>
+            </el-table-column>
+            <el-table-column label="操作" width="120">
+              <template #default="{row}">
+                <el-button size="small" link @click="tryTTS(row)">试听</el-button>
+                <el-button size="small" link type="warning" @click="editPersona(row)">编辑</el-button>
+                <el-button size="small" link type="danger" @click="delPersona(row)">删</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+        </div>
+      </el-tab-pane>
+
+      <!-- ⑥ 网站通知(跑马灯) 手动广播 -->
+      <el-tab-pane label="网站通知(跑马灯)" name="broadcast">
         <div class="card" style="max-width:640px">
-          <div class="hd"><b>发送通知</b><span class="sub">跑马灯即时到端（Rust hub 中继）；飞书走 webhook；全量落发送日志+审计</span></div>
           <el-form label-width="90">
             <el-form-item label="标题"><el-input v-model="bc.title" maxlength="120" /></el-form-item>
-            <el-form-item label="正文"><el-input v-model="bc.text" type="textarea" :rows="3" maxlength="2000" /></el-form-item>
+            <el-form-item label="内容"><el-input v-model="bc.text" type="textarea" :rows="3" maxlength="2000" /></el-form-item>
             <el-form-item label="级别">
               <el-radio-group v-model="bc.level" size="small">
                 <el-radio-button value="info">info</el-radio-button>
@@ -133,28 +152,31 @@
                 <el-checkbox value="email" disabled>邮件（未接线）</el-checkbox>
               </el-checkbox-group>
             </el-form-item>
+            <el-form-item label="声音人设">
+              <el-select v-model="bc.sound_key" size="small" clearable placeholder="无（静音）" style="width:200px">
+                <el-option v-for="p in personas" :key="p.skey" :label="p.name" :value="p.skey" />
+              </el-select>
+              <el-button size="small" link @click="tryBroadcastTTS" style="margin-left:8px">试听</el-button>
+            </el-form-item>
             <el-form-item>
-              <el-button type="warning" :loading="sending" @click="send">发送</el-button>
+              <el-button type="warning" :loading="sending" @click="send">立即广播到用户端跑马灯</el-button>
               <span v-if="lastResult" class="lastres">{{ lastResult }}</span>
             </el-form-item>
           </el-form>
+          <div class="note">广播即时推送到 Redis + 落发送日志；用户端 WS marquee 频道到端展示。</div>
         </div>
       </el-tab-pane>
 
-      <!-- ⑤ 发送日志 -->
+      <!-- ⑦ 发送日志 -->
       <el-tab-pane label="发送日志" name="logs">
         <div class="card">
-          <div class="hd"><b>mix 主动发送记录</b><span class="sub">dcm 服务侧告警见「运维面板/告警时间线」（alerts_log 独立账）</span>
-            <el-button size="small" @click="loadLogs">刷新</el-button>
-          </div>
+          <div class="hd"><b>mix 主动发送记录</b><el-button size="small" @click="loadLogs">刷新</el-button></div>
           <el-table :data="logs" size="small">
             <el-table-column prop="ts" label="时间" width="130" />
             <el-table-column prop="channel" label="渠道" width="80" />
             <el-table-column prop="title" label="标题" min-width="140" />
             <el-table-column prop="body" label="内容" min-width="200" show-overflow-tooltip />
-            <el-table-column label="结果" width="80">
-              <template #default="{row}"><span :class="row.ok?'up':'down'">{{ row.ok?'成功':'失败' }}</span></template>
-            </el-table-column>
+            <el-table-column label="结果" width="70"><template #default="{row}"><span :class="row.ok?'up':'down'">{{ row.ok?'成功':'失败' }}</span></template></el-table-column>
             <el-table-column prop="detail" label="详情" min-width="140" show-overflow-tooltip />
             <el-table-column prop="operator" label="操作者" width="100" />
           </el-table>
@@ -162,53 +184,57 @@
       </el-tab-pane>
     </el-tabs>
 
-    <!-- 公告编辑弹窗 -->
-    <el-dialog v-model="noticeDlg" :title="nf.id?'编辑公告/维护':'新建公告/维护'" width="520">
+    <!-- 模板编辑 -->
+    <el-dialog v-model="tplDlg" :title="tf.id?'编辑模板':'新增模板'" width="540">
       <el-form label-width="80">
-        <el-form-item label="类型">
-          <el-radio-group v-model="nf.kind">
-            <el-radio-button value="notice">公告</el-radio-button>
-            <el-radio-button value="maintenance">维护</el-radio-button>
-          </el-radio-group>
+        <el-form-item label="模板键"><el-input v-model="tf.tkey" :disabled="!!tf.id" placeholder="如 singleleg_alert" /></el-form-item>
+        <el-form-item label="分类">
+          <el-select v-model="tf.category" style="width:160px">
+            <el-option v-for="c in ['system','risk','trade','marketing']" :key="c" :value="c" :label="c" />
+          </el-select>
         </el-form-item>
-        <el-form-item label="标题"><el-input v-model="nf.title" maxlength="200" /></el-form-item>
-        <el-form-item label="内容"><el-input v-model="nf.content" type="textarea" :rows="4" maxlength="4000" /></el-form-item>
-        <el-form-item label="时间窗">
-          <el-date-picker v-model="nf.window" type="datetimerange" range-separator="~" start-placeholder="开始(可空)" end-placeholder="结束(可空)" size="small" />
-        </el-form-item>
-        <el-form-item label="启用"><el-switch v-model="nf.enabled" /></el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="noticeDlg=false">取消</el-button>
-        <el-button type="warning" @click="saveNotice">保存</el-button>
-      </template>
-    </el-dialog>
-
-    <!-- 模板编辑弹窗 -->
-    <el-dialog v-model="tplDlg" :title="tf.id?'编辑模板':'新建模板'" width="520">
-      <el-form label-width="80">
-        <el-form-item label="模板键"><el-input v-model="tf.tkey" :disabled="!!tf.id" placeholder="如 maintenance_notice" /></el-form-item>
-        <el-form-item label="标题"><el-input v-model="tf.title" maxlength="200" /></el-form-item>
-        <el-form-item label="正文"><el-input v-model="tf.body" type="textarea" :rows="4" maxlength="4000" /></el-form-item>
+        <el-form-item label="标题"><el-input v-model="tf.title" /></el-form-item>
+        <el-form-item label="正文"><el-input v-model="tf.body" type="textarea" :rows="3" /></el-form-item>
         <el-form-item label="级别">
           <el-radio-group v-model="tf.level" size="small">
-            <el-radio-button value="info">info</el-radio-button>
-            <el-radio-button value="warn">warn</el-radio-button>
-            <el-radio-button value="fatal">fatal</el-radio-button>
+            <el-radio-button value="info">info</el-radio-button><el-radio-button value="warn">warn</el-radio-button><el-radio-button value="fatal">fatal</el-radio-button>
           </el-radio-group>
         </el-form-item>
         <el-form-item label="渠道">
           <el-checkbox-group v-model="tf.channels">
-            <el-checkbox value="marquee">跑马灯</el-checkbox>
-            <el-checkbox value="feishu">飞书</el-checkbox>
-            <el-checkbox value="email">邮件</el-checkbox>
+            <el-checkbox value="marquee">跑马灯</el-checkbox><el-checkbox value="feishu">飞书</el-checkbox><el-checkbox value="email">邮件</el-checkbox>
           </el-checkbox-group>
         </el-form-item>
+        <el-form-item label="声音人设">
+          <el-select v-model="tf.sound_key" clearable placeholder="无" style="width:180px">
+            <el-option v-for="p in personas" :key="p.skey" :label="p.name" :value="p.skey" />
+          </el-select>
+        </el-form-item>
       </el-form>
-      <template #footer>
-        <el-button @click="tplDlg=false">取消</el-button>
-        <el-button type="warning" @click="saveTpl">保存</el-button>
-      </template>
+      <template #footer><el-button @click="tplDlg=false">取消</el-button><el-button type="warning" @click="saveTpl">保存</el-button></template>
+    </el-dialog>
+
+    <!-- 人设编辑 -->
+    <el-dialog v-model="personaDlg" :title="pf.id?'编辑人设':'新增人设'" width="520">
+      <el-form label-width="90">
+        <el-form-item label="标识"><el-input v-model="pf.skey" :disabled="!!pf.id" placeholder="如 sweet" /></el-form-item>
+        <el-form-item label="名称"><el-input v-model="pf.name" placeholder="甜妹 / 御姐" /></el-form-item>
+        <el-form-item label="嗓音">
+          <el-select v-model="pf.voice" style="width:260px">
+            <el-option v-for="v in voices" :key="v" :value="v" :label="v" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="人设风格"><el-input v-model="pf.style" placeholder="甜美/元气 · 系统营销" /></el-form-item>
+        <el-form-item label="语速">
+          <el-slider v-model="pf.rate_pct" :min="-50" :max="50" style="width:220px" /><span class="tip">{{ pf.rate_pct }}%</span>
+        </el-form-item>
+        <el-form-item label="音调">
+          <el-slider v-model="pf.pitch_pct" :min="-50" :max="50" style="width:220px" /><span class="tip">{{ pf.pitch_pct }}Hz</span>
+        </el-form-item>
+        <el-form-item label="试听文本"><el-input v-model="pf.sample" type="textarea" :rows="2" /></el-form-item>
+        <el-form-item><el-button size="small" @click="tryTTS(pf)">▶ 试听当前设置</el-button></el-form-item>
+      </el-form>
+      <template #footer><el-button @click="personaDlg=false">取消</el-button><el-button type="warning" @click="savePersona">保存</el-button></template>
     </el-dialog>
   </div>
 </template>
@@ -218,108 +244,97 @@ import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { mixApi } from '../../api/mix'
 
-const tab = ref('throttle')
-const cfg = ref({ channels: [], intervalSec: 300, maxPerHour: 6, cooldownSec: 600, tokenBucket: { rate: 1, burst: 3 } })
+const tab = ref('maint')
+const saving = ref(false), sending = ref(false), lastResult = ref('')
+const mt = reactive({ enabled: false, stop_strategy: true, block_trading: true, block_login: false, title: '系统维护中', content: '', until_at: null })
 const ch = ref({ feishuWebhook: '', feishuConfigured: false, email: { host: '', port: '', user: '', sender: '' } })
-const saving = ref(false)
-const notices = ref([])
-const templates = ref([])
-const logs = ref([])
-const sending = ref(false)
-const lastResult = ref('')
-const bc = reactive({ title: '', text: '', level: 'info', channels: ['marquee'] })
-const noticeDlg = ref(false)
-const nf = reactive({ id: null, kind: 'notice', title: '', content: '', enabled: false, window: null })
+const templates = ref([]), personas = ref([]), logs = ref([])
+const bc = reactive({ title: '', text: '', level: 'info', channels: ['marquee'], sound_key: '' })
 const tplDlg = ref(false)
-const tf = reactive({ id: null, tkey: '', title: '', body: '', level: 'info', channels: ['marquee'] })
+const tf = reactive({ id: null, tkey: '', category: 'system', title: '', body: '', level: 'info', channels: ['marquee'], sound_key: '' })
+const personaDlg = ref(false)
+const pf = reactive({ id: null, skey: '', name: '', voice: 'zh-CN-XiaoxiaoNeural', style: '', rate_pct: 0, pitch_pct: 0, sample: '' })
+const voices = ['zh-CN-XiaoxiaoNeural', 'zh-CN-XiaoyiNeural', 'zh-CN-YunxiNeural', 'zh-CN-YunyangNeural', 'zh-CN-XiaohanNeural']
+const chLabel = c => ({ marquee: '跑马灯', feishu: '飞书', email: '邮件' }[c] || c)
+const personaName = k => personas.value.find(p => p.skey === k)?.name || k
 
-async function loadThrottle() {
-  try {
-    const r = await mixApi.notifyGet()
-    cfg.value = { ...cfg.value, ...r, tokenBucket: { ...cfg.value.tokenBucket, ...(r.tokenBucket || {}) } }
-  } catch (e) { ElMessage.error(e?.error || '读取失败') }
-}
-async function saveThrottle() {
+async function loadMaint() { try { Object.assign(mt, await mixApi.maintenanceGet()) } catch (e) { /* 降级 */ } }
+async function saveMaint() {
   saving.value = true
-  try {
-    const r = await mixApi.notifySave(cfg.value)
-    ElMessage.success(`已保存（${r?.note || '全局生效'}）`)
-  } catch (e) { ElMessage.error(e?.detail || e?.error || '保存失败') }
-  finally { saving.value = false }
+  try { const r = await mixApi.maintenancePut({ ...mt }); ElMessage.success('维护设置已保存' + (r.kill_switch ? '（Kill Switch 已触发）' : '')) }
+  catch (e) { ElMessage.error(e?.detail || e?.error || '保存失败') } finally { saving.value = false }
 }
-async function loadChannels() { try { ch.value = { ...ch.value, ...(await mixApi.channelsGet()) } } catch (e) { /* 降级 */ } }
+async function allStop() {
+  await ElMessageBox.confirm('一键维护全停=开启维护 + Kill Switch 停全部自动策略 + 禁下单。确认？', '危险操作', { type: 'warning' })
+  const r = await mixApi.maintenanceAllStop({ block_login: mt.block_login, title: mt.title, content: mt.content })
+  Object.assign(mt, r.state || {}); mt.enabled = true
+  ElMessage.warning('已一键全停：' + (r.kill_switch?.message || 'Kill Switch 已执行'))
+}
+async function loadChannels() { try { ch.value = { ...ch.value, ...(await mixApi.channelsGet()) } } catch (e) { /* */ } }
 async function saveChannels() {
-  try { await mixApi.channelsPut({ feishuWebhook: ch.value.feishuWebhook, email: ch.value.email }); ElMessage.success('渠道已保存'); loadChannels() }
-  catch (e) { ElMessage.error(e?.detail || e?.error || '保存失败') }
-}
-async function loadNotices() { try { notices.value = await mixApi.notices() } catch (e) { notices.value = [] } }
-function editNotice(row) {
-  Object.assign(nf, row
-    ? { id: row.id, kind: row.kind, title: row.title, content: row.content, enabled: row.enabled,
-        window: (row.starts_at || row.ends_at) ? [row.starts_at, row.ends_at] : null }
-    : { id: null, kind: 'notice', title: '', content: '', enabled: false, window: null })
-  noticeDlg.value = true
-}
-async function saveNotice() {
-  try {
-    await mixApi.noticePut({ id: nf.id, kind: nf.kind, title: nf.title, content: nf.content, enabled: nf.enabled,
-      starts_at: nf.window?.[0] ? new Date(nf.window[0]).toISOString() : null,
-      ends_at: nf.window?.[1] ? new Date(nf.window[1]).toISOString() : null })
-    ElMessage.success('已保存'); noticeDlg.value = false; loadNotices()
-  } catch (e) { ElMessage.error(e?.detail || e?.error || '保存失败') }
-}
-async function delNotice(row) {
-  await ElMessageBox.confirm(`删除「${row.title}」？`, '删除', { type: 'warning' })
-  await mixApi.noticeDel(row.id); ElMessage.success('已删除'); loadNotices()
+  try { await mixApi.channelsPut({ feishuWebhook: ch.value.feishuWebhook, email: ch.value.email }); ElMessage.success('已保存'); loadChannels() }
+  catch (e) { ElMessage.error(e?.detail || '保存失败') }
 }
 async function loadTpls() { try { templates.value = await mixApi.templates() } catch (e) { templates.value = [] } }
 function editTpl(row) {
-  Object.assign(tf, row
-    ? { id: row.id, tkey: row.tkey, title: row.title, body: row.body, level: row.level, channels: [...(row.channels || [])] }
-    : { id: null, tkey: '', title: '', body: '', level: 'info', channels: ['marquee'] })
+  Object.assign(tf, row ? { id: row.id, tkey: row.tkey, category: row.category || 'system', title: row.title, body: row.body, level: row.level, channels: [...(row.channels || [])], sound_key: row.sound_key || '' }
+    : { id: null, tkey: '', category: 'system', title: '', body: '', level: 'info', channels: ['marquee'], sound_key: '' })
   tplDlg.value = true
 }
 async function saveTpl() {
   if (!tf.tkey) return ElMessage.warning('模板键必填')
   try { await mixApi.templatePut({ ...tf }); ElMessage.success('已保存'); tplDlg.value = false; loadTpls() }
-  catch (e) { ElMessage.error(e?.detail || e?.error || '保存失败') }
+  catch (e) { ElMessage.error(e?.detail || '保存失败') }
 }
-async function delTpl(row) {
-  await ElMessageBox.confirm(`删除模板 ${row.tkey}？`, '删除', { type: 'warning' })
-  await mixApi.templateDel(row.id); ElMessage.success('已删除'); loadTpls()
+async function delTpl(row) { await ElMessageBox.confirm(`删除模板 ${row.tkey}？`, '删除', { type: 'warning' }); await mixApi.templateDel(row.id); loadTpls() }
+function useTpl(row) { Object.assign(bc, { title: row.title, text: row.body, level: row.level, channels: (row.channels || ['marquee']).filter(c => c !== 'email'), sound_key: row.sound_key || '' }); tab.value = 'broadcast' }
+
+async function loadPersonas() { try { personas.value = await mixApi.personas() } catch (e) { personas.value = [] } }
+function editPersona(row) {
+  Object.assign(pf, row ? { ...row } : { id: null, skey: '', name: '', voice: 'zh-CN-XiaoxiaoNeural', style: '', rate_pct: 0, pitch_pct: 0, sample: '' })
+  personaDlg.value = true
 }
-function useTpl(row) {
-  Object.assign(bc, { title: row.title, text: row.body, level: row.level, channels: (row.channels || ['marquee']).filter(c => c !== 'email') })
-  tab.value = 'broadcast'
+async function savePersona() {
+  if (!pf.skey) return ElMessage.warning('标识必填')
+  try { await mixApi.personaPut({ ...pf }); ElMessage.success('已保存'); personaDlg.value = false; loadPersonas() }
+  catch (e) { ElMessage.error(e?.detail || '保存失败') }
 }
+async function delPersona(row) { await ElMessageBox.confirm(`删除人设 ${row.name}？`, '删除', { type: 'warning' }); await mixApi.personaDel(row.id); loadPersonas() }
+// 浏览器 speechSynthesis 按人设调参朗读
+function speak(text, rate_pct, pitch_pct) {
+  if (!window.speechSynthesis) return ElMessage.warning('浏览器不支持语音合成')
+  const u = new SpeechSynthesisUtterance(text || '测试语音')
+  u.lang = 'zh-CN'; u.rate = 1 + (rate_pct || 0) / 100; u.pitch = 1 + (pitch_pct || 0) / 100
+  window.speechSynthesis.cancel(); window.speechSynthesis.speak(u)
+}
+function tryTTS(p) { speak(p.sample || '亲，这是一条测试播报', p.rate_pct, p.pitch_pct) }
+function tryBroadcastTTS() { const p = personas.value.find(x => x.skey === bc.sound_key); speak(bc.text || bc.title || '测试', p?.rate_pct, p?.pitch_pct) }
+
 async function loadLogs() { try { logs.value = await mixApi.notifyLogs() } catch (e) { logs.value = [] } }
 async function send() {
-  if (!bc.text) return ElMessage.warning('正文必填')
+  if (!bc.text) return ElMessage.warning('内容必填')
   sending.value = true
   try {
     const r = await mixApi.notifyBroadcast({ ...bc })
     lastResult.value = Object.entries(r.results || {}).map(([k, v]) => `${k}:${v}`).join('  ')
-    ElMessage.success('已发送'); loadLogs()
-  } catch (e) { ElMessage.error(e?.detail || e?.error || '发送失败') }
-  finally { sending.value = false }
+    if (bc.sound_key) tryBroadcastTTS()
+    ElMessage.success('已广播'); loadLogs()
+  } catch (e) { ElMessage.error(e?.detail || '发送失败') } finally { sending.value = false }
 }
-onMounted(() => { loadThrottle(); loadChannels(); loadNotices(); loadTpls(); loadLogs() })
+onMounted(() => { loadMaint(); loadChannels(); loadTpls(); loadPersonas(); loadLogs() })
 </script>
 
 <style scoped lang="scss">
 .mixnotify { display: flex; flex-direction: column; gap: 12px; }
-.cards2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 12px; align-items: start; }
 .card { border: 1px solid var(--el-border-color); border-radius: 10px; padding: 14px 16px; background: var(--mix-card, #181B21);
   .hd { display: flex; gap: 10px; align-items: baseline; margin-bottom: 12px;
     b { font-size: 13px; } .sub { flex: 1; color: var(--el-text-color-secondary); font-size: 11px; } } }
-.note { font-size: 12px; color: var(--el-text-color-regular); margin-top: 10px;
-  p { margin: 6px 0 0; color: var(--el-text-color-secondary); } }
-.tb { display: flex; gap: 8px; align-items: center; font-size: 12px;
-  em { font-style: normal; color: var(--el-text-color-placeholder); font-size: 11px; } }
-.up { color: #0ECB81; font-weight: 700; }
-.down { color: #F6465D; font-weight: 700; }
-.dim { color: var(--el-text-color-placeholder); }
+.banner { padding: 8px 12px; border-radius: 8px; font-size: 13px; font-weight: 600; margin-bottom: 14px;
+  &.ok { background: rgba(14,203,129,.12); color: #0ECB81; } &.warn { background: rgba(240,185,11,.14); color: #F0B90B; } }
+.tip { margin-left: 10px; font-size: 11px; color: var(--el-text-color-placeholder); }
+.note { font-size: 11px; color: var(--el-text-color-secondary); margin-top: 10px; }
 .lastres { margin-left: 10px; font-size: 11px; color: var(--el-text-color-secondary); }
+.up { color: #0ECB81; font-weight: 700; } .down { color: #F6465D; font-weight: 700; } .dim { color: var(--el-text-color-placeholder); }
 .ntabs :deep(.el-tabs__item) { color: var(--el-text-color-secondary); font-weight: 600; }
 .ntabs :deep(.el-tabs__item.is-active) { color: #F0B90B; }
 .ntabs :deep(.el-tabs__active-bar) { background: #F0B90B; }
