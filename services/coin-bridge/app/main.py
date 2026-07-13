@@ -58,6 +58,9 @@ CMD_WHITELIST = {
     "push_symbol": ("POST", "/api/engine/push-symbol/{symbol}", {}),
     # S3 规则写(coin 权威:schema 校验+审计+30s 热重载在 coin 侧原样生效;body=params 透传)
     "rules_update": ("PUT", "/api/global-rules/", {}),
+    # 单一规则(某币的 SymbolRule 基线,coin schema 权威):读+写
+    "symbol_rule_get": ("GET", "/api/symbol-rules/{symbol}", {}),
+    "symbol_rule_put": ("PUT", "/api/symbol-rules/{symbol}", {}),
 }
 # S3 面板快照发布周期(dcm:coin:panel);原料=coin 引擎自己维护的缓存键+blacklist API,
 # 绝不直打交易所 REST(IP 权重预算课)
@@ -97,7 +100,8 @@ def _exec_command(cmd: dict) -> dict:
         if not re.fullmatch(r"[A-Z0-9]{1,20}", sym):
             return {"ok": False, "err": "symbol 非法"}
         path = path.replace("{symbol}", sym)
-        body = {}
+        # 路径含 symbol 时,body 仍取 params 剩余键(单一规则 PUT 需带字段);symbol 自身不入 body
+        body = {**base_body, **{k: v for k, v in params.items() if k != "symbol"}}
     else:
         body = {**base_body, **params}
     if action.startswith("manual_"):
