@@ -44,6 +44,117 @@ async def site_brand_put(body: dict, admin=Depends(require_admin)):
     return {"saved": True, "brand": allowed}
 
 
+# ================= I1 合约矩阵(V4.0 §7.1)=================
+# 公开 exchangeInfo(无需 key)拉合约规格入库。首批 Binance(USDT-M linear + COIN-M inverse,
+# 含永续/交割);其余 venue 增量补。永续 deliveryDate 哨兵 4133404800000 → expiry=NULL。
+_PERP_SENTINEL_MS = 4133404800000  # 币安永续 deliveryDate 占位(≈2100年)
+
+
+def _bn_filters(sym: dict):
+    fl = {f.get("filterType"): f for f in sym.get("filters", [])}
+    tick = fl.get("PRICE_FILTER", {}).get("tickSize")
+    step = fl.get("LOT_SIZE", {}).get("minQty")
+    return (float(tick) if tick else None), (float(step) if step else None)
+
+
+def _bn_expiry(sym: dict):
+    dd = sym.get("deliveryDate")
+    if not dd or int(dd) >= _PERP_SENTINEL_MS:
+        return None
+    import datetime as _dt
+    return _dt.datetime.fromtimestamp(int(dd) / 1000, _dt.timezone.utc)
+
+
+async def _populate_binance_instruments(pool) -> dict:
+    import httpx
+    rows = []
+    async with httpx.AsyncClient(timeout=20) as cli:
+        # USDT-M(linear):PERPETUAL + 交割 CURRENT_QUARTER/NEXT_QUARTER
+        fapi = (await cli.get("https://fapi.binance.com/fapi/v1/exchangeInfo")).json()
+        for s in fapi.get("symbols", []):
+            ct = s.get("contractType") or ""
+            if not ct or s.get("status") != "TRADING":
+                continue
+            tick, minq = _bn_filters(s)
+            mt = "perp" if "PERPETUAL" in ct else "future"
+            rows.append(("binance", s["symbol"], s.get("baseAsset", ""), mt, "linear", 1,
+                         s.get("quoteAsset", ""), s.get("marginAsset", ""), s.get("marginAsset", ""),
+                         ct, _bn_expiry(s), minq, tick, s.get("status", "")))
+        # COIN-M(inverse):contractSize=乘数,marginAsset=币本位
+        dapi = (await cli.get("https://dapi.binance.com/dapi/v1/exchangeInfo")).json()
+        for s in dapi.get("symbols", []):
+            ct = s.get("contractType") or ""
+            if not ct or s.get("contractStatus", s.get("status")) != "TRADING":
+                continue
+            tick, minq = _bn_filters(s)
+            mt = "perp" if "PERPETUAL" in ct else "future"
+            rows.append(("binance", s["symbol"], s.get("baseAsset", ""), mt, "inverse",
+                         float(s.get("contractSize") or 1), s.get("quoteAsset", ""),
+                         s.get("marginAsset", ""), s.get("marginAsset", ""),
+                         ct, _bn_expiry(s), minq, tick, s.get("contractStatus", s.get("status", ""))))
+    n = 0
+    for r in rows:
+        await pool.execute(
+            "INSERT INTO instrument_spec(venue,instrument_id,canonical_underlying,market_type,"
+            "linear_or_inverse,contract_multiplier,quote_asset,settlement_asset,collateral_asset,"
+            "contract_type,expiry,min_qty,tick_size,status,updated_at) "
+            "VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,now()) "
+            "ON CONFLICT (venue,instrument_id) DO UPDATE SET canonical_underlying=$3,market_type=$4,"
+            "linear_or_inverse=$5,contract_multiplier=$6,quote_asset=$7,settlement_asset=$8,"
+            "collateral_asset=$9,contract_type=$10,expiry=$11,min_qty=$12,tick_size=$13,status=$14,updated_at=now()",
+            *r)
+        n += 1
+    return {"venue": "binance", "upserted": n}
+
+
+@router.post("/system/instruments/refresh")
+async def instruments_refresh(body: dict, op=Depends(require_operator)):
+    """拉取 exchangeInfo 刷新合约矩阵。venue 默认 binance(首批);其余增量补。"""
+    pool = await ds.pg_main()
+    if pool is None:
+        raise HTTPException(503, "mix_main 未配置")
+    venue = str(body.get("venue") or "binance")
+    if venue != "binance":
+        raise HTTPException(400, f"venue {venue} 采集器尚未实现(首批仅 binance)")
+    try:
+        res = await _populate_binance_instruments(pool)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(502, f"exchangeInfo 拉取失败:{e!r}"[:200])
+    await proxy.audit(op["operator"], op["role"], "instruments.refresh", venue, res, "ok")
+    return {"ok": True, **res}
+
+
+@router.get("/meta/instruments")
+async def meta_instruments(venue: str = "", underlying: str = "", market_type: str = "",
+                           _who=Depends(require_viewer)):
+    """合约矩阵查询。可按 venue/underlying/market_type 过滤;futures 带 expiry。"""
+    pool = await ds.pg_main()
+    if pool is None:
+        return {"instruments": [], "count": 0}
+    conds, args = [], []
+    for col, val in (("venue", venue), ("canonical_underlying", underlying), ("market_type", market_type)):
+        if val:
+            args.append(val)
+            conds.append(f"{col}=${len(args)}")
+    where = (" WHERE " + " AND ".join(conds)) if conds else ""
+    try:
+        rows = await pool.fetch(
+            "SELECT venue,instrument_id,canonical_underlying,market_type,linear_or_inverse,"
+            "contract_multiplier,quote_asset,settlement_asset,collateral_asset,contract_type,"
+            "expiry,min_qty,tick_size,status FROM instrument_spec" + where +
+            " ORDER BY canonical_underlying, market_type, expiry NULLS FIRST LIMIT 2000", *args)
+    except Exception:  # noqa: BLE001
+        return {"instruments": [], "count": 0}
+    out = []
+    for r in rows:
+        d = dict(r)
+        for k in ("contract_multiplier", "min_qty", "tick_size"):
+            d[k] = float(d[k]) if d[k] is not None else None
+        d["expiry"] = d["expiry"].isoformat() if d["expiry"] else None
+        out.append(d)
+    return {"instruments": out, "count": len(out)}
+
+
 # ================= catalog v2 产品目录(V4.0 §3,读) =================
 @router.get("/meta/products")
 async def meta_products(_who=Depends(require_viewer)):
