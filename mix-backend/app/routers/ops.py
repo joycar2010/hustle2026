@@ -74,14 +74,207 @@ async def registry_put(body: dict, op=Depends(require_operator)):
     return {"saved": True}
 
 
-# ---------------- LLM 状态（dcm llm-advisor 只读真状态） ----------------
+# ---------------- LLM 状态 + 中转站管理 + 每日消费（testauto /infra 模式移植） ----------------
+# 权威=mix_main.llm_relays;生效链路=Redis dcm:llm:config(llm-advisor 每轮热读,主备自动降级);
+# 熔断态=dcm:llm:breaker(advisor 维护,手动恢复=DEL);用量账=dcm_main.llm_usage_log(0013,mix_ro 读)。
+
+_LLM_HEALTH_KEYS = ("primary_model", "primary_relay", "fallback_model", "circuit_open",
+                    "open_until", "recent_failures", "failure_threshold",
+                    "consecutive_trips", "current_cooldown_s", "relay", "degraded")
+
+
 @router.get("/system/llm")
 async def llm_status(_who=Depends(require_viewer)):
     d = await ds.get_json("dcm:advisor:llm") or {}
     return {"status": d.get("status", "未配置"), "model": d.get("model"),
             "latency_ms": d.get("latency_ms"), "ts": d.get("ts"),
             "usage": d.get("usage"), "commentary": (d.get("commentary") or "")[:2000],
-            "note": "评审层只读只建议(治理:schema硬校验+越界丢弃);key/模型改 C 机 llm-advisor env 后重启生效"}
+            **{k: d.get(k) for k in _LLM_HEALTH_KEYS},
+            "note": "评审层只读只建议(schema硬校验+越界丢弃);模型/中转站在下方管理区热改,advisor 每轮(15min)生效"}
+
+
+def _mask_key(k: str) -> str:
+    k = str(k or "")
+    return (k[:6] + "***" + k[-4:]) if len(k) > 12 else ("***" if k else "")
+
+
+async def _publish_llm_config(pool):
+    """发布全量中转站配置到总线(含明文 key——总线仅内网;UI 响应永远掩码)。"""
+    r = ds.rds()
+    rows = await pool.fetch("SELECT * FROM llm_relays ORDER BY (role!='primary'), id")
+    relays = [{"id": x["id"], "name": x["name"], "base_url": x["base_url"],
+               "api_key": x["api_key"], "model": x["model"], "role": x["role"],
+               "enabled": x["enabled"]} for x in rows]
+    import time as _t
+    await r.set("dcm:llm:config", json.dumps({"ts": int(_t.time()), "relays": relays},
+                                             ensure_ascii=False))
+    return len(relays)
+
+
+def _relay_row(x) -> dict:
+    fetched = json.loads(x["available_models"]) if x["available_models"] else []
+    custom = json.loads(x["custom_models"]) if x["custom_models"] else []
+    return {"id": x["id"], "name": x["name"], "base_url": x["base_url"],
+            "api_key_masked": _mask_key(x["api_key"]), "model": x["model"],
+            "role": x["role"], "enabled": x["enabled"],
+            # 可选列表 = 中转站 /models 拉取 ∪ 手动加入(未上架模型占位,刷新永不丢)
+            "available_models": sorted(set(fetched) | set(custom)),
+            "custom_models": custom,
+            "price_in_per_m": float(x["price_in_per_m"]), "price_out_per_m": float(x["price_out_per_m"]),
+            "note": x["note"]}
+
+
+@router.get("/system/llm/relays")
+async def llm_relays(_who=Depends(require_viewer)):
+    pool = await ds.pg_main()
+    if pool is None:
+        return {"items": []}
+    rows = await pool.fetch("SELECT * FROM llm_relays ORDER BY (role!='primary'), id")
+    return {"items": [_relay_row(x) for x in rows]}
+
+
+@router.post("/system/llm/relays", status_code=201)
+async def llm_relay_add(body: dict, op=Depends(require_operator)):
+    pool = await ds.pg_main()
+    name = str(body.get("name") or "").strip()
+    base = str(body.get("base_url") or "").strip().rstrip("/")
+    key = str(body.get("api_key") or "").strip()
+    model = str(body.get("model") or "").strip()
+    if not (name and base and key and model):
+        raise HTTPException(400, "name/base_url/api_key/model 必填")
+    row = await pool.fetchrow(
+        "INSERT INTO llm_relays(name,base_url,api_key,model,role,enabled) "
+        "VALUES($1,$2,$3,$4,'backup',TRUE) RETURNING *", name, base, key, model)
+    n = await _publish_llm_config(pool)
+    await proxy.audit(op["operator"], op["role"], "llm.relay.add", name,
+                      {"base_url": base, "model": model}, f"published {n}")
+    return {"ok": True, "item": _relay_row(row)}
+
+
+@router.put("/system/llm/relays/{rid}")
+async def llm_relay_put(rid: int, body: dict, op=Depends(require_operator)):
+    pool = await ds.pg_main()
+    cur = await pool.fetchrow("SELECT * FROM llm_relays WHERE id=$1", rid)
+    if not cur:
+        raise HTTPException(404, "中转站不存在")
+    key = str(body.get("api_key") or "").strip() or cur["api_key"]   # 空=保留原 key
+    custom = body.get("custom_models")
+    if not isinstance(custom, list):
+        custom = json.loads(cur["custom_models"]) if cur["custom_models"] else []
+    custom = sorted({str(m).strip() for m in custom if str(m).strip()})[:40]
+    await pool.execute(
+        "UPDATE llm_relays SET name=$2, base_url=$3, api_key=$4, model=$5, "
+        "price_in_per_m=$6, price_out_per_m=$7, note=$8, custom_models=$9, updated_at=now() WHERE id=$1",
+        rid, str(body.get("name") or cur["name"]),
+        str(body.get("base_url") or cur["base_url"]).rstrip("/"), key,
+        str(body.get("model") or cur["model"]),
+        float(body.get("price_in_per_m") if body.get("price_in_per_m") is not None else cur["price_in_per_m"]),
+        float(body.get("price_out_per_m") if body.get("price_out_per_m") is not None else cur["price_out_per_m"]),
+        str(body.get("note") if body.get("note") is not None else cur["note"]),
+        json.dumps(custom))
+    n = await _publish_llm_config(pool)
+    await proxy.audit(op["operator"], op["role"], "llm.relay.save", cur["name"],
+                      {"model": body.get("model")}, f"published {n}")
+    return {"ok": True}
+
+
+@router.delete("/system/llm/relays/{rid}")
+async def llm_relay_del(rid: int, op=Depends(require_operator)):
+    pool = await ds.pg_main()
+    cur = await pool.fetchrow("DELETE FROM llm_relays WHERE id=$1 RETURNING name", rid)
+    if not cur:
+        raise HTTPException(404, "中转站不存在")
+    n = await _publish_llm_config(pool)
+    await proxy.audit(op["operator"], op["role"], "llm.relay.del", cur["name"], {}, f"published {n}")
+    return {"ok": True}
+
+
+@router.post("/system/llm/relays/{rid}/set-role")
+async def llm_relay_role(rid: int, body: dict, op=Depends(require_operator)):
+    """设主站:其余全部降备(主站唯一)。"""
+    pool = await ds.pg_main()
+    if str(body.get("role")) != "primary":
+        raise HTTPException(400, "只支持 role=primary(备用=默认态)")
+    async with pool.acquire() as c, c.transaction():
+        await c.execute("UPDATE llm_relays SET role='backup', updated_at=now() WHERE role='primary'")
+        got = await c.execute("UPDATE llm_relays SET role='primary', enabled=TRUE, updated_at=now() WHERE id=$1", rid)
+        if got.endswith("0"):
+            raise HTTPException(404, "中转站不存在")
+    n = await _publish_llm_config(pool)
+    await proxy.audit(op["operator"], op["role"], "llm.relay.primary", str(rid), {}, f"published {n}")
+    return {"ok": True}
+
+
+@router.post("/system/llm/relays/{rid}/toggle")
+async def llm_relay_toggle(rid: int, body: dict, op=Depends(require_operator)):
+    pool = await ds.pg_main()
+    await pool.execute("UPDATE llm_relays SET enabled=$2, updated_at=now() WHERE id=$1",
+                       rid, bool(body.get("enabled")))
+    n = await _publish_llm_config(pool)
+    await proxy.audit(op["operator"], op["role"], "llm.relay.toggle", str(rid),
+                      {"enabled": bool(body.get("enabled"))}, f"published {n}")
+    return {"ok": True}
+
+
+@router.post("/system/llm/relays/{rid}/refresh-models")
+async def llm_relay_models(rid: int, op=Depends(require_operator)):
+    """真调该站 /models 刷新可选模型列表(openai 兼容)。"""
+    import httpx
+    pool = await ds.pg_main()
+    cur = await pool.fetchrow("SELECT * FROM llm_relays WHERE id=$1", rid)
+    if not cur:
+        raise HTTPException(404, "中转站不存在")
+    resp = None
+    try:
+        async with httpx.AsyncClient(timeout=15) as cli:
+            resp = await cli.get(f"{cur['base_url']}/models",
+                                 headers={"Authorization": f"Bearer {cur['api_key']}"})
+        models = sorted({str(m.get("id")) for m in (resp.json().get("data") or []) if m.get("id")})
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": f"{e!r}"[:200]}
+    if not models:
+        return {"ok": False, "error": f"http {resp.status_code}: {resp.text[:150]}"}
+    await pool.execute("UPDATE llm_relays SET available_models=$2, updated_at=now() WHERE id=$1",
+                       rid, json.dumps(models))
+    custom = json.loads(cur["custom_models"]) if cur["custom_models"] else []
+    return {"ok": True, "count": len(models),
+            "available_models": sorted(set(models) | set(custom))}
+
+
+@router.post("/system/llm/circuit-reset")
+async def llm_circuit_reset(op=Depends(require_operator)):
+    """手动恢复熔断(advisor 下轮照常调用)。"""
+    r = ds.rds()
+    await r.delete("dcm:llm:breaker")
+    await proxy.audit(op["operator"], op["role"], "llm.circuit.reset", "dcm:llm:breaker", {}, "ok")
+    return {"ok": True}
+
+
+@router.get("/system/llm/usage-daily")
+async def llm_usage_daily(days: int = 14, _who=Depends(require_viewer)):
+    """每日消费明细(dcm_main.llm_usage_log 真账):逐日 调用/tokens/延迟/失败 + 按中转站单价折算成本。"""
+    days = max(1, min(days, 90))
+    pool = await ds.pg_main()
+    prices = {}
+    if pool is not None:
+        for x in await pool.fetch("SELECT name, price_in_per_m, price_out_per_m FROM llm_relays"):
+            prices[x["name"]] = (float(x["price_in_per_m"]), float(x["price_out_per_m"]))
+    rows = await ds.fetch(
+        "SELECT ts::date d, relay, model, count(*) calls, count(*) FILTER (WHERE NOT ok) fails, "
+        "sum(tokens_in) tin, sum(tokens_out) tout, avg(latency_ms)::int lat "
+        "FROM llm_usage_log WHERE ts > now() - ($1 || ' days')::interval "
+        "GROUP BY 1,2,3 ORDER BY 1 DESC, 4 DESC", str(days))
+    out = []
+    for x in rows:
+        pin, pout = prices.get(x["relay"], (0.5, 1.5))
+        tin, tout = int(x["tin"] or 0), int(x["tout"] or 0)
+        out.append({"date": str(x["d"]), "relay": x["relay"], "model": x["model"],
+                    "calls": int(x["calls"]), "fails": int(x["fails"]),
+                    "tokens_in": tin, "tokens_out": tout,
+                    "avg_latency_ms": int(x["lat"] or 0),
+                    "cost_usd": round(tin / 1e6 * pin + tout / 1e6 * pout, 4)})
+    return {"days": days, "rows": out,
+            "note": "成本=tokens×中转站单价(默认in $0.5/M,out $1.5/M,可在中转站条目改)"}
 
 
 @router.get("/system/llm/history")
