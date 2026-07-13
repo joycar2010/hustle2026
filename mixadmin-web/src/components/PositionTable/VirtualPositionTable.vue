@@ -241,7 +241,7 @@ function stateStyle(s: SubRowState): { bg: string; fg: string } {
                 ↳ <i class="kind" :class="it.sub.accountKind">{{ it.sub.accountKind === 'master' ? '主' : '子' }}</i>
                 {{ it.sub.executingAccount }}
               </span>
-              <span class="sbadge dimb">{{ it.sub.venue }}</span>
+              <span class="sbadge venue-badge" :class="'v-'+it.sub.venue">{{ it.sub.venue }}</span>
               <span class="phase"></span>
               <span v-for="(v, vi) in it.sub.values" :key="vi" class="cell val"
                     :style="{ color: v.dim ? '#5E6673' : tone(v.tone, STRATEGY_META[it.row.strategyCode].color) }">{{ v.value }}</span>
@@ -318,9 +318,18 @@ $t1: #EAECEF; $t2: #848E9C; $t3: #5E6673; $gold: #F0B90B;
     &.sub { background: rgba(132,142,156,.15); color: $t2; } } }
 .sbadge { width: 44px; text-align: center; padding: 1px 0; border-radius: 4px; font-size: 9px; font-weight: 800;
   &.dimb { background: $card2; color: $t3; font-weight: 500; } }
+/* 交易所配色（专业量化惯例:各所固定色,一眼分辨腿归属） */
+.venue-badge { font-weight: 700;
+  &.v-binance { background: rgba(240,185,11,.18); color: #F0B90B; }
+  &.v-bybit { background: rgba(255,159,67,.18); color: #FF9F43; }
+  &.v-okx { background: rgba(74,156,255,.18); color: #4A9CFF; }
+  &.v-gate { background: rgba(167,139,250,.18); color: #A78BFA; }
+  &.v-bitget { background: rgba(45,212,191,.18); color: #2DD4BF; }
+  &.v-hyperliquid { background: rgba(244,114,182,.18); color: #F472B6; } }
+/* 列头提亮（$t3 太暗看不清 → $t2 更亮 + 加粗） */
 .phase { width: 92px; flex: none; color: $t2; font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cell { flex: 1; min-width: 62px; text-align: right; white-space: nowrap; overflow: hidden;
-  &.lbl { color: $t3; font-size: 10px; font-weight: 500; }
+  &.lbl { color: $t2; font-size: 10px; font-weight: 600; }
   &.val { font-size: 11.5px; font-weight: 600; } }
 /* 右侧信息区: 弹性宽(min~max)+逐项 nowrap,长条目(费差 venue)不再把列挤成竖条 */
 .params { flex: 1 1 230px; min-width: 170px; max-width: 320px; display: inline-flex; gap: 9px;

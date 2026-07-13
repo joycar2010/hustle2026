@@ -38,20 +38,35 @@
         </div>
       </el-tab-pane>
 
-      <!-- ② 飞书通知 -->
+      <!-- ② 飞书通知（自建应用 App ID/Secret + 群机器人 Webhook 双通道） -->
       <el-tab-pane label="飞书通知" name="feishu">
-        <div class="card" style="max-width:600px">
-          <el-alert v-if="!ch.feishuConfigured" title="未连通: 飞书 Webhook 未配置" type="warning" :closable="false" show-icon style="margin-bottom:12px" />
-          <el-form label-width="120">
-            <el-form-item label="Webhook URL">
-              <el-input v-model="ch.feishuWebhook" placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/…（留空=不改）" />
-            </el-form-item>
-            <el-form-item>
-              <el-button type="warning" @click="saveChannels">保存凭证</el-button>
-              <el-tag v-if="ch.feishuConfigured" type="success" effect="plain" size="small" style="margin-left:8px">已配置</el-tag>
-            </el-form-item>
-          </el-form>
-          <div class="note">飞书群机器人 webhook（存服务端自管，非对话 open_id 方式）。fatal 级绕常规节流（300s/1 硬地板）。</div>
+        <div class="cards2">
+          <div class="card">
+            <div class="hd"><b>飞书自建应用凭证</b><span class="sub">用于手机号查 open_id、卡片推送（DexCexMix 自建应用）</span></div>
+            <el-alert v-if="!ch.feishuAppConfigured" title="未连通: 飞书 App ID 未配置" type="warning" :closable="false" show-icon style="margin-bottom:12px" />
+            <el-alert v-else :title="`已连通：${ch.feishuAppId}`" type="success" :closable="false" show-icon style="margin-bottom:12px" />
+            <el-form label-width="110">
+              <el-form-item label="App ID"><el-input v-model="feishuApp.app_id" :placeholder="ch.feishuAppId || 'cli_ 开头'" /></el-form-item>
+              <el-form-item label="App Secret"><el-input v-model="feishuApp.secret" type="password" show-password placeholder="留空=不改" autocomplete="new-password" /></el-form-item>
+              <el-form-item label="接收 Open ID"><el-input v-model="feishuApp.open_id" :placeholder="ch.feishuOpenId || 'ou_ 开头'" /></el-form-item>
+              <el-form-item>
+                <el-button type="warning" @click="saveFeishuApp">保存凭证</el-button>
+                <el-input v-model="testPhone" size="small" style="width:180px;margin-left:8px" placeholder="手机号(含国家码)测试">
+                  <template #append><el-button @click="testLookup">获取ID</el-button></template>
+                </el-input>
+              </el-form-item>
+            </el-form>
+            <div class="note">获取路径：飞书开放平台 → 应用 → 凭证与基础信息 → App ID / App Secret。存服务端 feishu_conf（600 权限同源）。</div>
+          </div>
+          <div class="card">
+            <div class="hd"><b>群机器人 Webhook</b><span class="sub">备用推送通道</span></div>
+            <el-alert v-if="!ch.feishuConfigured" title="未配置 Webhook（选填）" type="info" :closable="false" show-icon style="margin-bottom:12px" />
+            <el-form label-width="90">
+              <el-form-item label="Webhook"><el-input v-model="ch.feishuWebhook" placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/…" /></el-form-item>
+              <el-form-item><el-button type="warning" @click="saveChannels">保存 Webhook</el-button></el-form-item>
+            </el-form>
+            <div class="note">fatal 级绕常规节流（300s/1 硬地板）。</div>
+          </div>
         </div>
       </el-tab-pane>
 
@@ -247,7 +262,18 @@ import { mixApi } from '../../api/mix'
 const tab = ref('maint')
 const saving = ref(false), sending = ref(false), lastResult = ref('')
 const mt = reactive({ enabled: false, stop_strategy: true, block_trading: true, block_login: false, title: '系统维护中', content: '', until_at: null })
-const ch = ref({ feishuWebhook: '', feishuConfigured: false, email: { host: '', port: '', user: '', sender: '' } })
+const ch = ref({ feishuWebhook: '', feishuConfigured: false, feishuAppId: '', feishuAppConfigured: false, feishuOpenId: '', email: { host: '', port: '', user: '', sender: '' } })
+const feishuApp = ref({ app_id: '', secret: '', open_id: '' })
+const testPhone = ref('')
+async function saveFeishuApp() {
+  try { await mixApi.channelsPut({ feishuConf: { ...feishuApp.value } }); ElMessage.success('飞书应用凭证已保存'); feishuApp.value.secret = ''; loadChannels() }
+  catch (e) { ElMessage.error(e?.detail || '保存失败') }
+}
+async function testLookup() {
+  if (!testPhone.value) return ElMessage.warning('填手机号(含国家码)')
+  try { const r = await mixApi.feishuLookup(testPhone.value); ElMessage.success('查到 open_id: ' + (r.open_id || '').slice(0, 14) + '…') }
+  catch (e) { ElMessage.error(e?.detail || '查询失败(手机号需在飞书通讯录)') }
+}
 const templates = ref([]), personas = ref([]), logs = ref([])
 const bc = reactive({ title: '', text: '', level: 'info', channels: ['marquee'], sound_key: '' })
 const tplDlg = ref(false)

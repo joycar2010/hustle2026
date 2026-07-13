@@ -348,14 +348,23 @@ async def personas_del(pid: int, op=Depends(require_operator)):
 # ---------------- 渠道设置（飞书 webhook / 邮件配置留位;节流主体仍在 /settings/notifications） ----------------
 @router.get("/notify/channels")
 async def channels_get(_who=Depends(require_viewer)):
+    import os
     pool = await _pool()
-    row = await pool.fetchrow("SELECT feishu_webhook, email_conf FROM notify_settings WHERE id=1")
+    row = await pool.fetchrow("SELECT feishu_webhook, email_conf, feishu_conf FROM notify_settings WHERE id=1")
     email = row["email_conf"] if row else {}
     if isinstance(email, str):
         email = json.loads(email or "{}")
+    fconf = row["feishu_conf"] if row else {}
+    if isinstance(fconf, str):
+        fconf = json.loads(fconf or "{}")
     hook = (row["feishu_webhook"] if row else "") or ""
+    # App ID：库配置优先，回落 DexCexMix 自建应用 env（已在岗，手机号→open_id 用它）
+    app_id = fconf.get("app_id") or os.environ.get("DCM_FEISHU_APP_ID", "")
     return {"feishuWebhook": (hook[:38] + "…" + hook[-6:]) if len(hook) > 50 else hook,
             "feishuConfigured": bool(hook),
+            "feishuAppId": app_id,
+            "feishuAppConfigured": bool(app_id),
+            "feishuOpenId": fconf.get("open_id") or os.environ.get("DCM_FEISHU_OPEN_ID", ""),
             "email": {k: email.get(k, "") for k in ("host", "port", "user", "sender")},
             "emailNote": "邮件通道未接 SMTP,保存仅留位"}
 
