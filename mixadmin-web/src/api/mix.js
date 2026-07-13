@@ -77,6 +77,9 @@ export const mixApi = {
   channelsPut: (b) => http.put('/notify/channels', b),
   llmHistory: () => http.get('/system/llm/history'),
   datasources: () => http.get('/meta/datasources'),
+  feishuGet: () => http.get('/me/feishu'),
+  feishuBind: (b) => http.post('/me/feishu', b),
+  feishuLookup: (phone) => http.get('/me/feishu/lookup', { params: { phone } }),
   // 通知模块扩展
   maintenanceGet: () => http.get('/system/maintenance'),
   maintenancePut: (b) => http.put('/system/maintenance', b),

@@ -20,7 +20,9 @@
         <span class="chip" :class="{on:!filterStrategy}" @click="setStrategy('')">全部 {{ totalCount }}</span>
         <span v-for="s in strategies" :key="s.code" class="chip"
               :class="{on:filterStrategy===s.code}"
-              :style="filterStrategy===s.code?{background:META[s.code].colorBg,color:META[s.code].color,borderColor:META[s.code].color}:{}"
+              :style="filterStrategy===s.code
+                ? {background:META[s.code].color,color:'#0B0E11',borderColor:META[s.code].color}
+                : {background:META[s.code].colorBg,color:META[s.code].color,borderColor:META[s.code].color+'66'}"
               @click="setStrategy(s.code)">
           {{ s.code }}·{{ s.name }}
         </span>
@@ -47,17 +49,13 @@
         <div v-for="s in strategies" :key="s.code" class="srow">
           <span class="sbadge" :style="{background: SC[s.code]}" @click="$router.push('/mix/strategy/'+s.code)">{{ s.code }}</span>
           <span class="snm" @click="$router.push('/mix/strategy/'+s.code)">{{ s.name }}</span>
-          <span class="skpi">{{ s.slots }} 仓</span>
+          <span class="skpi sl">{{ s.slots }} 仓</span>
           <span class="skpi">{{ (s.notional||0).toLocaleString() }}U</span>
-          <b class="skpi" :class="(s.pnlTotal||0) >= 0 ? 'up' : 'down'">{{ (s.pnlTotal||0).toFixed(2) }}</b>
-          <!-- 模式切换（S2 可网页热切,armed 需 ARM 确认；其余只读标注） -->
-          <span class="smode" @click.stop>
-            <el-radio-group v-if="s.modeSwitchable" :model-value="s.mode" size="small" @change="switchMode(s, $event)">
-              <el-radio-button value="shadow">影子</el-radio-button>
-              <el-radio-button value="armed">武装</el-radio-button>
-            </el-radio-group>
-            <i v-else class="mtag" :class="s.mode">{{ modeLabel(s.mode) }}</i>
-          </span>
+          <b class="skpi pf" :class="(s.pnlTotal||0) >= 0 ? 'up' : 'down'">{{ (s.pnlTotal||0).toFixed(2) }}</b>
+          <!-- 模式：紧凑标签,S2 可点切换(armed 需 ARM 确认);其余只读 -->
+          <i class="mtag" :class="[s.mode, {clickable: s.modeSwitchable}]"
+             :title="s.modeSwitchable ? '点击切换 影子/武装' : '引擎 env 控制,不可网页热切'"
+             @click.stop="s.modeSwitchable && switchMode(s, s.mode==='armed' ? 'shadow' : 'armed')">{{ modeLabel(s.mode) }}</i>
         </div>
       </div>
 
@@ -210,14 +208,14 @@ onUnmounted(() => { wsDisconnect && wsDisconnect(); auxTimer && clearInterval(au
 .chd { font-size: 12.5px; font-weight: 700; color: var(--mix-t1, #EAECEF); margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; }
 .srow { display: flex; align-items: center; gap: 8px; font-size: 11.5px; padding: 3px 0; color: var(--mix-t2, #848E9C);
   &:hover { color: var(--mix-t1, #EAECEF); } }
-.snm { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
-.smode { display: inline-flex; align-items: center;
-  :deep(.el-radio-button__inner) { padding: 2px 7px; font-size: 10px; }
-  .mtag { font-style: normal; font-size: 9.5px; padding: 1px 6px; border-radius: 4px; font-weight: 700;
-    &.armed { background: rgba(246,70,93,.15); color: #F6465D; }
-    &.shadow { background: rgba(74,156,255,.15); color: #4A9CFF; }
-    color: var(--mix-t3, #5E6673); background: var(--mix-fill, rgba(94,102,115,.15)); } }
-.skpi { min-width: 52px; text-align: right; }
+.snm { flex: 1; min-width: 60px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+.mtag { flex: none; width: 44px; text-align: center; font-style: normal; font-size: 9.5px; padding: 2px 0; border-radius: 4px; font-weight: 700;
+  background: rgba(94,102,115,.15); color: var(--mix-t3, #5E6673);
+  &.armed { background: rgba(246,70,93,.15); color: #F6465D; }
+  &.shadow { background: rgba(74,156,255,.15); color: #4A9CFF; }
+  &.clickable { cursor: pointer; &:hover { filter: brightness(1.3); } } }
+.skpi { flex: none; text-align: right; font-variant-numeric: tabular-nums;
+  &.sl { width: 44px; } width: 58px; &.pf { width: 62px; font-weight: 700; } }
 .sbadge { min-width: 24px; text-align: center; font-size: 9.5px; font-weight: 800; color: #0B0E11; border-radius: 3px; padding: 1px 4px; }
 .sdot2 { width: 7px; height: 7px; border-radius: 50%; background: var(--mix-green, #0ECB81); &.off { background: var(--mix-t3, #5E6673); } }
 .wrow { display: flex; align-items: center; gap: 8px; font-size: 11.5px; padding: 3px 0; color: var(--mix-t2, #848E9C); }

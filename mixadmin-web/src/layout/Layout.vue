@@ -49,32 +49,54 @@
         <el-button size="small" class="wall-btn" @click="openWall('risk')">屏3·风控墙</el-button>
         <el-popover trigger="click" width="320" :teleported="false" popper-class="op-panel-pop" @show="loadPanelHealth">
           <template #reference>
-            <span class="op-chip"><el-icon><Avatar/></el-icon>{{op.operator||'超级管理员'}} ({{op.role||'super'}})<el-icon><ArrowDown/></el-icon></span>
+            <span class="op-chip"><el-icon><Avatar/></el-icon>{{op.operator||'超级管理员'}}（{{roleCn(op.role)}}）<el-icon><ArrowDown/></el-icon></span>
           </template>
-          <!-- 用户面板(testgo 用户面板模式,适配三轨令牌) -->
+          <!-- 用户面板(testgo 用户面板模式,适配三轨令牌;中文人性化) -->
           <div class="op-panel">
             <div class="opp-hd">
               <div class="opp-avatar"><el-icon><Avatar/></el-icon></div>
               <div class="opp-id">
                 <b>{{ op.operator || '未登录' }}</b>
-                <span class="opp-role">{{ op.role || '—' }} · {{ tokenKind }}</span>
+                <span class="opp-role">{{ roleCn(op.role) }} · {{ tokenKindCn }}</span>
               </div>
             </div>
             <div class="opp-sec">身份</div>
-            <div class="opp-kv"><span>权限</span><b>{{ op.perms==='*' ? '全部模块' : (op.perms||'—') }}</b></div>
-            <div class="opp-kv"><span>令牌轨道</span><b>{{ tokenKind }}</b></div>
+            <div class="opp-kv"><span>角色等级</span><b>{{ roleCn(op.role) }}</b></div>
+            <div class="opp-kv"><span>可见权限</span><b>{{ op.perms==='*' ? '全部模块' : (op.perms||'—') }}</b></div>
+            <div class="opp-kv"><span>登录方式</span><b>{{ tokenKindCn }}</b></div>
             <div class="opp-sec">系统状态</div>
             <div class="opp-kv"><span>数据源</span>
               <b :class="panelHealth.degraded ? 'warn' : 'ok'">{{ panelHealth.degraded ? '降级(部分不可用)' : '正常' }}</b></div>
             <div class="opp-kv"><span>总线服务</span><b>{{ panelHealth.bus_services_seen ?? '—' }} 个心跳在线</b></div>
             <div class="opp-kv"><span>通知通道</span><b :class="wsOn?'ok':'warn'">{{ wsOn ? 'WS 已连' : '待命/重连中' }}</b></div>
+            <div class="opp-sec">飞书通知</div>
+            <div class="opp-kv"><span>绑定状态</span>
+              <b :class="feishu.open_id?'ok':'warn'">{{ feishu.open_id ? '已绑定' : '未绑定' }}</b></div>
             <div class="opp-acts">
-              <el-button size="small" @click="$router.push('/system')">运维面板</el-button>
+              <el-button size="small" @click="openFeishu">飞书设置</el-button>
               <el-button size="small" @click="refreshIdentity">刷新身份</el-button>
               <el-button size="small" type="danger" plain @click="opLogout">退出 / 更换</el-button>
             </div>
           </div>
         </el-popover>
+        <!-- 飞书通知绑定(自助;不含改令牌/改账号——账号治理在操作员管理,权限门控) -->
+        <el-dialog v-model="feishuDlg" title="飞书通知设置" width="440" :teleported="true">
+          <el-form label-width="110">
+            <el-form-item label="飞书 Open ID"><el-input v-model="feishuForm.open_id" placeholder="ou_ 开头，接收通知优先级最高" /></el-form-item>
+            <el-form-item label="飞书手机号">
+              <el-input v-model="feishuForm.phone" placeholder="含国家码，如 +86199…">
+                <template #append><el-button :loading="feishuLooking" @click="lookupFeishu">获取ID</el-button></template>
+              </el-input>
+            </el-form-item>
+            <el-form-item label="飞书 Union ID"><el-input v-model="feishuForm.union_id" placeholder="跨应用唯一标识（可选）" /></el-form-item>
+            <el-form-item label="启用飞书通知"><el-switch v-model="feishuForm.enabled" /></el-form-item>
+          </el-form>
+          <div style="font-size:11px;color:#5E6673;padding:0 8px">仅绑定个人飞书接收通道；账号/令牌治理在「操作员管理」，此处不可改。</div>
+          <template #footer>
+            <el-button @click="feishuDlg=false">取消</el-button>
+            <el-button type="warning" @click="saveFeishu">保存</el-button>
+          </template>
+        </el-dialog>
         <span class="dotok"></span><span class="tb-clock">{{ clock }}</span>
       </div>
       <div class="tabs-bar">
@@ -222,6 +244,32 @@ const tokenKind = computed(()=>{
 const panelHealth = ref({})
 async function loadPanelHealth(){ try{ panelHealth.value = await mixApi.datasources() }catch(e){ panelHealth.value={degraded:true} } }
 async function refreshIdentity(){ await restoreOp(); ElMessage.success('身份已刷新: '+(op.value.operator||'未登录')) }
+// 角色中文人性化
+const ROLE_CN = { SUPER_ADMIN:'超级管理员', OPERATOR:'操作员', VIEWER:'只读', USER:'用户', owner:'所有者', admin:'管理员', user:'用户' }
+function roleCn(r){ return ROLE_CN[r] || r || '超级管理员' }
+const tokenKindCn = computed(()=>{ const k=tokenKind.value; return ({'用户 JWT':'用户账号登录','operator 令牌':'操作员令牌','只读令牌':'只读令牌','未登录':'未登录'})[k] || k })
+// 飞书自助绑定(个人接收通道;不含账号/令牌治理)
+const feishu = ref((()=>{ try{ return JSON.parse(localStorage.getItem('mix_feishu')||'{}') }catch(e){ return {} } })())
+const feishuDlg = ref(false), feishuLooking = ref(false)
+const feishuForm = ref({ open_id:'', phone:'', union_id:'', enabled:true })
+function openFeishu(){ feishuForm.value = { ...feishu.value }; feishuDlg.value = true }
+async function lookupFeishu(){
+  if(!feishuForm.value.phone) return ElMessage.warning('请填手机号(含国家码)')
+  feishuLooking.value = true
+  try{ const r = await mixApi.feishuLookup(feishuForm.value.phone)
+    if(r.open_id) feishuForm.value.open_id = r.open_id
+    if(r.union_id) feishuForm.value.union_id = r.union_id
+    ElMessage.success('已获取飞书ID') }
+  catch(e){ ElMessage.error(e?.detail || e?.error || '获取失败(手机号需在飞书通讯录)') }
+  finally{ feishuLooking.value = false }
+}
+async function saveFeishu(){
+  try{ await mixApi.feishuBind({ ...feishuForm.value })
+    feishu.value = { ...feishuForm.value }
+    localStorage.setItem('mix_feishu', JSON.stringify(feishu.value))
+    ElMessage.success('飞书通知设置已保存'); feishuDlg.value = false }
+  catch(e){ ElMessage.error(e?.detail || e?.error || '保存失败') }
+}
 // 全局跑马灯（Layout 自持一条 WS,所有页面可见;emoji 属消息文本,显示层剥离改用色点分级）
 const marqueeText=ref(''), wsOn=ref(false)
 const EMOJI_RE=/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}\u{200D}]/gu
