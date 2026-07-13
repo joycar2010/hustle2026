@@ -52,6 +52,15 @@ async def o1_evaluate(body: dict, _who=Depends(require_viewer)):
     return await o1.evaluate(body.get("legs") or [])
 
 
+@router.post("/system/execution/shadow-sync")
+async def execution_shadow_sync(op=Depends(require_operator)):
+    """手动触发一次影随采纳(读真实持仓→shadow owner/intent/saga+对账)。"""
+    from .. import kernel_shadow
+    res = await kernel_shadow.shadow_sync()
+    await proxy.audit(op["operator"], op["role"], "execution.shadow_sync", "-", {}, str(res)[:120])
+    return res
+
+
 @router.get("/system/execution/state")
 async def execution_state(_who=Depends(require_viewer)):
     """执行内核 shadow 态概览(供最终 UI):owner/intent/saga 计数 + 模板映射。表未迁移=空。"""

@@ -43,6 +43,8 @@ from . import ws as _ws  # noqa: E402
 async def _start_frames_publisher():
     asyncio.get_event_loop().create_task(_ws.position_frames_publisher())
     asyncio.get_event_loop().create_task(history.history_sync_loop())  # 交易历史落 mix 库(300s)
+    from . import kernel_shadow  # noqa: E402
+    asyncio.get_event_loop().create_task(kernel_shadow.kernel_shadow_loop())  # 执行内核影随(120s,shadow)
 
 
 @app.get(f"{API}/health")
