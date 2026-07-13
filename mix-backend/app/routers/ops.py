@@ -44,6 +44,26 @@ async def site_brand_put(body: dict, admin=Depends(require_admin)):
     return {"saved": True, "brand": allowed}
 
 
+# ================= catalog v2 产品目录(V4.0 §3,读) =================
+@router.get("/meta/products")
+async def meta_products(_who=Depends(require_viewer)):
+    """产品/能力目录:C1-C6/O1/I1/R1/D1-D4 + 旧 S 码 alias。前端策略标签/规则中心可消费。
+    表未迁移=空(前端回落旧 STRATEGY_META,老行为不变)。"""
+    pool = await ds.pg_main()
+    if pool is None:
+        return {"products": [], "by_scode": {}}
+    try:
+        rows = await pool.fetch(
+            "SELECT product_id, name, kind, parent_id, economic_structure, stage, priority, "
+            "book_eligibility, deploy_domain, alias_scode, note, sort_order "
+            "FROM product_catalog ORDER BY sort_order, product_id")
+    except Exception:  # noqa: BLE001  (表未迁移)
+        return {"products": [], "by_scode": {}}
+    prods = [dict(r) for r in rows]
+    by_scode = {r["alias_scode"]: r["product_id"] for r in prods if r["alias_scode"]}
+    return {"products": prods, "by_scode": by_scode}
+
+
 # ================= 投资份额账本 / NAV 管道(V4.0 §11-12,操作员侧) =================
 # CORE_POOL NAV 权威源 = risk-ledger 的 reconciled 跨所权益(实盘对账后的真值)。
 # 纪律:share_event append-only(表层已无 UPDATE/DELETE 权);NAV 快照不覆盖;发行份额须
