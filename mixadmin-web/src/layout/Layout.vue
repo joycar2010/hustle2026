@@ -131,8 +131,13 @@
       </div>
       <!-- 运维助手对话 -->
       <div v-show="aiTab==='chat'" class="ai-body" ref="aiBodyEl">
-        <div v-if="!aiMsgs.length" class="ai-empty">您好！我是 HustleCoin Mix 运维助手，可解答管理后台功能用法与系统监控口径。</div>
+        <div v-if="!aiMsgs.length" class="ai-empty">您好！我是 HustleCoin Mix 运维助手，可解答管理后台功能用法与系统监控口径。支持超长文本粘贴、多轮上下文（Shift+Enter 换行，Enter 发送）。</div>
         <div v-for="(m,i) in aiMsgs" :key="m.id||i" :class="'ab '+m.who">{{m.txt}}<span class="ai-del" @click="aiDel(m.id)" title="删除">×</span></div>
+        <!-- 思考状态 + 进度（LLM 中转站有时较慢,让用户看到在动而非卡死） -->
+        <div v-if="aiBusy" class="ab ai thinking">
+          <span class="tk-dots"><i></i><i></i><i></i></span>
+          <span class="tk-txt">{{ aiThinkTxt }}<em v-if="aiElapsed>0"> · 已等待 {{ aiElapsed }}s</em></span>
+        </div>
       </div>
       <!-- AI 顾问播报（分域顾问最新发言） -->
       <div v-show="aiTab==='adv'" class="ai-body adv">
@@ -149,7 +154,9 @@
         <div class="adv-foot">播报每 30s 刷新 · {{ advDnd ? '免打扰已开(不自动弹屏)' : '有新发言自动弹屏' }}</div>
       </div>
       <div v-show="aiTab==='chat'" class="ai-foot">
-        <el-input v-model="aiIn" size="small" placeholder="问运维/功能用法…" @keyup.enter="aiSend" autocomplete="off"/>
+        <el-input v-model="aiIn" type="textarea" :autosize="{minRows:1,maxRows:6}" resize="none"
+                  placeholder="问运维/功能用法…（Shift+Enter 换行，Enter 发送，支持超长粘贴）"
+                  @keydown.enter="onAiKey" autocomplete="off"/>
         <el-button size="small" type="primary" :loading="aiBusy" @click="aiSend">发送</el-button>
       </div>
     </div>
@@ -307,6 +314,8 @@ function startMarquee(){
 // AI 运维助手悬浮球(site=qhadmin, 接 qh 后端 LLM; 未配置则后端回退; localStorage 保存/删除/清空对齐 qh)
 import { nextTick } from 'vue'
 const aiOpen=ref(false),aiIn=ref(''),aiBusy=ref(false),aiConvId=ref(null),aiBodyEl=ref(null)
+const aiElapsed=ref(0),aiThinkTxt=ref('思考中…')
+let aiTimer=null
 const aiMsgs=ref((()=>{ try{ return JSON.parse(localStorage.getItem('qha_history')||'[]') }catch(e){ return [] } })())
 try{ aiConvId.value=localStorage.getItem('qha_conv_id')||null }catch(e){}
 function aiSave(){ try{ localStorage.setItem('qha_history', JSON.stringify(aiMsgs.value.slice(-200))); if(aiConvId.value)localStorage.setItem('qha_conv_id',aiConvId.value) }catch(e){} }
@@ -333,17 +342,27 @@ async function loadAdvisors(){
 }
 function aiDel(id){ aiMsgs.value=aiMsgs.value.filter(m=>m.id!==id); aiSave() }
 function aiClear(){ if(!aiMsgs.value.length)return; if(!confirm('确定清空所有对话记录？此操作不可撤销。'))return; aiMsgs.value=[]; aiConvId.value=null; try{localStorage.removeItem('qha_conv_id')}catch(e){}; aiSave() }
+// Enter 发送 / Shift+Enter 换行（textarea 支持超长多行输入）
+function onAiKey(e){ if(e.shiftKey)return; e.preventDefault(); aiSend() }
 async function aiSend(){
+  if(aiBusy.value)return
   const t=(aiIn.value||'').trim(); if(!t)return; aiIn.value=''; aiMsgs.value.push({id:aiId(),who:'me',txt:t}); aiSave(); aiBusy.value=true
+  // 思考进度:计时 + 分阶段文案(让超长请求的长等待可感知,不像卡死)
+  aiElapsed.value=0; aiThinkTxt.value='思考中…'
+  aiTimer=setInterval(()=>{ aiElapsed.value++; if(aiElapsed.value===8)aiThinkTxt.value='正在读取实时系统快照并推理…'; else if(aiElapsed.value===25)aiThinkTxt.value='内容较长,正在生成回答（可能需要 1-2 分钟）…'; else if(aiElapsed.value===70)aiThinkTxt.value='仍在等待中转站响应,若超时会自动切备用站…' },1000)
   await nextTick(()=>{ if(aiBodyEl.value)aiBodyEl.value.scrollTop=aiBodyEl.value.scrollHeight })
   try{
-    // 走 mix 后端 /ai/chat(新 LLM 中转站链路:主备自动降级+用量落账+实时系统上下文)
+    // 走 mix 后端 /ai/chat(新 LLM 中转站链路:主备自动降级+用量落账+实时系统上下文;conversation_id 携带多轮上下文)
     const r=await mixApi.aiChat({conversation_id:aiConvId.value,message:t})
     if(r.conversation_id)aiConvId.value=r.conversation_id
     const tail=r.model?`\n—— ${r.model}${r.degraded?'(备用站)':''}`:''
     aiMsgs.value.push({id:aiId(),who:'ai',txt:(r.reply||r.detail||'暂不可用')+tail}); aiSave()
-  }catch(e){ aiMsgs.value.push({id:aiId(),who:'ai',txt:'AI 服务调用失败: '+(e?.detail||e?.error||'请稍后重试')}); aiSave() }
-  finally{ aiBusy.value=false; await nextTick(()=>{ if(aiBodyEl.value)aiBodyEl.value.scrollTop=aiBodyEl.value.scrollHeight }) }
+  }catch(e){
+    const st=e?.response?.status
+    const hint = st===504||/timeout/i.test(e?.message||'') ? '请求超时（可能内容过长或中转站繁忙），可稍后重试或把问题拆短' : (e?.detail||e?.error||'请稍后重试')
+    aiMsgs.value.push({id:aiId(),who:'ai',txt:'AI 服务调用失败: '+hint}); aiSave()
+  }
+  finally{ if(aiTimer){clearInterval(aiTimer);aiTimer=null} aiBusy.value=false; await nextTick(()=>{ if(aiBodyEl.value)aiBodyEl.value.scrollTop=aiBodyEl.value.scrollHeight }) }
 }
 onMounted(()=>{ setInterval(()=>{ clock.value=new Date().toTimeString().slice(0,8) },1000); restoreOp(); loadBrand(); startMarquee(); loadAdvisors(); setInterval(loadAdvisors, 30000) })
 </script>
@@ -385,7 +404,16 @@ onMounted(()=>{ setInterval(()=>{ clock.value=new Date().toTimeString().slice(0,
 .ai-body .ai-del{display:none;position:absolute;top:-7px;width:18px;height:18px;border-radius:50%;background:var(--el-bg-color);border:1px solid var(--el-border-color);color:var(--el-text-color-secondary);font-size:12px;line-height:16px;text-align:center;cursor:pointer}
 .ai-body .ab:hover .ai-del{display:block}
 .ai-body .ab.me .ai-del{left:-7px} .ai-body .ab.ai .ai-del{right:-7px}
-.ai-foot{display:flex;gap:8px;padding:10px;border-top:1px solid var(--el-border-color-lighter)}
+.ai-foot{display:flex;gap:8px;padding:10px;border-top:1px solid var(--el-border-color-lighter);align-items:flex-end}
+.ai-foot :deep(.el-textarea){flex:1}
+.ai-foot :deep(.el-textarea__inner){font-size:13px;line-height:1.5}
+/* 思考状态气泡:三点脉冲 + 计时 */
+.ai-body .ab.thinking{display:inline-flex;align-items:center;gap:8px;background:var(--el-bg-color);border:1px dashed var(--el-border-color);color:var(--el-text-color-secondary)}
+.tk-dots{display:inline-flex;gap:3px}
+.tk-dots i{width:6px;height:6px;border-radius:50%;background:var(--el-color-primary);opacity:.4;animation:tkpulse 1.2s infinite ease-in-out}
+.tk-dots i:nth-child(2){animation-delay:.2s} .tk-dots i:nth-child(3){animation-delay:.4s}
+@keyframes tkpulse{0%,100%{opacity:.3;transform:scale(.8)}50%{opacity:1;transform:scale(1.15)}}
+.tk-txt{font-size:12px} .tk-txt em{font-style:normal;color:var(--el-text-color-placeholder)}
 /* tab 标题左侧扁平图标: 与文字基线对齐, 颜色继承(未激活=次要色, 激活=主色, 随主题自适应) */
 .tab-lbl{display:inline-flex;align-items:center;gap:5px}
 .tab-ic{font-size:14px;vertical-align:-2px}
