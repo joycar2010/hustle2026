@@ -113,21 +113,33 @@ async def registry_tree(_who=Depends(require_viewer)):
 
 @router.post("/accounts/registry-full")
 async def registry_full(body: dict, op=Depends(require_operator)):
-    """新建账户(主/子)+可选别名/邮箱;API Key 走独立 credentials(浏览器加密),此处只落账户簿元数据。"""
+    """新建账户(主/子)+可选别名/邮箱/book/账户模式;API Key 走独立 credentials(浏览器加密),此处只落账户簿元数据。
+    #1 book 护栏:CORE_POOL/SMA=投资人/客户资金,须 confirm=true 二次确认(防误把研发账户建成投资池)。"""
     key = str(body.get("account_key") or "").strip()
     if not key:
         raise HTTPException(400, "account_key required")
     atype = body.get("account_type") if body.get("account_type") in ("master", "sub") else "master"
+    book = str(body.get("book") or "TEST").upper()
+    if book not in ("CORE_POOL", "HOUSE_RND", "TEST") and not book.startswith("SMA"):
+        raise HTTPException(400, "book 须∈ CORE_POOL/HOUSE_RND/TEST/SMA:*")
+    if book in ("CORE_POOL",) or book.startswith("SMA"):
+        if not body.get("confirm"):
+            raise HTTPException(400, f"建 {book} 账户(投资人/客户资金)须 confirm=true 二次确认")
+    mode = str(body.get("account_mode") or "classic")
+    if mode not in ("classic", "portfolio_margin", "cross_margin", "isolated", "unknown"):
+        mode = "classic"
     pool = await ds.pg_main()
     if pool is None:
         raise HTTPException(503, "mix_main 未配置")
     await pool.execute(
-        "INSERT INTO accounts_registry(account_key,alias,email,note,machine,account_type,parent_key,updated_at) "
-        "VALUES($1,$2,$3,$4,$5,$6,$7,now()) ON CONFLICT (account_key) DO UPDATE SET "
-        "alias=$2, email=$3, note=$4, machine=$5, account_type=$6, parent_key=$7, updated_at=now()",
+        "INSERT INTO accounts_registry(account_key,alias,email,note,machine,account_type,parent_key,"
+        "book,account_mode,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,now()) "
+        "ON CONFLICT (account_key) DO UPDATE SET alias=$2, email=$3, note=$4, machine=$5, "
+        "account_type=$6, parent_key=$7, book=$8, account_mode=$9, updated_at=now()",
         key, str(body.get("alias") or "")[:80], str(body.get("email") or "")[:120],
         str(body.get("note") or "")[:200], str(body.get("machine") or "").upper()[:1],
-        atype, str(body.get("parent_key") or "")[:80] if atype == "sub" else "")
+        atype, str(body.get("parent_key") or "")[:80] if atype == "sub" else "", book, mode)
     await _proxy.audit(op["operator"], op["role"], "account.create", key,
-                       {"type": atype, "parent": body.get("parent_key")}, "saved")
-    return {"saved": True, "hint": "如需交易能力,右键「设置 API…」录入密钥(浏览器端加密)"}
+                       {"type": atype, "parent": body.get("parent_key"), "book": book, "mode": mode}, "saved")
+    return {"saved": True, "book": book, "account_mode": mode,
+            "hint": "如需交易能力,右键「设置 API…」录入密钥(浏览器端加密)"}
