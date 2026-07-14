@@ -1036,13 +1036,42 @@ async def account_nodes() -> list[dict]:
     snaps = await _accounts_snap()
     panel = await ds.get_json("dcm:coin:panel") or {}
     reg = {}
+    cred = {}          # account_key -> {venue, state, key_mask}(凭证录入状态)
     pool = await ds.pg_main()
     if pool:
         try:
-            for r in await pool.fetch("SELECT account_key, alias, email FROM accounts_registry"):
-                reg[r["account_key"]] = {"alias": r["alias"], "email": r["email"]}
+            for r in await pool.fetch("SELECT account_key, alias, email, book, account_type, parent_key "
+                                      "FROM accounts_registry"):
+                reg[r["account_key"]] = {"alias": r["alias"], "email": r["email"], "book": r["book"],
+                                         "account_type": r["account_type"], "parent_key": r["parent_key"]}
         except Exception:  # noqa: BLE001
             pass
+        try:
+            for r in await pool.fetch("SELECT account_key, venue, state, key_mask FROM api_credentials "
+                                      "WHERE state <> 'revoked'"):
+                cred[r["account_key"]] = {"venue": r["venue"], "state": r["state"], "key_mask": r["key_mask"]}
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _reg_venue(ak, meta):
+        """派生 registry 账户所属交易所:凭证 venue 优先,回落 parent_key 里的所名。"""
+        v = (cred.get(ak) or {}).get("venue")
+        if v in VENUES:
+            return v
+        pk = str(meta.get("parent_key") or "")
+        for vn in VENUES:
+            if pk.startswith(vn):
+                return vn
+        return None
+
+    # registry 登记的子账户按所分组(排除 6 主 venue 键本身;coin panel 账户下面按 note 去重)
+    reg_subs = {v: [] for v in VENUES}
+    for ak, meta in reg.items():
+        if ak in VENUES or meta.get("account_type") == "master":
+            continue
+        v = _reg_venue(ak, meta)
+        if v:
+            reg_subs[v].append((ak, meta))
 
     def deco(key, metrics):
         e = reg.get(key)
@@ -1071,6 +1100,26 @@ async def account_nodes() -> list[dict]:
                         "风险度": _num(acct.get("margin_level"), 2)}),
                     "approvalState": None, "children": [],
                 })
+        # registry 登记的子账户(CORE_POOL 等新建账户)——即使还没快照也显示,带 book+凭证状态。
+        _shown = {c["id"] for c in children}
+        for ak, meta in reg_subs.get(venue, []):
+            if ak in _shown:
+                continue
+            cst = cred.get(ak) or {}
+            sub_snap = snaps.get(f"{venue}:{ak}") or snaps.get(ak)   # 多账户快照就绪后带权益
+            cred_state = cst.get("state") or "未录凭证"
+            m = {"别名": meta.get("alias") or ak, "Book": meta.get("book") or "—",
+                 "凭证": cred_state, "Key掩码": cst.get("key_mask") or "—"}
+            if sub_snap:
+                m["净值"] = f"{float(sub_snap.get('equity_usdt') or 0):,.2f} U"
+                m["快照"] = _age_text(sub_snap.get("ts"))
+            children.append({
+                "id": ak, "kind": "sub", "platformType": "cex", "venue": venue,
+                "domain": meta.get("book") or "TEST",
+                # apiStatus 严格枚举(ok/restricted/healing);详细凭证态在 metrics.凭证
+                "apiStatus": "ok" if cred_state == "active" else ("healing" if cred_state == "pending" else "restricted"),
+                "metrics": m, "approvalState": None, "children": [],
+            })
         npos = len(s.get("positions") or {})
         out.append({
             "id": venue, "kind": "master", "platformType": "cex", "venue": venue,
