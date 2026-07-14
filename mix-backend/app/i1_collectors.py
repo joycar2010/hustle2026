@@ -65,7 +65,7 @@ async def collect_okx(cli) -> list:
 
 async def collect_gate(cli) -> list:
     rows = []
-    # USDT 本位永续(linear);Gate 交割在 /delivery,此处先永续
+    # USDT 本位永续(linear)
     d = await _get(cli, "https://api.gateio.ws/api/v4/futures/usdt/contracts")
     for s in d:
         if s.get("in_delisting"):
@@ -77,6 +77,23 @@ async def collect_gate(cli) -> list:
                      "USDT", "USDT", "USDT", "PERPETUAL", None,
                      float(s.get("order_size_min")) if s.get("order_size_min") else None,
                      float(s.get("order_price_round")) if s.get("order_price_round") else None, "TRADING"))
+    # USDT 本位交割(linear future);expire_time 单位=秒(非毫秒)→ ×1000
+    try:
+        dd = await _get(cli, "https://api.gateio.ws/api/v4/delivery/usdt/contracts")
+        for s in dd:
+            if s.get("in_delisting"):
+                continue
+            name = s.get("name", "")  # SOL_USDT_20260724
+            base = name.split("_")[0]
+            mult = s.get("quanto_multiplier") or "1"
+            exp = s.get("expire_time")
+            rows.append(("gate", name, base, "future", "linear", float(mult) if mult and float(mult) > 0 else 1,
+                         "USDT", "USDT", "USDT", (s.get("cycle") or "").upper(),
+                         _expiry(int(exp) * 1000) if exp else None,
+                         float(s.get("order_size_min")) if s.get("order_size_min") else None,
+                         float(s.get("order_price_round")) if s.get("order_price_round") else None, "TRADING"))
+    except Exception:  # noqa: BLE001  (交割端点异常不影响永续)
+        pass
     return rows
 
 
