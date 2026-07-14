@@ -80,8 +80,14 @@ async def main():
     # --arm 真金
     import asyncpg
     from store import PgSagaStore
-    adapters = {"binance-margin": venue_armed("binance-margin", True, [symbol]),
-                "binance": venue_armed("binance", True, [symbol])}
+    import redis.asyncio as _A
+    from policy_client import can_open
+    pr = _A.from_url(os.environ.get("DCM_REDIS_URL", "redis://10.0.1.212:6379/0"), decode_responses=True)
+    ok, why = await can_open(pr, "binance")   # C3 两腿都在 binance 账户(margin+perp)
+    if not ok:
+        print(f"  ⚠️ binance 风险策略不允许新增: {why}(place 会强制拒;如需强开先 /risk/overrides 置 NORMAL)")
+    adapters = {"binance-margin": venue_armed("binance-margin", True, [symbol], policy_r=pr),
+                "binance": venue_armed("binance", True, [symbol], policy_r=pr)}
     mv = MultiVenue(adapters)
     pool = await asyncpg.create_pool(os.environ["DCM_PG_DSN"], min_size=1, max_size=2)
     store = PgSagaStore(pool, mode="armed")

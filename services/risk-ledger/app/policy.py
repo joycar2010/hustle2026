@@ -39,21 +39,55 @@ def _capabilities(mode: str) -> dict:
     }
 
 
+# 账户限制信号分类(V5 §6.3/ADR-008)——HARD=账户级权限/风控/冻结(→NO_NEW),TRANSPORT=网络限频(不判封号)。
+_HARD_CODES = ("-2015", "-1002", "-2008", "10003", "10004", "10005", "33004", "50111", "50113",
+               "40001", "40009", "40012", "401", "403")
+_HARD_WORDS = ("permission", "unauthorized", "forbidden", "banned", "restrict", "kyc", "frozen",
+               "invalid api", "api-key", "ip ", "not allowed", "suspend")
+_TRANSPORT_WORDS = ("timeout", "timed out", "connect", "ssl", "temporarily", "read error", "429",
+                    "too many", "-1003", "gateway", "503", "502")
+
+
+def classify_err(err: str):
+    """(severity, signal_type)。HARD→账户限制(NO_NEW);TRANSPORT→网络(不下压模式,WATCH 已够);MEDIUM 其余。"""
+    e = (err or "").lower()
+    if any(w in e for w in _TRANSPORT_WORDS) or any(c in e for c in ("-1003", "429", "503", "502")):
+        return "TRANSPORT", "NETWORK"
+    if any(c in e for c in _HARD_CODES) or any(w in e for w in _HARD_WORDS):
+        return "HARD", "PERMISSION_OR_RISK"
+    return "MEDIUM", "PRIVATE_API_ERROR"
+
+
 async def _venue_exposure(r, venue: str):
-    """从 dcm:account:{venue} 算在场名义 = Σ|qty|×mark;返回 (notional, equity, ok)。"""
+    """从 dcm:account:{venue} 算在场名义 = Σ|qty|×mark;返回 (notional, equity, ok, err)。"""
     try:
         a = json.loads(await r.get(f"dcm:account:{venue}") or "{}")
     except Exception:  # noqa: BLE001
-        return 0.0, 0.0, False
+        return 0.0, 0.0, False, "snapshot缺失"
     if not a.get("ok"):
-        return 0.0, float(a.get("equity_usdt") or 0), False
+        return 0.0, float(a.get("equity_usdt") or 0), False, str(a.get("err") or "")
     positions = a.get("positions") or {}
     detail = a.get("pos_detail") or {}
     notional = 0.0
     for sym, qty in positions.items():
         mark = float((detail.get(sym) or {}).get("mark") or 0)
         notional += abs(float(qty or 0)) * mark
-    return notional, float(a.get("equity_usdt") or 0), True
+    return notional, float(a.get("equity_usdt") or 0), True, ""
+
+
+async def _persist_restriction(pool, venue, severity, signal_type, err):
+    """落 restriction_event(dedup by venue+code,ON CONFLICT 累加 hit_count/更新 last_seen)。"""
+    if pool is None:
+        return
+    dedupe = f"{venue}:{signal_type}:{(err or '')[:40]}"
+    try:
+        await pool.execute(
+            "INSERT INTO restriction_event(venue,scope,signal_type,source_type,severity,raw_code,"
+            "raw_payload,dedupe_key) VALUES($1,'VENUE',$2,'ACCOUNT_FACT',$3,$4,$5,$6) "
+            "ON CONFLICT (dedupe_key) DO UPDATE SET last_seen=now(), hit_count=restriction_event.hit_count+1",
+            venue, signal_type, severity, (err or "")[:40], (err or "")[:500], dedupe)
+    except Exception:  # noqa: BLE001
+        pass
 
 
 async def compute_and_publish(pool, r) -> dict:
@@ -80,7 +114,7 @@ async def compute_and_publish(pool, r) -> dict:
     global_ovr = overrides.get("GLOBAL:GLOBAL", {}).get("mode", "NORMAL")
     venues_out = {}
     for v in SUPPORTED_VENUES:
-        notional, equity, ok = await _venue_exposure(r, v)
+        notional, equity, ok, err = await _venue_exposure(r, v)
         cap_row = caps.get(f"venue:{v}")
         mode, reason = "NORMAL", "ok"
         cap_val = float(cap_row["max_notional_usdt"]) if cap_row else None
@@ -91,7 +125,13 @@ async def compute_and_publish(pool, r) -> dict:
             elif notional >= cap_val * warn_ratio:
                 mode, reason = "WATCH", f"敞口{notional:.0f}≥{warn_ratio:.0%}上限"
         if not ok:
-            mode, reason = _stricter(mode, "WATCH"), reason + "|账户快照失败"
+            # 账户快照失败→分类:HARD 权限/风控/冻结=账户限制→NO_NEW(自动保命反射);
+            # TRANSPORT 网络限频=不判封号只 WATCH;落 restriction_event 供追溯。
+            severity, sig = classify_err(err)
+            auto_mode = "NO_NEW_RISK" if severity == "HARD" else "WATCH"
+            mode = _stricter(mode, auto_mode)
+            reason = f"账户失败[{severity}:{err[:50]}]|" + reason
+            await _persist_restriction(pool, v, severity, sig, err)
         # 合并 override(venue 级 + 全局,取最严格)
         vovr = overrides.get(f"VENUE:{v}", {}).get("mode")
         if vovr:
@@ -105,20 +145,21 @@ async def compute_and_publish(pool, r) -> dict:
             "capabilities": _capabilities(mode),
         }
 
-    # 单调版本号(消费者只接受更高版本;DB 权威,重启不回退)
-    version = int(time.time())
+    # (epoch, sequence) 双单调 fencing(ADR-005):消费者按字典序只接受更高。
+    # DB 恢复/权威重建 → 手动 bump epoch(避免 sequence 回退使旧快照复活);sequence 每轮 +1。
+    epoch, version = 1, int(time.time())
     if pool is not None:
         try:
             row = await pool.fetchrow(
                 "UPDATE risk_policy_version SET policy_version = policy_version + 1, updated_at = now() "
-                "WHERE id = 1 RETURNING policy_version")
+                "WHERE id = 1 RETURNING policy_epoch, policy_version")
             if row:
-                version = int(row["policy_version"])
+                epoch, version = int(row["policy_epoch"]), int(row["policy_version"])
         except Exception:  # noqa: BLE001
             pass
 
     summary = {
-        "policy_version": version, "ts": int(time.time()),
+        "policy_epoch": epoch, "policy_version": version, "ts": int(time.time()),
         "global_mode": global_ovr,
         "venues": venues_out,
         "capped_venues": [v for v, d in venues_out.items() if d["mode"] != "NORMAL"],

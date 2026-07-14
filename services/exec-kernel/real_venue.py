@@ -61,15 +61,30 @@ def _env_armed(armed, arm_symbols):
 
 
 class _GatedPos:
-    """公共件:下单硬门控 + all_positions→get_position 派生(单币仓)。"""
+    """公共件:下单硬门控 + all_positions→get_position 派生(单币仓)。
+    G1(ADR-002 收编闸):place 最后一跳除 armed 外,再过风险策略——不可绕过。
+    _policy_r/_policy_venue 由 venue_armed 注入(生产路径 manager/canary 必注入);
+    未注入=armed-only(仅测试/legacy)。减险(reduce_only)永远放行。"""
     armed = False
     arm_symbols = frozenset()
+    _policy_r = None            # 注入的 Redis(读 dcm:risk:policy)
+    _policy_venue = None        # 策略作用域 venue(binance-margin→binance 共用账户限制)
 
     def _gate(self, cid, sym):
         if not self.armed:
             raise PermissionError(f"exec 未武装(DCM_EXEC_ARMED!=true),拒绝下单 {cid}")
         if sym not in self.arm_symbols:
             raise PermissionError(f"{sym} 不在武装白名单 {sorted(self.arm_symbols)},拒绝下单 {cid}")
+
+    async def _policy_gate(self, cid, sym, reduce_only=False):
+        """风险策略最后一跳(增险类):venue 非 CAN_OPEN/策略超龄/版本回退 → fail-closed 拒。
+        减险(reduce_only)不查(平仓/还币/救援永远允许);未注入策略=跳过(armed 已控)。"""
+        if reduce_only or self._policy_r is None:
+            return
+        from policy_client import can_open
+        ok, why = await can_open(self._policy_r, self._policy_venue or "binance")
+        if not ok:
+            raise PermissionError(f"风险策略拒绝新增 {sym}({cid}): {why}")
 
     async def get_position(self, symbol: str) -> dict:
         r = await self.all_positions()
@@ -175,10 +190,9 @@ class BinanceRealVenue:
         """市价单(binance 永续/现货)。leg={symbol,side(BUY/SELL),market,qty|quote_qty,reduce_only}。
         硬门控:非 armed 或 symbol 不在白名单 → 拒绝。确定性 cid→newClientOrderId(交易所端幂等)。"""
         sym = leg.get("symbol", "")
-        if not self.armed:
-            raise PermissionError(f"exec 未武装(DCM_EXEC_ARMED!=true),拒绝下单 {cid}")
-        if sym not in self.arm_symbols:
-            raise PermissionError(f"{sym} 不在武装白名单 {self.arm_symbols},拒绝下单 {cid}")
+        self._gate(cid, sym)
+        await self._policy_gate(cid, sym, leg.get("reduce_only"))
+        await self._policy_gate(cid, sym, leg.get("reduce_only"))
         market = leg.get("market", "perp")
         base, path = (BINANCE_FAPI, "/fapi/v1/order") if market == "perp" else (BINANCE_SPOT, "/api/v3/order")
         params = {"symbol": sym, "side": leg["side"], "type": "MARKET",
@@ -280,6 +294,7 @@ class BinanceMarginRealVenue(_GatedPos):
         leg={symbol,side(SELL开/BUY平),qty(base),reduce_only}。"""
         symbol = leg.get("symbol", "")
         self._gate(cid, symbol)
+        await self._policy_gate(cid, symbol, leg.get("reduce_only"))
         side = str(leg["side"]).upper()
         # 开空=借币卖出;平空=买回还债。reduce_only 或 side=BUY 视为平仓侧。
         closing = bool(leg.get("reduce_only")) or side == "BUY"
@@ -366,6 +381,7 @@ class BybitRealVenue(_GatedPos):
         """市价单(v5)。硬门控。side Buy/Sell;reduceOnly 平仓。orderLinkId=确定性 cid(交易所端幂等)。"""
         sym = leg.get("symbol", "")
         self._gate(cid, sym)
+        await self._policy_gate(cid, sym, leg.get("reduce_only"))
         side = "Buy" if str(leg["side"]).upper() == "BUY" else "Sell"
         body = {"category": "linear", "symbol": sym, "side": side, "orderType": "Market",
                 "qty": _qstr(leg["qty"]), "orderLinkId": self._coid(cid)}
@@ -466,6 +482,7 @@ class GateRealVenue(_GatedPos):
         """市价单(price=0,tif=ioc)。leg.qty 单位=base → 换算张(带符号:BUY+ SELL-)。硬门控。"""
         sym = leg.get("symbol", "")
         self._gate(cid, sym)
+        await self._policy_gate(cid, sym, leg.get("reduce_only"))
         async with httpx.AsyncClient(timeout=15) as cli:
             mult = (await self._mults(cli)).get(sym, 0) or 0
         if mult <= 0:
@@ -570,6 +587,7 @@ class BitgetRealVenue(_GatedPos):
         """市价单(v2 place-order,单向持仓 crossed)。size 单位=base。硬门控。clientOid 幂等。"""
         sym = leg.get("symbol", "")
         self._gate(cid, sym)
+        await self._policy_gate(cid, sym, leg.get("reduce_only"))
         body = {"symbol": sym, "productType": "USDT-FUTURES", "marginMode": "crossed",
                 "marginCoin": "USDT", "size": _qstr(leg["qty"]),
                 "side": "buy" if str(leg["side"]).upper() == "BUY" else "sell",
@@ -683,6 +701,7 @@ class OkxRealVenue(_GatedPos):
         """市价单(tdMode=cross)。leg.qty=base → sz 张(÷ctVal,落到 lotSz 步长)。硬门控。"""
         inst = leg.get("symbol", "")
         self._gate(cid, inst)
+        await self._policy_gate(cid, inst, leg.get("reduce_only"))
         async with httpx.AsyncClient(timeout=15) as cli:
             ctv = (await self._ctvals(cli)).get(inst, 0)
         lot = self._lot.get(inst, 1) or 1
@@ -811,6 +830,7 @@ class HyperliquidRealVenue(_GatedPos):
         """市价单(SDK market_open;reduce_only→market_close)。leg.qty=base;硬门控。"""
         coin = leg.get("symbol", "")
         self._gate(cid, coin)
+        await self._policy_gate(cid, coin, leg.get("reduce_only"))
         dec = self._szdecs().get(coin)
         if dec is None:
             return {"status": REJECT, "filled": 0, "err": f"HL 无 {coin} 合约(meta 查无)"}
@@ -864,16 +884,21 @@ class HyperliquidRealVenue(_GatedPos):
         return {"ok": True, "positions": out}
 
 
-def venue_armed(name: str, armed: bool, arm_symbols):
+def venue_armed(name: str, armed: bool, arm_symbols, policy_r=None):
     """带武装门控构造适配器(manager/canary 按 pair 精细控制)。六所全支持写路径;
-    binance-margin=C3 借币短腿(§6.1 BORROW_SPOT_SHORT_DERIVATIVE_LONG)。"""
+    binance-margin=C3 借币短腿(§6.1 BORROW_SPOT_SHORT_DERIVATIVE_LONG)。
+    G1(ADR-002):policy_r 注入=place 最后一跳过风险策略(生产路径必注入,不可绕过);
+    binance-margin 的策略作用域=binance(共用账户限制)。"""
     cls = {"binance": BinanceRealVenue, "bybit": BybitRealVenue, "gate": GateRealVenue,
            "bitget": BitgetRealVenue, "okx": OkxRealVenue,
            "hyperliquid": HyperliquidRealVenue,
            "binance-margin": BinanceMarginRealVenue}.get(name)
     if cls is None:
         raise VenueError(f"{name} 无可武装适配器")
-    return cls(armed=armed, arm_symbols=arm_symbols)
+    v = cls(armed=armed, arm_symbols=arm_symbols)
+    v._policy_r = policy_r
+    v._policy_venue = "binance" if name == "binance-margin" else name
+    return v
 
 
 class MultiVenue:

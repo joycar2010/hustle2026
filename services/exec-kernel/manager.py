@@ -97,6 +97,7 @@ async def manage_symbol(sym, cfg, store, r):
     spot_src = cfg.get("spot_source", base)   # 理财腿用 LDXVG
     armed = mode == "armed"
     venue = BinanceRealVenue(armed=armed, arm_symbols=[sym] if armed else [])
+    venue._policy_r = r; venue._policy_venue = "binance"   # G1:C1 腿 place 也过策略最后一跳
     perp = await venue.get_position(sym)
     amt = perp.get("amt") or 0
     spot = await venue.get_spot_balance(spot_src)
@@ -207,7 +208,8 @@ async def manage_pair(pid, cfg, store, r):
         vsym = venue_sym(v, sym)
         if v not in adapters:
             try:
-                adapters[v] = venue_armed(v, armed, [vsym] if armed else [])
+                # G1:注入 policy_r=r,place 最后一跳过风险策略(不可绕过;close 路径 reduce_only 不受影响)
+                adapters[v] = venue_armed(v, armed, [vsym] if armed else [], policy_r=r)
             except Exception as e:  # noqa: BLE001
                 st["action"] = f"NO_ADAPTER({v}: {repr(e)[:60]})"
                 return st

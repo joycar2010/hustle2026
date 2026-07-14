@@ -13,11 +13,11 @@ import time
 POLICY_KEY = "dcm:risk:policy"
 STALE_SEC = int(os.environ.get("DCM_POLICY_STALE_SEC", "90"))   # 快照刷新龄阈值(fail-closed)
 
-_last_version = {"v": -1}   # 进程内单调门闩
+_last_fence = {"epoch": -1, "seq": -1}   # 进程内 (epoch, sequence) 单调门闩(ADR-005)
 
 
 async def read_policy(r):
-    """返回 (policy_dict|None, fresh_bool)。None=缺失;fresh=False 表示超龄或缺失,须 fail-closed。"""
+    """返回 (policy_dict|None, fresh_bool)。None=缺失;fresh=False 表示超龄/缺失/fence 回退,须 fail-closed。"""
     try:
         raw = await r.get(POLICY_KEY)
     except Exception:  # noqa: BLE001
@@ -31,10 +31,14 @@ async def read_policy(r):
     age = time.time() - float(pol.get("ts") or 0)
     if age > STALE_SEC:
         return pol, False   # 有内容但超龄:调用方按 fail-closed 处理
-    ver = int(pol.get("policy_version") or -1)
-    if ver < _last_version["v"]:
-        return pol, False   # 版本回退(旧快照复活)→ 拒绝当新鲜
-    _last_version["v"] = max(_last_version["v"], ver)
+    # (epoch, sequence) 字典序单调:任一维回退=旧快照复活,拒绝当新鲜(DB 恢复须 bump epoch)
+    epoch = int(pol.get("policy_epoch") or 1)
+    seq = int(pol.get("policy_version") or -1)
+    cur = (epoch, seq)
+    last = (_last_fence["epoch"], _last_fence["seq"])
+    if cur < last:
+        return pol, False
+    _last_fence["epoch"], _last_fence["seq"] = epoch, seq
     return pol, True
 
 

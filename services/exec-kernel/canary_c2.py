@@ -99,13 +99,20 @@ async def main():
         print("dry 完成,零下单。")
         return
 
-    # --arm 真金:构造武装适配器(仅本 symbol 白名单)
+    # --arm 真金:构造武装适配器(仅本 symbol 白名单);G1 注入 policy_r=place 过风险策略最后一跳
     import os
 
     import asyncpg
+    import redis.asyncio as _A
+    from policy_client import can_open
     from store import PgSagaStore
-    adapters = {v_long: venue_armed(v_long, True, [sym_l]),
-                v_short: venue_armed(v_short, True, [sym_s])}
+    pr = _A.from_url(os.environ.get("DCM_REDIS_URL", "redis://10.0.1.212:6379/0"), decode_responses=True)
+    for vv in (v_long, v_short):   # 开仓前策略预检(place 仍会强制,此处提前告知)
+        ok, why = await can_open(pr, vv)
+        if not ok and not close_only:
+            print(f"  ⚠️ {vv} 风险策略不允许新增: {why}(如需强开,先经 /risk/overrides 置 NORMAL)")
+    adapters = {v_long: venue_armed(v_long, True, [sym_l], policy_r=pr),
+                v_short: venue_armed(v_short, True, [sym_s], policy_r=pr)}
     mv = MultiVenue(adapters)
     pool = await asyncpg.create_pool(os.environ["DCM_PG_DSN"], min_size=1, max_size=2)
     store = PgSagaStore(pool, mode="armed")
