@@ -25,7 +25,7 @@ import redis.asyncio as aioredis
 from dcm_common.heartbeat import Heartbeat
 from dcm_common.notify import Notifier, feishu_from_env
 
-from policy import compute_and_publish  # noqa: E402  # G0 风险策略权威(ADR-001)
+from policy import compute_and_publish, corebox_check  # noqa: E402  # G0 风险策略权威+CORE_POOL 封闭盒子
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 log = logging.getLogger("risk-ledger")
@@ -436,6 +436,13 @@ async def main():
                 status["policy"] = {"version": pol["policy_version"], "capped": pol["capped_venues"]}
             except Exception:
                 log.exception("policy compute/publish failed (continuing)")
+            # CORE_POOL 封闭盒子不变量:组权益突降/成员限制 → 告警(fire 走共享节流+落库)
+            try:
+                cbmon = await corebox_check(r, fire=fire)
+                status["corebox"] = {"sealed": cbmon.get("sealed"), "equity": cbmon.get("total_equity_usdt"),
+                                     "members": cbmon.get("member_count")}
+            except Exception:
+                log.exception("corebox check failed (continuing)")
             await hb.beat_once()
             log.info("LEDGER_OK services=%s alerts=%d policy_v=%s capped=%s",
                      status.get("services"), status.get("alerts_this_round", 0),

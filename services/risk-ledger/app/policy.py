@@ -90,6 +90,59 @@ async def _persist_restriction(pool, venue, severity, signal_type, err):
         pass
 
 
+import os as _os
+
+COREBOX_DROP_USDT = float(_os.environ.get("DCM_COREBOX_DROP_USDT", "2000"))   # 单区间净流出绝对阈
+COREBOX_DROP_PCT = float(_os.environ.get("DCM_COREBOX_DROP_PCT", "0.02"))      # 单区间净流出比例阈
+
+
+async def corebox_check(r, fire=None) -> dict:
+    """CORE_POOL 封闭盒子不变量:读 dcm:risk:corebox 组总权益,对比上区间基线。
+    突降 > max(绝对阈, 比例阈)=可能净流出/强平/盒子被破 → P0 告警(delta 中性组不该单区间大跌)。
+    成员账户快照失败(ok=false)=可能被风控/限制 → 告警。基线存 Redis(重启不丢)。只读只告警。"""
+    try:
+        cb = json.loads(await r.get("dcm:risk:corebox") or "{}")
+    except Exception:  # noqa: BLE001
+        return {"ok": False, "note": "corebox 未发布"}
+    members = cb.get("members") or []
+    if not members:
+        return {"ok": True, "note": "CORE_POOL 组为空(未入金)", "member_count": 0}
+    total = float(cb.get("total_equity_usdt") or 0)
+    try:
+        base = json.loads(await r.get("dcm:risk:corebox:baseline") or "{}")
+    except Exception:  # noqa: BLE001
+        base = {}
+    last = float(base.get("equity_usdt")) if base.get("equity_usdt") is not None else None
+
+    alerts = []
+    # ① 突降 = 净流出/强平嫌疑
+    if last is not None and total < last:
+        drop = last - total
+        thr = max(COREBOX_DROP_USDT, COREBOX_DROP_PCT * last)
+        if drop > thr:
+            alerts.append(("corebox-drop",
+                           f"CORE_POOL 组权益突降 {drop:.0f}U({last:.0f}→{total:.0f},阈{thr:.0f})"
+                           f"——delta 中性组不该单区间大跌,查是否净流出/强平/单腿爆", "fatal"))
+    # ② 成员账户快照失败 = 可能账户限制/封号
+    for m in members:
+        if not m.get("ok") and m.get("has_key"):
+            alerts.append((f"corebox-member:{m['account_key']}",
+                           f"CORE_POOL 成员 {m.get('name')} 账户快照失败(可能被限制/封号/网络)", "warn"))
+    if fire:
+        for key, msg, lvl in alerts:
+            await fire(key, "CORE_POOL 封闭盒子告警", msg, level=lvl)
+
+    # 更新基线(记录当前;上升或小幅波动都刷新,只对突降告警)
+    await r.set("dcm:risk:corebox:baseline",
+                json.dumps({"equity_usdt": total, "ts": int(time.time()),
+                            "member_count": len(members)}), ex=86400)
+    mon = {"ts": int(time.time()), "total_equity_usdt": total, "prev_equity_usdt": last,
+           "member_count": len(members), "alerts": [a[0] for a in alerts],
+           "sealed": len(alerts) == 0}
+    await r.set("dcm:risk:corebox:monitor", json.dumps(mon, ensure_ascii=False), ex=180)
+    return mon
+
+
 async def compute_and_publish(pool, r) -> dict:
     """计算有效策略并发布。pool=dcm_main(读 cap/override,写 version);r=Redis。返回 summary。"""
     caps, overrides = {}, {}
