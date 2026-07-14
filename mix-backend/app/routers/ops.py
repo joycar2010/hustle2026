@@ -491,11 +491,16 @@ async def registry_put(body: dict, op=Depends(require_operator)):
     machine = str(body.get("machine") or "").upper()
     if machine and machine not in ("A", "B", "C"):
         raise HTTPException(400, "machine 必须是 A/B/C 或空")
+    # 未传的字段不覆盖(前端别名弹框不传 machine→防清空 A/B/C 标记):仅当 body 含该键才更新。
     await pool.execute(
         "INSERT INTO accounts_registry(account_key, alias, email, note, machine, updated_at) "
-        "VALUES($1,$2,$3,$4,$5,now()) ON CONFLICT (account_key) "
-        "DO UPDATE SET alias=$2, email=$3, note=$4, machine=$5, updated_at=now()",
-        key, str(body.get("alias") or ""), str(body.get("email") or ""), str(body.get("note") or ""), machine)
+        "VALUES($1,$2,$3,$4,$5,now()) ON CONFLICT (account_key) DO UPDATE SET "
+        "alias=CASE WHEN $6 THEN $2 ELSE accounts_registry.alias END, "
+        "email=CASE WHEN $7 THEN $3 ELSE accounts_registry.email END, "
+        "note=CASE WHEN $8 THEN $4 ELSE accounts_registry.note END, "
+        "machine=CASE WHEN $9 THEN $5 ELSE accounts_registry.machine END, updated_at=now()",
+        key, str(body.get("alias") or ""), str(body.get("email") or ""), str(body.get("note") or ""), machine,
+        "alias" in body, "email" in body, "note" in body, bool(machine))
     await proxy.audit(op["operator"], op["role"], "registry.put", key, body, "saved")
     return {"saved": True}
 
