@@ -2,6 +2,8 @@
   <div class="riskbar" :class="{ stale: d.stale }">
     <!-- 行1:平台模式章(文字+色,V5 §14 禁止只用颜色)+ 版本 + 冻结新增 -->
     <div class="r1">
+      <span class="p0chip" :class="{hot: p0Count>0}" :title="'fatal Incident+受限venue+NAV折价'">
+        P0待办 <b>{{ p0Count }}</b></span>
       <span class="modechip" :class="modeCls(d.worst_mode)">
         平台模式 {{ d.worst_mode || 'STALE' }}<i v-if="d.worst_mode==='NORMAL'">·已核验</i>
         <i v-else-if="d.stale">·数据超龄 fail-closed</i>
@@ -43,6 +45,11 @@ const notice = computed(() => {
   const vs = (d.value.venues || []).filter(v => SEV[v.mode])
   return vs.length ? vs[0] : null
 })
+const p0Count = computed(() => {
+  const fatal = (d.value.incidents || []).filter(i => i.severity === 'fatal').length
+  const trapped = (d.value.nav?.trapped_usdt || 0) > 0 ? 1 : 0
+  return fatal + (d.value.restricted_accounts || 0) + trapped
+})
 const n = v => (v == null ? 'N/A' : Number(v).toLocaleString())
 const short = s => String(s || '').split('|')[0].slice(0, 42)
 const fmtAge = s => (s >= 3600 ? Math.floor(s / 3600) + 'h' : Math.floor(s / 60) + 'm')
@@ -73,6 +80,10 @@ onUnmounted(() => timer && clearInterval(timer))
 }
 .r1, .r2 { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; font-size: 11.5px; color: var(--mix-t2, #848E9C); }
 .grow { flex: 1; }
+.p0chip { font-weight: 800; font-size: 12px; padding: 2px 10px; border-radius: 5px;
+  background: rgba(94,102,115,.18); color: var(--mix-t2, #848E9C);
+  b { color: var(--mix-t1, #EAECEF); }
+  &.hot { background: rgba(246,70,93,.18); color: #F6465D; b { color: #F6465D; } } }
 .modechip { font-weight: 800; font-size: 12px; padding: 2px 10px; border-radius: 5px;
   i { font-style: normal; font-weight: 500; opacity: .85; }
   &.ok { background: rgba(14,203,129,.12); color: #35b57c; }

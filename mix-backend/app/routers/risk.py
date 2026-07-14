@@ -309,3 +309,50 @@ async def risk_summary(_who=Depends(require_viewer)):
         "transitions": transitions,
         "credential_epochs": (pol or {}).get("credential_epochs") or {},
     }
+
+
+@router.get("/risk/venue/{venue}")
+async def risk_venue_detail(venue: str, _who=Depends(require_viewer)):
+    """平台详情页(V2 设计 KdKdE 五标签)数据源:概览/账户限制时间线/提现与网络/敞口仓位/条款与证据。"""
+    pol = await ds.get_json("dcm:risk:policy")
+    vd = ((pol or {}).get("venues") or {}).get(venue) or {}
+    wd = await ds.get_json(f"dcm:risk:withdrawal:{venue}")
+    out = {"venue": venue, "policy": vd, "withdrawal": wd,
+           "restrictions": [], "transitions": [], "observations": [],
+           "venue_policy": None, "artifacts": [], "defense_packs": [], "incidents": []}
+    pool = await ds.pg()
+    if pool is None:
+        out["note"] = "dcm_main 不可达"
+        return out
+
+    async def _rows(key, sql, *args):
+        try:
+            out[key] = [dict(r) for r in await pool.fetch(sql, *args)]
+        except Exception:
+            pass
+    await _rows("restrictions",
+                "SELECT signal_type, severity, raw_code, raw_payload, hit_count, first_seen::text, "
+                "last_seen::text FROM restriction_event WHERE venue=$1 ORDER BY last_seen DESC LIMIT 50", venue)
+    await _rows("transitions",
+                "SELECT before_mode, after_mode, reason, policy_epoch, policy_version, recorded_at::text "
+                "FROM venue_mode_transition WHERE scope_key=$1 ORDER BY id DESC LIMIT 50", venue)
+    await _rows("observations",
+                "SELECT asset, network, amount::text, status, venue_tx_id, chain_tx, initiated_at::text, "
+                "confirmed_at::text, duration_sec::text FROM withdrawal_observation WHERE venue=$1 "
+                "ORDER BY id DESC LIMIT 50", venue)
+    await _rows("incidents",
+                "SELECT rule, state, severity, title, detail, hit_count, first_seen::text, last_seen::text "
+                "FROM venue_incident WHERE venue=$1 ORDER BY id DESC LIMIT 30", venue)
+    await _rows("artifacts",
+                "SELECT kind, title, url_or_ref, note, recorded_at::text FROM venue_policy_artifact "
+                "WHERE venue=$1 ORDER BY id DESC LIMIT 20", venue)
+    await _rows("defense_packs",
+                "SELECT id, trigger_rule, note, generated_at::text FROM account_defense_pack "
+                "WHERE venue=$1 ORDER BY id DESC LIMIT 10", venue)
+    try:
+        row = await pool.fetchrow("SELECT * FROM venue_policy WHERE venue=$1", venue)
+        if row:
+            out["venue_policy"] = {k: (str(v) if v is not None else None) for k, v in dict(row).items()}
+    except Exception:
+        pass
+    return out

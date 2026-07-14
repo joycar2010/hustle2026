@@ -13,6 +13,7 @@ const routes = [
     // 监控中心已移除(用户拍板):职能已分散到 屏1机会墙/屏3风控墙/主控台底排/系统设置·运维面板
     { path:'mix/blacklist', name:'mix-blacklist', meta:{title:'黑名单',icon:'CircleClose',group:'总控',ord:0.4}, component:()=>import('../views/mix/MixBlacklist.vue') },
     { path:'mix/coins', name:'mix-coins', meta:{title:'币管理',icon:'Coin',group:'总控',ord:0.45}, component:()=>import('../views/mix/MixCoins.vue') },
+    { path:'mix/venue/:venue', name:'mix-venue-detail', meta:{title:'平台详情',icon:'Warning',group:'总控',hidden:true}, component:()=>import('../views/mix/MixVenueDetail.vue') },
     { path:'mix/venuerisk', name:'mix-venuerisk', meta:{title:'平台风险',icon:'Warning',group:'总控',ord:0.35}, component:()=>import('../views/mix/MixVenueRisk.vue') },
     { path:'mix/report', name:'mix-report', meta:{title:'资金收益',icon:'TrendCharts',group:'总控',ord:0.5}, component:()=>import('../views/mix/MixReport.vue') },
     // ===== 系统设置(Mix 版:qh 同名模块已由下列页面替代) =====

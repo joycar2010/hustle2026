@@ -991,6 +991,9 @@ def _dir_listing(path: str) -> list[dict]:
     return out
 
 
+SSL_DOMAINS = ("mix.hustle2026.xyz", "mixadmin.hustle2026.xyz", "user.hustle2026.xyz")
+
+
 async def _ssl_expiry(host: str = "mixadmin.hustle2026.xyz") -> str:
     def _get():
         try:
@@ -1002,6 +1005,27 @@ async def _ssl_expiry(host: str = "mixadmin.hustle2026.xyz") -> str:
         except Exception as e:  # noqa: BLE001
             return f"读取失败: {e}"
     return await asyncio.to_thread(_get)
+
+
+async def _ssl_domains() -> dict:
+    """三域名逐域证书事实(到期+SAN 覆盖),不猜——逐域真握手读取。"""
+    out = {}
+    for h in SSL_DOMAINS:
+        def _get(host=h):
+            try:
+                pem = ssl.get_server_certificate((host, 443), timeout=6)
+                import subprocess
+                r = subprocess.run(["openssl", "x509", "-noout", "-enddate", "-ext", "subjectAltName"],
+                                   input=pem.encode(), capture_output=True, timeout=6)
+                txt = r.stdout.decode()
+                exp = next((ln.replace("notAfter=", "").strip()
+                            for ln in txt.splitlines() if ln.startswith("notAfter=")), "?")
+                san_ok = host in txt
+                return {"expiry": exp, "san_covers": san_ok}
+            except Exception as e:  # noqa: BLE001
+                return {"expiry": f"读取失败: {e}", "san_covers": False}
+        out[h] = await asyncio.to_thread(_get)
+    return out
 
 
 @router.get("/system/status")
@@ -1024,7 +1048,8 @@ async def system_status(_who=Depends(require_viewer)):
                         os.path.getmtime("/data/mix/backend/app/main.py")).strftime("%Y-%m-%d %H:%M")
                     if os.path.exists("/data/mix/backend/app/main.py") else "—"},
         "db": db,
-        "ssl": {"cert_expiry": await _ssl_expiry(), "auto_renew": "certbot.timer(系统级)"},
+        "ssl": {"cert_expiry": await _ssl_expiry(), "auto_renew": "certbot.timer(系统级)",
+                "domains": await _ssl_domains()},
         "backups": _dir_listing(BACKUP_DIR),
     }
 

@@ -39,7 +39,7 @@
                 ? {background:META[s.code].color,color:'#0B0E11',borderColor:META[s.code].color}
                 : {background:META[s.code].colorBg,color:META[s.code].color,borderColor:META[s.code].color+'66'}"
               @click="setStrategy(s.code)">
-          {{ s.code }}·{{ s.name }}
+          <span :title="'系统码 '+s.code">{{ META[s.code]?.ccode || s.code }}·{{ s.name }}</span>
         </span>
       </div>
       <div class="right">
@@ -71,7 +71,7 @@
           <el-link type="warning" @click="$router.push('/mix/strategies')">全页 →</el-link>
         </div>
         <div v-for="s in strategies" :key="s.code" class="srow">
-          <span class="sbadge" :style="{background: SC[s.code]}" @click="$router.push('/mix/strategy/'+s.code)">{{ s.code }}</span>
+          <span class="sbadge" :style="{background: SC[s.code]}" :title="'系统码 '+s.code" @click="$router.push('/mix/strategy/'+s.code)">{{ META[s.code]?.ccode || s.code }}</span>
           <span class="snm" @click="$router.push('/mix/strategy/'+s.code)">{{ s.name }}</span>
           <span class="skpi sl">{{ s.slots }} 仓</span>
           <span class="skpi">{{ (s.notional||0).toLocaleString() }}U</span>

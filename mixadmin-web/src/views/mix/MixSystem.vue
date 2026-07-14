@@ -19,6 +19,11 @@
         <div class="chd"><b>SSL 证书</b></div>
         <div class="kv"><span>到期</span><b>{{ st.ssl?.cert_expiry || '—' }}</b></div>
         <div class="kv"><span>自动续期</span><b>{{ st.ssl?.auto_renew || '—' }}</b></div>
+        <div v-for="(info, dom) in (st.ssl?.domains || {})" :key="dom" class="kv">
+          <span>{{ dom }}</span>
+          <b :style="{color: info.san_covers ? '#0ECB81' : '#F6465D'}">
+            {{ info.san_covers ? 'SAN✓' : 'SAN✗' }} · {{ info.expiry }}</b>
+        </div>
         <el-button size="small" type="warning" :loading="busy==='ssl'" @click="run('ssl')">手动触发续期检查</el-button>
         <div class="fnote">certbot renew：未到期=no-op，安全</div>
       </div>

@@ -10,7 +10,7 @@
         <el-checkbox v-model="showNormal" size="small">显示正常平台</el-checkbox>
       </div>
       <el-table :data="rowsShown" size="small" :row-class-name="rowCls">
-        <el-table-column label="Venue" width="96"><template #default="{row}"><b class="vn">{{ row.venue }}</b>
+        <el-table-column label="Venue" width="96"><template #default="{row}"><b class="vn link" @click="$router.push('/mix/venue/'+row.venue)">{{ row.venue }}</b>
           <i class="tier" v-if="row.tier">Tier {{ row.tier }}</i></template></el-table-column>
         <el-table-column label="有效模式" width="130"><template #default="{row}">
           <span class="mch" :class="modeCls(row.mode)">{{ row.mode }}</span></template></el-table-column>
@@ -122,7 +122,7 @@ onUnmounted(() => timer && clearInterval(timer))
   &.quar { background: #8B1E2D; color: #fff; }
   &.recov { background: rgba(140,163,199,.16); color: #8CA3C7; }
   &.unknown { background: rgba(94,102,115,.2); color: #9aa4b2; } }
-.vn { color: var(--mix-t1, #EAECEF); }
+.vn { color: var(--mix-t1, #EAECEF); &.link { cursor: pointer; &:hover { color: #F0B90B; } } }
 .tier { font-style: normal; margin-left: 6px; font-size: 9px; color: var(--mix-t3, #5E6673); }
 .bad { color: #F6465D; } .dim { color: var(--mix-t3, #5E6673); } .pad { padding: 8px 0; }
 .rsn { font-size: 10.5px; }
