@@ -72,6 +72,18 @@ class BinanceRealVenue:
         return {"ok": True, "symbol": symbol, "amt": amt, "entry": float(pos.get("entryPrice") or 0),
                 "unrealized": float(pos.get("unRealizedProfit") or 0), "flat": abs(amt) < 1e-12}
 
+    async def all_positions(self) -> dict:
+        """扫全部非空永续持仓 → {symbol: amt}。用于抓「裸露实盘」(内核不知道的仓,最危险)。"""
+        code, d = await self._get(BINANCE_FAPI, "/fapi/v2/positionRisk", {})
+        if code != 200 or not isinstance(d, list):
+            return {"ok": False, "err": f"http {code}: {str(d)[:120]}"}
+        out = {}
+        for p in d:
+            amt = float(p.get("positionAmt") or 0)
+            if abs(amt) > 1e-12:
+                out[p.get("symbol")] = amt
+        return {"ok": True, "positions": out}
+
     # ---------- 下单路径(硬门控,当前不投产) ----------
     async def place(self, cid: str, leg: dict) -> dict:
         sym = leg.get("symbol", "")
