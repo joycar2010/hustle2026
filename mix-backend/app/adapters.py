@@ -1200,6 +1200,44 @@ async def account_nodes() -> list[dict]:
     return out
 
 
+async def corebox_state() -> dict:
+    """CORE_POOL 封闭盒子组状态(V5 §2.1/§11)——所有 book=CORE_POOL 账户为一组。
+    组总权益=各成员快照权益之和;成员含主账户(hedge_via_master 对冲腿)+借币子账户。
+    封闭盒子铁律:提现处处关,组总权益只应因入金+PnL 变化,任何净流出=盒子被破。"""
+    snaps = await _accounts_snap()
+    pool = await ds.pg_main()
+    members = []
+    total = 0.0
+    if pool is not None:
+        try:
+            rows = await pool.fetch("SELECT account_key, alias, email, book, account_type, parent_key "
+                                    "FROM accounts_registry WHERE book='CORE_POOL' ORDER BY account_type DESC")
+            creds = {r["account_key"]: r["venue"] for r in await pool.fetch(
+                "SELECT account_key, venue, state FROM api_credentials WHERE state <> 'revoked'")}
+            for row in rows:
+                ak = row["account_key"]
+                venue = creds.get(ak) or _reg_venue_of(row) or "binance"
+                snap = snaps.get(f"{venue}:{ak}") or (snaps.get(venue) if ak == venue else {}) or {}
+                eq = float(snap.get("equity_usdt") or 0)
+                total += eq
+                members.append({"account_key": ak, "name": row["alias"] or row["email"] or ak,
+                                "venue": venue, "type": row["account_type"],
+                                "equity_usdt": round(eq, 2), "ok": bool(snap.get("ok")),
+                                "has_key": ak in creds})
+        except Exception:  # noqa: BLE001
+            pass
+    return {"ts": int(time.time()), "members": members, "member_count": len(members),
+            "total_equity_usdt": round(total, 2)}
+
+
+def _reg_venue_of(row) -> str:
+    pk = str(row.get("parent_key") or "")
+    for v in VENUES:
+        if pk.startswith(v):
+            return v
+    return ""
+
+
 async def coins_board() -> list[dict]:
     routes = await ds.hgetall_json("dcm:route:assignments")
     fund_bn = await _funding("binance")

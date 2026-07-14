@@ -31,10 +31,19 @@ async def position_frames_publisher():
     不再走 REST 回环（毫秒级坑位刷新;hub 不算业务,业务留单一来源）。
     读缓存 3s TTL 会拖慢刷新,故本任务绕缓存现算（_no_cache）。"""
     last_sig = None
+    _cb_tick = 0
     while True:
         try:
             r = ds.rds()
             if r is not None:
+                # CORE_POOL 封闭盒子组状态发布(每 ~30s;risk-ledger 消费做流出不变量检查)
+                _cb_tick += 1
+                if _cb_tick % 20 == 1:
+                    try:
+                        cb = await adapters.corebox_state()
+                        await r.set("dcm:risk:corebox", json.dumps(cb, ensure_ascii=False), ex=180)
+                    except Exception:  # noqa: BLE001
+                        pass
                 ds._cache.clear()   # 绕 3s 读缓存,取最新行情/快照
                 rows = await adapters.position_rows(None)
                 # 变更签名：任何价/费/pnl/相位变动即推（价格几乎每帧变=近实时推）
