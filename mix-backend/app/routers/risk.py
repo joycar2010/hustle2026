@@ -380,6 +380,15 @@ async def risk_opportunities(_who=Depends(require_viewer)):
             "skipped_count": len(op.get("skipped") or [])}
 
 
+def _combo_net_pnl(realized, upnl):
+    """逐组合净PnL = 已实现(income_records 各 itype 累加)+ 未实现(upnl)。两者全缺=None(不冒充0)。"""
+    if not realized and upnl is None:
+        return None
+    r = sum(float(v) for v in (realized or {}).values())
+    u = float(upnl) if upnl is not None else 0.0
+    return round(r + u, 2)
+
+
 @router.get("/risk/portfolio")
 async def risk_portfolio(_who=Depends(require_viewer)):
     """经济组合表(tlOCA 十二列)+四采集件:
@@ -392,6 +401,17 @@ async def risk_portfolio(_who=Depends(require_viewer)):
     pol = await ds.get_json("dcm:risk:policy") or {}
     rep = await ds.get_json("dcm:exec:repair") or {}
     acct: dict = {}
+    # 逐 symbol 已实现账本(income_records:PNL/FEE/FUNDING/…),供逐组合净PnL=已实现+未实现
+    realized: dict = {}
+    _rpool = await ds.pg()
+    if _rpool is not None:
+        try:
+            for _r in await _rpool.fetch(
+                    "SELECT symbol, itype, sum(amount)::float8 AS amt FROM income_records "
+                    "WHERE itype <> 'TRANSFER' GROUP BY symbol, itype"):
+                realized.setdefault(_r["symbol"], {})[_r["itype"]] = _r["amt"]
+        except Exception:
+            pass
 
     async def _acct(venue):
         if venue not in acct:
@@ -463,7 +483,10 @@ async def risk_portfolio(_who=Depends(require_viewer)):
             "saga": ps.get("saga"), "saga_state": ps.get("action") or "N/A",
             "target": ps.get("target"), "mode": ps.get("mode"), "signal": ps.get("signal"),
             "next_cashflow": cashflow,
-            "net_pnl": None,
+            "realized": realized.get(sym),
+            "net_pnl": _combo_net_pnl(realized.get(sym),
+                       sum(float(x["upnl"]) for x in legs if x.get("upnl") is not None)
+                       if any(x.get("upnl") is not None for x in legs) else None),
             "upnl_sum": (round(sum(float(x["upnl"]) for x in legs if x.get("upnl") is not None), 2)
                          if any(x.get("upnl") is not None for x in legs) else None),
             "net_delta_usdt": round(delta_usdt, 2) if legs else None,
@@ -496,7 +519,10 @@ async def risk_portfolio(_who=Depends(require_viewer)):
             "owner": "exec-mgr", "product": "C1", "symbol": sym,
             "route": "BN现货 + BN永续", "saga": None, "saga_state": ss.get("action") or "N/A",
             "target": ss.get("target"), "mode": ss.get("mode"), "signal": ss.get("signal"),
-            "next_cashflow": cashflow, "net_pnl": None, "upnl_sum": pd.get("upnl"),
+            "next_cashflow": cashflow,
+            "realized": realized.get(sym),
+            "net_pnl": _combo_net_pnl(realized.get(sym), pd.get("upnl")),
+            "upnl_sum": pd.get("upnl"),
             # manager 的 delta 是 base 数量——换成 USDT 口径(mark 缺=N/A,绝不冒充)
             "net_delta_usdt": (round(float(ss.get("delta") or 0) * float(pd.get("mark") or 0), 2)
                                if pd.get("mark") else None),

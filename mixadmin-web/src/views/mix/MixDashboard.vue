@@ -34,9 +34,13 @@
             <el-button size="small" text @click="$router.push('/mix/venuerisk')">查看</el-button>
           </div>
           <div v-for="(t,i) in todo.p2" :key="'p2'+i" class="tline">
-            <span class="pri p2">P2·提案</span><b>{{ t.title }}</b><span class="dimtxt">{{ t.sub }}</span>
+            <span class="pri p2">P2·{{ t.kind==='proposal' ? t.state : '提案' }}</span><b>{{ t.title }}</b><span class="dimtxt">{{ t.sub }}</span>
             <span class="grow" />
-            <el-button size="small" text @click="openWall()">审批…</el-button>
+            <template v-if="t.kind==='proposal'">
+              <el-button v-if="t.state==='PENDING_APPROVAL'" size="small" type="warning" plain @click="openApprove(t.id)">审批(TOTP)</el-button>
+              <el-button size="small" text @click="rejectProp(t.id)">驳回</el-button>
+            </template>
+            <el-button v-else size="small" text @click="genDryRunSym(t.symbol)">生成DRY_RUN</el-button>
           </div>
         </div>
         <div class="cfoot bordered">新增风险路径:DRY_RUN → COOLDOWN → WebAuthn/TOTP → ACTIVE ｜ 减仓/撤单/冻结新增/残腿收敛:立即执行</div>
@@ -104,7 +108,7 @@
             <div class="dcol">
               <div class="dh">退出 & THESIS</div>
               <div class="dline dimtxt">退出深度/预计滑点 N/A ｜ 信号:{{ r.signal || 'N/A' }}</div>
-              <div class="dline"><el-button size="small" plain disabled title="两步确认流程接入中">平仓…(两步确认:两腿报价+费用+滑点+净收益)</el-button></div>
+              <div class="dline"><el-button size="small" plain @click.stop="openClose(r.symbol)">平仓…(两步确认:两腿报价+费用+滑点+净收益)</el-button></div>
             </div>
           </div>
         </template>
@@ -126,21 +130,36 @@
           <b class="obps" :class="(o.risk_adjusted_e_bps??0)>0 ? 'up' : 'down'">
             {{ o.risk_adjusted_e_bps != null ? (o.risk_adjusted_e_bps>0?'+':'') + o.risk_adjusted_e_bps + ' bps' : 'N/A' }}</b>
           <span class="dimtxt">{{ o.venue_long }}⟶{{ o.venue_short }} · 容量 {{ o.target_notional_usdt ?? 'N/A' }}U</span>
-          <span class="ogates" v-if="!o.blocked">闸 {{ (o.risk_adjusted_e_bps??0)>0?'✓':'✗' }}E ✓鲜 {{ (o.target_notional_usdt||0)>0?'✓':'✗' }}容 <span class="dimtxt">借N/A</span></span>
+          <span class="ogates" v-if="!o.blocked">闸 {{ (o.risk_adjusted_e_bps??0)>0?'✓':'✗' }}E ✓鲜 {{ (o.target_notional_usdt||0)>0?'✓':'✗' }}容
+            <el-link type="warning" @click.stop="genDryRun(o)">生成DRY_RUN</el-link></span>
           <span class="ogates bad" v-else>⛔ {{ o.venue_long_mode }}/{{ o.venue_short_mode }} 受限·无开仓入口</span>
         </div>
       </div>
     </div>
+
+    <ClosePreviewDialog v-model="closeDlg.open" :symbol="closeDlg.symbol" @done="load" />
+    <el-dialog v-model="apprDlg.open" title="提案审批 · TOTP 二次认证" width="440px">
+      <div class="dimtxt" style="margin-bottom:10px">批准=记录人工已批准该经济意图(shadow 终态,绝不下单/武装);须过冷静期。</div>
+      <el-input v-model="apprDlg.code" placeholder="6位 TOTP 动态码" maxlength="6" />
+      <template #footer>
+        <el-button @click="apprDlg.open=false">取消</el-button>
+        <el-button type="warning" :loading="apprDlg.busy" @click="doApprove">批准(shadow)</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import RiskStatusBar from '../../components/RiskStatusBar.vue'
+import ClosePreviewDialog from '../../components/ClosePreviewDialog.vue'
+import { ElMessage } from 'element-plus'
 import { mixApi } from '../../api/mix'
 
 const rs = ref({}); const ov = ref({}); const opps = ref([]); const oppSkipped = ref(0)
-const pf = ref({}); const expanded = ref(-1)
+const pf = ref({}); const expanded = ref(-1); const props2 = ref([])
+const closeDlg = ref({ open: false, symbol: '' })
+const apprDlg = ref({ open: false, id: null, code: '', busy: false })
 let t1 = null
 const NA = 'N/A'
 const fmtAge = s => (s >= 3600 ? Math.floor(s / 3600) + 'h' : Math.floor((s || 0) / 60) + 'm')
@@ -156,9 +175,15 @@ const todo = computed(() => {
   const p1 = inc.filter(i => i.severity !== 'fatal').map(i => ({
     tag: i.rule === 'nav-haircut' ? '账务' : '事件', title: `${i.venue} ${i.title}`,
     sub: (i.detail || '').slice(0, 60), age: fmtAge(i.age_sec) + ' 前' }))
-  const p2 = (opps.value || []).filter(o => !o.blocked).slice(0, 2).map(o => ({
-    title: `开仓提案 ${o.symbol} C2.H · 风调E ${o.risk_adjusted_e_bps} bps`,
-    sub: `建议名义 ${o.target_notional_usdt}U · shadow 候选,审批走 DRY_RUN 链` }))
+  const p2 = []
+  ;(props2.value || []).forEach(pp => p2.push({ kind: 'proposal', id: pp.id, state: pp.state,
+    title: `${pp.symbol} ${pp.product} 提案`,
+    sub: pp.state === 'COOLDOWN' ? `冷静期剩 ${Math.max(0, Math.ceil((pp.cooldown_left||0)/60))}min`
+      : pp.state === 'PENDING_APPROVAL' ? `待二次认证 · 名义 ${pp.target_notional}U` : pp.state }))
+  ;(opps.value || []).filter(o => !o.blocked && !(props2.value||[]).some(pp => pp.symbol === o.symbol))
+    .slice(0, 2).forEach(o => p2.push({ symbol: o.symbol,
+      title: `开仓机会 ${o.symbol} C2.H · 风调E ${o.risk_adjusted_e_bps} bps`,
+      sub: `建议名义 ${o.target_notional_usdt}U · 生成 DRY_RUN 走审批链` }))
   return { p0, p1, p2 }
 })
 // 组合表聚合→八卡(四采集件点亮)
@@ -224,7 +249,27 @@ async function load() {
       mixApi.riskOpportunities(), mixApi.riskPortfolio()])
     rs.value = a; ov.value = b; opps.value = (c?.candidates || []).slice(0, 10)
     oppSkipped.value = c?.skipped_count ?? 0; pf.value = d
+    props2.value = (await mixApi.proposals())?.rows || []
   } catch (e) { /* 状态条自带 STALE 表达,不装绿 */ }
+}
+function openClose(sym) { closeDlg.value = { open: true, symbol: sym } }
+function openApprove(id) { apprDlg.value = { open: true, id, code: '', busy: false } }
+async function genDryRun(o) { genDryRunSym(o.symbol) }
+async function genDryRunSym(sym) {
+  try { const r = await mixApi.proposalCreate({ symbol: sym, product: 'C2.H' })
+    ElMessage.success(`DRY_RUN 提案已建(冷静期 ${r.cooldown_sec}s)`); load()
+  } catch (e) { ElMessage.error(e?.detail || e?.error || '生成失败(需 operator 权限)') }
+}
+async function rejectProp(id) {
+  try { await mixApi.proposalReject(id); ElMessage.success('已驳回'); load() }
+  catch (e) { ElMessage.error(e?.detail || '失败') }
+}
+async function doApprove() {
+  apprDlg.value.busy = true
+  try { const r = await mixApi.proposalApprove(apprDlg.value.id, apprDlg.value.code)
+    ElMessage.success(r.note || '已批准(shadow)'); apprDlg.value.open = false; load()
+  } catch (e) { ElMessage.error(e?.detail || e?.error || 'TOTP 验证失败') }
+  finally { apprDlg.value.busy = false }
 }
 onMounted(() => { load(); t1 = setInterval(load, 10000) })
 onUnmounted(() => t1 && clearInterval(t1))

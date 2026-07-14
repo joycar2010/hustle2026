@@ -42,6 +42,22 @@
     </el-tab-pane>
     <el-tab-pane label="网站设置" name="site" lazy><MixSite /></el-tab-pane>
     <el-tab-pane label="LLM设置" name="llm" lazy><MixLLM /></el-tab-pane>
+    <el-tab-pane label="二次认证(TOTP)" name="totp" lazy>
+      <div class="card" style="max-width:460px">
+        <div class="chd"><b>操作员 TOTP 绑定</b></div>
+        <div class="fnote" style="margin-bottom:10px">提案审批(DRY_RUN→ACTIVE)第二因子。规约允许 WebAuthn/TOTP,本实现为 TOTP。当前:<b>{{ totpBound ? '已绑定 ✓' : '未绑定' }}</b></div>
+        <div v-if="!totpUri">
+          <el-button size="small" type="warning" @click="totpProvision">{{ totpBound ? '重新绑定' : '开始绑定' }}</el-button>
+        </div>
+        <div v-else>
+          <div class="fnote">otpauth URI(填入 Authenticator / Google Authenticator):</div>
+          <el-input :model-value="totpUri" readonly type="textarea" :rows="2" style="margin:6px 0" />
+          <div class="fnote">secret: <code>{{ totpSecret }}</code></div>
+          <el-input v-model="totpCode" placeholder="输入一次动态码确认" maxlength="6" size="small" style="width:160px;margin-top:8px" />
+          <el-button size="small" type="warning" style="margin-left:8px" @click="totpConfirm">确认启用</el-button>
+        </div>
+      </div>
+    </el-tab-pane>
     <el-tab-pane label="AiCoin配置" name="aicoin" lazy>
       <div class="card" style="max-width:560px">
         <div class="chd"><b>AiCoin 行情接口配置</b></div>
@@ -102,7 +118,17 @@ async function acTest() {
   try { const r = await mixApi.aicoinConfigTest(ac.value); acMsg.value = r.ok ? '✓ 连接成功(quota 可读)' : '✗ ' + (r.error || '失败') }
   catch (e) { acMsg.value = '✗ ' + (e?.detail || e?.error || '失败') } finally { acBusy.value = '' }
 }
-onMounted(() => { load(); acLoad() })
+const totpBound = ref(false); const totpUri = ref(''); const totpSecret = ref(''); const totpCode = ref('')
+async function totpLoad() { try { totpBound.value = (await mixApi.totpStatus())?.bound } catch (e) { /* */ } }
+async function totpProvision() {
+  try { const r = await mixApi.totpProvision(); totpUri.value = r.otpauth_uri; totpSecret.value = r.secret }
+  catch (e) { ElMessage.error(e?.detail || '需 operator 权限') }
+}
+async function totpConfirm() {
+  try { await mixApi.totpConfirm(totpCode.value); ElMessage.success('TOTP 已启用'); totpUri.value = ''; totpLoad() }
+  catch (e) { ElMessage.error(e?.detail || '验证码错误') }
+}
+onMounted(() => { load(); acLoad(); totpLoad() })
 </script>
 
 <style scoped lang="scss">

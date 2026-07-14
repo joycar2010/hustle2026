@@ -36,16 +36,8 @@
         <div class="dim2">{{ r.route }} · {{ r.saga_state }} · Δ {{ r.net_delta_usdt ?? 'N/A' }}U · 缓冲 {{ r.margin_buffer != null ? r.margin_buffer + '%' : 'N/A' }}</div>
         <div v-if="exp===i" class="det">
           <div v-for="(lg,j) in r.legs" :key="j" class="dim2">{{ lg.venue }} {{ (lg.amt||0)>=0?'多':'空' }} {{ lg.amt }} · upnl {{ lg.upnl ?? 'N/A' }}</div>
-          <div class="two" v-if="closing!==i">
-            <button class="mbtn w" @click.stop="closing=i">平组合…(两步确认)</button>
-          </div>
-          <div class="two" v-else>
-            <div class="preq">
-              <b>第1步 · 预演报价</b>
-              <div class="dim2">两腿实时报价/费用/预计滑点/最终净收益 = N/A(预演链下批接入)</div>
-            </div>
-            <button class="mbtn danger" disabled title="Passkey 审批链下批接入">第2步 · Passkey 确认(未接入)</button>
-            <button class="mbtn" @click.stop="closing=-1">放弃</button>
+          <div class="two">
+            <button class="mbtn w" @click.stop="openClose(r.symbol)">平组合…(两步确认)</button>
           </div>
         </div>
       </div>
@@ -68,11 +60,15 @@
 
     <!-- ④ 审批(fk5UB:只审桌面 DRY_RUN 通过的 Intent;长按3s→Passkey) -->
     <div class="body" v-show="tab==='appr'">
-      <div class="empty">无待审 Intent<br/><span class="dim2">只显示桌面 DRY_RUN 通过的提案(提案链下批);<br/>审批=长按3s→Passkey,平板不能发起新增风险</span></div>
-      <div class="mcard col" v-for="o in oppsTop" :key="o.symbol">
-        <div class="row1"><b>{{ o.symbol }}</b><i class="pb">C2.H 候选</i>
-          <span class="grow" /><span class="dim2">风调E {{ o.risk_adjusted_e_bps }} bps</span></div>
-        <div class="dim2">shadow 候选仅供知悉,审批须待 DRY_RUN 链</div>
+      <div v-if="!props2.length" class="empty">无待审提案<br/><span class="dim2">桌面生成 DRY_RUN 后在此审批;审批=TOTP 二次认证,平板不能发起新增风险</span></div>
+      <div class="mcard col" v-for="p in props2" :key="p.id">
+        <div class="row1"><b>{{ p.symbol }}</b><i class="pb">{{ p.product }}</i>
+          <span class="grow" /><span class="dim2">{{ p.state }}</span></div>
+        <div class="dim2">名义 {{ p.target_notional }}U · {{ p.state==='COOLDOWN' ? '冷静期剩 '+Math.max(0,Math.ceil((p.cooldown_left||0)/60))+'min' : p.venue_long+'⟶'+p.venue_short }}</div>
+        <div class="two" v-if="p.state==='PENDING_APPROVAL'">
+          <el-input v-model="apprCode[p.id]" placeholder="TOTP 6位" maxlength="6" size="small" style="max-width:140px" />
+          <button class="mbtn" @click="approve(p.id)">批准(shadow)</button>
+        </div>
       </div>
     </div>
 
@@ -97,12 +93,14 @@
     </div>
   </div>
   <div v-else class="gate">平板值守终端<br/><small>URL 需携带 ?token=(operator_mobile 令牌)</small></div>
+  <ClosePreviewDialog v-model="closeDlg.open" :symbol="closeDlg.symbol" @done="load" />
 </template>
 
 <script setup>
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRoute } from 'vue-router'
+import ClosePreviewDialog from '../../components/ClosePreviewDialog.vue'
 import { mixApi } from '../../api/mix'
 
 const route = useRoute()
@@ -112,8 +110,14 @@ if (route.query.token) localStorage.setItem('mix_token', String(route.query.toke
 const TABS = [{ k: 'todo', t: '待办', i: '◉' }, { k: 'pos', t: '持仓', i: '▤' },
   { k: 'risk', t: '风控', i: '⛨' }, { k: 'appr', t: '审批', i: '✓' }, { k: 'more', t: '更多', i: '⋯' }]
 const tab = ref('todo'); const rs = ref({ stale: true }); const pf = ref({}); const opps = ref([])
-const exp = ref(-1); const closing = ref(-1); const clock = ref('')
+const exp = ref(-1); const clock = ref(''); const props2 = ref([])
+const closeDlg = ref({ open: false, symbol: '' }); const apprCode = ref({})
 let t1 = null; let t2 = null
+function openClose(sym) { closeDlg.value = { open: true, symbol: sym } }
+async function approve(id) {
+  try { const r = await mixApi.proposalApprove(id, apprCode.value[id]); ElMessage.success(r.note || '已批准'); load() }
+  catch (e) { ElMessage.error(e?.detail || 'TOTP 失败') }
+}
 const p0 = computed(() => (rs.value.incidents || []).filter(i => i.severity === 'fatal').length + badRows.value.length)
 const p1 = computed(() => (rs.value.incidents || []).filter(i => i.severity !== 'fatal').length)
 const badRows = computed(() => (pf.value.rows || []).filter(r => r.recon !== 'ok'))
@@ -133,6 +137,7 @@ async function load() {
     rs.value = await mixApi.riskSummary()
     pf.value = await mixApi.riskPortfolio()
     opps.value = (await mixApi.riskOpportunities())?.candidates || []
+    props2.value = ((await mixApi.proposals())?.rows || []).filter(p => ['COOLDOWN','PENDING_APPROVAL'].includes(p.state))
   } catch (e) { rs.value = { ...rs.value, stale: true } }
 }
 async function freeze() {
