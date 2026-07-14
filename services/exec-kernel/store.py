@@ -15,6 +15,7 @@ class PgSagaStore:
             "INSERT INTO exec_saga(saga_id, legs, mode, updated_at) "
             "VALUES($1, jsonb_build_object($2::text, $3::jsonb), $4, now()) "
             "ON CONFLICT (saga_id) DO UPDATE SET legs = exec_saga.legs || jsonb_build_object($2::text, $3::jsonb), "
+            "saga_version = exec_saga.saga_version + 1, "
             "updated_at=now()",
             sid, str(idx), json.dumps({"coid": cid, "state": st, "filled": filled}), self.mode)
 
@@ -28,4 +29,5 @@ class PgSagaStore:
     async def set_state(self, sid, st):
         await self.pool.execute(
             "INSERT INTO exec_saga(saga_id, state, mode, updated_at) VALUES($1,$2,$3,now()) "
-            "ON CONFLICT (saga_id) DO UPDATE SET state=$2, updated_at=now()", sid, st, self.mode)
+            "ON CONFLICT (saga_id) DO UPDATE SET state=$2, saga_version=exec_saga.saga_version+1, "
+            "updated_at=now()", sid, st, self.mode)

@@ -24,7 +24,7 @@ import redis.asyncio as aioredis
 
 sys.path.insert(0, "/home/ec2-user/dexcexmix")
 sys.path.insert(0, "/home/ec2-user/dexcexmix/src/packages/dcm-common")
-from policy_client import read_policy  # noqa: E402
+from policy_client import read_policy, set_pool as policy_set_pool  # noqa: E402
 
 try:
     from dcm_common.notify import Notifier, feishu_from_env
@@ -211,6 +211,7 @@ async def evaluate(r, pool, now):
 async def main():
     r = aioredis.from_url(REDIS_URL, decode_responses=True)
     pool = await asyncpg.create_pool(PG_DSN, min_size=1, max_size=2) if PG_DSN else None
+    policy_set_pool(pool)
     once = "--once" in sys.argv
     while True:
         try:

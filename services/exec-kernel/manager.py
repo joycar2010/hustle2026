@@ -20,7 +20,7 @@ sys.path.insert(0, "/home/ec2-user/dexcexmix")
 import exec_core as E  # noqa: E402
 from real_venue import BinanceRealVenue, MultiVenue, venue_armed, venue_sym  # noqa: E402
 from store import PgSagaStore  # noqa: E402
-from policy_client import read_policy  # noqa: E402  # G0 风险策略消费
+from policy_client import read_policy, set_pool as policy_set_pool  # noqa: E402  # G0 风险策略消费
 
 try:
     from dcm_common.notify import Notifier, feishu_from_env
@@ -283,6 +283,7 @@ async def main():
     global _alert_pool
     pool = await asyncpg.create_pool(os.environ["DCM_PG_DSN"], min_size=1, max_size=2)
     _alert_pool = pool
+    policy_set_pool(pool)   # 批次2:Redis 失效时策略从 PG effective_risk_policy 回退读
     r = aioredis.from_url(os.environ.get("DCM_REDIS_URL", "redis://10.0.1.212:6379/0"), decode_responses=True)
     store = PgSagaStore(pool)
     once = "--once" in sys.argv

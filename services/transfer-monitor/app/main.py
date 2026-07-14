@@ -25,6 +25,7 @@ import os
 import time
 from urllib.parse import urlencode
 
+import asyncpg
 import httpx
 import redis.asyncio as aioredis
 
@@ -103,7 +104,9 @@ async def _wd_binance(cli) -> list | None:
 
     cls_map = {0: "pending", 2: "pending", 4: "pending", 6: "done", 3: "fail", 5: "fail", 1: "cancel"}
     return [(cls_map.get(int(w.get("status", -1)), "pending"), _ts(w.get("applyTime")),
-             _ts(w.get("completeTime")) or None) for w in r]
+             _ts(w.get("completeTime")) or None,
+             {"tx_id": str(w.get("id") or ""), "asset": w.get("coin"), "amount": w.get("amount"),
+              "network": w.get("network"), "chain_tx": w.get("txId")}) for w in r]
 
 
 async def _wd_bybit(cli) -> list | None:
@@ -121,7 +124,9 @@ async def _wd_bybit(cli) -> list | None:
         cls = cls_map.get(w.get("status"), "pending")   # SecurityCheck/Pending/BlockchainConfirmed 等=pending
         t0 = float(w.get("createTime") or 0) / 1000
         t1 = float(w.get("updateTime") or 0) / 1000 if cls == "done" else None
-        out.append((cls, t0, t1))
+        out.append((cls, t0, t1, {"tx_id": str(w.get("withdrawId") or ""), "asset": w.get("coin"),
+                                  "amount": w.get("amount"), "network": w.get("chain"),
+                                  "chain_tx": w.get("txID")}))
     return out
 
 
@@ -140,7 +145,9 @@ async def _wd_okx(cli) -> list | None:
     for w in r.get("data", []) or []:
         st = str(w.get("state"))
         cls = "fail" if st == "-1" else "cancel" if st in ("-2", "-3") else "done" if st == "2" else "pending"
-        out.append((cls, float(w.get("ts") or 0) / 1000, None))
+        out.append((cls, float(w.get("ts") or 0) / 1000, None,
+                    {"tx_id": str(w.get("wdId") or ""), "asset": w.get("ccy"), "amount": w.get("amt"),
+                     "network": w.get("chain"), "chain_tx": w.get("txId")}))
     return out
 
 
@@ -156,7 +163,9 @@ async def _wd_gate(cli) -> list | None:
     if not isinstance(r, list):
         return None
     cls_map = {"DONE": "done", "FAIL": "fail", "INVALID": "fail", "CANCEL": "cancel"}
-    return [(cls_map.get(w.get("status"), "pending"), float(w.get("timestamp") or 0), None) for w in r]
+    return [(cls_map.get(w.get("status"), "pending"), float(w.get("timestamp") or 0), None,
+             {"tx_id": str(w.get("id") or ""), "asset": w.get("currency"), "amount": w.get("amount"),
+              "network": w.get("chain"), "chain_tx": w.get("txid")}) for w in r]
 
 
 async def _wd_bitget(cli) -> list | None:
@@ -179,19 +188,63 @@ async def _wd_bitget(cli) -> list | None:
         cls = cls_map.get(w.get("status"), "pending")
         t0 = float(w.get("cTime") or 0) / 1000
         t1 = float(w.get("uTime") or 0) / 1000 if cls == "done" else None
-        out.append((cls, t0, t1))
+        out.append((cls, t0, t1, {"tx_id": str(w.get("orderId") or ""), "asset": w.get("coin"),
+                                  "amount": w.get("size"), "network": w.get("chain"),
+                                  "chain_tx": w.get("tradeId")}))
     return out
 
 
 _WD_COLLECTORS = {"binance": _wd_binance, "bybit": _wd_bybit, "okx": _wd_okx,
                   "gate": _wd_gate, "bitget": _wd_bitget}
+_WD_WINDOW_NOTE = {"binance": "~90d默认", "bybit": "近50笔", "okx": "近100笔", "gate": "~7d默认", "bitget": "30d窗"}
+_STATUS_MAP = {"pending": "PENDING", "done": "CONFIRMED", "fail": "FAILED", "cancel": "CANCELLED"}
+_baseline_last: dict[str, float] = {}   # venue -> 上次基线落库 ts(每小时一行,防行涌)
+
+
+async def _persist_observations(pool, venue: str, recs: list):
+    """逐笔提现事实 upsert(幂等 by venue+流水号;状态/完成时间/耗时随后续轮次更新)。"""
+    if pool is None:
+        return
+    for cls, t0, t1, ref in recs:
+        txid = (ref or {}).get("tx_id")
+        if not txid or not t0:
+            continue
+        try:
+            await pool.execute(
+                "INSERT INTO withdrawal_observation(venue,asset,network,amount,initiated_at,confirmed_at,"
+                "duration_sec,status,venue_tx_id,chain_tx) "
+                "VALUES($1,$2,$3,$4,to_timestamp($5),to_timestamp($6),$7,$8,$9,$10) "
+                "ON CONFLICT (venue, venue_tx_id) WHERE venue_tx_id IS NOT NULL DO UPDATE SET "
+                "status=EXCLUDED.status, confirmed_at=EXCLUDED.confirmed_at, duration_sec=EXCLUDED.duration_sec",
+                venue, str((ref or {}).get("asset") or ""), str((ref or {}).get("network") or ""),
+                float((ref or {}).get("amount") or 0), t0, t1,
+                (t1 - t0) if (t1 and t1 >= t0) else None,
+                _STATUS_MAP.get(cls, "PENDING"), txid, str((ref or {}).get("chain_tx") or ""))
+        except Exception as e:  # noqa: BLE001
+            log.warning("wd observation persist failed %s/%s: %r", venue, txid, e)
+
+
+async def _persist_baseline(pool, venue: str, wh: dict, now: float):
+    """滚动基线每小时一行落 PG(Redis 快照重启即失;PG 基线供阈值/审计/回看)。"""
+    if pool is None or now - _baseline_last.get(venue, 0) < 3600:
+        return
+    try:
+        await pool.execute(
+            "INSERT INTO withdrawal_baseline(venue,window_note,p50_sec,p95_sec,sample_n,pending_count,"
+            "oldest_pending_age_sec,recent_failures) VALUES($1,$2,$3,$4,$5,$6,$7,$8)",
+            venue, _WD_WINDOW_NOTE.get(venue, ""), wh.get("p50_sec"), wh.get("p95_sec"),
+            int(wh.get("sample_n") or 0), int(wh.get("pending_count") or 0),
+            float(wh.get("oldest_pending_age_sec") or 0), int(wh.get("recent_failures") or 0))
+        _baseline_last[venue] = now
+    except Exception as e:  # noqa: BLE001
+        log.warning("wd baseline persist failed %s: %r", venue, e)
 
 
 def _wd_summary(venue: str, recs: list, now: float) -> dict:
     """归一记录→健康摘要:pending 龄/时长 p50-p95/平台失败数/最后成功。
     提现罕见(交易 key 提现关,仅 Treasury 手动),样本少时 p50/p95=None,靠 pending 龄+SLA 兜底。"""
     pending_ages, durations, fails, last_success = [], [], 0, 0
-    for cls, t0, t1 in recs:
+    for cls, t0, t1, _ref in recs:
         if cls == "pending" and t0:
             pending_ages.append(now - t0)
         elif cls == "done":
@@ -228,7 +281,7 @@ async def _held_assets(r: aioredis.Redis) -> set[str]:
     return held
 
 
-async def monitor_round(r: aioredis.Redis, cli: httpx.AsyncClient, notify: Notifier) -> dict:
+async def monitor_round(r: aioredis.Redis, cli: httpx.AsyncClient, notify: Notifier, pool=None) -> dict:
     now = int(time.time())
     caps = await _binance_capital(cli)
     if caps is None:
@@ -283,9 +336,17 @@ async def monitor_round(r: aioredis.Redis, cli: httpx.AsyncClient, notify: Notif
         if recs is None:
             log.warning("withdrawal history fetch failed venue=%s (skip publish)", venue)
             continue
-        wh = _wd_summary(venue, recs, time.time())
+        now_f = time.time()
+        wh = _wd_summary(venue, recs, now_f)
         await r.set(f"dcm:risk:withdrawal:{venue}", json.dumps(wh, ensure_ascii=False),
                     ex=max(INTERVAL * 4, 1200))
+        await _persist_observations(pool, venue, recs)
+        await _persist_baseline(pool, venue, wh, now_f)
+        # HARD 直通:pending/连败信号落地即触发 risk-ledger 立即重算(5s 三处阻断,V5 §20.2)
+        if wh["pending_count"] or wh["recent_failures"]:
+            await r.publish("dcm:risk:trigger", json.dumps(
+                {"venue": venue, "why": "withdrawal", "pending": wh["pending_count"],
+                 "failures": wh["recent_failures"]}))
         if wh["pending_count"]:
             wd_pending[venue] = wh["pending_count"]
     return {"coins": len(caps), "held": len(held), "events": events, "held_alerts": held_alerts,
@@ -294,6 +355,8 @@ async def monitor_round(r: aioredis.Redis, cli: httpx.AsyncClient, notify: Notif
 
 async def main():
     r = aioredis.from_url(REDIS_URL, decode_responses=True)
+    pg_dsn = os.environ.get("DCM_PG_DSN", "")
+    pool = await asyncpg.create_pool(pg_dsn, min_size=1, max_size=2) if pg_dsn else None
     notify = Notifier(REDIS_URL, SERVICE, feishu=feishu_from_env())
     hb = Heartbeat(REDIS_URL, SERVICE, interval_sec=60, ttl_sec=max(INTERVAL * 3, 900))
     asyncio.create_task(hb.run_forever())
@@ -301,7 +364,7 @@ async def main():
     async with httpx.AsyncClient(timeout=20) as cli:
         while True:
             try:
-                stats = await monitor_round(r, cli, notify)
+                stats = await monitor_round(r, cli, notify, pool)
                 hb.extra = stats
                 log.info(f"TRANSFER_OK {stats}")
             except Exception:

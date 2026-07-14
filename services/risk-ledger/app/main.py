@@ -26,6 +26,7 @@ from dcm_common.heartbeat import Heartbeat
 from dcm_common.notify import Notifier, feishu_from_env
 
 from policy import compute_and_publish, corebox_check  # noqa: E402  # G0 风险策略权威+CORE_POOL 封闭盒子
+import incidents  # noqa: E402  # 批次1:有状态 Incident(发生/升级/恢复/超时四时点通知)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 log = logging.getLogger("risk-ledger")
@@ -413,6 +414,66 @@ async def check_round(r: aioredis.Redis, self_pool) -> dict:
     return status
 
 
+_prev_modes: dict = {}          # venue -> 上轮模式(模式历史;重启首轮只登记不记转变)
+_policy_wake = asyncio.Event()  # HARD 直通:采集器 publish dcm:risk:trigger → 立即重算
+
+
+async def _post_policy(pool, pol):
+    """策略发布后置:①模式转变落 venue_mode_transition;②REDUCE+/NO_NEW/NAV折价/凭证轮换
+    走有状态 Incident(只在发生/升级/恢复/超时通知——错误码轰炸在 Incident 层终结)。"""
+    global _prev_modes
+    for vn, vd in (pol.get("venues") or {}).items():
+        mode = vd.get("mode", "NORMAL")
+        prev = _prev_modes.get(vn)
+        if prev is not None and prev != mode and pool is not None:
+            try:
+                await pool.execute(
+                    "INSERT INTO venue_mode_transition(scope_type,scope_key,before_mode,after_mode,"
+                    "reason,policy_epoch,policy_version) VALUES('VENUE',$1,$2,$3,$4,$5,$6)",
+                    vn, prev, mode, str(vd.get("reason", ""))[:300],
+                    int(pol.get("policy_epoch") or 0), int(pol.get("policy_version") or 0))
+            except Exception:
+                log.exception("mode transition persist failed")
+        _prev_modes[vn] = mode
+        if mode in ("REDUCE_ONLY", "EXIT_ONLY", "FROZEN"):
+            await incidents.touch(pool, fire, vn, "policy-mode", "fatal",
+                                  f"{vn} 风险模式={mode}", str(vd.get("reason", ""))[:300])
+        elif mode == "NO_NEW_RISK":
+            await incidents.touch(pool, fire, vn, "policy-mode", "warn",
+                                  f"{vn} 风险模式=NO_NEW_RISK", str(vd.get("reason", ""))[:300])
+        else:
+            await incidents.resolve(pool, fire, vn, "policy-mode")
+    nav = pol.get("nav") or {}
+    if float(nav.get("trapped_usdt") or 0) > 0:
+        by = ", ".join(f"{k}={x}U" for k, x in (nav.get("trapped_by_venue") or {}).items())
+        await incidents.touch(pool, fire, "GLOBAL", "nav-haircut", "warn",
+                              "NAV haircut:受限venue权益折价",
+                              f"净NAV {nav.get('net_nav_usdt')}U = 总{nav.get('gross_equity_usdt')}U"
+                              f" − 折价 {nav.get('trapped_usdt')}U({by})")
+    else:
+        await incidents.resolve(pool, fire, "GLOBAL", "nav-haircut")
+    for vn in pol.get("credential_rotations") or []:
+        await incidents.touch(pool, fire, vn, "credential-rotation", "warn",
+                              f"{vn} API凭证轮换检测",
+                              "key指纹变化→credential_epoch已bump;若非人为轮换须立即排查泄露")
+
+
+async def _trigger_listener(r):
+    """订阅 dcm:risk:trigger(账户失败/提现异常直通)——收到即唤醒主循环立即重算策略,
+    达成"强限制信号落地→5秒内三处(C策略/B place/候选闸)拒新增"(V5 §20.2)。"""
+    while True:
+        try:
+            ps = r.pubsub()
+            await ps.subscribe("dcm:risk:trigger")
+            async for msg in ps.listen():
+                if msg.get("type") == "message":
+                    log.info("risk trigger: %s", str(msg.get("data"))[:150])
+                    _policy_wake.set()
+        except Exception:
+            log.warning("trigger listener reconnecting")
+            await asyncio.sleep(5)
+
+
 async def main():
     r = aioredis.from_url(REDIS_URL, decode_responses=True)
     pool = None
@@ -424,6 +485,7 @@ async def main():
     global _alert_pool
     _alert_pool = pool
     hb = Heartbeat(REDIS_URL, "risk-ledger", interval_sec=INTERVAL, ttl_sec=INTERVAL * 3 + 30)
+    trigger_task = asyncio.create_task(_trigger_listener(r))  # noqa: F841  # 常驻引用防GC
     log.info("risk-ledger up interval=%ss stale_pos=%ss guards=%s expected=%s",
              INTERVAL, STALE_POS_SEC, pool is not None, list(EXPECTED_HB))
     while True:
@@ -436,17 +498,8 @@ async def main():
                 pol = await compute_and_publish(pool, r)
                 status["policy"] = {"version": pol["policy_version"], "capped": pol["capped_venues"],
                                     "nav": pol.get("nav")}
-                # G2:trapped capital 折价>0 或 venue 落入 REDUCE 以上 → 告警(fire 共享节流防刷屏)
-                nav = pol.get("nav") or {}
-                if float(nav.get("trapped_usdt") or 0) > 0:
-                    by = ", ".join(f"{k}={x}U" for k, x in (nav.get("trapped_by_venue") or {}).items())
-                    await fire("nav-haircut", "NAV haircut:受限venue权益折价",
-                               f"净NAV {nav.get('net_nav_usdt')}U = 总权益 {nav.get('gross_equity_usdt')}U"
-                               f" − 折价 {nav.get('trapped_usdt')}U({by})", level="warn")
-                for vn, vd in (pol.get("venues") or {}).items():
-                    if vd.get("mode") in ("REDUCE_ONLY", "EXIT_ONLY", "FROZEN"):
-                        await fire(f"policy-mode:{vn}", f"{vn} 风险模式={vd['mode']}",
-                                   str(vd.get("reason", ""))[:300], level="fatal")
+                await _post_policy(pool, pol)
+                status["incidents"] = await incidents.active_summary(pool)
             except Exception:
                 log.exception("policy compute/publish failed (continuing)")
             # CORE_POOL 封闭盒子不变量:组权益突降/成员限制 → 告警(fire 走共享节流+落库)
@@ -462,7 +515,19 @@ async def main():
                      status.get("policy", {}).get("version"), status.get("policy", {}).get("capped"))
         except Exception:
             log.exception("check round crashed (continuing)")
-        await asyncio.sleep(INTERVAL)
+        # 等待下一轮;触发直通到达则提前醒,先做一次快速策略重算(不等30s轮距)
+        try:
+            await asyncio.wait_for(_policy_wake.wait(), timeout=INTERVAL)
+            _policy_wake.clear()
+            try:
+                pol = await compute_and_publish(pool, r)
+                await _post_policy(pool, pol)
+                log.info("TRIGGER_RECOMPUTE policy_v=%s capped=%s",
+                         pol["policy_version"], pol["capped_venues"])
+            except Exception:
+                log.exception("trigger recompute failed")
+        except asyncio.TimeoutError:
+            pass
 
 
 if __name__ == "__main__":

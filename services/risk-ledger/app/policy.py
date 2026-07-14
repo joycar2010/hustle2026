@@ -60,20 +60,43 @@ def classify_err(err: str):
 
 
 async def _venue_exposure(r, venue: str):
-    """从 dcm:account:{venue} 算在场名义 = Σ|qty|×mark;返回 (notional, equity, ok, err)。"""
+    """从 dcm:account:{venue} 算在场名义 = Σ|qty|×mark;返回 (notional, equity, ok, err, key_fp)。"""
     try:
         a = json.loads(await r.get(f"dcm:account:{venue}") or "{}")
     except Exception:  # noqa: BLE001
-        return 0.0, 0.0, False, "snapshot缺失"
+        return 0.0, 0.0, False, "snapshot缺失", ""
+    fp = str(a.get("key_fp") or "")
     if not a.get("ok"):
-        return 0.0, float(a.get("equity_usdt") or 0), False, str(a.get("err") or "")
+        return 0.0, float(a.get("equity_usdt") or 0), False, str(a.get("err") or ""), fp
     positions = a.get("positions") or {}
     detail = a.get("pos_detail") or {}
     notional = 0.0
     for sym, qty in positions.items():
         mark = float((detail.get(sym) or {}).get("mark") or 0)
         notional += abs(float(qty or 0)) * mark
-    return notional, float(a.get("equity_usdt") or 0), True, ""
+    return notional, float(a.get("equity_usdt") or 0), True, "", fp
+
+
+async def _credential_epoch(pool, venue: str, key_fp: str):
+    """凭证代次(ADR-005):key 指纹变化=轮换→epoch+1。返回 (epoch, rotated)。"""
+    if pool is None or not key_fp:
+        return None, False
+    try:
+        row = await pool.fetchrow("SELECT epoch, key_fingerprint FROM credential_epoch WHERE venue=$1", venue)
+        if row is None:
+            await pool.execute("INSERT INTO credential_epoch(venue, epoch, key_fingerprint) "
+                               "VALUES($1, 1, $2) ON CONFLICT (venue) DO NOTHING", venue, key_fp)
+            return 1, False
+        if row["key_fingerprint"] and row["key_fingerprint"] != key_fp:
+            await pool.execute("UPDATE credential_epoch SET epoch=epoch+1, key_fingerprint=$2, "
+                               "updated_at=now(), note='auto: key指纹变化' WHERE venue=$1", venue, key_fp)
+            return int(row["epoch"]) + 1, True
+        if not row["key_fingerprint"]:
+            await pool.execute("UPDATE credential_epoch SET key_fingerprint=$2, updated_at=now() "
+                               "WHERE venue=$1", venue, key_fp)
+        return int(row["epoch"]), False
+    except Exception:  # noqa: BLE001  # 表未建/迁移中:不阻塞策略发布
+        return None, False
 
 
 # WithdrawalSentinel 提现延迟阈(V5 §7.2;提现罕见无 p95 基线时用绝对阈,crypto 正常分钟~1h 完成)
@@ -210,9 +233,14 @@ async def compute_and_publish(pool, r) -> dict:
             pass
 
     global_ovr = overrides.get("GLOBAL:GLOBAL", {}).get("mode", "NORMAL")
-    venues_out = {}
+    venues_out, cred_epochs, cred_rotations = {}, {}, []
     for v in SUPPORTED_VENUES:
-        notional, equity, ok, err = await _venue_exposure(r, v)
+        notional, equity, ok, err, key_fp = await _venue_exposure(r, v)
+        cep, rotated = await _credential_epoch(pool, v, key_fp)
+        if cep is not None:
+            cred_epochs[v] = cep
+        if rotated:
+            cred_rotations.append(v)
         cap_row = caps.get(f"venue:{v}")
         mode, reason = "NORMAL", "ok"
         cap_val = float(cap_row["max_notional_usdt"]) if cap_row else None
@@ -251,19 +279,6 @@ async def compute_and_publish(pool, r) -> dict:
             "capabilities": _capabilities(mode),
         }
 
-    # (epoch, sequence) 双单调 fencing(ADR-005):消费者按字典序只接受更高。
-    # DB 恢复/权威重建 → 手动 bump epoch(避免 sequence 回退使旧快照复活);sequence 每轮 +1。
-    epoch, version = 1, int(time.time())
-    if pool is not None:
-        try:
-            row = await pool.fetchrow(
-                "UPDATE risk_policy_version SET policy_version = policy_version + 1, updated_at = now() "
-                "WHERE id = 1 RETURNING policy_epoch, policy_version")
-            if row:
-                epoch, version = int(row["policy_epoch"]), int(row["policy_version"])
-        except Exception:  # noqa: BLE001
-            pass
-
     # NAV haircut:逐 venue trapped = equity × 折价率(按最终有效模式);净 NAV = 总权益 − trapped。
     hc = _haircuts()
     gross = trapped = 0.0
@@ -280,13 +295,49 @@ async def compute_and_publish(pool, r) -> dict:
     nav = {"gross_equity_usdt": round(gross, 2), "trapped_usdt": round(trapped, 2),
            "net_nav_usdt": round(gross - trapped, 2), "trapped_by_venue": trapped_by}
 
-    summary = {
-        "policy_epoch": epoch, "policy_version": version, "ts": int(time.time()),
+    body = {
+        "ts": int(time.time()),
         "global_mode": global_ovr,
         "venues": venues_out,
         "capped_venues": [v for v, d in venues_out.items() if d["mode"] != "NORMAL"],
         "nav": nav,
+        "credential_epochs": cred_epochs,
+        "credential_rotations": cred_rotations,
     }
+    # (epoch, sequence) 双单调 fencing(ADR-005)+ PG outbox 耐久发布(批次2):
+    # 同一事务 bump 版本 + upsert effective_risk_policy 全量快照 + 写 outbox——
+    # Redis 清空/C 重启窗口消费者可从 PG 权威读回,旧快照永不复活。
+    epoch, version = 1, int(time.time())
+    summary = {"policy_epoch": epoch, "policy_version": version, **body}
+    if pool is not None:
+        try:
+            async with pool.acquire() as conn:
+                async with conn.transaction():
+                    row = await conn.fetchrow(
+                        "UPDATE risk_policy_version SET policy_version = policy_version + 1, "
+                        "updated_at = now() WHERE id = 1 RETURNING policy_epoch, policy_version")
+                    if row:
+                        epoch, version = int(row["policy_epoch"]), int(row["policy_version"])
+                    summary = {"policy_epoch": epoch, "policy_version": version, **body}
+                    snap = json.dumps(summary, ensure_ascii=False)
+                    await conn.execute(
+                        "INSERT INTO effective_risk_policy(id, policy_epoch, policy_version, snapshot) "
+                        "VALUES(1, $1, $2, $3::jsonb) ON CONFLICT (id) DO UPDATE SET policy_epoch=$1, "
+                        "policy_version=$2, snapshot=$3::jsonb, updated_at=now()", epoch, version, snap)
+                    await conn.execute(
+                        "INSERT INTO risk_policy_outbox(policy_epoch, policy_version, snapshot) "
+                        "VALUES($1, $2, $3::jsonb)", epoch, version, snap)
+        except Exception:  # noqa: BLE001  # 表未建/迁移中:降级时间版本,仍发 Redis(不断发布)
+            pass
     await r.set(POLICY_KEY, json.dumps(summary, ensure_ascii=False), ex=180)
     await r.set("dcm:risk:nav", json.dumps({**nav, "ts": summary["ts"]}, ensure_ascii=False), ex=180)
+    if pool is not None:
+        try:
+            # Redis 投递成功→标记 outbox 已派发;修剪只留近 500 行
+            await pool.execute("UPDATE risk_policy_outbox SET dispatched_at=now() "
+                               "WHERE policy_version=$1 AND dispatched_at IS NULL", version)
+            await pool.execute("DELETE FROM risk_policy_outbox WHERE id < "
+                               "(SELECT COALESCE(max(id),0)-500 FROM risk_policy_outbox)")
+        except Exception:  # noqa: BLE001
+            pass
     return summary

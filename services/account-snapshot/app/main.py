@@ -8,6 +8,7 @@ API key 白名单只绑 B 机 → 所有交易所私有调用只从 B 发起,key
 只读:本服务无任何下单能力。
 """
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -123,8 +124,14 @@ async def main():
                         "ts": int(time.time()), "ok": s.ok, "equity_usdt": round(s.equity_usdt, 2),
                         "positions": {k: round(v, 10) for k, v in s.positions.items()},
                         "pos_detail": s.pos_detail,
+                        # key 指纹:凭证轮换检测(credential_epoch,ADR-005)——只发指纹绝不发 key
+                        "key_fp": hashlib.sha256((active[s.venue].get("key") or "").encode()).hexdigest()[:12],
                         "err": s.err}, ensure_ascii=False), ex=180)
                     hb[s.venue] = f"{round(s.equity_usdt, 2)}U/{len(s.positions)}pos" if s.ok else f"ERR:{s.err[:60]}"
+                    if not s.ok:
+                        # HARD 直通:账户失败事实落地即触发 risk-ledger 立即重算(5s 三处阻断,V5 §20.2)
+                        await r.publish("dcm:risk:trigger", json.dumps(
+                            {"venue": s.venue, "why": "account_fail", "err": (s.err or "")[:120]}))
                 # 多账户快照:UI 录入的额外子账户(如 CORE_POOL joycar0013)→ dcm:account:{venue}:{account_key}
                 extras = _extra_accounts()
                 extra_snaps = await asyncio.gather(
