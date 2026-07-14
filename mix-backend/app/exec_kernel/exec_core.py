@@ -69,9 +69,9 @@ class SagaExecutor:
                 return False
         return False
 
-    async def _rollback_leg(self, saga_id, leg_idx, leg):
-        """回滚已成腿(reduce-only 反向平掉)—— INV2:绝不留裸单腿。"""
-        cid = coid(saga_id, leg_idx, "rollback")
+    async def _rollback_leg(self, saga_id, leg_idx, leg, ns="rollback"):
+        """回滚/平掉一腿(reduce-only 反向)—— INV2:绝不留裸单腿。ns 区分开仓回滚/正常平仓。"""
+        cid = coid(saga_id, leg_idx, ns)
         rb = {**(leg or {}), "reduce_only": True, "leg_idx": leg_idx,
               "side": ("BUY" if (leg or {}).get("side") == "SELL" else "SELL")}
         for _ in range(MAX_PLACE_RETRY):
@@ -86,32 +86,45 @@ class SagaExecutor:
         return False  # 回滚失败 = 必须人工(fatal),外层置 QUARANTINED
 
     async def open_pair(self, saga_id, legs, resume=False):
-        """开双腿。resume=True 从 store 重建续跑(崩溃恢复)—— INV3。"""
+        """开 N 腿(1..N;2 腿=标准配对)。resume=True 从 store 重建续跑(崩溃恢复)—— INV3。
+        先薄盘口腿(legs[0])依次到对冲腿;任一腿达重试上限未成 → 回滚所有已成腿(逆序)。"""
         existing = await self.store.load(saga_id) if resume else {}
         await self.store.set_state(saga_id, RESERVED)
-        # 先薄盘口腿(leg0),再对冲腿(leg1);已 FILLED 的腿跳过(恢复幂等)
         await self.store.set_state(saga_id, OPENING)
-        leg0_ok = existing.get(0, {}).get("state") == FILLED
-        if not leg0_ok:
-            leg0_ok = await self._confirm_leg(saga_id, 0, legs[0])
-        if not leg0_ok:
-            # leg0 都没成 → 无敞口,直接失败(无需回滚)
+        filled_idx = []
+        for i, leg in enumerate(legs):
+            if existing.get(i, {}).get("state") == FILLED:   # 恢复:已成腿跳过(幂等)
+                filled_idx.append(i)
+                continue
+            if i == 1:
+                await self.store.set_state(saga_id, HEDGING)
+            ok = await self._confirm_leg(saga_id, i, leg)
+            if ok:
+                filled_idx.append(i)
+                continue
+            # 第 i 腿失败:已成腿为空 → 无敞口直接失败;否则逆序回滚
+            if not filled_idx:
+                await self.store.set_state(saga_id, CLOSED)
+                return CLOSED
+            await self.store.set_state(saga_id, LEG_IMBALANCE)
+            for j in reversed(filled_idx):
+                if not await self._rollback_leg(saga_id, j, legs[j]):
+                    await self.store.set_state(saga_id, QUARANTINED)   # 回滚失败=人工兜底
+                    return QUARANTINED
             await self.store.set_state(saga_id, CLOSED)
             return CLOSED
-        await self.store.set_state(saga_id, HEDGING)
-        leg1_ok = existing.get(1, {}).get("state") == FILLED
-        if not leg1_ok:
-            leg1_ok = await self._confirm_leg(saga_id, 1, legs[1])
-        if leg1_ok:
-            await self.store.set_state(saga_id, OPEN)
-            return OPEN
-        # leg0 成、leg1 败 → 单腿失衡 → 回滚 leg0
-        await self.store.set_state(saga_id, LEG_IMBALANCE)
-        if await self._rollback_leg(saga_id, 0, legs[0]):
-            await self.store.set_state(saga_id, CLOSED)
-            return CLOSED
-        await self.store.set_state(saga_id, QUARANTINED)   # 回滚也失败=人工兜底
-        return QUARANTINED
+        await self.store.set_state(saga_id, OPEN)
+        return OPEN
+
+    async def close_pair(self, saga_id, legs):
+        """平所有腿(reduce-only 反向)。任一腿平不掉 → QUARANTINED 人工。"""
+        await self.store.set_state(saga_id, CLOSING)
+        for i, leg in enumerate(legs):
+            if not await self._rollback_leg(saga_id, i, leg, ns="close"):
+                await self.store.set_state(saga_id, QUARANTINED)
+                return QUARANTINED
+        await self.store.set_state(saga_id, CLOSED)
+        return CLOSED
 
 
 # place/query 返回的 status 常量
