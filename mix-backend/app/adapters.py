@@ -1095,26 +1095,47 @@ async def account_nodes() -> list[dict]:
         e = reg.get(ak) or {}
         return e.get("alias") or e.get("email") or ak
 
-    # 正确层级模型:venue=主账户分组节点;持 env key 的快照账户(joycar0014/joycar002 等)是【子账户】非主账户。
-    # binance-master → [joycar0014(env key快照) / coin子账户 / CORE_POOL新建子账户] 全部同级。
-    out = []
-    for venue in VENUES:
-        s = snaps.get(venue)
-        children = []
-        seen = set()
-        total_eq = 0.0
-        # HL 是链上 DEX 钱包(地址+agent 私钥,无 API secret/passphrase),非 CEX;platformType=kms_wallet
-        # 让前端按「链上」渲染+走钱包菜单(而非 set_api key/secret 流程)。
-        is_dex = venue == "hyperliquid"
-        pt = "kms_wallet" if is_dex else "cex"
+    # #3 主子真关联:subs 按真 master(parent_key ∈ master_keys)归组;未关联的按 venue 落 orphan。
+    master_keys = {ak for v in masters_by_venue for ak in masters_by_venue[v]}
+    subs_by_master = {}
+    reg_subs = {v: [] for v in VENUES}
+    for ak, meta in reg.items():
+        if ak in VENUES or meta.get("account_type") == "master":
+            continue
+        pk = meta.get("parent_key")
+        if pk in master_keys:
+            subs_by_master.setdefault(pk, []).append((ak, meta))
+        else:
+            v = _reg_venue(ak, meta)
+            if v:
+                reg_subs[v].append((ak, meta))
 
-        # ① 持 env key 的主用子账户(dcm:account:{venue} 快照本体就是这个子账户,如 binance=joycar0014);
-        #    HL 例外:是钱包地址账户,kind=wallet 显示地址/托管而非凭证。
-        if s is not None:
+    def _reg_sub_node(ak, meta, venue):
+        cst = cred.get(ak) or {}
+        sub_snap = snaps.get(f"{venue}:{ak}") or {}
+        cred_state = cst.get("state") or "未录凭证"
+        m = {"账户": _acct_name(ak), "Book": meta.get("book") or "—",
+             "凭证": cred_state, "Key掩码": cst.get("key_mask") or "—"}
+        eq = 0.0
+        if sub_snap:
+            eq = float(sub_snap.get("equity_usdt") or 0)
+            m["净值"] = f"{eq:,.2f} U"
+            m["快照"] = _age_text(sub_snap.get("ts"))
+        return eq, {"id": ak, "kind": "sub", "platformType": "cex", "venue": venue,
+                    "domain": meta.get("book") or "TEST",
+                    "apiStatus": "ok" if cred_state == "active" else ("healing" if cred_state == "pending" else "restricted"),
+                    "metrics": m, "approvalState": None, "children": []}
+
+    def _common_children(venue, s, is_dex, pt):
+        """通用子账户(env-key 快照账户 + coin 面板子账户 + 未关联 orphan subs)——挂 default master 下。"""
+        ch = []
+        seen = set()
+        teq = 0.0
+        if s is not None:   # env-key 快照账户(joycar0014/joycar002 等);HL 是钱包
             pm = reg.get(venue) or {}
             cst = cred.get(venue) or {}
             eq = float(s.get("equity_usdt") or 0)
-            total_eq += eq
+            teq += eq
             if is_dex:
                 metrics = {"账户": _acct_name(venue), "Book": pm.get("book") or "—",
                            "净值": f"{eq:,.2f} U", "持仓数": str(len(s.get("positions") or {})),
@@ -1124,79 +1145,80 @@ async def account_nodes() -> list[dict]:
                 metrics = {"账户": _acct_name(venue), "Book": pm.get("book") or "—",
                            "净值": f"{eq:,.2f} U", "持仓数": str(len(s.get("positions") or {})),
                            "凭证": (cst.get("state") or "env-key"), "快照": _age_text(s.get("ts"))}
-            children.append({
-                "id": venue, "kind": "wallet" if is_dex else "sub", "platformType": pt, "venue": venue,
-                "domain": pm.get("book") or ("DEX·HL" if is_dex else "B·exec"),
-                "apiStatus": "ok" if s.get("ok") else "restricted",
-                "metrics": metrics, "approvalState": None, "children": [],
-            })
+            ch.append({"id": venue, "kind": "wallet" if is_dex else "sub", "platformType": pt, "venue": venue,
+                       "domain": pm.get("book") or ("DEX·HL" if is_dex else "B·exec"),
+                       "apiStatus": "ok" if s.get("ok") else "restricted",
+                       "metrics": metrics, "approvalState": None, "children": []})
             seen.add(venue)
-
-        # ② coin 面板子账户(币安借币引擎的独立子账户,同级挂在币安分组下)
-        if venue == "binance":
+        if venue == "binance":   # coin 面板子账户
             for acct in (panel.get("balances") or {}).get("balances") or []:
                 note = str(acct.get("note") or f"sub:{acct.get('account_id')}")
                 if note in seen:
                     continue
                 seen.add(note)
-                total_eq += float(acct.get("margin_net_usdt") or 0)
-                children.append({
-                    "id": note, "kind": "sub", "platformType": "cex", "venue": "binance",
-                    "domain": "coin·3shard", "apiStatus": "ok",
-                    "metrics": {"账户": _acct_name(note),
-                                "杠杆净资产": f"{float(acct.get('margin_net_usdt') or 0):,.2f} U",
-                                "可用USDT": f"{float(acct.get('margin_usdt_free') or 0):,.2f}",
-                                "借币负债": f"{float(acct.get('margin_usdt_borrowed') or 0):,.2f}",
-                                "风险度": _num(acct.get("margin_level"), 2)},
-                    "approvalState": None, "children": [],
-                })
-
-        # ③ registry 登记的其它子账户(CORE_POOL 新建等)——即使无快照也显示,带 book+凭证状态
-        for ak, meta in reg_subs.get(venue, []):
+                teq += float(acct.get("margin_net_usdt") or 0)
+                ch.append({"id": note, "kind": "sub", "platformType": "cex", "venue": "binance",
+                           "domain": "coin·3shard", "apiStatus": "ok",
+                           "metrics": {"账户": _acct_name(note),
+                                       "杠杆净资产": f"{float(acct.get('margin_net_usdt') or 0):,.2f} U",
+                                       "可用USDT": f"{float(acct.get('margin_usdt_free') or 0):,.2f}",
+                                       "借币负债": f"{float(acct.get('margin_usdt_borrowed') or 0):,.2f}",
+                                       "风险度": _num(acct.get("margin_level"), 2)},
+                           "approvalState": None, "children": []})
+        for ak, meta in reg_subs.get(venue, []):   # 未关联真 master 的 orphan subs
             if ak in seen:
                 continue
             seen.add(ak)
-            cst = cred.get(ak) or {}
-            sub_snap = snaps.get(f"{venue}:{ak}") or snaps.get(ak)   # 多账户快照就绪后带权益
-            cred_state = cst.get("state") or "未录凭证"
-            m = {"账户": _acct_name(ak), "Book": meta.get("book") or "—",
-                 "凭证": cred_state, "Key掩码": cst.get("key_mask") or "—"}
-            if sub_snap:
-                eq = float(sub_snap.get("equity_usdt") or 0)
-                total_eq += eq
-                m["净值"] = f"{eq:,.2f} U"
-                m["快照"] = _age_text(sub_snap.get("ts"))
-            children.append({
-                "id": ak, "kind": "sub", "platformType": "cex", "venue": venue,
-                "domain": meta.get("book") or "TEST",
-                "apiStatus": "ok" if cred_state == "active" else ("healing" if cred_state == "pending" else "restricted"),
-                "metrics": m, "approvalState": None, "children": [],
-            })
+            e, node = _reg_sub_node(ak, meta, venue)
+            teq += e
+            ch.append(node)
+        return teq, ch
 
-        # venue 主账户分组节点:有注册的真 master(joycar2010@…主号)就用它(显示名+自己权益,hedge_via_master
-        # 的合约对冲腿在此账户);否则合成 {venue}-master 分组。合计净值=主账户+各子账户。
-        mak = (masters_by_venue.get(venue) or [None])[0]
-        if mak:
-            mmeta = reg.get(mak) or {}
-            msnap = snaps.get(f"{venue}:{mak}") or {}
-            meq = float(msnap.get("equity_usdt") or 0) if msnap else 0.0
-            total_eq += meq
-            node_id = mak
-            node_metrics = {"账户": _acct_name(mak), "Book": mmeta.get("book") or "—",
-                            "本账户": f"{meq:,.2f} U", "子账户": str(len(children)),
-                            "合计净值": f"{total_eq:,.2f} U"}
-            node_status = "ok" if msnap.get("ok") else ("ok" if (s is not None and s.get("ok")) else "restricted")
+    # 每个 venue:有真 master 则每个 master 一个分组节点(子账户按 parent_key 归位;default master 收通用子账户);
+    # 无真 master 则合成 {venue}-master 分组。这样选 B 的独立 CORE_POOL 主账户会与测试主账户分列两个节点。
+    out = []
+    for venue in VENUES:
+        s = snaps.get(venue)
+        is_dex = venue == "hyperliquid"
+        pt = "kms_wallet" if is_dex else "cex"
+        v_masters = masters_by_venue.get(venue, [])
+        default_master = v_masters[0] if v_masters else None
+
+        if v_masters:
+            for mak in v_masters:
+                children = []
+                teq = 0.0
+                for ak, meta in subs_by_master.get(mak, []):   # 该 master 关联的子账户
+                    e, node = _reg_sub_node(ak, meta, venue)
+                    teq += e
+                    children.append(node)
+                if mak == default_master:   # 默认主账户额外收通用子账户(env-key/coin/orphan)
+                    ce, cch = _common_children(venue, s, is_dex, pt)
+                    teq += ce
+                    children += cch
+                mmeta = reg.get(mak) or {}
+                msnap = snaps.get(f"{venue}:{mak}") or {}
+                meq = float(msnap.get("equity_usdt") or 0) if msnap else 0.0
+                out.append({
+                    "id": mak, "kind": "master", "platformType": pt, "venue": venue,
+                    "domain": mmeta.get("book") or ("DEX·HL" if is_dex else "B·exec"),
+                    "apiStatus": "ok" if (msnap.get("ok") or (s is not None and s.get("ok"))) else "restricted",
+                    "metrics": {"账户": _acct_name(mak), "Book": mmeta.get("book") or "—",
+                                "本账户": f"{meq:,.2f} U", "子账户": str(len(children)),
+                                "合计净值": f"{(teq + meq):,.2f} U"},
+                    "approvalState": None, "children": children,
+                })
         else:
-            node_id = f"{venue}-master"
-            node_metrics = {("链上" if is_dex else "交易所"): venue,
+            teq, children = _common_children(venue, s, is_dex, pt)
+            out.append({
+                "id": f"{venue}-master", "kind": "master", "platformType": pt, "venue": venue,
+                "domain": "DEX·HL" if is_dex else "B·exec",
+                "apiStatus": "ok" if (s is not None and s.get("ok")) else "restricted",
+                "metrics": {("链上" if is_dex else "交易所"): venue,
                             ("钱包" if is_dex else "子账户"): str(len(children)),
-                            "合计净值": f"{total_eq:,.2f} U"}
-            node_status = "ok" if (s is not None and s.get("ok")) else "restricted"
-        out.append({
-            "id": node_id, "kind": "master", "platformType": pt, "venue": venue,
-            "domain": "DEX·HL" if is_dex else "B·exec", "apiStatus": node_status,
-            "metrics": node_metrics, "approvalState": None, "children": children,
-        })
+                            "合计净值": f"{teq:,.2f} U"},
+                "approvalState": None, "children": children,
+            })
     return out
 
 

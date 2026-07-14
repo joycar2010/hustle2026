@@ -505,6 +505,58 @@ async def registry_put(body: dict, op=Depends(require_operator)):
     return {"saved": True}
 
 
+@router.get("/accounts/masters")
+async def account_masters(venue: str = "", _who=Depends(require_viewer)):
+    """可选主账户列表(account_type=master),供设主子关联时下拉。venue 过滤(凭证 venue)。"""
+    pool = await ds.pg_main()
+    if pool is None:
+        return {"masters": []}
+    creds = {r["account_key"]: r["venue"] for r in await pool.fetch(
+        "SELECT account_key, venue FROM api_credentials WHERE state <> 'revoked'")}
+    out = []
+    for r in await pool.fetch("SELECT account_key, alias, email, book FROM accounts_registry "
+                              "WHERE account_type='master' ORDER BY account_key"):
+        v = creds.get(r["account_key"], "")
+        if venue and v and v != venue:
+            continue
+        out.append({"account_key": r["account_key"], "name": r["alias"] or r["email"] or r["account_key"],
+                    "venue": v, "book": r["book"]})
+    return {"masters": out}
+
+
+@router.put("/accounts/{account_key}/master")
+async def set_account_master(account_key: str, body: dict, op=Depends(require_operator)):
+    """#3 主子真关联:子账户 parent_key → 真实 master account_key(hedge_via_master 对冲路由靠此)。
+    校验:master 存在且 account_type=master;主子 venue 一致(凭证)。master_key='' = 解除关联。
+    ⚠️关联决定 C3 hedge_via_master 的对冲腿下到哪个主账户,错了=对冲下错账户,必须校验严格。"""
+    master_key = str(body.get("master_key") or "").strip()
+    pool = await ds.pg_main()
+    if pool is None:
+        raise HTTPException(503, "mix_main 未配置")
+    sub = await pool.fetchrow("SELECT account_key FROM accounts_registry WHERE account_key=$1", account_key)
+    if not sub:
+        raise HTTPException(404, f"账户 {account_key} 不存在")
+    if master_key:
+        if master_key == account_key:
+            raise HTTPException(400, "主账户不能是自己")
+        m = await pool.fetchrow("SELECT account_type FROM accounts_registry WHERE account_key=$1", master_key)
+        if not m:
+            raise HTTPException(400, f"主账户 {master_key} 不存在")
+        if m["account_type"] != "master":
+            raise HTTPException(400, f"{master_key} 不是主账户(当前 {m['account_type']})")
+        vs = {r["account_key"]: r["venue"] for r in await pool.fetch(
+            "SELECT account_key, venue FROM api_credentials WHERE account_key = ANY($1::text[])",
+            [account_key, master_key])}
+        if account_key in vs and master_key in vs and vs[account_key] != vs[master_key]:
+            raise HTTPException(400, f"主子 venue 不一致(子={vs[account_key]}/主={vs[master_key]})")
+    await pool.execute("UPDATE accounts_registry SET parent_key=$2, account_type='sub', updated_at=now() "
+                       "WHERE account_key=$1", account_key, master_key)
+    await proxy.audit(op["operator"], op["role"], "account.set_master", account_key,
+                      {"master": master_key}, "saved")
+    return {"saved": True, "account_key": account_key, "master_key": master_key or None,
+            "note": "hedge_via_master 对冲腿将路由到此主账户"}
+
+
 # ---------------- LLM 状态 + 中转站管理 + 每日消费（testauto /infra 模式移植） ----------------
 # 权威=mix_main.llm_relays;生效链路=Redis dcm:llm:config(llm-advisor 每轮热读,主备自动降级);
 # 熔断态=dcm:llm:breaker(advisor 维护,手动恢复=DEL);用量账=dcm_main.llm_usage_log(0013,mix_ro 读)。
