@@ -5,6 +5,7 @@
   2) 拿不到的数值一律 '—'（dim），绝不编数；未启用策略如实标注，绝不用演示数据冒充。
   3) 数据源失联返回空集 + degraded 标记，绝不 500。
 """
+import os
 import time
 import datetime as dt
 from typing import Any, Optional
@@ -66,6 +67,12 @@ def _hours_since(iso: Any) -> str:
         return f"持仓 {h:.1f}h"
     except Exception:  # noqa: BLE001
         return "持仓"
+
+
+def _mask_addr(a: str) -> str:
+    """链上地址掩码显示(0x1234…abcd)。"""
+    a = str(a or "")
+    return f"{a[:6]}…{a[-4:]}" if len(a) > 12 else (a or "—")
 
 
 def _num(v, nd=4) -> str:
@@ -1086,21 +1093,32 @@ async def account_nodes() -> list[dict]:
         children = []
         seen = set()
         total_eq = 0.0
+        # HL 是链上 DEX 钱包(地址+agent 私钥,无 API secret/passphrase),非 CEX;platformType=kms_wallet
+        # 让前端按「链上」渲染+走钱包菜单(而非 set_api key/secret 流程)。
+        is_dex = venue == "hyperliquid"
+        pt = "kms_wallet" if is_dex else "cex"
 
-        # ① 持 env key 的主用子账户(dcm:account:{venue} 快照本体就是这个子账户,如 binance=joycar0014)
+        # ① 持 env key 的主用子账户(dcm:account:{venue} 快照本体就是这个子账户,如 binance=joycar0014);
+        #    HL 例外:是钱包地址账户,kind=wallet 显示地址/托管而非凭证。
         if s is not None:
             pm = reg.get(venue) or {}
             cst = cred.get(venue) or {}
             eq = float(s.get("equity_usdt") or 0)
             total_eq += eq
+            if is_dex:
+                metrics = {"账户": _acct_name(venue), "Book": pm.get("book") or "—",
+                           "净值": f"{eq:,.2f} U", "持仓数": str(len(s.get("positions") or {})),
+                           "地址": _mask_addr(s.get("account_key") or os.environ.get("HL_WALLET_ADDRESS", "")),
+                           "托管": "DEX·agent 私钥(非 API key)", "快照": _age_text(s.get("ts"))}
+            else:
+                metrics = {"账户": _acct_name(venue), "Book": pm.get("book") or "—",
+                           "净值": f"{eq:,.2f} U", "持仓数": str(len(s.get("positions") or {})),
+                           "凭证": (cst.get("state") or "env-key"), "快照": _age_text(s.get("ts"))}
             children.append({
-                "id": venue, "kind": "sub", "platformType": "cex", "venue": venue,
-                "domain": pm.get("book") or "B·exec",
+                "id": venue, "kind": "wallet" if is_dex else "sub", "platformType": pt, "venue": venue,
+                "domain": pm.get("book") or ("DEX·HL" if is_dex else "B·exec"),
                 "apiStatus": "ok" if s.get("ok") else "restricted",
-                "metrics": {"账户": _acct_name(venue), "Book": pm.get("book") or "—",
-                            "净值": f"{eq:,.2f} U", "持仓数": str(len(s.get("positions") or {})),
-                            "凭证": (cst.get("state") or "env-key"), "快照": _age_text(s.get("ts"))},
-                "approvalState": None, "children": [],
+                "metrics": metrics, "approvalState": None, "children": [],
             })
             seen.add(venue)
 
@@ -1145,11 +1163,14 @@ async def account_nodes() -> list[dict]:
                 "metrics": m, "approvalState": None, "children": [],
             })
 
-        # venue 主账户分组节点(合计净值=各子账户之和;子账户数)
+        # venue 主账户分组节点(合计净值=各子账户之和;子账户数)。HL=kms_wallet(前端渲染「链上」)。
         out.append({
-            "id": f"{venue}-master", "kind": "master", "platformType": "cex", "venue": venue,
-            "domain": "B·exec", "apiStatus": "ok" if (s is not None and s.get("ok")) else "restricted",
-            "metrics": {"交易所": venue, "子账户": str(len(children)), "合计净值": f"{total_eq:,.2f} U"},
+            "id": f"{venue}-master", "kind": "master", "platformType": pt, "venue": venue,
+            "domain": "DEX·HL" if is_dex else "B·exec",
+            "apiStatus": "ok" if (s is not None and s.get("ok")) else "restricted",
+            "metrics": {("链上" if is_dex else "交易所"): venue,
+                        ("钱包" if is_dex else "子账户"): str(len(children)),
+                        "合计净值": f"{total_eq:,.2f} U"},
             "approvalState": None, "children": children,
         })
     return out
