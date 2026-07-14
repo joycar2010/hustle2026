@@ -150,15 +150,55 @@ async def set_account_mode(account_key: str, body: dict, op=Depends(require_oper
     return {"saved": True, "account_key": account_key, "account_mode": mode}
 
 
+_ACCT_MODES = [("classic", "经典"), ("portfolio_margin", "统一账户"),
+               ("cross_margin", "全仓杠杆"), ("isolated", "逐仓")]
+
+
+async def _enabled_strategies(pool):
+    """系统已启用策略(新 C 码体系)=product_catalog 中 stage 非 NA/KILLED 的产品(排除纯能力 O1/I1/R1)。
+    动态覆盖,新产品上架自动进矩阵。回落=catalog 不可读时给 CEX 主产品。"""
+    if pool is not None:
+        try:
+            rows = await pool.fetch(
+                "SELECT product_id, name FROM product_catalog "
+                "WHERE stage NOT IN ('NA','KILLED') AND product_id NOT IN ('O1','I1','R1') "
+                "AND product_id NOT LIKE 'D%' "   # DEX 产品不用 CEX 账户模式,不进账户模式资格矩阵
+                "ORDER BY sort_order, product_id")
+            if rows:
+                return [(r["product_id"], r["name"]) for r in rows]
+        except Exception:  # noqa: BLE001
+            pass
+    return [("C1", "期现收费"), ("C2", "跨所费差"), ("C3", "借币点差"),
+            ("C3.R", "利率套利"), ("C4", "期现交割"), ("C5", "永续交割")]
+
+
 @router.get("/risk/eligibility")
 async def eligibility_matrix(_who=Depends(require_viewer)):
-    """策略×账户模式资格矩阵(单一权威)。opener/executor 据此门控账户能跑哪些策略。"""
+    """策略×账户模式资格矩阵(单一权威):**动态覆盖系统已启用全部策略(新C码)×全部账户模式**;
+    未配置格默认 ALLOWED。opener/executor 据此门控账户能跑哪些策略。"""
     pool = await ds.pg_main()
-    if pool is None:
-        return {"matrix": []}
-    rows = await pool.fetch("SELECT strategy, account_mode, eligibility, reason, updated_at "
-                            "FROM strategy_account_eligibility ORDER BY strategy, account_mode")
-    return {"matrix": [dict(r) for r in rows]}
+    strategies = await _enabled_strategies(pool)
+    configured = {}
+    if pool is not None:
+        try:
+            for r in await pool.fetch("SELECT strategy, account_mode, eligibility, reason "
+                                      "FROM strategy_account_eligibility"):
+                configured[(r["strategy"], r["account_mode"])] = {"eligibility": r["eligibility"],
+                                                                  "reason": r["reason"]}
+        except Exception:  # noqa: BLE001
+            pass
+    grid = []
+    for scode, sname in strategies:
+        for mkey, mname in _ACCT_MODES:
+            c = configured.get((scode, mkey))
+            grid.append({"strategy": scode, "strategy_name": sname,
+                         "account_mode": mkey, "account_mode_name": mname,
+                         "eligibility": (c or {}).get("eligibility", "ALLOWED"),
+                         "reason": (c or {}).get("reason"),
+                         "configured": c is not None})
+    return {"strategies": [{"code": s, "name": n} for s, n in strategies],
+            "account_modes": [{"key": k, "name": n} for k, n in _ACCT_MODES],
+            "matrix": grid}
 
 
 @router.put("/risk/eligibility")

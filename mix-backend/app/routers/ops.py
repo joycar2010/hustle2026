@@ -558,6 +558,37 @@ async def set_account_master(account_key: str, body: dict, op=Depends(require_op
             "note": "hedge_via_master 对冲腿将路由到此主账户"}
 
 
+@router.put("/accounts/batch")
+async def accounts_batch(body: dict, op=Depends(require_operator)):
+    """批量设置勾选账户的账户模式(account_mode)或资金账本(book)。
+    body={account_keys:[...], account_mode?:..., book?:...}。只改传入的字段。"""
+    keys = body.get("account_keys") or []
+    if not isinstance(keys, list) or not keys:
+        raise HTTPException(400, "account_keys 必填(勾选的账户)")
+    mode = body.get("account_mode")
+    book = body.get("book")
+    if not mode and not book:
+        raise HTTPException(400, "account_mode 或 book 至少传一个")
+    if mode and mode not in ("classic", "portfolio_margin", "cross_margin", "isolated", "unknown"):
+        raise HTTPException(400, "account_mode 非法")
+    if book and book not in ("CORE_POOL", "HOUSE_RND", "TEST") and not str(book).startswith("SMA"):
+        raise HTTPException(400, "book 非法")
+    pool = await ds.pg_main()
+    if pool is None:
+        raise HTTPException(503, "mix_main 不可达")
+    sets, args = [], [keys]
+    if mode:
+        args.append(mode); sets.append(f"account_mode=${len(args)}")
+    if book:
+        args.append(book); sets.append(f"book=${len(args)}")
+    n = await pool.execute(f"UPDATE accounts_registry SET {', '.join(sets)}, updated_at=now() "
+                           "WHERE account_key = ANY($1::text[])", *args)
+    await proxy.audit(op["operator"], op["role"], "account.batch", ",".join(keys[:10]),
+                      {"mode": mode, "book": book, "count": len(keys)}, "saved")
+    return {"saved": True, "affected": len(keys), "account_mode": mode, "book": book,
+            "note": n}
+
+
 # ---------------- LLM 状态 + 中转站管理 + 每日消费（testauto /infra 模式移植） ----------------
 # 权威=mix_main.llm_relays;生效链路=Redis dcm:llm:config(llm-advisor 每轮热读,主备自动降级);
 # 熔断态=dcm:llm:breaker(advisor 维护,手动恢复=DEL);用量账=dcm_main.llm_usage_log(0013,mix_ro 读)。
