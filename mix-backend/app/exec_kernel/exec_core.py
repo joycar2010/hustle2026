@@ -42,14 +42,14 @@ class SagaExecutor:
         cid = coid(saga_id, leg_idx, ns)
         for _ in range(MAX_PLACE_RETRY):
             # 每次重试前先查:确定性 cid 意味着上次可能其实已下到交易所
-            q = await self.venue.query(cid)
+            q = await self.venue.query(cid, leg)
             if q["status"] == FILLED:
                 await self.store.save_leg(saga_id, leg_idx, cid, FILLED, q["filled"])
                 return True
             if q["status"] in (ACK, PARTIAL):
                 # 已挂单但未全成:等待/查询,不重复下单
                 await self.store.save_leg(saga_id, leg_idx, cid, q["status"], q.get("filled", 0))
-                q2 = await self.venue.query(cid)
+                q2 = await self.venue.query(cid, leg)
                 if q2["status"] == FILLED:
                     await self.store.save_leg(saga_id, leg_idx, cid, FILLED, q2["filled"])
                     return True
@@ -69,15 +69,17 @@ class SagaExecutor:
                 return False
         return False
 
-    async def _rollback_leg(self, saga_id, leg_idx):
-        """回滚已成腿(reduce-only 平掉)—— INV2:绝不留裸单腿。"""
+    async def _rollback_leg(self, saga_id, leg_idx, leg):
+        """回滚已成腿(reduce-only 反向平掉)—— INV2:绝不留裸单腿。"""
         cid = coid(saga_id, leg_idx, "rollback")
+        rb = {**(leg or {}), "reduce_only": True, "leg_idx": leg_idx,
+              "side": ("BUY" if (leg or {}).get("side") == "SELL" else "SELL")}
         for _ in range(MAX_PLACE_RETRY):
-            q = await self.venue.query(cid)
+            q = await self.venue.query(cid, rb)
             if q["status"] == FILLED:
                 await self.store.save_leg(saga_id, leg_idx, cid, ROLLED_BACK, 0)
                 return True
-            res = await self.venue.place(cid, {"reduce_only": True, "leg_idx": leg_idx})
+            res = await self.venue.place(cid, rb)
             if res["status"] == FILLED:
                 await self.store.save_leg(saga_id, leg_idx, cid, ROLLED_BACK, 0)
                 return True
@@ -105,7 +107,7 @@ class SagaExecutor:
             return OPEN
         # leg0 成、leg1 败 → 单腿失衡 → 回滚 leg0
         await self.store.set_state(saga_id, LEG_IMBALANCE)
-        if await self._rollback_leg(saga_id, 0):
+        if await self._rollback_leg(saga_id, 0, legs[0]):
             await self.store.set_state(saga_id, CLOSED)
             return CLOSED
         await self.store.set_state(saga_id, QUARANTINED)   # 回滚也失败=人工兜底

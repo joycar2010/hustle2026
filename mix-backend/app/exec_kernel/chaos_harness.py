@@ -60,7 +60,7 @@ class SimVenue:
         self.orders[cid] = {"state": E.FILLED, "filled": 1.0}
         return {"status": E.FILLED, "filled": 1.0}
 
-    async def query(self, cid):
+    async def query(self, cid, leg=None):
         if self.partition:
             return {"status": E.NOTFOUND, "filled": 0}   # 分区期查不到(保守当未下)
         o = self.orders.get(cid)
