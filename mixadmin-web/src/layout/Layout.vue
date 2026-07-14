@@ -230,7 +230,7 @@
 import { ref, watch, onMounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElNotification } from 'element-plus'
 import { api } from '../api'
 import { mixApi } from '../api/mix'
 import { connectStream } from '../api/mixWs'
@@ -354,34 +354,46 @@ function startMarquee(){
       marqueeText.value=String(raw).replace(EMOJI_RE,'').replace(/\s+/g,' ').trim()
       onAlertMarquee(d) } })   // AI 客服:重要告警主动弹浮框
 }
-// AI 客服主动弹窗:跑马灯告警达阈值→AI 助手浮球自动弹出(可后台开关+免打扰)
+// AI 客服主动弹窗:跑马灯告警达阈值→AI 助手浮球自动弹出。
+// 铁律:弹窗要即时且无条件(不被慢 aiChat/免打扰阻塞)——先弹再异步补解读/语音。
+// fatal 告警绝不被顾问播报免打扰(advDnd)静默;免打扰只压 warn。
 const LEVEL_RANK={info:0,warn:1,fatal:2}
 async function onAlertMarquee(d){
   try{
-    const conf=aiPushConf.value; if(!conf.enabled) return
+    const conf=aiPushConf.value||{}
+    if(conf.enabled===false) return   // 只有显式关闭才不弹(未加载时 undefined→仍弹,fail-open)
     const level=String(d.level||'info')
-    if((LEVEL_RANK[level]??0) < (LEVEL_RANK[conf.min_level]??2)) return
-    if(advDnd.value) return   // 免打扰:不弹屏(与顾问播报同一开关)
+    const minLv=conf.min_level||'fatal'
+    if((LEVEL_RANK[level]??0) < (LEVEL_RANK[minLv]??2)) return
+    if(advDnd.value && level!=='fatal') return   // 免打扰只压 warn;fatal 必弹
     const title=String(d.title||'系统告警').replace(EMOJI_RE,'').trim()
     const body=String(d.content||d.text||'').replace(EMOJI_RE,'').replace(/\s+/g,' ').trim()
-    let shown=`【${title}】${body}`
-    if(conf.interpret){   // AI 解读:让助手用人话解释这条告警+建议动作
-      try{ const rr=await mixApi.aiChat({conversation_id:aiConvId.value,message:`系统刚触发一条告警，请用一两句话向运维口语化解释它意味着什么、要不要处理、怎么处理（不要复述原文）：标题「${title}」内容「${body}」`})
-        if(rr.conversation_id)aiConvId.value=rr.conversation_id
-        if(rr.reply)shown=`⚠️ ${title}\n${rr.reply}` }catch(e){ /* 解读失败回落原文 */ }
-    }
-    aiMsgs.value.push({id:aiId(),who:'ai',txt:shown,alert:true}); aiSave()
+    // ① 保底角标通知(即使浮球逻辑出问题也一定可见)
+    try{ ElNotification({ title:(level==='fatal'?'🔴 ':'⚠️ ')+title, message:body, type:(level==='fatal'?'error':'warning'),
+      duration:level==='fatal'?0:8000, position:'bottom-right' }) }catch(e){}
+    // ② 立即弹 AI 浮球并推入告警气泡(不等 aiChat/tts)
+    const mid=aiId()
+    aiMsgs.value.push({id:mid,who:'ai',txt:`【${title}】${body}`,alert:true}); aiSave()
     aiOpen.value=true; aiTab.value='chat'
     await nextTick(()=>{ if(aiBodyEl.value)aiBodyEl.value.scrollTop=aiBodyEl.value.scrollHeight })
-    if(conf.speak){   // 语音播报:edge-tts 人声念告警标题(带鉴权取 blob,失败静默)
-      try{ const blob=await mixApi.ttsBlob(title, conf.persona||'')
+    // ③ 异步补 AI 解读(替换该气泡文本;失败保留原文)
+    if(conf.interpret){
+      mixApi.aiChat({conversation_id:aiConvId.value,message:`系统刚触发一条告警，请用一两句话向运维口语化解释它意味着什么、要不要处理、怎么处理（不要复述原文）：标题「${title}」内容「${body}」`})
+        .then(rr=>{ if(rr.conversation_id)aiConvId.value=rr.conversation_id
+          if(rr.reply){ const m=aiMsgs.value.find(x=>x.id===mid); if(m){ m.txt=`⚠️ ${title}\n${rr.reply}`; aiSave() } } })
+        .catch(()=>{})
+    }
+    // ④ 异步语音播报(edge-tts 人声念标题;失败静默回落浏览器 TTS)
+    if(conf.speak){
+      mixApi.ttsBlob(title, conf.persona||'').then(blob=>{
         const url=URL.createObjectURL(blob); const au=new Audio(url)
-        au.onended=()=>URL.revokeObjectURL(url); au.play().catch(()=>{}) }catch(e){}
+        au.onended=()=>URL.revokeObjectURL(url); au.play().catch(()=>{})
+      }).catch(()=>{ try{ const u=new SpeechSynthesisUtterance(title); speechSynthesis.speak(u) }catch(e){} })
     }
   }catch(e){ /* 弹窗失败绝不影响跑马灯 */ }
 }
-const aiPushConf=ref({enabled:false, min_level:'fatal', speak:false, persona:'', interpret:false})
-async function loadAiPushConf(){ try{ Object.assign(aiPushConf.value, await mixApi.notifyAiGet()) }catch(e){ /* 降级:不弹 */ } }
+const aiPushConf=ref({enabled:undefined, min_level:'fatal', speak:false, persona:'', interpret:false})
+async function loadAiPushConf(){ try{ Object.assign(aiPushConf.value, await mixApi.notifyAiGet()) }catch(e){ /* 加载失败:enabled 保持 undefined→fatal 仍 fail-open 弹 */ } }
 // AI 运维助手悬浮球(site=qhadmin, 接 qh 后端 LLM; 未配置则后端回退; localStorage 保存/删除/清空对齐 qh)
 import { nextTick } from 'vue'
 const aiOpen=ref(false),aiIn=ref(''),aiBusy=ref(false),aiConvId=ref(null),aiBodyEl=ref(null)
