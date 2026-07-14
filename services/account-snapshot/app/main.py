@@ -56,6 +56,39 @@ def _venue_proxy(venue: str) -> str:
     return ""
 
 
+def _extra_accounts():
+    """扫 .creds/*.env,返回 UI 录入的额外账户(env 主 key 之外)。
+    每项 {account_key, venue, key, secret, passphrase, proxy}。venue 缺失=跳过(cred-agent 未补 VENUE 的旧文件)。
+    account_key ∈ VENUE_CFG 键(六所主账户名)=env 主账户,跳过(避免与 dcm:account:{venue} 重复)。"""
+    out = []
+    if not os.path.isdir(CREDS_DIR):
+        return out
+    for fn in os.listdir(CREDS_DIR):
+        if not fn.endswith(".env"):
+            continue
+        ak = fn[:-4]
+        if ak in VENUE_CFG:   # 六所主账户名(binance/bybit/...)是 env 主账户的代理文件,不作额外账户
+            continue
+        kv = {}
+        try:
+            for line in open(os.path.join(CREDS_DIR, fn)):
+                if "=" in line:
+                    k, v = line.split("=", 1)
+                    kv[k.strip()] = v.strip()
+        except Exception:  # noqa: BLE001
+            continue
+        venue = kv.get("VENUE", "")
+        if not venue or not kv.get("API_KEY"):
+            continue   # 无 venue(旧文件)或无 key → 无法快照,跳过
+        cfg = {"key": kv["API_KEY"], "secret": kv.get("API_SECRET", "")}
+        if kv.get("API_PASSPHRASE"):
+            cfg["passphrase"] = kv["API_PASSPHRASE"]
+        if venue == "hyperliquid":
+            cfg["address"] = kv["API_KEY"]
+        out.append({"account_key": ak, "venue": venue, "cfg": cfg, "proxy": kv.get("PROXY_URL", "")})
+    return out
+
+
 async def main():
     r = aioredis.from_url(REDIS_URL, decode_responses=True)
     active = {v: c for v, c in VENUE_CFG.items() if c.get("key") and c.get("secret")}
@@ -92,8 +125,23 @@ async def main():
                         "pos_detail": s.pos_detail,
                         "err": s.err}, ensure_ascii=False), ex=180)
                     hb[s.venue] = f"{round(s.equity_usdt, 2)}U/{len(s.positions)}pos" if s.ok else f"ERR:{s.err[:60]}"
+                # 多账户快照:UI 录入的额外子账户(如 CORE_POOL joycar0013)→ dcm:account:{venue}:{account_key}
+                extras = _extra_accounts()
+                extra_snaps = await asyncio.gather(
+                    *(fetch_account(client_for(e["venue"]), e["venue"], e["cfg"]) for e in extras),
+                    return_exceptions=True)
+                for e, es in zip(extras, extra_snaps):
+                    if isinstance(es, Exception):
+                        continue
+                    await r.set(f"dcm:account:{e['venue']}:{e['account_key']}", json.dumps({
+                        "ts": int(time.time()), "ok": es.ok, "equity_usdt": round(es.equity_usdt, 2),
+                        "positions": {k: round(v, 10) for k, v in es.positions.items()},
+                        "pos_detail": es.pos_detail, "account_key": e["account_key"],
+                        "err": es.err}, ensure_ascii=False), ex=180)
+                    hb[f"{e['venue']}:{e['account_key']}"] = (
+                        f"{round(es.equity_usdt, 2)}U" if es.ok else f"ERR:{es.err[:50]}")
                 await r.set("dcm:hb:account-snapshot", json.dumps(hb, ensure_ascii=False), ex=max(INTERVAL * 3, 300))
-                log.info("ACCT_OK %s", {s.venue: (s.ok, round(s.equity_usdt, 2), len(s.positions)) for s in snaps})
+                log.info("ACCT_OK %s +%d extra", {s.venue: (s.ok, round(s.equity_usdt, 2)) for s in snaps}, len(extras))
             except Exception:
                 log.exception("snapshot round crashed (continuing)")
             await asyncio.sleep(INTERVAL)

@@ -35,12 +35,13 @@ def _decrypt(ct: str) -> dict:
     return {"key": parts[0].strip(), "secret": parts[1].strip(), "passphrase": parts[2].strip()}
 
 
-def _write_env(account_key: str, cred: dict, proxy_url: str):
+def _write_env(account_key: str, cred: dict, proxy_url: str, venue: str = ""):
     path = os.path.join(CREDS_DIR, f"{account_key}.env")
     lines = [f"API_KEY={cred['key']}", f"API_SECRET={cred['secret']}"]
     if cred.get("passphrase"):
         lines.append(f"API_PASSPHRASE={cred['passphrase']}")
     lines.append(f"PROXY_URL={proxy_url or ''}")
+    lines.append(f"VENUE={venue or ''}")   # 多账户快照据此知道该 key 属哪个交易所
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w") as f:
         f.write("\n".join(lines) + "\n")
@@ -52,7 +53,7 @@ def _mask(k: str) -> str:
 
 def process(conn):
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-        cur.execute("SELECT account_key, ciphertext, proxy_url, state FROM api_credentials "
+        cur.execute("SELECT account_key, ciphertext, proxy_url, state, venue FROM api_credentials "
                     "WHERE state IN ('pending','revoked')")
         rows = cur.fetchall()
     for r in rows:
@@ -67,8 +68,8 @@ def process(conn):
             cred = _decrypt(r["ciphertext"])
             if not cred["key"] or not cred["secret"]:
                 raise ValueError("解密结果缺 key/secret")
-            _write_env(ak, cred, r["proxy_url"])
-            detail = f"key={_mask(cred['key'])} proxy={'on' if r['proxy_url'] else 'direct'}"
+            _write_env(ak, cred, r["proxy_url"], r.get("venue") or "")
+            detail = f"key={_mask(cred['key'])} venue={r.get('venue') or '?'} proxy={'on' if r['proxy_url'] else 'direct'}"
             with conn.cursor() as cur:
                 cur.execute("UPDATE api_credentials SET state='active', applied_detail=%s, updated_at=now() "
                             "WHERE account_key=%s", (detail, ak))
