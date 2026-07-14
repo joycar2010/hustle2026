@@ -68,6 +68,7 @@ EXPECTED_HB = {
     # engine-basis/engine-dualperp 已退役(2026-07-14,统一执行内核接管)——新权威:
     "exec-manager": 120,     # 20s/轮,持仓 owner-of-record
     "exec-recon": 400,       # 120s/轮,6所对账
+    "exec-opener": 300,      # 60s/轮,shadow 开仓候选决策(不下单)
 }
 RECON_VENUES = ("binance", "bybit", "okx", "gate", "bitget", "hyperliquid")
 STALE_STATUSES = ("PENDING_BORROW", "BORROWED_IDLE", "PENDING_REPAY")

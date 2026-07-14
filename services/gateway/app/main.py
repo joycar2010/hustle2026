@@ -116,7 +116,7 @@ EXPECTED_SVCS = {"feed-cex": 120, "funding-sync": 900, "depth-sampler": 400, "un
                  "risk-ledger": 120, "carry-advisor": 1900, "coin-bridge": 240, "basis-sampler": 200,
                  "pnl-recorder": 900, "lending-advisor": 5500, "llm-advisor": 1800,
                  # engine-basis/engine-dualperp 退役(2026-07-14)→统一执行内核:
-                 "exec-manager": 120, "exec-recon": 400}
+                 "exec-manager": 120, "exec-recon": 400, "exec-opener": 300}
 
 
 @app.get("/api/overview")
