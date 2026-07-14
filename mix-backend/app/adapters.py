@@ -1049,10 +1049,11 @@ async def account_nodes() -> list[dict]:
     pool = await ds.pg_main()
     if pool:
         try:
-            for r in await pool.fetch("SELECT account_key, alias, email, book, account_type, parent_key "
-                                      "FROM accounts_registry"):
+            for r in await pool.fetch("SELECT account_key, alias, email, book, account_type, parent_key, "
+                                      "account_mode FROM accounts_registry"):
                 reg[r["account_key"]] = {"alias": r["alias"], "email": r["email"], "book": r["book"],
-                                         "account_type": r["account_type"], "parent_key": r["parent_key"]}
+                                         "account_type": r["account_type"], "parent_key": r["parent_key"],
+                                         "account_mode": r["account_mode"]}
         except Exception:  # noqa: BLE001
             pass
         try:
@@ -1095,6 +1096,12 @@ async def account_nodes() -> list[dict]:
         e = reg.get(ak) or {}
         return e.get("alias") or e.get("email") or ak
 
+    _MODE_CN = {"classic": "经典", "portfolio_margin": "统一账户", "cross_margin": "全仓杠杆",
+                "isolated": "逐仓", "unknown": "未知"}
+
+    def _mode_cn(ak):
+        return _MODE_CN.get((reg.get(ak) or {}).get("account_mode") or "classic", "经典")
+
     # #3 主子真关联:subs 按真 master(parent_key ∈ master_keys)归组;未关联的按 venue 落 orphan。
     master_keys = {ak for v in masters_by_venue for ak in masters_by_venue[v]}
     subs_by_master = {}
@@ -1114,7 +1121,7 @@ async def account_nodes() -> list[dict]:
         cst = cred.get(ak) or {}
         sub_snap = snaps.get(f"{venue}:{ak}") or {}
         cred_state = cst.get("state") or "未录凭证"
-        m = {"账户": _acct_name(ak), "Book": meta.get("book") or "—",
+        m = {"账户": _acct_name(ak), "Book": meta.get("book") or "—", "模式": _mode_cn(ak),
              "凭证": cred_state, "Key掩码": cst.get("key_mask") or "—"}
         eq = 0.0
         if sub_snap:
@@ -1142,7 +1149,7 @@ async def account_nodes() -> list[dict]:
                            "地址": _mask_addr(s.get("account_key") or os.environ.get("HL_WALLET_ADDRESS", "")),
                            "托管": "DEX·agent 私钥(非 API key)", "快照": _age_text(s.get("ts"))}
             else:
-                metrics = {"账户": _acct_name(venue), "Book": pm.get("book") or "—",
+                metrics = {"账户": _acct_name(venue), "Book": pm.get("book") or "—", "模式": _mode_cn(venue),
                            "净值": f"{eq:,.2f} U", "持仓数": str(len(s.get("positions") or {})),
                            "凭证": (cst.get("state") or "env-key"), "快照": _age_text(s.get("ts"))}
             ch.append({"id": venue, "kind": "wallet" if is_dex else "sub", "platformType": pt, "venue": venue,
@@ -1159,7 +1166,7 @@ async def account_nodes() -> list[dict]:
                 teq += float(acct.get("margin_net_usdt") or 0)
                 ch.append({"id": note, "kind": "sub", "platformType": "cex", "venue": "binance",
                            "domain": "coin·3shard", "apiStatus": "ok",
-                           "metrics": {"账户": _acct_name(note),
+                           "metrics": {"账户": _acct_name(note), "模式": _mode_cn(note),
                                        "杠杆净资产": f"{float(acct.get('margin_net_usdt') or 0):,.2f} U",
                                        "可用USDT": f"{float(acct.get('margin_usdt_free') or 0):,.2f}",
                                        "借币负债": f"{float(acct.get('margin_usdt_borrowed') or 0):,.2f}",
@@ -1204,8 +1211,8 @@ async def account_nodes() -> list[dict]:
                     "domain": mmeta.get("book") or ("DEX·HL" if is_dex else "B·exec"),
                     "apiStatus": "ok" if (msnap.get("ok") or (s is not None and s.get("ok"))) else "restricted",
                     "metrics": {"账户": _acct_name(mak), "Book": mmeta.get("book") or "—",
-                                "本账户": f"{meq:,.2f} U", "子账户": str(len(children)),
-                                "合计净值": f"{(teq + meq):,.2f} U"},
+                                "模式": _mode_cn(mak), "本账户": f"{meq:,.2f} U",
+                                "子账户": str(len(children)), "合计净值": f"{(teq + meq):,.2f} U"},
                     "approvalState": None, "children": children,
                 })
         else:

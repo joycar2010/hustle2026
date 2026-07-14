@@ -132,6 +132,55 @@ async def risk_corebox(_who=Depends(require_viewer)):
     return st
 
 
+@router.put("/accounts/{account_key}/mode")
+async def set_account_mode(account_key: str, body: dict, op=Depends(require_operator)):
+    """#5 设账户模式(account_mode)——决定该账户能跑什么策略(经资格矩阵)。
+    classic=经典钱包分离(C3);portfolio_margin=统一账户(借贷套利)。"""
+    mode = str(body.get("account_mode") or "").strip()
+    if mode not in ("classic", "portfolio_margin", "cross_margin", "isolated", "unknown"):
+        raise HTTPException(400, "account_mode 须∈ classic/portfolio_margin/cross_margin/isolated/unknown")
+    pool = await ds.pg_main()
+    if pool is None:
+        raise HTTPException(503, "dcm_main 不可达")
+    n = await pool.execute("UPDATE accounts_registry SET account_mode=$2, updated_at=now() WHERE account_key=$1",
+                           account_key, mode)
+    if n.endswith("0"):
+        raise HTTPException(404, f"账户 {account_key} 不存在")
+    await proxy.audit(op["operator"], op["role"], "account.set_mode", account_key, {"mode": mode}, "saved")
+    return {"saved": True, "account_key": account_key, "account_mode": mode}
+
+
+@router.get("/risk/eligibility")
+async def eligibility_matrix(_who=Depends(require_viewer)):
+    """策略×账户模式资格矩阵(单一权威)。opener/executor 据此门控账户能跑哪些策略。"""
+    pool = await ds.pg_main()
+    if pool is None:
+        return {"matrix": []}
+    rows = await pool.fetch("SELECT strategy, account_mode, eligibility, reason, updated_at "
+                            "FROM strategy_account_eligibility ORDER BY strategy, account_mode")
+    return {"matrix": [dict(r) for r in rows]}
+
+
+@router.put("/risk/eligibility")
+async def eligibility_put(body: dict, op=Depends(require_operator)):
+    """改资格矩阵一格(strategy×account_mode→eligibility)。政策可配,不硬编码。"""
+    strategy = str(body.get("strategy") or "").strip()
+    mode = str(body.get("account_mode") or "").strip()
+    elig = str(body.get("eligibility") or "").strip().upper()
+    if not strategy or not mode or elig not in ("PREFERRED", "ALLOWED", "FORBIDDEN"):
+        raise HTTPException(400, "strategy/account_mode 必填,eligibility∈PREFERRED/ALLOWED/FORBIDDEN")
+    pool = await ds.pg_main()
+    if pool is None:
+        raise HTTPException(503, "dcm_main 不可达")
+    await pool.execute(
+        "INSERT INTO strategy_account_eligibility(strategy,account_mode,eligibility,reason,updated_by,updated_at) "
+        "VALUES($1,$2,$3,$4,$5,now()) ON CONFLICT (strategy,account_mode) DO UPDATE SET "
+        "eligibility=$3, reason=$4, updated_by=$5, updated_at=now()",
+        strategy, mode, elig, str(body.get("reason") or "")[:200], op["operator"])
+    await proxy.audit(op["operator"], op["role"], "eligibility.put", f"{strategy}:{mode}", body, elig)
+    return {"saved": True}
+
+
 @router.get("/risk/restrictions")
 async def risk_restrictions(_who=Depends(require_viewer)):
     """账户限制原始事实(近 100 条;V5 §6.3)。"""
