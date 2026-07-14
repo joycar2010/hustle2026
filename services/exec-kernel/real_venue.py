@@ -85,19 +85,46 @@ class BinanceRealVenue:
                 out[p.get("symbol")] = amt
         return {"ok": True, "positions": out}
 
-    # ---------- 下单路径(硬门控,当前不投产) ----------
+    async def _post(self, base: str, path: str, params: dict):
+        async with httpx.AsyncClient(timeout=15) as cli:
+            r = await cli.post(f"{base}{path}?{self._sign(params)}", headers={"X-MBX-APIKEY": self.key})
+        try:
+            return r.status_code, r.json()
+        except Exception:  # noqa: BLE001
+            return r.status_code, r.text
+
+    # ---------- 下单路径(硬门控 + 市价单) ----------
     async def place(self, cid: str, leg: dict) -> dict:
+        """市价单(binance 永续/现货)。leg={symbol,side(BUY/SELL),market,qty|quote_qty,reduce_only}。
+        硬门控:非 armed 或 symbol 不在白名单 → 拒绝。确定性 cid→newClientOrderId(交易所端幂等)。"""
         sym = leg.get("symbol", "")
         if not self.armed:
             raise PermissionError(f"exec 未武装(DCM_EXEC_ARMED!=true),拒绝下单 {cid}")
         if sym not in self.arm_symbols:
             raise PermissionError(f"{sym} 不在武装白名单 {self.arm_symbols},拒绝下单 {cid}")
-        raise NotImplementedError("place 真下单实现待武装专场(混沌已过,接线时启用)")
+        market = leg.get("market", "perp")
+        base, path = (BINANCE_FAPI, "/fapi/v1/order") if market == "perp" else (BINANCE_SPOT, "/api/v3/order")
+        params = {"symbol": sym, "side": leg["side"], "type": "MARKET",
+                  "newClientOrderId": cid.replace(":", "-")[:36]}
+        if leg.get("quote_qty") is not None and market == "spot":
+            params["quoteOrderQty"] = leg["quote_qty"]
+        else:
+            params["quantity"] = leg["qty"]
+        if leg.get("reduce_only") and market == "perp":
+            params["reduceOnly"] = "true"
+        try:
+            code, d = await self._post(base, path, params)
+        except Exception as e:  # noqa: BLE001
+            return {"status": TIMEOUT, "filled": 0, "err": repr(e)[:120]}
+        if code != 200 or not isinstance(d, dict):
+            return {"status": REJECT, "filled": 0, "err": f"http {code}: {str(d)[:150]}"}
+        st = d.get("status", "")
+        return {"status": {"FILLED": FILLED, "NEW": ACK, "PARTIALLY_FILLED": PARTIAL}.get(st, ACK),
+                "filled": float(d.get("executedQty") or 0), "venue_order_id": str(d.get("orderId") or "")}
 
     async def cancel(self, cid: str, symbol: str = "", market: str = "perp") -> None:
         if not self.armed:
             raise PermissionError("exec 未武装,拒绝撤单")
-        raise NotImplementedError("cancel 待武装专场")
 
 
 class BybitRealVenue:
