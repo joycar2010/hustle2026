@@ -1,9 +1,9 @@
 <template>
   <div class="mixdash">
-    <!-- V2 全局状态条(双行:平台模式+风险摘要,V5 §14.1;数据超龄 fail-closed 灰) -->
+    <!-- 设计宪法:tlOCA 单屏版V2。数据不够的格子写 N/A,绝不改格子。 -->
     <RiskStatusBar />
-    <!-- 跑马灯已全局化(Layout 顶栏);本页 WS 仅消费 position:updates -->
-    <!-- V2·组合安全摘要八卡(tlOCA g2u09e;数据缺失一律 N/A 绝不用哨兵值) -->
+
+    <!-- 组合安全摘要八卡(g2u09e) -->
     <div class="sumrow">
       <div v-for="c in sumCards" :key="c.k" class="scard" :class="c.cls">
         <span class="sk">{{ c.k }}</span>
@@ -12,134 +12,122 @@
       </div>
     </div>
 
-    <!-- V2·中段:待办队列 | 异常与Saga(tlOCA G05EKu) -->
+    <!-- 中段:待办队列(P0/P1/P2 分级) | 异常/Saga(G05EKu) -->
     <div class="midrow">
-      <div class="card mid">
-        <div class="chd">待办队列 <b :class="{warn: todoRows.length}">{{ todoRows.length }}</b>
-          <el-link class="mr" @click="$router.push('/mix/venuerisk')">风险工作台 →</el-link></div>
-        <div v-if="!todoRows.length" class="dimtxt">无待办(Incident 全清)</div>
-        <div v-for="(t,i) in todoRows" :key="i" class="todoline">
-          <span class="mch" :class="t.severity==='fatal' ? 'red' : 'watch'">{{ t.state }}</span>
-          <b>{{ t.venue }}</b> {{ t.title }}
-          <span class="dimtxt">命中{{ t.hit_count }} · {{ fmtAge(t.age_sec) }}</span>
+      <div class="card todo">
+        <div class="chd">待办队列 <span class="dimtxt">现在必须处理什么</span>
+          <span class="grow" />
+          <span class="cnt p0">P0 {{ todo.p0.length }}</span>
+          <span class="cnt p1">P1 {{ todo.p1.length }}</span>
+          <span class="cnt p2">P2 {{ todo.p2.length }}</span>
         </div>
-        <div class="cfoot">P0 置顶 · 减险动作立即执行,提险须 DRY_RUN→冷静期→二次认证</div>
+        <div class="tlist">
+          <div v-if="!todo.p0.length && !todo.p1.length && !todo.p2.length" class="dimtxt pad">无待办(Incident 全清 · 无提案)</div>
+          <div v-for="(t,i) in todo.p0" :key="'p0'+i" class="tline">
+            <span class="pri p0">P0·{{ t.tag }}</span><b>{{ t.title }}</b><span class="dimtxt">{{ t.sub }}</span>
+            <span class="grow" /><span class="dimtxt">{{ t.age }}</span>
+            <el-button size="small" type="danger" plain @click="$router.push('/mix/venuerisk')">去紧急处置 →</el-button>
+          </div>
+          <div v-for="(t,i) in todo.p1" :key="'p1'+i" class="tline">
+            <span class="pri p1">P1·{{ t.tag }}</span><b>{{ t.title }}</b><span class="dimtxt">{{ t.sub }}</span>
+            <span class="grow" /><span class="dimtxt">{{ t.age }}</span>
+            <el-button size="small" text @click="$router.push('/mix/venuerisk')">查看</el-button>
+          </div>
+          <div v-for="(t,i) in todo.p2" :key="'p2'+i" class="tline">
+            <span class="pri p2">P2·提案</span><b>{{ t.title }}</b><span class="dimtxt">{{ t.sub }}</span>
+            <span class="grow" />
+            <el-button size="small" text @click="openWall()">审批…</el-button>
+          </div>
+        </div>
+        <div class="cfoot bordered">新增风险路径:DRY_RUN → COOLDOWN → WebAuthn/TOTP → ACTIVE ｜ 减仓/撤单/冻结新增/残腿收敛:立即执行</div>
       </div>
-      <div class="card mid">
-        <div class="chd">异常与决策流</div>
-        <div v-if="feedLoop.length" class="dfeed">
-          <div class="dtrack"><div class="dinner" :style="{ animationDuration: feedDur }">
-            <span v-for="(f, idx) in feedLoop" :key="idx" class="ditem">
-              <i class="dbadge" :style="{ background: SC[f.code] || '#5E6673' }">{{ META[f.code]?.ccode || f.code }}</i>
-              <em class="dkind">{{ f.kind }}</em>{{ f.text }}<b class="dts">{{ shortTs(f.ts) }}</b>
-            </span>
-          </div></div>
-        </div>
-        <div v-for="(seg, i) in (ov.pipeline||[]).slice(0,8)" :key="seg.label" class="pmini">
-          <span class="pl">{{ seg.label }}</span><b>{{ seg.total }}</b>
-          <span class="pstack"><span v-for="(n, code) in seg.split" :key="code" class="pchunk"
-            :style="{flex: n, background: SC[code] || '#5E6673'}"></span></span>
+      <div class="card saga">
+        <div class="chd">异常 / Saga <span class="grow" /><span class="dimtxt">双腿执行状态</span></div>
+        <div class="tlist">
+          <div v-if="!sagaRows.length" class="dimtxt pad">无进行中 Saga / 修复意图</div>
+          <div v-for="(sg,i) in sagaRows" :key="i" class="sgline">
+            <b :class="{bad: sg.bad}">{{ sg.symbol }}</b> · <span class="dimtxt">{{ sg.kind }}</span>
+            <div class="steps">
+              <span v-for="(st,j) in sg.steps" :key="j" class="step" :class="st.cls">{{ j+1 }} {{ st.t }}</span>
+            </div>
+          </div>
+          <div v-if="pf.repair?.intents?.length" class="rescue">
+            <b>修复意图</b>
+            <span v-for="it in pf.repair.intents" :key="it.intent_id" class="dimtxt">
+              {{ it.kind }} {{ it.symbol }}→撤出{{ it.venue }}(est {{ it.est_notional_usdt }}U,shadow)</span>
+          </div>
         </div>
       </div>
     </div>
 
-    <!-- 过滤 + 排序 -->
-    <div class="bar">
-      <div class="chips">
-        <span class="chip" :class="{on:!filterStrategy}" @click="setStrategy('')">全部 {{ totalCount }}</span>
-        <span v-for="s in strategies" :key="s.code" class="chip"
-              :class="{on:filterStrategy===s.code}"
-              :style="filterStrategy===s.code
-                ? {background:META[s.code].color,color:'#0B0E11',borderColor:META[s.code].color}
-                : {background:META[s.code].colorBg,color:META[s.code].color,borderColor:META[s.code].color+'66'}"
-              @click="setStrategy(s.code)">
-          <span :title="'系统码 '+s.code">{{ META[s.code]?.ccode || s.code }}·{{ s.name }}</span>
-        </span>
+    <!-- 生产持仓(WhJIi 十二列;一行=一个经济组合,点击展开) -->
+    <div class="card poscard">
+      <div class="chd">生产持仓 <span class="dimtxt">一行=一个经济组合 · 点击展开交易腿</span>
+        <span class="grow" /><span class="dimtxt">口径:净PnL = Funding + Basis − Fee − Slippage(费后·含未实现)</span></div>
+      <div class="ptbl">
+        <div class="phead">
+          <span class="c ow">OWNER</span><span class="c pd">产品</span><span class="c sy">标的</span>
+          <span class="c rt">路由</span><span class="c sg">Saga状态</span><span class="c cf">下一现金流</span>
+          <span class="c pn">净PnL</span><span class="c dl">净Delta</span><span class="c mb">保证金缓冲</span>
+          <span class="c xc">退出成本</span><span class="c rc">RECON</span><span class="c op2">操作</span>
+        </div>
+        <div v-if="!pf.rows?.length" class="dimtxt pad">无在管组合(exec-manager 空配置)</div>
+        <template v-for="(r,i) in pf.rows" :key="i">
+          <div class="prow2" :class="{bad: r.recon!=='ok', open: expanded===i}" @click="expanded = expanded===i ? -1 : i">
+            <span class="c ow">{{ r.owner }}</span>
+            <span class="c pd"><i class="pbadge">{{ r.product }}</i></span>
+            <span class="c sy"><b>{{ r.symbol }}</b></span>
+            <span class="c rt">{{ r.route }}</span>
+            <span class="c sg"><i class="sdot" :class="sagaCls(r)"></i>{{ sagaText(r) }}</span>
+            <span class="c cf">{{ r.next_cashflow ? '净差 ' + r.next_cashflow.net_daily_pct + '%/d' : 'N/A' }}</span>
+            <span class="c pn">{{ r.net_pnl == null ? 'N/A' : r.net_pnl + ' U' }}</span>
+            <span class="c dl" :class="{ok: Math.abs(r.net_delta_usdt||0) < 25}">{{ r.net_delta_usdt == null ? 'N/A' : (r.net_delta_usdt>=0?'+':'') + r.net_delta_usdt + ' U' }}</span>
+            <span class="c mb">{{ r.margin_buffer == null ? 'N/A' : r.margin_buffer }}</span>
+            <span class="c xc">{{ r.exit_cost == null ? 'N/A' : r.exit_cost }}</span>
+            <span class="c rc" :class="{bad: r.recon!=='ok'}">{{ r.recon==='ok' ? '✓ 0 差异' : '⚠ ' + r.recon }}</span>
+            <span class="c op2"><el-button size="small" text @click.stop="$router.push('/mix/strategies')">详情</el-button></span>
+          </div>
+          <div v-if="expanded===i" class="drawer">
+            <div class="dcol">
+              <div class="dh">腿明细</div>
+              <div v-for="(lg,j) in r.legs" :key="j" class="dline">
+                <b>{{ lg.venue }}</b> {{ (lg.amt||0) >= 0 ? '多' : '空' }} {{ lg.amt }}
+                <span class="dimtxt"> mark {{ lg.mark ?? 'N/A' }} · venue {{ lg.mode ?? 'N/A' }}</span>
+              </div>
+            </div>
+            <div class="dcol">
+              <div class="dh">FUNDING 现金流</div>
+              <div class="dline">{{ r.next_cashflow ? '本组合净差 ' + r.next_cashflow.net_daily_pct + '%/d(空腿收−多腿付)' : 'N/A(资金费日历待接)' }}</div>
+              <div class="dh">净收益拆分(开仓以来)</div>
+              <div class="dline dimtxt">Funding N/A · Basis N/A · Fee N/A · Slippage N/A(逐组合账本待接)</div>
+            </div>
+            <div class="dcol">
+              <div class="dh">退出 & THESIS</div>
+              <div class="dline dimtxt">退出深度/预计滑点 N/A ｜ 信号:{{ r.signal || 'N/A' }}</div>
+              <div class="dline"><el-button size="small" plain disabled title="两步确认流程接入中">平仓…(两步确认:两腿报价+费用+滑点+净收益)</el-button></div>
+            </div>
+          </div>
+        </template>
       </div>
-      <div class="right">
-        <el-radio-group v-model="sortKey" size="small" @change="load">
-          <el-radio-button value="opened_at">发起时间</el-radio-button>
-          <el-radio-button value="pnl">收益</el-radio-button>
-        </el-radio-group>
-        <el-button size="small" @click="flipDir">{{ sortDir==='asc'?'早→晚 / 低→高':'晚→早 / 高→低' }}</el-button>
-        <el-button size="small" :loading="loading" @click="load">刷新</el-button>
-      </div>
+      <div class="cfoot bordered">平仓统一两步确认,提交前展示两腿实时报价/费用/预计滑点/最终净收益 ｜ 单腿操作仅在「风控与账务」紧急残腿处理 ｜ 数据缺失一律显示 N/A,绝不使用哨兵值</div>
     </div>
 
-    <!-- V2·生产持仓卡(tlOCA WhJIi;功能1:1复用既有坑位表) -->
-    <div class="poscard">
-      <VirtualPositionTable
-        :rows="rows" :sort-key="sortKey" :sort-dir="sortDir" :height="0"
-        @action="onAction" @rule-template="onRuleTemplate" @rule-symbol="onRuleSymbol" />
-      <div class="cfoot bordered">平仓统一两步确认,提交前展示两腿实时报价/费用/预计滑点/最终净收益 ｜ 单腿操作仅在「风控与账务」紧急残腿处理 ｜ 数据缺失一律 N/A,绝不使用哨兵值</div>
-    </div>
-
-    <!-- V2·通过硬闸的机会(tlOCA z5ijRp;候选带venue风险字段,受限腿无开仓入口) -->
-    <div class="card opprow" v-if="opps.length">
-      <div class="chd">通过硬闸的机会 <span class="dimtxt">shadow 候选 · 风险调整后E(bps)</span></div>
+    <!-- 通过硬闸的机会 · Top10(z5ijRp) -->
+    <div class="card opprow">
+      <div class="chd">通过硬闸的机会 · Top {{ opps.length }}
+        <span class="dimtxt">硬闸 = 风调E>0 · 数据新鲜 · 容量>0 ｜ shadow 候选</span>
+        <span class="grow" />
+        <el-link @click="openWall()">其余 {{ oppSkipped }} 个候选 → 机会台(屏1·机会与LAB)→</el-link>
+      </div>
       <div class="oppstrip">
+        <div v-if="!opps.length" class="dimtxt pad">本轮无过闸候选</div>
         <div v-for="o in opps" :key="o.symbol" class="opp" :class="{blocked: o.blocked}">
-          <b class="osym">{{ o.symbol }}</b>
-          <span class="oroute">{{ o.venue_long }}⟶{{ o.venue_short }}</span>
-          <span class="oe">E {{ o.e_bps ?? 'N/A' }} · 风调 <b :class="(o.risk_adjusted_e_bps??0)>0?'up':'down'">{{ o.risk_adjusted_e_bps ?? 'N/A' }}</b></span>
-          <span class="omode" v-if="o.blocked">⛔ {{ o.blocked_reason }}({{ o.venue_long_mode }}/{{ o.venue_short_mode }})</span>
-          <span class="omode dimtxt" v-else>帽 {{ o.target_notional_usdt }}U · charge {{ o.risk_charge_bps ?? 'N/A' }}</span>
-        </div>
-      </div>
-    </div>
-
-    <!-- 通用规则(策略级) / 单一规则(某币) / 划转 / 部分还币 弹层 -->
-    <RuleSettingsModal v-model="ruleModal.open" :code="ruleModal.code" />
-    <SymbolRuleModal v-model="symModal.open" :symbol="symModal.symbol" :code="symModal.code" />
-    <TransferModal v-model="transferModal.open" :accounts="transferModal.accounts" :default-sub="transferModal.sub" />
-    <PartialRepayModal v-model="repayModal.open" :symbol="repayModal.symbol" @done="onRepayDone" />
-
-    <!-- 底部横排三卡：策略总览缩略 / 账户余额水位预警 / 分策略管道总览 -->
-    <div class="botrow">
-      <div class="card">
-        <div class="chd">策略总览
-          <span class="hd-stat">在管 <b>{{ totalCount }}</b> · 当日收益 <b :class="(ov.pnl_today||0) >= 0 ? 'up' : 'down'">{{ fmtPnl(ov.pnl_today) }}</b> U</span>
-          <el-link type="warning" @click="$router.push('/mix/strategies')">全页 →</el-link>
-        </div>
-        <div v-for="s in strategies" :key="s.code" class="srow">
-          <span class="sbadge" :style="{background: SC[s.code]}" :title="'系统码 '+s.code" @click="$router.push('/mix/strategy/'+s.code)">{{ META[s.code]?.ccode || s.code }}</span>
-          <span class="snm" @click="$router.push('/mix/strategy/'+s.code)">{{ s.name }}</span>
-          <span class="skpi sl">{{ s.slots }} 仓</span>
-          <span class="skpi">{{ (s.notional||0).toLocaleString() }}U</span>
-          <b class="skpi pf" :class="(s.pnlTotal||0) >= 0 ? 'up' : 'down'">{{ (s.pnlTotal||0).toFixed(2) }}</b>
-          <!-- 模式：紧凑标签,S2 可点切换(armed 需 ARM 确认);其余只读 -->
-          <i class="mtag" :class="[s.mode, {clickable: s.modeSwitchable}]"
-             :title="s.modeSwitchable ? '点击切换 影子/武装' : '引擎 env 控制,不可网页热切'"
-             @click.stop="s.modeSwitchable && switchMode(s, s.mode==='armed' ? 'shadow' : 'armed')">{{ modeLabel(s.mode) }}</i>
-        </div>
-      </div>
-
-      <div class="card">
-        <div class="chd">账户余额水位预警 <b :class="warnCount ? 'warn' : 'up'">{{ warnCount }} 预警</b></div>
-        <div v-for="w in watermarks" :key="w.account" class="wrow">
-          <span class="wnm">{{ w.account }}</span>
-          <span class="wamt">{{ w.available }}</span>
-          <span class="wbar"><i :style="{width: (w.level*100)+'%', background: wcolor(w)}" /></span>
-          <span class="wth" :style="{color: wcolor(w)}">{{ wlabel(w) }}</span>
-        </div>
-        <div class="fnote">水位=权益/目标（fund-scheduler 提案制，人工划转执行）</div>
-      </div>
-
-      <div class="card">
-        <div class="chd">分策略管道总览
-          <!-- 真系统健康监控（原 footer 硬编码文字改为实时状态） -->
-          <span class="hd-health" @click="$router.push('/system')">
-            <i class="hdot" :class="{bad: healthBad}"></i>
-            服务 {{ ov.health?.ok ?? '—' }}/{{ ov.health?.total ?? '—' }} ·
-            护栏 <b :class="ov.risk?.alerts_this_round ? 'warn' : 'up'">{{ ov.risk?.alerts_this_round ?? 0 }} 告警</b> ·
-            WS <span class="hdot" :class="{bad: !wsOn}"></span>{{ wsOn ? '已连' : '重连中' }}
-          </span>
-        </div>
-        <div v-for="s in strategies" :key="s.code" class="prow">
-          <span class="sbadge" :style="{background: SC[s.code]}">{{ s.code }}</span>
-          <span class="pipe-mini">
-            <i v-for="(v, k) in s.pipeline" :key="k"><em>{{ k }}</em><b>{{ v }}</b></i>
-          </span>
+          <div class="ohd"><b class="osym">{{ o.symbol }}</b><i class="pbadge">C2.H</i></div>
+          <b class="obps" :class="(o.risk_adjusted_e_bps??0)>0 ? 'up' : 'down'">
+            {{ o.risk_adjusted_e_bps != null ? (o.risk_adjusted_e_bps>0?'+':'') + o.risk_adjusted_e_bps + ' bps' : 'N/A' }}</b>
+          <span class="dimtxt">{{ o.venue_long }}⟶{{ o.venue_short }} · 容量 {{ o.target_notional_usdt ?? 'N/A' }}U</span>
+          <span class="ogates" v-if="!o.blocked">闸 {{ (o.risk_adjusted_e_bps??0)>0?'✓':'✗' }}E ✓鲜 {{ (o.target_notional_usdt||0)>0?'✓':'✗' }}容 <span class="dimtxt">借N/A</span></span>
+          <span class="ogates bad" v-else>⛔ {{ o.venue_long_mode }}/{{ o.venue_short_mode }} 受限·无开仓入口</span>
         </div>
       </div>
     </div>
@@ -148,329 +136,156 @@
 
 <script setup>
 import { computed, onMounted, onUnmounted, ref } from 'vue'
-import { connectStream } from '../../api/mixWs'
-import { ElMessage, ElMessageBox } from 'element-plus'
 import RiskStatusBar from '../../components/RiskStatusBar.vue'
-import VirtualPositionTable from '../../components/PositionTable/VirtualPositionTable.vue'
-import RuleSettingsModal from '../../components/rules/RuleSettingsModal.vue'
-import SymbolRuleModal from '../../components/rules/SymbolRuleModal.vue'
-import TransferModal from '../../components/rules/TransferModal.vue'
-import PartialRepayModal from '../../components/rules/PartialRepayModal.vue'
-import { STRATEGY_META as META } from '../../components/PositionTable/types'
-import { CONTEXT_MENUS } from '../../components/PositionTable/strategyColumns'
 import { mixApi } from '../../api/mix'
 
-const SC = { S1: '#4A9CFF', S2: '#F0B90B', S3: '#A78BFA', S4: '#2DD4BF', S5: '#FF9F43', S6: '#F472B6' }
-
-const rows = ref([])
-const rs = ref({})     // /risk/summary(八卡+待办;RiskStatusBar 独立拉自己的)
-const opps = ref([])   // /risk/opportunities(通过硬闸的机会)
+const rs = ref({}); const ov = ref({}); const opps = ref([]); const oppSkipped = ref(0)
+const pf = ref({}); const expanded = ref(-1)
+let t1 = null
 const NA = 'N/A'
-const fmtAge = sec => (sec >= 3600 ? Math.floor(sec / 3600) + 'h' : Math.floor((sec || 0) / 60) + 'm')
-const todoRows = computed(() => (rs.value.incidents || []).slice(0, 5))
-// V2 八卡(tlOCA 组合安全摘要):有真数给真数,没有=N/A(规约:绝不用哨兵值)
+const fmtAge = s => (s >= 3600 ? Math.floor(s / 3600) + 'h' : Math.floor((s || 0) / 60) + 'm')
+
+// 待办分级:P0=fatal Incident/残腿 · P1=warn Incident · P2=开仓提案(过闸候选)
+const todo = computed(() => {
+  const inc = rs.value.incidents || []
+  const p0 = inc.filter(i => i.severity === 'fatal').map(i => ({
+    tag: i.rule === 'policy-mode' ? '受限' : '事件', title: `${i.venue} ${i.title}`,
+    sub: (i.detail || '').slice(0, 60), age: '已持续 ' + fmtAge(i.age_sec) }))
+  ;(pf.value.rows || []).filter(r => r.recon !== 'ok').forEach(r =>
+    p0.push({ tag: '残腿', title: `${r.symbol} ${r.recon}`, sub: '单腿裸露,人工确认后收敛', age: '' }))
+  const p1 = inc.filter(i => i.severity !== 'fatal').map(i => ({
+    tag: i.rule === 'nav-haircut' ? '账务' : '事件', title: `${i.venue} ${i.title}`,
+    sub: (i.detail || '').slice(0, 60), age: fmtAge(i.age_sec) + ' 前' }))
+  const p2 = (opps.value || []).filter(o => !o.blocked).slice(0, 2).map(o => ({
+    title: `开仓提案 ${o.symbol} C2.H · 风调E ${o.risk_adjusted_e_bps} bps`,
+    sub: `建议名义 ${o.target_notional_usdt}U · shadow 候选,审批走 DRY_RUN 链` }))
+  return { p0, p1, p2 }
+})
+// 八卡(宪法:格子=设计稿,数据不够 N/A 绝不换卡)
 const sumCards = computed(() => {
   const nav = rs.value.nav || {}
   const vs = rs.value.venues || []
   const notional = vs.length ? vs.reduce((t, v) => t + (v.exposure_notional || 0), 0) : null
   const pnl = ov.value.pnl_today
-  const p0 = (rs.value.incidents || []).filter(i => i.severity === 'fatal').length
-    + (rs.value.restricted_accounts || 0) + ((rs.value.nav?.trapped_usdt || 0) > 0 ? 1 : 0)
-  const wd = rs.value.oldest_pending || {}
+  const p0 = todo.value.p0.length
   return [
     { k: 'CORE NAV', v: nav.accounting_nav_usdt != null ? Number(nav.accounting_nav_usdt).toLocaleString() + ' U' : NA,
-      note: nav.available_equity_usdt != null ? `风调可用 ${nav.available_equity_usdt} U` : '接入中' },
+      note: nav.available_equity_usdt != null ? `风调可用 ${nav.available_equity_usdt} U` : NA },
     { k: '今日净PnL(费后)', v: pnl != null ? (pnl >= 0 ? '+' : '') + Number(pnl).toFixed(2) + ' U' : NA,
-      vc: pnl >= 0 ? 'up' : 'down', note: '逐笔成交法' },
+      vc: pnl >= 0 ? 'up' : 'down', note: 'Funding/Basis/费 拆分 N/A(逐组合账本待接)' },
     { k: '总名义仓位', v: notional != null ? Math.round(notional).toLocaleString() + ' U' : NA,
-      note: `${totalCount.value} 仓在管` },
-    { k: '净Delta', v: NA, note: '净敞口地板监控中(risk-ledger)' },
-    { k: '最低保证金缓冲', v: NA, note: '逐所杠杆预警见风控面' },
+      note: `${(pf.value.rows || []).length} 组合` },
+    { k: '净Delta', v: NA, note: 'BTC当量/bps NAV N/A(净敞口源待接)' },
+    { k: '最低保证金缓冲', v: NA, note: '逐组合保证金源待接 · 告警线 25%' },
     { k: 'P0 事件', v: String(p0), vc: p0 ? 'down' : '', cls: p0 ? 'hot' : '',
       note: p0 ? (rs.value.top_incident?.title || '见待办') : '无', nc: p0 ? 'down' : '' },
-    { k: 'RECON 差异', v: ov.value.risk?.alerts_this_round != null ? `${ov.value.risk.alerts_this_round} 告警` : NA,
-      note: 'R1-R11 巡检口径' },
-    { k: '最老pending提现', v: wd.age_sec ? fmtAge(wd.age_sec) : '无',
-      note: wd.venue ? wd.venue : '五所哨兵在岗' },
+    { k: 'RECON 差异', v: NA, note: 'R11 逐组合差异表待接(告警在岗)' },
+    { k: '下一现金流', v: NA, note: 'funding 结算日历待接' },
   ]
 })
-const strategies = ref([])
-const enums = ref({})
-const ov = ref({})
-const watermarks = ref([])
-const filterStrategy = ref('')
-const sortKey = ref('opened_at')
-const sortDir = ref('asc')
-const loading = ref(false)
-
-const totalCount = computed(() => rows.value.reduce((n, r) => n + (r.positionCount || 0), 0))
-const warnCount = computed(() => watermarks.value.filter(w => w.threshold !== 'ok').length)
-const healthBad = computed(() => { const h = ov.value.health; return h ? (h.ok < h.total) : false })
-const fmtPnl = v => (v == null ? '—' : (v >= 0 ? '+' : '') + Number(v).toFixed(2))
-const wcolor = w => w.threshold === 'withdraw' ? '#F6465D' : w.threshold === 'topup' ? '#F0B90B' : '#0ECB81'
-const wlabel = w => w.threshold === 'ok' ? '正常'
-  : `${{ topup: '补仓线', withdraw: '提现线' }[w.threshold] || ''}·需补 ${Math.ceil(w.deficit_usdt || 0)}U`
-
+// Saga 链:manager 快照行 → 步骤化(数据有多细画多细,缺=进行中,绝不臆造)
+const sagaRows = computed(() => (pf.value.rows || [])
+  .filter(r => r.saga_state && r.saga_state !== 'hold' && !String(r.saga_state).startsWith('flat'))
+  .map(r => ({
+    symbol: r.symbol, kind: `${r.product} ${r.target === 'close' ? '平仓' : r.target === 'hold' ? '持有' : ''} Saga`,
+    bad: r.recon !== 'ok',
+    steps: (r.legs || []).map(lg => ({ t: `${lg.venue}腿 ${Math.abs(lg.amt||0)>1e-9 ? '✓在场' : '—'}`,
+      cls: Math.abs(lg.amt||0)>1e-9 ? 'ok' : '' }))
+      .concat([{ t: String(r.saga_state).slice(0, 18), cls: r.recon !== 'ok' ? 'bad' : 'run' }]),
+  })))
+const sagaCls = r => (r.recon !== 'ok' ? 'bad' : r.saga_state === 'hold' ? 'ok' : 'run')
+const sagaText = r => (r.recon !== 'ok' ? '补偿·单腿' : r.saga_state === 'hold' ? '● 稳态' : r.saga_state)
+function openWall() { window.open(`/wall/market?token=${localStorage.getItem('mix_token') || ''}`) }
 async function load() {
-  loading.value = true
   try {
-    rows.value = await mixApi.positions({ sort: sortKey.value, dir: sortDir.value, strategy: filterStrategy.value })
-  } catch (e) {
-    ElMessage.error(e?.error || '加载失败')
-  } finally { loading.value = false }
+    const [a, b, c, d] = await Promise.all([mixApi.riskSummary(), mixApi.monitor.overview(),
+      mixApi.riskOpportunities(), mixApi.riskPortfolio()])
+    rs.value = a; ov.value = b; opps.value = (c?.candidates || []).slice(0, 10)
+    oppSkipped.value = c?.skipped_count ?? 0; pf.value = d
+  } catch (e) { /* 状态条自带 STALE 表达,不装绿 */ }
 }
-async function loadAux() {
-  try {
-    ov.value = await mixApi.monitor.overview()
-    strategies.value = await mixApi.strategies()
-    watermarks.value = await mixApi.monitor.watermarks()
-    rs.value = await mixApi.riskSummary()
-    opps.value = (await mixApi.riskOpportunities())?.candidates || []
-  } catch (e) { /* 辅助区降级不阻断主表 */ }
-}
-// 决策事件流(管道条下滚动;后端聚合三引擎流水/路由变更/结算入账,全真)
-const feed = ref([])
-const feedLoop = computed(() => (feed.value.length ? [...feed.value, ...feed.value] : []))
-const feedDur = computed(() => `${Math.max(30, feed.value.length * 7)}s`)
-const shortTs = (t) => {
-  const d = new Date(t)
-  return isNaN(d) ? '' : `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
-}
-async function loadFeed() { try { feed.value = await mixApi.monitor.decisionFeed() } catch (e) { /* 降级 */ } }
-// 秒级高频轮询：水位 + 当日收益 + 系统健康（后端读缓存快照,轻量）
-async function loadWater() {
-  try {
-    const [wm, o] = await Promise.all([mixApi.monitor.watermarks(), mixApi.monitor.overview()])
-    watermarks.value = wm; ov.value = o
-  } catch (e) { /* 降级 */ }
-}
-function setStrategy(code) { filterStrategy.value = code; load() }
-function flipDir() { sortDir.value = sortDir.value === 'asc' ? 'desc' : 'asc'; load() }
-
-// S3(coin) 菜单动作走 coin 菜单代理端点（桥→coin 状态机权威）
-const S3_MENU_KEYS = ['push_symbol', 'remove_slot', 'resume_slot', 'manual_open', 'blacklist',
-  'force_close', 'manual_hedge', 'manual_repay', 'partial_repay', 'batch_remove', 'max_borrowable', 'transfer']
-async function onAction({ action, rowId, accountId }) {
-  const row = rows.value.find(r => r.id === rowId)
-  const item = row ? (CONTEXT_MENUS[row.strategyCode] || []).find(i => i.key === action) : null
-  try {
-    if (item?.confirm) {
-      await ElMessageBox.confirm(`确认对 ${row.symbol}${accountId ? ' · ' + accountId : ''} 执行「${item.label}」？`, '危险操作', { type: 'warning', confirmButtonText: '执行' })
-    }
-    // S3 走 coin 菜单代理（真实操作,coin 50U保护/还币闸/状态机原样生效）
-    if (row?.strategyCode === 'S3' && S3_MENU_KEYS.includes(action)) {
-      // 划转=弹窗（内部/跨账户,coin 契约 from_wallet/to_wallet）
-      if (action === 'transfer') { await openTransferModal(accountId); return }
-      const extra = {}
-      if (action === 'manual_open') {
-        const { value } = await ElMessageBox.prompt('手动开仓金额（USDT,留空=按规则 order_amount）', `手动开仓 · ${row.symbol}`, { inputValue: '10' })
-        if (value !== '' && value != null) extra.amount = parseFloat(value)
-      }
-      // 部分还币=coin PartialRepayDialog 1:1 弹窗(逐账户 现币/借币/待还+数量/金额互斥+卖回残留)
-      if (action === 'partial_repay') { repayModal.value = { open: true, symbol: row.symbol }; return }
-      const r = await mixApi.coinMenu(row.symbol, { action, sub: accountId, ...extra })
-      if (action === 'max_borrowable') {
-        const c = r?.coin || {}
-        ElMessageBox.alert(
-          `${c.asset || row.symbol}：最大可借 ${c.max_borrowable ?? '—'}（借币限额 ${c.borrow_limit ?? '—'}）`,
-          `刷新可借 · ${accountId || ''}`, { confirmButtonText: '知道了' })
-        return
-      }
-      ElMessage.success(`已受理：${item?.label || action}（coin 状态机执行）`)
-      setTimeout(load, 900); return
-    }
-    const r = await mixApi.positionAction(rowId, action, accountId, `${action}:${rowId}:${Date.now()}`)
-    ElMessage.success(r?.note || '已受理（202），结果以 WS 对账')
-    setTimeout(load, 900)
-  } catch (e) {
-    if (e === 'cancel') return
-    ElMessage.error(e?.error || e?.detail || '被拒绝')
-  }
-}
-const ruleModal = ref({ open: false, code: 'S3' })
-const symModal = ref({ open: false, symbol: '', code: 'S3' })
-const repayModal = ref({ open: false, symbol: '' })
-function onRepayDone() { setTimeout(load, 900) }
-function onRuleTemplate({ code }) { ruleModal.value = { open: true, code } }
-function onRuleSymbol({ symbol, code }) { symModal.value = { open: true, symbol, code } }
-
-// 划转弹窗（账户清单=coin 面板子账户,实时余额随行）
-const transferModal = ref({ open: false, sub: null, accounts: [] })
-async function openTransferModal(accountId) {
-  try {
-    const f = await mixApi.fundRulesS3()
-    transferModal.value = {
-      open: true,
-      accounts: (f.accounts || []).map(a => ({ sub: a.sub, note: a.note, balance: a.balance })),
-      sub: (f.accounts || []).find(a => a.note === accountId || String(a.sub) === String(accountId))?.sub ?? null,
-    }
-  } catch (e) { ElMessage.error(e?.detail || e?.error || '账户清单读取失败') }
-}
-
-const modeLabel = m => ({ shadow: '影子', armed: '武装', 未启用: '未启用' }[m] || m || '—')
-async function switchMode(s, mode) {
-  try {
-    let confirm
-    if (mode === 'armed') {
-      const { value } = await ElMessageBox.prompt(`切换 ${s.code} 为「武装」= 真金下单。输入 ARM 确认（风控联锁）`, '武装确认', { inputPattern: /^ARM$/, inputErrorMessage: '必须输入 ARM' })
-      confirm = value
-    } else {
-      await ElMessageBox.confirm(`切换 ${s.code} 为「影子」（停真金下单）？`, '模式切换', { type: 'warning' })
-    }
-    await mixApi.strategyMode(s.code, mode, confirm)
-    ElMessage.success(`${s.code} 已切 ${modeLabel(mode)}`)
-    loadAux()
-  } catch (e) { if (e !== 'cancel') { ElMessage.error(e?.detail || e?.error || '切换失败'); loadAux() } }
-}
-
-let wsDisconnect = null
-let auxTimer = null
-let waterTimer = null
-let feedTimer = null
-
-onMounted(async () => {
-  enums.value = await mixApi.enums()
-  await load()
-  loadAux()
-  loadFeed()
-  auxTimer = setInterval(loadAux, 15000)
-  waterTimer = setInterval(loadWater, 3000)   // 水位秒级(后端读8s快照,前端3s取最新)
-  feedTimer = setInterval(loadFeed, 20000)    // 决策流20s(shadow流水分钟级,再快无新事件)
-  // 坑位表毫秒级：直接用 Rust WS hub 中继的全量行换表（不再走 REST 回环）
-  wsDisconnect = connectStream((msg) => {
-    if (msg.channel !== 'position:updates') return
-    if (Array.isArray(msg.rows) && msg.rows.length && typeof msg.rows[0] === 'object' && msg.rows[0].symbol) {
-      // 帧内是全量行：按当前策略过滤+排序客户端应用（毫秒级,无网络往返）
-      let rs = msg.rows
-      if (filterStrategy.value) rs = rs.filter(r => r.strategyCode === filterStrategy.value)
-      rs = [...rs].sort((a, b) => {
-        const d = sortDir.value === 'asc' ? 1 : -1
-        if (sortKey.value === 'pnl') return ((a.pnl ?? -Infinity) - (b.pnl ?? -Infinity)) * d
-        return (String(a.openedAt || '') > String(b.openedAt || '') ? 1 : -1) * d
-      })
-      rows.value = rs
-    } else {
-      load()  // 老式摘要帧兜底
-    }
-  })
-})
-onUnmounted(() => { wsDisconnect && wsDisconnect(); auxTimer && clearInterval(auxTimer); waterTimer && clearInterval(waterTimer); feedTimer && clearInterval(feedTimer) })
+onMounted(() => { load(); t1 = setInterval(load, 10000) })
+onUnmounted(() => t1 && clearInterval(t1))
 </script>
 
 <style scoped lang="scss">
-/* 满高布局: 坑位表 flex 填余量,主控台整页不出浏览器滚动条(窗口过矮时回落到 .page 内滚动)
-   注意:固定行必须 flex:none,否则被 flex 压缩产生遮挡(管道条被剪的回归课) */
-.mixdash { display: flex; flex-direction: column; gap: 10px; height: 100%;
-  > .riskbar, > .sumrow, > .midrow, > .bar, > .opprow, > .botrow, > .foot { flex: none; } }
+.mixdash { display: flex; flex-direction: column; gap: 10px; min-height: 100%;
+  > .riskbar, > .sumrow, > .midrow, > .opprow { flex: none; }
+  > .poscard { flex: 1; min-height: 220px; } }
+.card { background: var(--mix-card, #181B21); border: 1px solid var(--mix-border, #262B33); border-radius: 10px; padding: 8px 12px; min-width: 0; }
+.chd { font-size: 12.5px; font-weight: 700; color: var(--mix-t1, #EAECEF); margin-bottom: 6px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.grow { flex: 1; }
+.dimtxt { color: var(--mix-t3, #5E6673); font-size: 10.5px; font-weight: 400; }
+.pad { padding: 10px 0; }
+.up { color: #0ECB81 !important; } .down { color: #F6465D !important; } .bad { color: #F6465D; } .ok { color: #0ECB81; }
 
-.sumrow { display: grid; grid-template-columns: repeat(8, 1fr); gap: 8px;
-  @media (max-width: 1500px) { grid-template-columns: repeat(4, 1fr); } }
+.sumrow { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 8px;
+  @media (max-width: 1500px) { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
 .scard { background: var(--mix-card, #181B21); border: 1px solid var(--mix-border, #262B33);
-  border-radius: 10px; padding: 8px 12px; display: flex; flex-direction: column; gap: 2px;
-  &.hot { border-color: rgba(246,70,93,.4); } }
+  border-radius: 10px; padding: 9px 13px; display: flex; flex-direction: column; gap: 3px; min-width: 0;
+  &.hot { border-color: rgba(246,70,93,.45); } }
 .sk { font-size: 10.5px; color: var(--mix-t2, #848E9C); }
-.sv { font-size: 18px; font-weight: 800; color: var(--mix-t1, #EAECEF); font-variant-numeric: tabular-nums;
-  &.up { color: #0ECB81; } &.down { color: #F6465D; } }
-.sn { font-size: 9.5px; color: var(--mix-t3, #5E6673); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  &.down { color: #F6465D; } }
-.midrow { display: grid; grid-template-columns: 3fr 2fr; gap: 8px; }
-.card.mid { padding: 8px 12px; min-height: 96px; }
-.mr { margin-left: auto; font-size: 10.5px; }
-.todoline { font-size: 11px; color: var(--mix-t2, #848E9C); padding: 2px 0; display: flex; gap: 6px; align-items: center;
+.sv { font-size: 19px; font-weight: 800; color: var(--mix-t1, #EAECEF); font-variant-numeric: tabular-nums; }
+.sn { font-size: 9.5px; color: var(--mix-t3, #5E6673); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; &.down { color: #F6465D; } }
+
+/* 竖条bug根治:两列都 minmax(0,·) 锁死,卡 overflow hidden——跑马灯/长内容撑不破列宽 */
+.midrow { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 10px; min-height: 200px;
+  .card { overflow: hidden; display: flex; flex-direction: column; } }
+.tlist { flex: 1; min-height: 0; overflow-y: auto; }
+.cnt { font-size: 10px; font-weight: 800; padding: 1px 8px; border-radius: 4px;
+  &.p0 { background: rgba(246,70,93,.16); color: #F6465D; }
+  &.p1 { background: rgba(240,185,11,.14); color: #F0B90B; }
+  &.p2 { background: rgba(74,156,255,.14); color: #4A9CFF; } }
+.tline { display: flex; align-items: center; gap: 8px; font-size: 11.5px; color: var(--mix-t2, #848E9C);
+  padding: 5px 0; border-bottom: 1px dashed var(--mix-border, #262B33);
+  b { color: var(--mix-t1, #EAECEF); white-space: nowrap; } }
+.pri { flex: none; font-size: 10px; font-weight: 800; padding: 1px 7px; border-radius: 4px;
+  &.p0 { background: rgba(246,70,93,.16); color: #F6465D; }
+  &.p1 { background: rgba(240,185,11,.14); color: #F0B90B; }
+  &.p2 { background: rgba(74,156,255,.14); color: #4A9CFF; } }
+.cfoot { font-size: 10px; color: var(--mix-t3, #5E6673);
+  &.bordered { border-top: 1px solid var(--mix-border, #262B33); margin-top: 6px; padding-top: 6px; } }
+.sgline { padding: 5px 0; border-bottom: 1px dashed var(--mix-border, #262B33); font-size: 11.5px; color: var(--mix-t2, #848E9C);
   b { color: var(--mix-t1, #EAECEF); } }
-.mch { font-weight: 800; font-size: 9.5px; padding: 0 6px; border-radius: 4px;
-  &.red { background: rgba(246,70,93,.16); color: #F6465D; }
-  &.watch { background: rgba(240,185,11,.14); color: #F0B90B; } }
-.dimtxt { color: var(--mix-t3, #5E6673); font-size: 10.5px; }
-.cfoot { font-size: 10px; color: var(--mix-t3, #5E6673); padding-top: 5px;
-  &.bordered { border-top: 1px solid var(--mix-border, #262B33); margin-top: 4px; padding: 5px 12px; } }
-.poscard { display: flex; flex-direction: column; flex: 1; min-height: 0;
-  background: var(--mix-card, #181B21); border: 1px solid var(--mix-border, #262B33); border-radius: 10px;
-  > :first-child { flex: 1; min-height: 0; } }
-.opprow { padding: 8px 12px; }
-.oppstrip { display: flex; gap: 8px; overflow-x: auto; }
-.opp { flex: none; min-width: 168px; background: var(--mix-panel, #12151A); border: 1px solid var(--mix-border, #262B33);
-  border-radius: 8px; padding: 6px 10px; display: flex; flex-direction: column; gap: 2px; font-size: 10.5px;
+.steps { display: flex; gap: 6px; margin-top: 3px; flex-wrap: wrap; }
+.step { font-size: 10px; padding: 1px 7px; border-radius: 4px; background: rgba(94,102,115,.15); color: var(--mix-t2, #848E9C);
+  &.ok { background: rgba(14,203,129,.12); color: #35b57c; }
+  &.run { background: rgba(240,185,11,.14); color: #F0B90B; }
+  &.bad { background: rgba(246,70,93,.16); color: #F6465D; } }
+.rescue { margin-top: 6px; padding: 6px 8px; border: 1px solid rgba(246,70,93,.3); border-radius: 6px;
+  font-size: 10.5px; display: flex; flex-direction: column; gap: 2px;
+  b { color: var(--mix-t1, #EAECEF); font-size: 11px; } }
+
+.poscard { display: flex; flex-direction: column; }
+.ptbl { flex: 1; min-height: 0; overflow: auto; font-size: 11px; }
+.phead, .prow2 { display: grid; align-items: center; min-width: 1180px;
+  grid-template-columns: 74px 56px 96px minmax(120px,1.2fr) 110px 128px 92px 130px 92px 78px 100px 84px; }
+.phead { color: var(--mix-t3, #5E6673); font-size: 10px; border-bottom: 1px solid var(--mix-border, #262B33);
+  padding: 4px 0; position: sticky; top: 0; background: var(--mix-card, #181B21); z-index: 1; }
+.prow2 { color: var(--mix-t2, #848E9C); padding: 7px 0; border-bottom: 1px solid var(--mix-border, #262B33);
+  cursor: pointer;
+  b { color: var(--mix-t1, #EAECEF); }
+  &:hover, &.open { background: var(--mix-card2, #1E2329); }
+  &.bad { background: rgba(246,70,93,.05); } }
+.c { padding: 0 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pbadge { font-style: normal; font-size: 9.5px; font-weight: 800; padding: 1px 6px; border-radius: 3px;
+  background: rgba(240,185,11,.14); color: #F0B90B; }
+.sdot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 5px;
+  &.ok { background: #0ECB81; } &.run { background: #F0B90B; } &.bad { background: #F6465D; } }
+.drawer { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; padding: 10px 16px;
+  background: var(--mix-panel, #12151A); border-left: 2px solid #4A9CFF; border-bottom: 1px solid var(--mix-border, #262B33);
+  font-size: 11px; color: var(--mix-t2, #848E9C); }
+.dh { font-size: 10px; color: var(--mix-t3, #5E6673); margin: 4px 0 2px; font-weight: 700; }
+.dline { padding: 2px 0; b { color: var(--mix-t1, #EAECEF); } }
+
+.opprow { min-height: 118px; }
+.oppstrip { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; }
+.opp { flex: none; width: 172px; background: var(--mix-panel, #12151A); border: 1px solid var(--mix-border, #262B33);
+  border-radius: 8px; padding: 8px 10px; display: flex; flex-direction: column; gap: 3px; font-size: 10.5px;
   color: var(--mix-t2, #848E9C);
   &.blocked { opacity: .55; border-color: rgba(246,70,93,.35); } }
-.osym { color: var(--mix-t1, #EAECEF); font-size: 12px; }
-.oe b.up { color: #0ECB81; } .oe b.down { color: #F6465D; }
-.pmini { display: flex; align-items: center; gap: 8px; font-size: 10.5px; color: var(--mix-t2, #848E9C); padding: 1px 0;
-  .pl { min-width: 88px; } b { color: var(--mix-t1, #EAECEF); min-width: 26px; text-align: right; }
-  .pstack { flex: 1; display: flex; height: 4px; border-radius: 2px; overflow: hidden; background: var(--mix-border, #262B33); }
-  .pchunk { display: block; height: 100%; } }
-.pipeline { display: flex; gap: 8px; align-items: stretch; overflow-x: auto; padding: 2px 0; }
-.pseg { position: relative; flex: 1; min-width: 104px; background: var(--mix-card, #181B21); border: 1px solid var(--mix-border, #262B33);
-  border-radius: 8px; padding: 8px 12px 10px; color: var(--mix-t1, #EAECEF); }
-.pnum { font-size: 20px; font-weight: 800; line-height: 1.1; }
-.plabel { font-size: 11px; color: var(--mix-t2, #848E9C); margin: 2px 0 6px; }
-.pnote { margin-left: 6px; color: var(--mix-accent, #F0B90B); }
-.pstack { display: flex; height: 4px; border-radius: 2px; overflow: hidden; background: var(--mix-border, #262B33); position: relative; }
-.pchunk { display: block; height: 100%; }
-.parrow { position: absolute; right: -9px; top: 40%; color: var(--mix-t3, #5E6673); z-index: 1; }
-
-/* 工作流动效:活跃段(total>0)堆叠条流光扫过 + 段间箭头金色脉冲;静止段不装忙 */
-.pseg.live { border-color: rgba(240, 185, 11, .22); }
-.pstack.live::after { content: ''; position: absolute; inset: 0; border-radius: 2px; pointer-events: none;
-  background: linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, .38) 50%, transparent 100%);
-  background-size: 200% 100%; animation: pflow 2.8s linear infinite; }
-@keyframes pflow { from { background-position: 200% 0; } to { background-position: -200% 0; } }
-.parrow.flow { color: var(--mix-accent, #F0B90B); animation: parrowpulse 1.6s ease-in-out infinite; }
-@keyframes parrowpulse { 0%, 100% { opacity: .35; transform: translateX(0); } 50% { opacity: 1; transform: translateX(2px); } }
-
-/* 决策事件流(横向滚动;悬停暂停;两份内容 -50% 无缝循环) */
-.dfeed { display: flex; align-items: center; gap: 8px; background: var(--mix-card, #181B21);
-  border: 1px solid var(--mix-border, #262B33); border-radius: 8px; padding: 4px 10px; overflow: hidden; }
-.dlbl { flex: none; font-size: 10.5px; font-weight: 800; color: var(--mix-accent, #F0B90B); letter-spacing: 1px; }
-.dtrack { flex: 1; overflow: hidden; }
-.dinner { display: inline-flex; gap: 26px; padding-right: 26px; white-space: nowrap;
-  animation: dscroll linear infinite; will-change: transform;
-  &:hover { animation-play-state: paused; } }
-@keyframes dscroll { from { transform: translateX(0); } to { transform: translateX(-50%); } }
-.ditem { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--mix-t2, #848E9C); }
-.dbadge { font-style: normal; font-size: 9px; font-weight: 800; color: #0B0E11; border-radius: 3px; padding: 0 4px; }
-.dkind { font-style: normal; color: var(--mix-t1, #EAECEF); font-weight: 600; }
-.dts { font-weight: 500; color: var(--mix-t3, #5E6673); margin-left: 2px; }
-
-.botrow { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 10px; }
-.card { background: var(--mix-card, #181B21); border: 1px solid var(--mix-border, #262B33); border-radius: 8px; padding: 10px 12px; }
-.chd { font-size: 12.5px; font-weight: 700; color: var(--mix-t1, #EAECEF); margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
-.hd-stat { margin-left: auto; margin-right: 8px; font-size: 11px; font-weight: 500; color: var(--mix-t2, #848E9C);
-  b { font-weight: 700; color: var(--mix-t1, #EAECEF); &.up { color: #0ECB81; } &.down { color: #F6465D; } } }
-.hd-health { margin-left: auto; font-size: 10.5px; font-weight: 500; color: var(--mix-t2, #848E9C); cursor: pointer; display: inline-flex; align-items: center; gap: 4px;
-  b { font-weight: 700; &.up { color: #0ECB81; } &.warn { color: #F0B90B; } }
-  &:hover { color: var(--mix-t1, #EAECEF); } }
-.hdot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #0ECB81; &.bad { background: #F6465D; } }
-.srow { display: flex; align-items: center; gap: 8px; font-size: 11.5px; padding: 3px 0; color: var(--mix-t2, #848E9C);
-  &:hover { color: var(--mix-t1, #EAECEF); } }
-.snm { flex: 1; min-width: 60px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
-.mtag { flex: none; width: 44px; text-align: center; font-style: normal; font-size: 9.5px; padding: 2px 0; border-radius: 4px; font-weight: 700;
-  background: rgba(94,102,115,.15); color: var(--mix-t3, #5E6673);
-  &.armed { background: rgba(246,70,93,.15); color: #F6465D; }
-  &.shadow { background: rgba(74,156,255,.15); color: #4A9CFF; }
-  &.clickable { cursor: pointer; &:hover { filter: brightness(1.3); } } }
-.skpi { flex: none; text-align: right; font-variant-numeric: tabular-nums;
-  &.sl { width: 44px; } width: 58px; &.pf { width: 62px; font-weight: 700; } }
-.sbadge { min-width: 24px; text-align: center; font-size: 9.5px; font-weight: 800; color: #0B0E11; border-radius: 3px; padding: 1px 4px; }
-.sdot2 { width: 7px; height: 7px; border-radius: 50%; background: var(--mix-green, #0ECB81); &.off { background: var(--mix-t3, #5E6673); } }
-.wrow { display: flex; align-items: center; gap: 8px; font-size: 11.5px; padding: 3px 0; color: var(--mix-t2, #848E9C); }
-.wnm { min-width: 72px; font-weight: 600; color: var(--mix-t1, #EAECEF); }
-.wamt { min-width: 60px; text-align: right; }
-.wbar { flex: 1; height: 5px; background: var(--mix-border, #262B33); border-radius: 3px; overflow: hidden;
-  i { display: block; height: 100%; border-radius: 3px; } }
-.wth { min-width: 90px; text-align: right; font-weight: 700; font-size: 10.5px; }
-.prow { display: flex; gap: 8px; align-items: baseline; padding: 3px 0; }
-.pipe-mini { display: flex; gap: 8px; flex-wrap: wrap; font-size: 10.5px; color: var(--mix-t2, #848E9C);
-  i { font-style: normal; em { font-style: normal; margin-right: 3px; } b { color: var(--mix-t1, #EAECEF); } } }
-.fnote { font-size: 10px; color: var(--mix-t3, #5E6673); margin-top: 6px; }
-
-.bar { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
-.chips { display: flex; gap: 6px; flex-wrap: wrap;
-  .chip { padding: 3px 10px; border-radius: 6px; border: 1px solid var(--el-border-color); cursor: pointer; font-size: 12px; color: var(--el-text-color-secondary);
-    &.on { background: #F0B90B; border-color: #F0B90B; color: #0B0E11; font-weight: 700; } } }
-.right { display: flex; gap: 8px; align-items: center; }
-.foot { font-size: 11px; color: var(--el-text-color-secondary); }
-.up { color: var(--mix-green, #0ECB81); }
-.down { color: var(--mix-red, #F6465D); }
-.warn { color: var(--mix-accent, #F0B90B); }
+.ohd { display: flex; align-items: center; justify-content: space-between; }
+.osym { color: var(--mix-t1, #EAECEF); font-size: 12.5px; }
+.obps { font-size: 16px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.ogates { font-size: 9.5px; color: var(--mix-t3, #5E6673); &.bad { color: #F6465D; } }
 </style>

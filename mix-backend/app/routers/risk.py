@@ -378,3 +378,73 @@ async def risk_opportunities(_who=Depends(require_viewer)):
                     "blocked_reason": ("腿venue受限" if blocked else "")})
     return {"ts": op.get("ts"), "mode": op.get("mode", "shadow"), "candidates": out,
             "skipped_count": len(op.get("skipped") or [])}
+
+
+@router.get("/risk/portfolio")
+async def risk_portfolio(_who=Depends(require_viewer)):
+    """经济组合表(tlOCA 生产持仓,1:1 十二列)数据源:manager 快照(owner-of-record)
+    ×feed mark(净Delta)×funding(下一现金流方向)×repair 意图(Saga 链)。
+    缺数据列如实 N/A(净PnL 逐组合/保证金缓冲/退出成本=后续采集,绝不用哨兵值)。"""
+    mgr = await ds.get_json("dcm:exec:manager") or {}
+    pol = await ds.get_json("dcm:risk:policy") or {}
+    rep = await ds.get_json("dcm:exec:repair") or {}
+    rows = []
+
+    async def _mark(venue, sym):
+        try:
+            raw = await ds.rds().hget(f"dcm:feed:{venue}:perp", sym)
+            import json as _j
+            l1 = _j.loads(raw) if raw else None
+            return (float(l1["bid"]) + float(l1["ask"])) / 2 if l1 else None
+        except Exception:
+            return None
+
+    async def _fund(venue, sym):
+        try:
+            raw = await ds.rds().hget(f"dcm:feed:funding:{venue}", sym)
+            import json as _j
+            return _j.loads(raw) if raw else None
+        except Exception:
+            return None
+
+    for ps in (mgr.get("pairs") or []):
+        sym = ps.get("symbol") or ps.get("pair")
+        legs, delta_usdt, route = [], 0.0, []
+        for lg in (ps.get("legs") or []):
+            v, amt = lg.get("venue"), float(lg.get("amt") or 0)
+            mk = await _mark(v, sym)
+            legs.append({"venue": v, "amt": amt, "mark": mk,
+                         "mode": ((pol.get("venues") or {}).get(v) or {}).get("mode", "N/A")})
+            route.append(f"{v}永续")
+            if mk:
+                delta_usdt += amt * mk
+        fl = await _fund(legs[0]["venue"], sym) if legs else None
+        fs = await _fund(legs[-1]["venue"], sym) if len(legs) > 1 else None
+        net_daily = None
+        if fl and fs:
+            net_daily = round(float(fs.get("daily_pct") or 0) - float(fl.get("daily_pct") or 0), 4)
+        rows.append({
+            "owner": "exec-mgr", "product": "C2.H", "symbol": sym,
+            "route": " + ".join(route) or "N/A",
+            "saga": ps.get("saga"), "saga_state": ps.get("action") or "N/A",
+            "target": ps.get("target"), "mode": ps.get("mode"),
+            "signal": ps.get("signal"),
+            "next_cashflow": ({"net_daily_pct": net_daily} if net_daily is not None else None),
+            "net_pnl": None, "net_delta_usdt": round(delta_usdt, 2) if legs else None,
+            "margin_buffer": None, "exit_cost": None,
+            "recon": "单腿!" if "SINGLE_LEG" in str(ps.get("action")) else "ok",
+            "legs": legs,
+        })
+    for ss in (mgr.get("symbols") or []):
+        rows.append({
+            "owner": "exec-mgr", "product": "C1", "symbol": ss.get("symbol"),
+            "route": "BN现货+BN永续", "saga": None, "saga_state": ss.get("action") or "N/A",
+            "target": ss.get("target"), "mode": ss.get("mode"), "signal": ss.get("signal"),
+            "next_cashflow": None, "net_pnl": None,
+            "net_delta_usdt": ss.get("delta"), "margin_buffer": None, "exit_cost": None,
+            "recon": "ok", "legs": [{"venue": "binance", "amt": ss.get("perp_amt"),
+                                     "spot": ss.get("spot")}],
+        })
+    return {"ts": mgr.get("ts"), "rows": rows,
+            "repair": {"trigger_venues": rep.get("trigger_venues") or [],
+                       "intents": rep.get("intents") or []}}
