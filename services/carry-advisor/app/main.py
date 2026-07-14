@@ -199,12 +199,17 @@ async def advisor_round(r: aioredis.Redis, cli: httpx.AsyncClient) -> dict:
         if not (await leg_fresh(r, vl, sym) and await leg_fresh(r, vs, sym)):
             continue
         my_e = arb_contract.carry_daily_net_pct(edge, ARB_FLAT_COST_DAILY_PCT)
+        # O1 现金流优化器:逐腿带符号净现金流(long 低费率所付、short 高费率所收)。
+        # 2 腿 carry 结果=hi−lo=edge(统一到 O1 原语,通用支持将来借币/理财腿),显式发布备查。
+        o1_net = arb_contract.o1_signed_cashflow_daily_pct([
+            {"side": "perp_long", "daily_pct": float(per_venue[vl]["daily_pct"])},
+            {"side": "perp_short", "daily_pct": float(per_venue[vs]["daily_pct"])}])
         cb = coin_bids.get(sym)
         if cb is not None and arb_contract.challenger_wins(cb["e_daily_pct"], my_e):
             yielded.append({"sym": sym, "coin_e": cb["e_daily_pct"], "carry_e": round(my_e, 5)})
             continue  # coin 期望值显著更高:让币,不入候选(coin 侧黑名单随路由消失自动解除)
         candidates.append({"symbol": sym, "venue_long": vl, "venue_short": vs,
-                           "edge": round(edge, 5)})
+                           "edge": round(edge, 5), "o1_net_daily_pct": round(o1_net, 5)})
     candidates.sort(key=lambda c: -c["edge"])
     top = candidates[:MAX_ROUTES]
     top_syms = {c["symbol"] for c in top}
@@ -227,7 +232,7 @@ async def advisor_round(r: aioredis.Redis, cli: httpx.AsyncClient) -> dict:
             pipe.hset(ARB_KEY_CARRY, c["symbol"], json.dumps({
                 "v": 1, "src": "carry", "sym": c["symbol"],
                 "e_daily_pct": round(c["edge"] - ARB_FLAT_COST_DAILY_PCT, 5),
-                "raw": {"edge_daily_pct": c["edge"],
+                "raw": {"edge_daily_pct": c["edge"], "o1_net_daily_pct": c.get("o1_net_daily_pct"),
                         "venues": f"{c['venue_long']}/{c['venue_short']}"},
                 "ts": now}, ensure_ascii=False))
         await pipe.execute()

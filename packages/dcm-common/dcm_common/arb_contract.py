@@ -57,6 +57,28 @@ def carry_daily_net_pct(edge_daily_pct, flat_cost_daily_pct=CARRY_FLAT_COST_DAIL
     return float(edge_daily_pct) - float(flat_cost_daily_pct)
 
 
+def o1_signed_cashflow_daily_pct(legs):
+    """O1 现金流优化器共享原语(V4.0 §7.3)——逐腿带符号日现金流合计(%/天),**禁 abs(funding)**。
+    leg = {side, daily_pct(永续腿,已归一日化%), apr(理财/借息年化%)}
+      perp_long  : -daily_pct  (多腿正费率=付出)
+      perp_short : +daily_pct  (空腿正费率=收入)
+      spot_earn  : +apr/365    (现货腿理财;须真实可存入,调用方保证)
+      borrow     : -apr/365    (借息成本)
+    2 腿 carry(long 低费率所 + short 高费率所)结果 = hi−lo = edge(与旧口径一致,通用支持借币/理财)。"""
+    net = 0.0
+    for lg in legs or []:
+        side = lg.get("side")
+        if side == "perp_long":
+            net += -float(lg.get("daily_pct") or 0)
+        elif side == "perp_short":
+            net += float(lg.get("daily_pct") or 0)
+        elif side == "spot_earn":
+            net += float(lg.get("apr") or 0) / 365.0
+        elif side == "borrow":
+            net += -float(lg.get("apr") or 0) / 365.0
+    return net
+
+
 def carry_daily_net_pct_from_engine_e(e_bps, horizon_days):
     """升级口径:引擎全 E(bps, horizon 摊销) → %/天。"""
     return float(e_bps) / 100.0 / max(0.001, float(horizon_days))
