@@ -155,6 +155,7 @@ export const mixApi = {
   setAccountMaster: (ak, master_key) => http.put(`/accounts/${encodeURIComponent(ak)}/master`, { master_key }),
   setAccountMode: (ak, account_mode) => http.put(`/accounts/${encodeURIComponent(ak)}/mode`, { account_mode }),
   eligibility: () => http.get('/risk/eligibility'),
+  accountsBatch: (b) => http.put('/accounts/batch', b),
   coins: () => http.get('/coins'),
   alerts: (strategy = '') => http.get('/alerts', { params: strategy ? { strategy } : {} }),
   reportPnl: (range = '30d') => http.get('/report/pnl', { params: { range } }),

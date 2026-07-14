@@ -2,56 +2,110 @@
   <div class="mixacct" @click="menu.open=false">
     <div class="bar">
       <b>账户列表</b>
-      <span class="hint">主账号行默认 · 点击展开子账户 · 右键 / ⋮ 账户操作（KMS 行 → 钱包管理菜单）</span>
+      <span class="hint">勾选账户→批量设模式/账本 · PC 行内图标或右键操作</span>
+      <span class="spacer" />
+      <span v-if="sel.size" class="selinfo">已选 {{ sel.size }}</span>
+      <el-button size="small" :disabled="!sel.size" @click="openBatch">批量设置…</el-button>
       <el-button type="warning" size="small" @click="createDlg=true">新建账户</el-button>
     </div>
 
     <div class="tbl">
+      <div class="thead">
+        <span class="c-cb"><input type="checkbox" :checked="allSel" @change="toggleAll" /></span>
+        <span class="c-name">账户</span>
+        <span class="c-venue">平台</span>
+        <span class="c-book">账本</span>
+        <span class="c-cred">凭证</span>
+        <span class="c-mode">模式</span>
+        <span class="c-eq">余额</span>
+        <span class="c-sub">子账户</span>
+        <span class="c-act">操作</span>
+      </div>
       <template v-for="m in tree" :key="m.id">
         <!-- 主账号 / 钱包组 行 -->
-        <div class="row master" @click="toggle(m.id)" @contextmenu.prevent="openMenu($event, m)">
-          <span class="caret">{{ open.has(m.id) ? '▾' : '▸' }}</span>
-          <span class="kind" :class="typeOf(m.id)==='sub' ? 'sub' : m.platformType">
-            {{ m.platformType === 'kms_wallet' ? '链上' : (typeOf(m.id)==='sub' ? '子' : '主') }}</span>
-          <span class="name" :class="{off: reg[m.id]?.enabled===false}">{{ m.id }}</span>
-          <span class="acctname">{{ reg[m.id]?.alias || '—' }}
-            <i v-if="reg[m.id]?.machine" class="mch">{{ reg[m.id].machine }}机</i>
-            <i v-if="reg[m.id]?.credential" class="cred" :class="reg[m.id].credential.state">{{ credLabel(reg[m.id].credential) }}</i>
+        <div class="row master" @contextmenu.prevent="openMenu($event, m)">
+          <span class="c-cb"><input type="checkbox" :checked="sel.has(m.id)" @click.stop="toggleSel(m.id)" /></span>
+          <span class="c-name" @click="toggle(m.id)">
+            <span class="caret">{{ open.has(m.id) ? '▾' : '▸' }}</span>
+            <span class="kind" :class="m.platformType==='kms_wallet' ? 'kms_wallet' : 'master'">{{ m.platformType==='kms_wallet' ? '链上' : '主' }}</span>
+            <b class="nm" :class="{off: reg[m.id]?.enabled===false}">{{ mv(m,'账户') || m.id }}</b>
+            <i class="dot" :class="m.apiStatus" />
           </span>
-          <span class="venue">{{ m.venue }} · 域 {{ m.domain }}</span>
-          <span class="dot" :class="m.apiStatus" />
-          <span v-for="(v,k) in m.metrics" :key="k" class="pair"><em>{{ k }}</em><b :class="{neg:String(v).startsWith('-')}">{{ v }}</b></span>
-          <button class="more" @click.stop="openMenu($event, m)">⋮</button>
+          <span class="c-venue">{{ m.venue }}</span>
+          <span class="c-book" :class="'bk-'+(mv(m,'Book')||'TEST')">{{ mv(m,'Book')||'—' }}</span>
+          <span class="c-cred">{{ mv(m,'凭证') || (m.platformType==='kms_wallet'?'钱包':'—') }}</span>
+          <span class="c-mode">{{ mv(m,'模式') || '—' }}</span>
+          <span class="c-eq">{{ mv(m,'合计净值') || mv(m,'净值') || '—' }}</span>
+          <span class="c-sub">{{ mv(m,'子账户') || mv(m,'钱包') || '—' }}</span>
+          <span class="c-act">
+            <el-icon v-for="a in actionsOf(m)" :key="a.key" class="act" :class="{danger:a.danger}" :title="a.label" @click.stop="doAction(a, m)"><component :is="a.icon" /></el-icon>
+            <button class="more" @click.stop="openMenu($event, m)"><el-icon><MoreFilled /></el-icon></button>
+          </span>
         </div>
         <!-- 子账户 / 钱包地址 行 -->
         <template v-if="open.has(m.id)">
           <div v-for="c in m.children" :key="c.id" class="row sub" @contextmenu.prevent="openMenu($event, c, m)">
-            <span class="caret"></span>
-            <span class="kind" :class="c.kind === 'wallet' ? 'kms_wallet' : 'sub'">{{ c.kind === 'wallet' ? '址' : '子' }}</span>
-            <span class="name sm" :class="{off: reg[c.id]?.enabled===false}">↳ {{ c.id }}</span>
-            <span class="acctname">{{ reg[c.id]?.alias || '—' }}
-              <i v-if="reg[c.id]?.machine" class="mch">{{ reg[c.id].machine }}机</i>
-              <i v-if="reg[c.id]?.credential" class="cred" :class="reg[c.id].credential.state">{{ credLabel(reg[c.id].credential) }}</i>
+            <span class="c-cb"><input type="checkbox" :checked="sel.has(c.id)" @click.stop="toggleSel(c.id)" /></span>
+            <span class="c-name">
+              <span class="caret sub" />
+              <span class="kind" :class="c.kind==='wallet' ? 'kms_wallet' : 'sub'">{{ c.kind==='wallet' ? '址' : '子' }}</span>
+              <b class="nm sm" :class="{off: reg[c.id]?.enabled===false}">{{ mv(c,'账户') || c.id }}</b>
+              <i class="dot" :class="c.apiStatus" />
             </span>
-            <span class="venue">{{ c.venue }}</span>
-            <span class="dot" :class="c.apiStatus" />
-            <span v-if="c.apiStatus==='restricted'" class="restricted">受限 · -2015 IP 白名单</span>
-            <span v-for="(v,k) in c.metrics" :key="k" class="pair"><em>{{ k }}</em><b :class="{neg:String(v).startsWith('-')}">{{ v }}</b></span>
-            <el-tag v-if="c.approvalState==='pending_approval'" size="small" type="warning" effect="dark" @click.stop="approve(c)">转账待审批 · 点此审批</el-tag>
-            <button class="more" @click.stop="openMenu($event, c, m)">⋮</button>
+            <span class="c-venue">{{ c.venue }}</span>
+            <span class="c-book" :class="'bk-'+(mv(c,'Book')||'TEST')">{{ mv(c,'Book')||'—' }}</span>
+            <span class="c-cred">{{ mv(c,'凭证') || (c.kind==='wallet'?'钱包':'—') }}</span>
+            <span class="c-mode">{{ mv(c,'模式') || '—' }}</span>
+            <span class="c-eq">{{ mv(c,'净值') || mv(c,'杠杆净资产') || '—' }}</span>
+            <span class="c-sub"><el-tag v-if="c.approvalState==='pending_approval'" size="small" type="warning" effect="dark" @click.stop="approve(c)">待审批</el-tag></span>
+            <span class="c-act">
+              <el-icon v-for="a in actionsOf(c)" :key="a.key" class="act" :class="{danger:a.danger}" :title="a.label" @click.stop="doAction(a, c)"><component :is="a.icon" /></el-icon>
+              <button class="more" @click.stop="openMenu($event, c, m)"><el-icon><MoreFilled /></el-icon></button>
+            </span>
           </div>
         </template>
       </template>
     </div>
 
+    <!-- 批量设置(勾选后) -->
+    <el-dialog v-model="batchDlg" :title="`批量设置 · 已选 ${sel.size} 个账户`" width="440">
+      <el-form label-width="90">
+        <el-form-item label="设置项">
+          <el-radio-group v-model="batchForm.field" size="small">
+            <el-radio-button value="account_mode">账户模式</el-radio-button>
+            <el-radio-button value="book">资金账本</el-radio-button>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item v-if="batchForm.field==='account_mode'" label="账户模式">
+          <el-select v-model="batchForm.account_mode" style="width:240px">
+            <el-option value="classic" label="经典（钱包分离·C3 借币点差）" />
+            <el-option value="portfolio_margin" label="统一账户（组合保证金·借贷套利）" />
+            <el-option value="cross_margin" label="全仓杠杆" />
+            <el-option value="isolated" label="逐仓" />
+          </el-select>
+        </el-form-item>
+        <el-form-item v-else label="资金账本">
+          <el-select v-model="batchForm.book" style="width:240px">
+            <el-option value="TEST" label="测试账户（TEST）" />
+            <el-option value="HOUSE_RND" label="自营研发金（HOUSE_RND）" />
+            <el-option value="CORE_POOL" label="核心投资池（CORE_POOL）" />
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="batchDlg=false">取消</el-button>
+        <el-button type="warning" @click="saveBatch">应用到 {{ sel.size }} 个账户</el-button>
+      </template>
+    </el-dialog>
+
     <!-- 账户右键菜单（cex / kms_wallet 按 platformType 注入） -->
     <Teleport to="body">
       <div v-if="menu.open" class="acct-ctx-backdrop" @click="menu.open=false" @contextmenu.prevent="menu.open=false"></div>
       <div v-if="menu.open" class="acct-ctx" :style="{left:menu.x+'px',top:menu.y+'px'}" @click.stop>
-        <div class="h">{{ menu.node?.id }} · {{ menu.node?.venue }}</div>
-        <template v-for="it in menuItems" :key="it.key">
-          <div v-if="it.dividerBefore" class="dv" />
-          <div class="it" :class="it.kind" @click="doAction(it)">{{ it.label }}</div>
+        <div class="h">{{ mv(menu.node,'账户') || menu.node?.id }} · {{ menu.node?.venue }}</div>
+        <template v-for="a in (menu.node ? actionsOf(menu.node) : [])" :key="a.key">
+          <div v-if="a.dividerBefore" class="dv" />
+          <div class="it" :class="{danger:a.danger}" @click="doAction(a, menu.node)"><el-icon class="mi"><component :is="a.icon" /></el-icon>{{ a.label }}</div>
         </template>
       </div>
     </Teleport>
@@ -257,15 +311,53 @@ async function encryptCred(apiKey, apiSecret, passphrase) {
 }
 const typeOf = id => reg.value[id]?.account_type || 'master'
 const credLabel = c => ({ active: `🔑${c.key_mask||'已配'}`, pending: '🔑下发中', error: '🔑异常', revoked: '🔑已吊销' }[c.state] || '')
+// 从节点 metrics 按键取值(固定列渲染);容错多种键名
+const mv = (node, key) => (node && node.metrics && node.metrics[key]) || ''
 
-const menuItems = computed(() => menu.node
-  ? [...(ACCOUNT_MENUS[menu.node.platformType] || []),
-     ...(typeOf(menu.node.id) === 'sub'
-       ? [{ key: 'set_master', label: '设置主账户关联…', kind: 'registry', dividerBefore: true }] : []),
-     { key: 'set_mode', label: '账户模式…', kind: 'registry',
-       dividerBefore: typeOf(menu.node.id) !== 'sub' },
-     { key: 'edit_registry', label: '别名 / 邮箱…', kind: 'registry' }]
-  : [])
+// 行内/菜单统一动作集:PC 内联扁平图标显示,移动端收进 ⋮ 菜单。编辑组+清除组用 dividerBefore 分隔。
+function actionsOf(node) {
+  if (!node) return []
+  const isWallet = node.kind === 'wallet' || node.platformType === 'kms_wallet'
+  const isSub = node.kind === 'sub' || typeOf(node.id) === 'sub'
+  if (isWallet) return [   // HL 链上钱包:agent 私钥,无 API key/secret 流程
+    { key: 'verify', icon: 'CircleCheck', label: '验证' },
+    { key: 'refresh', icon: 'Refresh', label: '余额刷新' },
+    { key: 'edit_registry', icon: 'EditPen', label: '编辑别名/邮箱', dividerBefore: true },
+    { key: 'ip_proxy', icon: 'Position', label: 'IP 代理' },
+    { key: 'purge', icon: 'Delete', label: '清除(改名/删除)', danger: true, confirm: true, dividerBefore: true }]
+  const A = []
+  if (!isSub) A.push({ key: 'create_sub', icon: 'Plus', label: '新建子账户' })
+  A.push({ key: 'set_api', icon: 'Key', label: '设置 API…' })
+  A.push({ key: 'toggle', icon: 'SwitchButton', label: '启用/禁用' })
+  A.push({ key: 'verify', icon: 'CircleCheck', label: '验证' })
+  A.push({ key: 'ip_whitelist', icon: 'Lock', label: 'IP 白名单' })
+  A.push({ key: 'refresh', icon: 'Refresh', label: '余额刷新' })
+  A.push({ key: 'edit_registry', icon: 'EditPen', label: '编辑别名/邮箱', dividerBefore: true })
+  if (isSub) A.push({ key: 'set_master', icon: 'Connection', label: '主账户关联' })
+  A.push({ key: 'set_mode', icon: 'Setting', label: '账户模式' })
+  A.push({ key: 'ip_proxy', icon: 'Position', label: 'IP 代理' })
+  A.push({ key: 'purge', icon: 'Delete', label: '清除(改名/删除)', danger: true, confirm: true, dividerBefore: true })
+  return A
+}
+
+// 勾选 + 批量设置
+const sel = reactive(new Set())
+const allIds = computed(() => tree.value.flatMap(m => [m.id, ...(m.children || []).map(c => c.id)]))
+const allSel = computed(() => allIds.value.length > 0 && allIds.value.every(id => sel.has(id)))
+function toggleSel(id) { sel.has(id) ? sel.delete(id) : sel.add(id) }
+function toggleAll() { allSel.value ? sel.clear() : allIds.value.forEach(id => sel.add(id)) }
+const batchDlg = ref(false)
+const batchForm = reactive({ field: 'account_mode', account_mode: 'classic', book: 'TEST' })
+function openBatch() { if (sel.size) batchDlg.value = true }
+async function saveBatch() {
+  const keys = [...sel]
+  const body = { account_keys: keys }
+  if (batchForm.field === 'account_mode') body.account_mode = batchForm.account_mode
+  else body.book = batchForm.book
+  try { const r = await mixApi.accountsBatch(body)
+    ElMessage.success(`已批量设置 ${r.affected} 个账户`); batchDlg.value = false; sel.clear(); loadRegistry(); load() }
+  catch (e) { ElMessage.error(e?.detail || e?.error || '批量设置失败') }
+}
 
 function toggle(id) { open.has(id) ? open.delete(id) : open.add(id) }
 function openMenu(e, node) {
@@ -274,9 +366,10 @@ function openMenu(e, node) {
   menu.y = Math.min(e.clientY, window.innerHeight - 300)
   menu.node = node
 }
-async function doAction(it) {
+async function doAction(it, node) {
   menu.open = false
-  const node = menu.node
+  node = node || menu.node
+  if (!node) return
   try {
     if (it.key === 'edit_registry') {
       const cur = reg.value[node.id] || {}
@@ -407,35 +500,46 @@ onMounted(() => { load(); loadRegistry() })
 
 <style scoped lang="scss">
 .mixacct { display: flex; flex-direction: column; gap: 10px; }
-.bar { display: flex; align-items: center; gap: 12px;
-  b { font-size: 14px; } .hint { flex: 1; font-size: 11px; color: var(--el-text-color-secondary); } }
+.bar { display: flex; align-items: center; gap: 10px;
+  b { font-size: 14px; } .hint { font-size: 11px; color: var(--el-text-color-secondary); }
+  .spacer { flex: 1; } .selinfo { font-size: 11px; color: #F0B90B; font-weight: 700; } }
 .tbl { border: 1px solid var(--el-border-color); border-radius: 10px; padding: 6px; display: flex; flex-direction: column; gap: 2px; }
-.row { display: flex; align-items: center; gap: 10px; padding: 0 10px; border-radius: 6px; cursor: pointer; font-size: 12px; height: 34px;
+.thead { display: flex; align-items: center; gap: 8px; padding: 2px 10px; font-size: 10px;
+  color: var(--el-text-color-placeholder); font-weight: 700; }
+.row { display: flex; align-items: center; gap: 8px; padding: 0 10px; border-radius: 6px; font-size: 12px; height: 34px;
   &.master { background: var(--el-fill-color); font-weight: 700; }
-  &.sub { background: var(--el-fill-color-lighter); padding-left: 26px; height: 30px; } }
-.caret { width: 12px; color: var(--el-text-color-placeholder); }
-.kind { padding: 0 5px; border-radius: 4px; font-size: 10px; font-weight: 800;
-  &.cex { background: rgba(240,185,11,.15); color: #B8860B; }
-  &.kms_wallet { background: rgba(45,212,191,.15); color: #0d9488; }
+  &.sub { background: var(--el-fill-color-lighter); height: 30px; } }
+/* 固定列(thead 与 row 同宽对齐) */
+.c-cb { width: 22px; flex: none; display: flex; align-items: center; input { cursor: pointer; } }
+.c-name { flex: 1; min-width: 170px; display: flex; align-items: center; gap: 6px; cursor: pointer; overflow: hidden;
+  .nm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    &.sm { font-weight: 600; } &.off { opacity: .45; text-decoration: line-through; } } }
+.c-venue { width: 82px; flex: none; color: var(--el-text-color-secondary); font-size: 11px; }
+.c-book { width: 90px; flex: none; font-size: 10px; font-weight: 800;
+  &.bk-CORE_POOL { color: #F0B90B; } &.bk-HOUSE_RND { color: #2DD4BF; } &.bk-TEST { color: var(--el-text-color-placeholder); } }
+.c-cred { width: 92px; flex: none; font-size: 10.5px; color: var(--el-text-color-secondary); }
+.c-mode { width: 66px; flex: none; font-size: 11px; }
+.c-eq { width: 104px; flex: none; font-size: 12px; font-weight: 700; text-align: right; }
+.c-sub { width: 70px; flex: none; font-size: 11px; color: var(--el-text-color-secondary); }
+.c-act { flex: none; display: flex; align-items: center; gap: 1px; margin-left: auto; }
+.caret { width: 12px; color: var(--el-text-color-placeholder); &.sub { visibility: hidden; } }
+.kind { padding: 0 5px; border-radius: 4px; font-size: 10px; font-weight: 800; flex: none;
+  &.master { background: rgba(240,185,11,.15); color: #F0B90B; }
+  &.kms_wallet { background: rgba(45,212,191,.15); color: #2DD4BF; }
   &.sub { background: var(--el-fill-color-dark); color: var(--el-text-color-secondary); } }
-.name { min-width: 130px; &.sm { font-weight: 600; }
-  &.off { opacity: .45; text-decoration: line-through; } }
-.acctname { min-width: 120px; font-size: 11px; color: #F0B90B; font-weight: 700;
-  .mch { font-style: normal; margin-left: 6px; padding: 0 5px; border-radius: 4px; font-size: 9px;
-    background: rgba(45,212,191,.14); color: #2DD4BF; font-weight: 800; }
-  .cred { font-style: normal; margin-left: 4px; padding: 0 5px; border-radius: 4px; font-size: 9px; font-weight: 700;
-    &.active { background: rgba(14,203,129,.14); color: #0ECB81; }
-    &.pending { background: rgba(240,185,11,.14); color: #F0B90B; }
-    &.error { background: rgba(246,70,93,.14); color: #F6465D; }
-    &.revoked { background: rgba(94,102,115,.14); color: #5E6673; } } }
-.venue { color: var(--el-text-color-secondary); font-size: 11px; min-width: 110px; }
-.dot { width: 7px; height: 7px; border-radius: 50%;
+.dot { width: 7px; height: 7px; border-radius: 50%; flex: none;
   &.ok { background: #0ECB81; } &.restricted { background: #F6465D; } &.healing { background: #F0B90B; } }
-.restricted { color: #F6465D; font-size: 10px; font-weight: 700; }
-.pair { flex: 1; display: inline-flex; justify-content: flex-end; gap: 4px; align-items: baseline; min-width: 0; overflow: hidden;
-  em { font-style: normal; color: var(--el-text-color-placeholder); font-size: 10px; white-space: nowrap; }
-  b { font-size: 11.5px; white-space: nowrap; &.neg { color: #F6465D; } } }
-.more { background: var(--el-fill-color-dark); border: 1px solid var(--el-border-color); border-radius: 4px; color: var(--el-text-color-secondary); cursor: pointer; padding: 0 6px; font-weight: 800; }
+/* 白色扁平功能图标(hover 金;danger 红) */
+.act { font-size: 15px; color: #C8CDD6; cursor: pointer; padding: 3px; border-radius: 4px; transition: color .12s, background .12s;
+  &:hover { color: #F0B90B; background: rgba(240,185,11,.12); }
+  &.danger:hover { color: #F6465D; background: rgba(246,70,93,.12); } }
+.more { display: none; background: transparent; border: none; color: var(--el-text-color-secondary); cursor: pointer; padding: 3px; align-items: center; }
+/* 移动端:内联图标收进 ⋮ 菜单;次要列隐藏 */
+@media (max-width: 860px) {
+  .c-act .act { display: none; }
+  .more { display: inline-flex; }
+  .c-cred, .c-sub, .thead .c-cred, .thead .c-sub { display: none; }
+}
 </style>
 
 <style lang="scss">
@@ -443,7 +547,8 @@ onMounted(() => { load(); loadRegistry() })
   box-shadow: 0 8px 24px rgba(0,0,0,.6); font-size: 11px; color: #EAECEF;
   .h { padding: 5px 10px 4px; color: #5E6673; font-size: 9px; font-weight: 600; }
   .dv { height: 1px; background: #262B33; margin: 2px 0; }
-  .it { padding: 6px 10px; border-radius: 6px; font-weight: 600; cursor: pointer;
-    &:hover { background: #20242C; }
-    &.danger { color: #F6465D; } &.strategy { color: #A78BFA; } &.link { color: #4A9CFF; } } }
+  .it { padding: 6px 10px; border-radius: 6px; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 8px;
+    .mi { font-size: 14px; color: #9AA0AB; }
+    &:hover { background: #20242C; } &:hover .mi { color: #F0B90B; }
+    &.danger { color: #F6465D; } &.danger .mi { color: #F6465D; } } }
 </style>
