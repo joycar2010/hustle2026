@@ -12,11 +12,13 @@ from fastapi import APIRouter, Depends, HTTPException
 from ..deps import require_viewer, require_operator
 from .. import datasources as ds
 from .. import proxy
+from .. import adapters
 
 router = APIRouter()
 
 _MODES = ("NORMAL", "WATCH", "NO_NEW_RISK", "REDUCE_ONLY", "EXIT_ONLY", "FROZEN")
-_SCOPES = ("VENUE", "ACCOUNT", "GLOBAL", "SYMBOL")
+_SCOPES = ("GLOBAL", "VENUE", "IDENTITY_GROUP", "ACCOUNT", "CREDENTIAL", "PRODUCT",
+           "SYMBOL", "ASSET_NETWORK", "OWNER_MANDATE")
 
 
 @router.get("/risk/overview")
@@ -704,3 +706,47 @@ async def c3_brief(symbol: str, _who=Depends(require_viewer)):
         {"k": "PositionIntent", "ok": None, "note": "coin 引擎生成"},
     ]
     return {"symbol": sym + "USDT", "grid": grid, "gates": gates}
+
+
+# V2 §12 准入与隔离:8 作用域统一视图(risk_policy_override 非 NORMAL 未过期 + coin symbol 黑名单)
+_SCOPE_ENFORCE = {
+    "GLOBAL": "policy 引擎即时强制", "VENUE": "policy 引擎即时强制",
+    "SYMBOL": "C3 黑名单即时强制(coin)", "ACCOUNT": "policy 账户级(部分)",
+    "IDENTITY_GROUP": "登记+呈现(引擎消费待接)", "CREDENTIAL": "登记+呈现(引擎消费待接)",
+    "PRODUCT": "登记+呈现(引擎消费待接)", "ASSET_NETWORK": "登记+呈现(引擎消费待接)",
+    "OWNER_MANDATE": "登记+呈现(引擎消费待接)"}
+
+
+@router.get("/quarantine")
+async def quarantine_list(_who=Depends(require_viewer)):
+    """准入与隔离统一视图:override(非NORMAL未过期,逐scope取最新)+ coin symbol黑名单。
+    每条=作用域/原因/创建人/有效期/传播范围/强制状态。解除=追加NORMAL,非删除。"""
+    rows = []
+    pool = await ds.pg()
+    if pool is not None:
+        try:
+            for r in await pool.fetch(
+                    "SELECT DISTINCT ON (scope_type, scope_key) scope_type, scope_key, mode, reason, "
+                    "expires_at::text, created_by, created_at::text FROM risk_policy_override "
+                    "WHERE (expires_at IS NULL OR expires_at > now()) "
+                    "ORDER BY scope_type, scope_key, id DESC"):
+                d = dict(r)
+                if d["mode"] == "NORMAL":
+                    continue   # 已解除(追加 NORMAL)
+                d["source"] = "override"
+                d["enforce"] = _SCOPE_ENFORCE.get(d["scope_type"], "未知")
+                rows.append(d)
+        except Exception:
+            pass
+    # coin symbol 黑名单(C3 准入)
+    try:
+        for b in await adapters.blacklist_rows():
+            rows.append({"scope_type": "SYMBOL", "scope_key": (b.get("symbol") or "").upper(),
+                         "mode": "KILLED", "reason": b.get("reason") or "coin黑名单",
+                         "created_by": b.get("created_by") or "coin", "source": "coin_blacklist",
+                         "enforce": "C3 黑名单即时强制(coin)", "expires_at": None,
+                         "created_at": str(b.get("created_at") or "")[:16]})
+    except Exception:
+        pass
+    return {"rows": rows, "scopes": list(_SCOPE_ENFORCE.keys()),
+            "enforce_map": _SCOPE_ENFORCE}

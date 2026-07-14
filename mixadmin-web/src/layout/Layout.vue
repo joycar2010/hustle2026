@@ -275,11 +275,11 @@ async function gateAdminLogin(){
 }
 function canSee(name){ const p=op.value.perms||''; if(!op.value.operator)return true; if(p==='*')return true; return p.split(',').map(x=>x.trim()).includes(name) }
 // 分组: 总控(置顶不收缩) → 分析 → 经营 → 运维; 隐藏 meta.hidden; 组内按 ord 排序
-const groups=computed(()=>{ const order=['总控','系统设置','分析','经营','运维']; const m={}
+const groups=computed(()=>{ const order=['日常运行','风险与账本','账户与资产','系统设置','分析','经营','运维']; const m={}
   menus.forEach(r=>{ if(!canSee(r.name))return; if(r.meta&&r.meta.hidden)return; const g=(r.meta&&r.meta.group)||'其它'; (m[g]=m[g]||[]).push(r) })
   // 注意 ord:0 是合法值——不能用 ||99(falsy 坑,曾把主控台 ord:0 排到组尾)
   const ordOf=r=>(r.meta&&r.meta.ord!=null)?r.meta.ord:99
-  return order.filter(g=>m[g]).map(g=>({name:g, standalone:(g==='总控'),
+  return order.filter(g=>m[g]).map(g=>({name:g, standalone:(g==='日常运行'),
     items:m[g].slice().sort((a,b)=>ordOf(a)-ordOf(b))})) })
 // 组收缩状态(localStorage 记忆; 默认全展开)
 const closedGroups=ref((()=>{ try{ return JSON.parse(localStorage.getItem('qh_admin_closed_grps')||'[]') }catch(e){ return [] } })())

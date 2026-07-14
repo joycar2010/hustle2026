@@ -99,6 +99,8 @@ export const mixApi = {
   },
 
   blacklist: () => http.get('/blacklist'),
+  quarantine: () => http.get('/quarantine'),
+  quarantineAdd: (b) => http.post('/risk/overrides', b),
   blacklistAdd: (symbol, reason) => http.post('/blacklist', { symbol, reason }),
   blacklistRemove: (symbol) => http.post('/blacklist/remove', { symbol }),
   coinAction: (symbol, action) => http.post(`/coins/${symbol}/actions`, { action }),
