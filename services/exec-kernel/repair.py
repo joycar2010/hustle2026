@@ -105,6 +105,41 @@ async def _build_intent(r, pol, venue, vd, pid, pcfg, legs):
     }
 
 
+async def _build_rescue(r, pol, venue, vd, pid, pcfg, legs):
+    """撤离不可行(受限所平不掉=trapped)→ 第三 venue 救援腿方案(ADR-007 MIXED_RESCUE,shadow)。
+    sizing 基于 confirmed_position(挂单/UNKNOWN 未计——armed 版必须升级为曝光区间 worst-case);
+    退出条件=原 venue 恢复 CAN_REDUCE 即撤救援腿,绝不变成无人管理的永久仓位。"""
+    sym = pcfg.get("symbol", pid)
+    trapped = [lg for lg in legs if lg.get("venue") == venue and abs(float(lg.get("amt") or 0)) > 1e-9]
+    if not trapped:
+        return None
+    amt = float(trapped[0]["amt"])
+    cands = []
+    for rv, rvd in (pol.get("venues") or {}).items():
+        if rv == venue or rvd.get("mode") not in ("NORMAL", "WATCH"):
+            continue
+        if not (rvd.get("capabilities") or {}).get("CAN_RESCUE_HEDGE"):
+            continue
+        ok, checks, mid = await _leg_check(r, pol, rv, sym)
+        if checks.get("feed_fresh") and mid > 0:
+            cands.append((float(rvd.get("equity") or 0), rv, mid))
+    if not cands:
+        return None
+    cands.sort(reverse=True)
+    _, rv, mid = cands[0]
+    plan = {"rescue_venue": rv, "symbol": sym,
+            "side": "SELL" if amt > 0 else "BUY", "qty": abs(amt),
+            "max_notional_usdt": round(abs(amt) * mid * 1.05, 2),
+            "sizing_basis": "confirmed_position(挂单/ACK_UNKNOWN未计,armed须worst-case曝光区间)",
+            "unwind_condition": f"{venue} 恢复 CAN_REDUCE 后先撤救援腿再平原腿",
+            "exec_path": "canary_c2单腿/manager RESCUE分支(armed留专场)"}
+    return {"kind": "RESCUE_HEDGE", "venue": venue, "pair_id": pid, "symbol": sym,
+            "feasible": True, "plan": plan,
+            "feasibility": {rv: {"can_rescue": True, "mid": mid}},
+            "reason": f"{venue}撤离不可行(trapped)→{rv}对冲方向敞口",
+            "est_notional_usdt": round(abs(amt) * mid, 2)}
+
+
 async def _persist(pool, it, pol, now):
     """PROPOSED 意图 upsert:同 (pair,venue) 现存 PROPOSED 未过期→刷新;过期→EXPIRED+重提;无→新建。
     返回 (intent_id, is_new)。pool=None(演练/降级)时只返回合成 id。"""
@@ -112,8 +147,8 @@ async def _persist(pool, it, pol, now):
         return f"rep-{it['pair_id']}-{it['venue']}-shadow", False
     row = await pool.fetchrow(
         "SELECT intent_id, expires_at < now() AS expired FROM risk_repair_intent "
-        "WHERE pair_id=$1 AND venue=$2 AND state='PROPOSED' ORDER BY id DESC LIMIT 1",
-        it["pair_id"], it["venue"])
+        "WHERE pair_id=$1 AND venue=$2 AND kind=$3 AND state='PROPOSED' ORDER BY id DESC LIMIT 1",
+        it["pair_id"], it["venue"], it["kind"])
     if row and not row["expired"]:
         await pool.execute(
             "UPDATE risk_repair_intent SET feasible=$2, plan=$3, feasibility=$4, reason=$5, "
@@ -128,14 +163,16 @@ async def _persist(pool, it, pol, now):
             "UPDATE risk_repair_intent SET state='EXPIRED', close_reason='ttl', updated_at=now() "
             "WHERE intent_id=$1", row["intent_id"])
     iid = f"rep-{it['pair_id']}-{it['venue']}-{int(now)}"
+    # executor_fence(ADR-007):planner/离线playbook/重复消息/重启不双重执行的围栏标识
+    fence = f"{it['kind']}:{it['pair_id']}:{it['venue']}:e{pol.get('policy_epoch')}v{pol.get('policy_version')}"
     await pool.execute(
         "INSERT INTO risk_repair_intent(intent_id, kind, venue, pair_id, symbol, state, mode, feasible, "
-        "plan, feasibility, reason, policy_epoch, policy_version, est_notional_usdt, expires_at) "
-        "VALUES($1,$2,$3,$4,$5,'PROPOSED','shadow',$6,$7,$8,$9,$10,$11,$12, now() + ($13||' seconds')::interval)",
+        "plan, feasibility, reason, policy_epoch, policy_version, est_notional_usdt, executor_fence, expires_at) "
+        "VALUES($1,$2,$3,$4,$5,'PROPOSED','shadow',$6,$7,$8,$9,$10,$11,$12,$13, now() + ($14||' seconds')::interval)",
         iid, it["kind"], it["venue"], it["pair_id"], it["symbol"], it["feasible"],
         json.dumps(it["plan"]), json.dumps(it["feasibility"]), it["reason"],
         int(pol.get("policy_epoch") or 0), int(pol.get("policy_version") or 0),
-        it["est_notional_usdt"], str(TTL_SEC))
+        it["est_notional_usdt"], fence, str(TTL_SEC))
     return iid, True
 
 
@@ -189,7 +226,13 @@ async def evaluate(r, pool, now):
             for v, vd in trigger.items():
                 if any(lg.get("venue") == v for lg in legs):
                     live_pairs.add((pid, v))
-                    intents.append(await _build_intent(r, pol, v, vd, pid, pcfg, legs))
+                    it = await _build_intent(r, pol, v, vd, pid, pcfg, legs)
+                    intents.append(it)
+                    if not it["feasible"] and not (it["feasibility"].get(v) or {}).get("can_reduce", True):
+                        # 受限所本身平不掉=trapped → 提案第三 venue 救援腿(MIXED_RESCUE)
+                        rescue = await _build_rescue(r, pol, v, vd, pid, pcfg, legs)
+                        if rescue:
+                            intents.append(rescue)
     cancelled = await _cancel_stale(pool, set(trigger), live_pairs)
 
     out = []

@@ -23,7 +23,19 @@ import redis.asyncio as aioredis
 
 sys.path.insert(0, "/home/ec2-user/dexcexmix")
 sys.path.insert(0, "/home/ec2-user/dexcexmix/src/packages/dcm-common")
-from policy_client import can_open, set_pool as policy_set_pool  # noqa: E402  # G0 风险策略消费
+from policy_client import can_open, read_policy, set_pool as policy_set_pool  # noqa: E402  # G0 风险策略消费
+
+# RestrictionRiskCharge shadow(ADR-009 首期口径:Tier情景+锁资天数+救援成本上限;
+# **只记录不闸**——概率化定价等真实事件样本攒够再进强制经济闸)
+_TIER_SCENARIO_BPS = {"A": 0.0, "B": 15.0, "C": 40.0}
+_TIER_LOCK_DAYS = {"A": 2, "B": 7, "C": 21}
+_CAPCOST_BPS_PER_DAY = float(os.environ.get("DCM_RC_CAPCOST_BPS_D", "1"))
+_RESCUE_BPS = float(os.environ.get("DCM_RC_RESCUE_BPS", "10"))
+
+
+def _risk_charge_bps(tier):
+    t = tier or "C"
+    return _TIER_SCENARIO_BPS.get(t, 40.0) + _TIER_LOCK_DAYS.get(t, 21) * _CAPCOST_BPS_PER_DAY + _RESCUE_BPS
 try:
     from dcm_common.arb_contract import o1_signed_cashflow_daily_pct
 except Exception:  # noqa: BLE001  # 包缺失时内联同口径(禁 abs)
@@ -126,10 +138,16 @@ async def evaluate(r, pool, now):
         funding_income_bps = net_daily * HOLD_HOURS / 24.0 * 100.0
         fees_bps = FEE_BPS_PER_FILL * 4.0
         e_bps = funding_income_bps - fees_bps - EST_ROUNDTRIP_COST_BPS
+        pol, _ = await read_policy(r)
+        pv = (pol or {}).get("venues") or {}
+        charge = max(_risk_charge_bps((pv.get(vl) or {}).get("tier")),
+                     _risk_charge_bps((pv.get(vs) or {}).get("tier")))
         rec = {"symbol": sym, "venue_long": vl, "venue_short": vs,
                "target_notional_usdt": round(target, 2),
                "net_daily_pct": round(net_daily, 5),
                "e_bps": round(e_bps, 3),
+               "risk_charge_bps": round(charge, 2),
+               "risk_adjusted_e_bps": round(e_bps - charge, 3),
                "parts": {"funding_income": round(funding_income_bps, 2),
                          "fees": round(fees_bps, 2), "est_cost": EST_ROUNDTRIP_COST_BPS},
                "route_reason": rt.get("reason")}

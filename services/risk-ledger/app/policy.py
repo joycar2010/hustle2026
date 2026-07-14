@@ -385,6 +385,7 @@ async def compute_and_publish(pool, r) -> dict:
             "modes_hit": hits,
             "exposure_notional": round(notional, 2), "equity": round(equity, 2),
             "cap_usdt": cap_val, "warn_ratio": warn_ratio,
+            "tier": (cap_row.get("tier") if cap_row else None),
             "capabilities": _capabilities(mode),
         }
 
@@ -401,8 +402,19 @@ async def compute_and_publish(pool, r) -> dict:
         trapped += cut
         if cut > 0:
             trapped_by[v] = cut
+    # 三口径分离(ADR-009):Accounting=账面;Risk-adjusted=账面−情景haircut(=trapped,只扣这一次);
+    # Available=可部署资本=Risk-adjusted−保证金预留(在场名义×预留率)−运营缓冲。不重复扣减。
+    reserve_pct = float(_os.environ.get("DCM_NAV_MARGIN_RESERVE_PCT", "0.2"))
+    op_buffer = float(_os.environ.get("DCM_NAV_OPERATIONAL_BUFFER_USDT", "50"))
+    total_notional = sum(d["exposure_notional"] for d in venues_out.values())
+    reservation = round(total_notional * reserve_pct, 2)
+    risk_adjusted = round(gross - trapped, 2)
     nav = {"gross_equity_usdt": round(gross, 2), "trapped_usdt": round(trapped, 2),
-           "net_nav_usdt": round(gross - trapped, 2), "trapped_by_venue": trapped_by}
+           "net_nav_usdt": risk_adjusted, "trapped_by_venue": trapped_by,
+           "accounting_nav_usdt": round(gross, 2),
+           "risk_adjusted_nav_usdt": risk_adjusted,
+           "available_equity_usdt": round(max(0.0, risk_adjusted - reservation - op_buffer), 2),
+           "reservation_usdt": reservation, "operational_buffer_usdt": op_buffer}
 
     body = {
         "ts": int(time.time()),

@@ -27,6 +27,7 @@ from dcm_common.notify import Notifier, feishu_from_env
 
 from policy import compute_and_publish, corebox_check  # noqa: E402  # G0 风险策略权威+CORE_POOL 封闭盒子
 import gates_shadow  # noqa: E402  # ADR-002 阶段A:三闸收编 shadow 对比(只记录)
+import defense_pack  # noqa: E402  # 批次6:证据包(REDUCE+ 进入时自动生成)
 import incidents  # noqa: E402  # 批次1:有状态 Incident(发生/升级/恢复/超时四时点通知)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -435,7 +436,15 @@ async def _post_policy(pool, pol):
                     int(pol.get("policy_epoch") or 0), int(pol.get("policy_version") or 0))
             except Exception:
                 log.exception("mode transition persist failed")
+        entered_severe = (prev is not None and prev not in ("REDUCE_ONLY", "EXIT_ONLY", "FROZEN")
+                          and mode in ("REDUCE_ONLY", "EXIT_ONLY", "FROZEN"))
         _prev_modes[vn] = mode
+        if entered_severe:
+            try:
+                pack_id = await defense_pack.generate(pool, vn, pol, trigger_rule=f"auto:{mode}")
+                log.warning("defense pack auto-generated venue=%s id=%s", vn, pack_id)
+            except Exception:
+                log.exception("defense pack generate failed")
         if mode in ("REDUCE_ONLY", "EXIT_ONLY", "FROZEN"):
             await incidents.touch(pool, fire, vn, "policy-mode", "fatal",
                                   f"{vn} 风险模式={mode}", str(vd.get("reason", ""))[:300])
