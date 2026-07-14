@@ -85,6 +85,9 @@ export const mixApi = {
   notifyBroadcast: (b) => http.post('/notify/broadcast', b),
   channelsGet: () => http.get('/notify/channels'),
   channelsPut: (b) => http.put('/notify/channels', b),
+  notifyAiGet: () => http.get('/notify/ai'),
+  notifyAiSave: (b) => http.put('/notify/ai', b),
+  notifyAiTest: (b) => http.post('/notify/ai/test', b || {}),
   llmHistory: () => http.get('/system/llm/history'),
   // 150s > 后端最坏路径(两站×55s+开销)——前端超时必须罩住后端降级链,否则答案生成完前端已放弃
   aiChat: (body) => http.post('/ai/chat', body, { timeout: 150000 }),

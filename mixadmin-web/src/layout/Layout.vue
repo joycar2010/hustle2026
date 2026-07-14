@@ -351,8 +351,37 @@ function startMarquee(){
   wsClose=connectStream(msg=>{ wsOn.value=true
     if(msg.channel==='marquee'){ const d=msg.data||msg
       const raw=d.text||d.title||d.content||''
-      marqueeText.value=String(raw).replace(EMOJI_RE,'').replace(/\s+/g,' ').trim() } })
+      marqueeText.value=String(raw).replace(EMOJI_RE,'').replace(/\s+/g,' ').trim()
+      onAlertMarquee(d) } })   // AI 客服:重要告警主动弹浮框
 }
+// AI 客服主动弹窗:跑马灯告警达阈值→AI 助手浮球自动弹出(可后台开关+免打扰)
+const LEVEL_RANK={info:0,warn:1,fatal:2}
+async function onAlertMarquee(d){
+  try{
+    const conf=aiPushConf.value; if(!conf.enabled) return
+    const level=String(d.level||'info')
+    if((LEVEL_RANK[level]??0) < (LEVEL_RANK[conf.min_level]??2)) return
+    if(advDnd.value) return   // 免打扰:不弹屏(与顾问播报同一开关)
+    const title=String(d.title||'系统告警').replace(EMOJI_RE,'').trim()
+    const body=String(d.content||d.text||'').replace(EMOJI_RE,'').replace(/\s+/g,' ').trim()
+    let shown=`【${title}】${body}`
+    if(conf.interpret){   // AI 解读:让助手用人话解释这条告警+建议动作
+      try{ const rr=await mixApi.aiChat({conversation_id:aiConvId.value,message:`系统刚触发一条告警，请用一两句话向运维口语化解释它意味着什么、要不要处理、怎么处理（不要复述原文）：标题「${title}」内容「${body}」`})
+        if(rr.conversation_id)aiConvId.value=rr.conversation_id
+        if(rr.reply)shown=`⚠️ ${title}\n${rr.reply}` }catch(e){ /* 解读失败回落原文 */ }
+    }
+    aiMsgs.value.push({id:aiId(),who:'ai',txt:shown,alert:true}); aiSave()
+    aiOpen.value=true; aiTab.value='chat'
+    await nextTick(()=>{ if(aiBodyEl.value)aiBodyEl.value.scrollTop=aiBodyEl.value.scrollHeight })
+    if(conf.speak){   // 语音播报:edge-tts 人声念告警标题(带鉴权取 blob,失败静默)
+      try{ const blob=await mixApi.ttsBlob(title, conf.persona||'')
+        const url=URL.createObjectURL(blob); const au=new Audio(url)
+        au.onended=()=>URL.revokeObjectURL(url); au.play().catch(()=>{}) }catch(e){}
+    }
+  }catch(e){ /* 弹窗失败绝不影响跑马灯 */ }
+}
+const aiPushConf=ref({enabled:false, min_level:'fatal', speak:false, persona:'', interpret:false})
+async function loadAiPushConf(){ try{ Object.assign(aiPushConf.value, await mixApi.notifyAiGet()) }catch(e){ /* 降级:不弹 */ } }
 // AI 运维助手悬浮球(site=qhadmin, 接 qh 后端 LLM; 未配置则后端回退; localStorage 保存/删除/清空对齐 qh)
 import { nextTick } from 'vue'
 const aiOpen=ref(false),aiIn=ref(''),aiBusy=ref(false),aiConvId=ref(null),aiBodyEl=ref(null)
@@ -422,7 +451,7 @@ async function aiSend(){
   }
   finally{ if(aiTimer){clearInterval(aiTimer);aiTimer=null} aiBusy.value=false; await nextTick(()=>{ if(aiBodyEl.value)aiBodyEl.value.scrollTop=aiBodyEl.value.scrollHeight }) }
 }
-onMounted(()=>{ setInterval(()=>{ clock.value=new Date().toTimeString().slice(0,8) },1000); restoreOp(); loadBrand(); startMarquee(); loadAdvisors(); setInterval(loadAdvisors, 30000); loadAiModels(); setInterval(loadAiModels, 60000) })
+onMounted(()=>{ setInterval(()=>{ clock.value=new Date().toTimeString().slice(0,8) },1000); restoreOp(); loadBrand(); startMarquee(); loadAdvisors(); setInterval(loadAdvisors, 30000); loadAiModels(); setInterval(loadAiModels, 60000); loadAiPushConf(); setInterval(loadAiPushConf, 120000) })
 </script>
 <style scoped>
 .ai-fab{position:fixed;right:24px;bottom:24px;width:52px;height:52px;border-radius:50%;background:var(--el-color-primary);color:#fff;

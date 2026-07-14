@@ -504,6 +504,50 @@ async def channels_get(_who=Depends(require_viewer)):
             "emailNote": "邮件通道未接 SMTP,保存仅留位"}
 
 
+# ---------------- AI 客服（浮动球主动弹窗：重要通知推给前端 AI 助手） ----------------
+_AI_DEFAULT = {"enabled": True, "min_level": "fatal", "speak": False,
+               "persona": "", "interpret": False}
+
+
+@router.get("/notify/ai")
+async def ai_conf_get(_who=Depends(require_viewer)):
+    """AI 客服弹窗配置（Layout 浮动球启动时读取；viewer 可读）。"""
+    pool = await _pool()
+    row = await pool.fetchrow("SELECT ai_conf FROM notify_settings WHERE id=1")
+    conf = row["ai_conf"] if row else {}
+    if isinstance(conf, str):
+        conf = json.loads(conf or "{}")
+    return {**_AI_DEFAULT, **(conf or {})}
+
+
+@router.put("/notify/ai")
+async def ai_conf_put(body: dict, op=Depends(require_operator)):
+    conf = {"enabled": bool(body.get("enabled", True)),
+            "min_level": body.get("min_level") if body.get("min_level") in ("warn", "fatal") else "fatal",
+            "speak": bool(body.get("speak")), "persona": str(body.get("persona") or "")[:40],
+            "interpret": bool(body.get("interpret"))}
+    pool = await _pool()
+    await pool.execute("UPDATE notify_settings SET ai_conf=$1::jsonb, updated_by=$2, updated_at=now() WHERE id=1",
+                       json.dumps(conf), op["operator"])
+    await proxy.audit(op["operator"], op["role"], "notify.ai", "notify_settings", conf, "saved")
+    return {"saved": True, **conf}
+
+
+@router.post("/notify/ai/test")
+async def ai_conf_test(body: dict, op=Depends(require_operator)):
+    """发一条测试告警到跑马灯频道（level 默认 fatal）——AI 客服弹窗端到端验证。"""
+    r = ds.rds()
+    if r is None:
+        raise HTTPException(503, "redis 未配置")
+    level = body.get("level") if body.get("level") in ("warn", "fatal") else "fatal"
+    await r.publish(MARQUEE_CHANNEL, json.dumps({
+        "service": "exec-manager", "title": str(body.get("title") or "AI客服弹窗测试")[:120],
+        "content": str(body.get("content") or f"这是一条 {level} 级测试告警，AI 客服应主动弹窗提示。")[:300],
+        "level": level, "color": LEVEL_COLOR.get(level, "#F6465D"), "blink": level == "fatal",
+    }, ensure_ascii=False))
+    return {"sent": True, "level": level}
+
+
 @router.put("/notify/channels")
 async def channels_put(body: dict, op=Depends(require_operator)):
     pool = await _pool()

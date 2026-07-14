@@ -70,6 +70,54 @@
         </div>
       </el-tab-pane>
 
+      <!-- AI 客服弹窗 -->
+      <el-tab-pane label="AI 客服弹窗" name="aics">
+        <div class="cards2">
+          <div class="card">
+            <div class="hd"><b>AI 客服主动弹窗</b><span class="sub">重要通知经右下角 AI 助手浮动球主动弹出提示</span></div>
+            <el-form label-width="130">
+              <el-form-item label="启用主动弹窗">
+                <el-switch v-model="ai.enabled" />
+                <span class="note" style="margin-left:10px">关=只有跑马灯，不弹 AI 浮框</span>
+              </el-form-item>
+              <el-form-item label="弹窗触发级别">
+                <el-radio-group v-model="ai.min_level" size="small">
+                  <el-radio-button value="warn">warn 及以上</el-radio-button>
+                  <el-radio-button value="fatal">仅 fatal</el-radio-button>
+                </el-radio-group>
+                <div class="note">告警级别达到此阈值才自动弹 AI 助手（免打扰开时仍不弹）。</div>
+              </el-form-item>
+              <el-form-item label="AI 解读告警">
+                <el-switch v-model="ai.interpret" />
+                <span class="note" style="margin-left:10px">开=弹窗时让 AI 用人话解释这条告警＋建议动作（消耗 LLM）；关=只把原文推进浮框</span>
+              </el-form-item>
+              <el-form-item label="语音播报">
+                <el-switch v-model="ai.speak" />
+                <el-select v-model="ai.persona" clearable placeholder="默认嗓音" size="small" style="width:160px;margin-left:10px" :disabled="!ai.speak">
+                  <el-option v-for="p in personas" :key="p.skey" :label="p.name" :value="p.skey" />
+                </el-select>
+                <div class="note">开=弹窗同时用 edge-tts 人声念出告警标题（御姐音适合风险告警）。</div>
+              </el-form-item>
+              <el-form-item>
+                <el-button type="warning" @click="saveAi">保存配置</el-button>
+                <el-button @click="testAi('warn')">发 warn 测试</el-button>
+                <el-button type="danger" plain @click="testAi('fatal')">发 fatal 测试</el-button>
+              </el-form-item>
+            </el-form>
+            <div class="note">测试会向跑马灯频道发一条告警，若浮球配置生效，应看到右下角 AI 助手自动弹出。exec-manager 的单腿裸露/建议平仓/平仓隔离告警也走同一条链路。</div>
+          </div>
+          <div class="card">
+            <div class="hd"><b>说明</b><span class="sub">告警来源与链路</span></div>
+            <ul class="ai-help">
+              <li>告警源：exec-manager（持仓接管：单腿裸露 fatal / 建议平仓 warn / 平仓隔离 fatal）、risk-ledger（护栏）、手动广播。</li>
+              <li>链路：服务 → Redis 跑马灯频道 → mix-ws-hub → 顶栏跑马灯（始终显示）＋（本开关开时）AI 浮动球主动弹窗。</li>
+              <li>免打扰：AI 浮框右上角铃铛开启免打扰后，即使达到阈值也不自动弹屏，仅红点计数。</li>
+              <li>解读：开「AI 解读告警」后，弹窗内容为 AI 对该告警的口语化解释＋建议动作。</li>
+            </ul>
+          </div>
+        </div>
+      </el-tab-pane>
+
       <!-- ③ 邮件(SMTP) -->
       <el-tab-pane label="邮件(SMTP)" name="email">
         <div class="card" style="max-width:600px">
@@ -268,6 +316,17 @@ const mt = reactive({ enabled: false, stop_strategy: true, block_trading: true, 
 const ch = ref({ feishuWebhook: '', feishuConfigured: false, feishuAppId: '', feishuAppConfigured: false, feishuOpenId: '', email: { host: '', port: '', user: '', sender: '' } })
 const feishuApp = ref({ app_id: '', secret: '', open_id: '' })
 const testPhone = ref('')
+// AI 客服弹窗配置
+const ai = reactive({ enabled: true, min_level: 'fatal', speak: false, persona: '', interpret: false })
+async function loadAi() { try { Object.assign(ai, await mixApi.notifyAiGet()) } catch (e) { /* 降级 */ } }
+async function saveAi() {
+  try { await mixApi.notifyAiSave({ ...ai }); ElMessage.success('AI 客服弹窗配置已保存（前端浮球下次告警生效）') }
+  catch (e) { ElMessage.error(e?.detail || e?.error || '保存失败') }
+}
+async function testAi(level) {
+  try { await mixApi.notifyAiTest({ level }); ElMessage.success(`已发 ${level} 测试告警，看右下角 AI 助手是否弹出`) }
+  catch (e) { ElMessage.error(e?.detail || e?.error || '发送失败') }
+}
 async function saveFeishuApp() {
   try { await mixApi.channelsPut({ feishuConf: { ...feishuApp.value } }); ElMessage.success('飞书应用凭证已保存'); feishuApp.value.secret = ''; loadChannels() }
   catch (e) { ElMessage.error(e?.detail || '保存失败') }
@@ -380,7 +439,7 @@ async function send() {
     ElMessage.success('已广播'); loadLogs()
   } catch (e) { ElMessage.error(e?.detail || '发送失败') } finally { sending.value = false }
 }
-onMounted(() => { loadMaint(); loadChannels(); loadTpls(); loadPersonas(); loadLogs() })
+onMounted(() => { loadMaint(); loadChannels(); loadTpls(); loadPersonas(); loadLogs(); loadAi() })
 </script>
 
 <style scoped lang="scss">
