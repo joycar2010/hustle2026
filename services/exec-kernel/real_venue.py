@@ -26,11 +26,13 @@ BINANCE_SPOT = "https://api.binance.com"
 class BinanceRealVenue:
     """binance 永续/现货 读适配器 + 门控下单。key/secret 从环境(B 机 .env / cred-agent)。"""
 
-    def __init__(self, key: str = "", secret: str = ""):
+    def __init__(self, key: str = "", secret: str = "", armed=None, arm_symbols=None):
         self.key = key or os.environ.get("BINANCE_KEY", "")
         self.secret = secret or os.environ.get("BINANCE_SECRET", "")
-        self.armed = os.environ.get("DCM_EXEC_ARMED", "false").lower() == "true"
-        self.arm_symbols = {s.strip() for s in os.environ.get("DCM_EXEC_ARM_SYMBOLS", "").split(",") if s.strip()}
+        # armed/arm_symbols 可构造覆盖(manager 按 symbol 精细控制),否则回落 env
+        self.armed = (os.environ.get("DCM_EXEC_ARMED", "false").lower() == "true") if armed is None else bool(armed)
+        self.arm_symbols = ({s.strip() for s in os.environ.get("DCM_EXEC_ARM_SYMBOLS", "").split(",") if s.strip()}
+                            if arm_symbols is None else set(arm_symbols))
 
     def _sign(self, params: dict) -> str:
         q = urlencode({**params, "timestamp": int(time.time() * 1000), "recvWindow": 5000})
