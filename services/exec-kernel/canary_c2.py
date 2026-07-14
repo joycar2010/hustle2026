@@ -2,7 +2,9 @@
 默认 --dry:逐所证明门控拒单(PermissionError,零下单)+ query 幂等(NOTFOUND)。
 --arm 真金小额往返:venueA 多腿 + venueB 空腿 → 开(open_pair)→ 实盘核对 → 平(close_pair)→ flat。
 try/finally 兜底:任何异常都按实盘余量 reduce-only 平回。
-用法: python canary_c2.py DOGEUSDT 6 binance bybit [--arm]
+--arm --hold 只开不平:开仓后打印 manager pairs 配置片段退出(生命周期交给 exec-manager 接管演练)。
+--arm --close 只平不开:按两所实盘余量 reduce-only 平回(manager 失效时的手动兜底)。
+用法: python canary_c2.py DOGEUSDT 6 binance bybit [--arm [--hold|--close]]
       (多腿所=第3参,空腿所=第4参;缺省 binance bybit)
 """
 import asyncio
@@ -61,6 +63,8 @@ async def main():
     v_long = sys.argv[3] if len(sys.argv) > 3 and not sys.argv[3].startswith("--") else "binance"
     v_short = sys.argv[4] if len(sys.argv) > 4 and not sys.argv[4].startswith("--") else "bybit"
     arm = "--arm" in sys.argv
+    hold = "--hold" in sys.argv
+    close_only = "--close" in sys.argv
     sym_l, sym_s = venue_sym(v_long, symbol), venue_sym(v_short, symbol)
 
     px = await _mark_price(symbol)
@@ -106,6 +110,37 @@ async def main():
     async def _pos(v, s):
         p = await adapters[v].get_position(s)
         return p.get("amt") if p.get("ok") else f"ERR:{p.get('err')}"
+
+    if close_only:
+        # 手动兜底:按两所实盘余量 reduce-only 平回(不走 open)
+        for v, s, stp in ((v_long, sym_l, step_l), (v_short, sym_s, step_s)):
+            amt = await _pos(v, s)
+            if isinstance(amt, (int, float)) and abs(amt) > 1e-12:
+                qq = _fl(abs(amt), stp)
+                res = await adapters[v].place(f"c2man:{symbol}:{v}:{int(time.time())}",
+                                              {"venue": v, "symbol": s, "market": "perp", "qty": qq,
+                                               "side": "BUY" if amt < 0 else "SELL", "reduce_only": True})
+                print(f"  手动平 {v}: {res.get('status')} {res.get('err') or ''}")
+        await asyncio.sleep(2)
+        print(f"  终查: {v_long}={await _pos(v_long, sym_l)} {v_short}={await _pos(v_short, sym_s)}")
+        await pool.close()
+        return
+
+    if hold:
+        # 只开不平:开仓后打印 manager 接管配置,不进兜底(留仓是目的)
+        final = await ex.open_pair(sid, legs)
+        await asyncio.sleep(2)
+        al, as_ = await _pos(v_long, sym_l), await _pos(v_short, sym_s)
+        print(f"open_pair 终态: {final}\n  开仓后实盘: {v_long}={al} {v_short}={as_}")
+        if final != "OPEN":
+            print("  ⚠️未达 OPEN,无仓可交接(exec_core 已回滚)。")
+        else:
+            cfg = {"mode": "shadow", "target": "hold", "signal_source": "config", "symbol": symbol,
+                   "legs": [{"venue": v_long, "side": "BUY"}, {"venue": v_short, "side": "SELL"}]}
+            print("  → 交接 manager pairs 配置片段(并入 dcm:exec:manager:config 的 pairs 段):")
+            print(f'    "{symbol}": ' + __import__("json").dumps(cfg, ensure_ascii=False))
+        await pool.close()
+        return
 
     try:
         final = await ex.open_pair(sid, legs)

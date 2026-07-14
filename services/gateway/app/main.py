@@ -112,10 +112,11 @@ async def readyz():
 
 # 逐服务心跳最大龄(秒)——各服务周期不同(采样器小时级/顾问10min级),不能用统一阈值
 EXPECTED_SVCS = {"feed-cex": 120, "funding-sync": 900, "depth-sampler": 400, "universe-sync": 7500,
-                 "account-snapshot": 240, "engine-dualperp": 120, "gateway": 120, "decision": 120,
+                 "account-snapshot": 240, "gateway": 120, "decision": 120,
                  "risk-ledger": 120, "carry-advisor": 1900, "coin-bridge": 240, "basis-sampler": 200,
-                 "pnl-recorder": 900, "engine-basis": 120, "lending-advisor": 5500,
-                 "llm-advisor": 1800}
+                 "pnl-recorder": 900, "lending-advisor": 5500, "llm-advisor": 1800,
+                 # engine-basis/engine-dualperp 退役(2026-07-14)→统一执行内核:
+                 "exec-manager": 120, "exec-recon": 400}
 
 
 @app.get("/api/overview")

@@ -80,6 +80,28 @@ async def reconcile(pool, r) -> dict:
     except Exception:  # noqa: BLE001
         pass
 
+    # exec-manager 接管仓(引擎退役后 manager=owner-of-record,无引擎 DB 行):
+    # 读 dcm:exec:manager 发布态(20s刷新EX300;manager 死→键消失→接管仓如实转 NAKED 告警,fail-loud)。
+    # pairs 腿的 symbol 已是 venue 格式(manager 存的就是 venue_sym 结果),直接入 expected。
+    try:
+        mgr = json.loads(await r.get("dcm:exec:manager") or "{}")
+        for s in (mgr.get("symbols") or []):   # C1 形态:binance 永续腿
+            amt = float(s.get("perp_amt") or 0)
+            if abs(amt) > 1e-12:
+                expected["binance"][str(s.get("symbol") or "")] = {
+                    "source": f"MGR:{s.get('symbol')}:perp", "exp_qty": abs(amt),
+                    "exp_sign": 1 if amt > 0 else -1}
+        for p in (mgr.get("pairs") or []):     # C2 形态:跨所双永续腿
+            for lg in (p.get("legs") or []):
+                amt = float(lg.get("amt") or 0)
+                v = lg.get("venue")
+                if abs(amt) > 1e-12 and v in SUPPORTED:
+                    expected[v][str(lg.get("symbol") or "")] = {
+                        "source": f"MGR:{p.get('pair')}:{v}", "exp_qty": abs(amt),
+                        "exp_sign": 1 if amt > 0 else -1}
+    except Exception:  # noqa: BLE001
+        pass
+
     breaks = list(unchecked)
     matched = 0
     for venue in SUPPORTED:

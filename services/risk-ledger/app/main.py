@@ -59,14 +59,15 @@ EXPECTED_HB = {
     "transfer-monitor": 900,
     "gateway": 120,
     "decision": 120,
-    "engine-dualperp": 120,
     "funding-sync": 900,
     "carry-advisor": 1900,
     "account-snapshot": 240,
     "depth-sampler": 400,
     "basis-sampler": 200,
-    "engine-basis": 120,
     "engine-lending": 900,   # S4 shadow 决策账,300s/轮
+    # engine-basis/engine-dualperp 已退役(2026-07-14,统一执行内核接管)——新权威:
+    "exec-manager": 120,     # 20s/轮,持仓 owner-of-record
+    "exec-recon": 400,       # 120s/轮,6所对账
 }
 RECON_VENUES = ("binance", "bybit", "okx", "gate", "bitget", "hyperliquid")
 STALE_STATUSES = ("PENDING_BORROW", "BORROWED_IDLE", "PENDING_REPAY")
@@ -330,6 +331,20 @@ async def check_round(r: aioredis.Redis, self_pool) -> dict:
                 expected_legs.add(("binance", b["symbol"]))
         except Exception as e:
             log.warning("recon_v2 expected legs read failed: %r", e)
+        # exec-manager 接管仓(引擎退役后无 DB 行,owner-of-record=dcm:exec:manager 发布态):
+        # pair 顶层 symbol=dcm 格式,与账户快照 positions 键同一口径;manager 死→键消失→如实转孤儿告警。
+        try:
+            mgr = await get_json(r, "dcm:exec:manager") or {}
+            for s in (mgr.get("symbols") or []):
+                if abs(float(s.get("perp_amt") or 0)) > 1e-12:
+                    expected_legs.add(("binance", str(s.get("symbol") or "")))
+            for p in (mgr.get("pairs") or []):
+                psym = str(p.get("symbol") or "")
+                for lg in (p.get("legs") or []):
+                    if abs(float(lg.get("amt") or 0)) > 1e-12:
+                        expected_legs.add((lg.get("venue"), psym))
+        except Exception as e:
+            log.warning("recon_v2 manager claims read failed: %r", e)
         orphans = []
         seen_keys = set()
         for v in RECON_VENUES:
