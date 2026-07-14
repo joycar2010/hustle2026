@@ -20,6 +20,7 @@ sys.path.insert(0, "/home/ec2-user/dexcexmix")
 import exec_core as E  # noqa: E402
 from real_venue import BinanceRealVenue, MultiVenue, venue_armed, venue_sym  # noqa: E402
 from store import PgSagaStore  # noqa: E402
+from policy_client import read_policy  # noqa: E402  # G0 风险策略消费
 
 try:
     from dcm_common.notify import Notifier, feishu_from_env
@@ -187,6 +188,16 @@ async def manage_pair(pid, cfg, store, r):
     armed = mode == "armed"
     sym = cfg.get("symbol", pid)
     target, signal_why = await _pair_signal(pid, cfg, r)
+    # G0 风险策略叠加:任一腿 venue 处于 REDUCE_ONLY/EXIT_ONLY → 强制 close_recommend(推该 venue 出清);
+    # NO_NEW 不影响在管持有(只挡新增,由 opener/canary 拦)。策略超龄不下压(保守持有,不误平)。
+    pol, fresh = await read_policy(r)
+    if fresh and pol:
+        for lc in (cfg.get("legs") or []):
+            vmode = ((pol.get("venues") or {}).get(lc.get("venue")) or {}).get("mode", "NORMAL")
+            if vmode in ("REDUCE_ONLY", "EXIT_ONLY", "FROZEN") and target == "hold":
+                target = "close_recommend"
+                signal_why = f"{lc.get('venue')}={vmode}(策略降级,推出清);{signal_why}"
+                break
     st = {"pair": pid, "symbol": sym, "mode": mode, "target": target, "signal": signal_why,
           "legs": [], "action": "hold"}
 

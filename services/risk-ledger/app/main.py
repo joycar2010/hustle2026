@@ -25,6 +25,8 @@ import redis.asyncio as aioredis
 from dcm_common.heartbeat import Heartbeat
 from dcm_common.notify import Notifier, feishu_from_env
 
+from policy import compute_and_publish  # noqa: E402  # G0 风险策略权威(ADR-001)
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 log = logging.getLogger("risk-ledger")
 
@@ -428,9 +430,16 @@ async def main():
             status = await check_round(r, pool)
             hb.extra = {"alerts": status.get("alerts_this_round", 0)}
             await r.set("dcm:risk:status", json.dumps(status, ensure_ascii=False, default=str), ex=180)
+            # G0 风险策略权威:算逐 venue 有效模式+能力位→发布 dcm:risk:policy(唯一发布者)
+            try:
+                pol = await compute_and_publish(pool, r)
+                status["policy"] = {"version": pol["policy_version"], "capped": pol["capped_venues"]}
+            except Exception:
+                log.exception("policy compute/publish failed (continuing)")
             await hb.beat_once()
-            log.info("LEDGER_OK services=%s alerts=%d",
-                     status.get("services"), status.get("alerts_this_round", 0))
+            log.info("LEDGER_OK services=%s alerts=%d policy_v=%s capped=%s",
+                     status.get("services"), status.get("alerts_this_round", 0),
+                     status.get("policy", {}).get("version"), status.get("policy", {}).get("capped"))
         except Exception:
             log.exception("check round crashed (continuing)")
         await asyncio.sleep(INTERVAL)

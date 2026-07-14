@@ -23,6 +23,7 @@ import redis.asyncio as aioredis
 
 sys.path.insert(0, "/home/ec2-user/dexcexmix")
 sys.path.insert(0, "/home/ec2-user/dexcexmix/src/packages/dcm-common")
+from policy_client import can_open  # noqa: E402  # G0 风险策略消费(venue 敞口/NO_NEW 闸)
 try:
     from dcm_common.arb_contract import o1_signed_cashflow_daily_pct
 except Exception:  # noqa: BLE001  # 包缺失时内联同口径(禁 abs)
@@ -109,6 +110,12 @@ async def evaluate(r, pool, now):
             continue
         vl, vs = rt.get("venue_long"), rt.get("venue_short")
         target = float(rt.get("target_notional_usdt") or 0)
+        # G0 风险策略闸:任一腿 venue 不允许新增(敞口超限/NO_NEW/超龄 fail-closed)→ 不出候选
+        okl, rl = await can_open(r, vl)
+        oks, rs = await can_open(r, vs)
+        if not (okl and oks):
+            skipped.append({"symbol": sym, "reason": f"policy {vl}={rl}/{vs}={rs}"})
+            continue
         fl, sl = await _funding(r, vl, sym, now)
         fs, ss = await _funding(r, vs, sym, now)
         if fl is None or fs is None:
