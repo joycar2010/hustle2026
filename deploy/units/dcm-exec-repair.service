@@ -1,0 +1,17 @@
+[Unit]
+Description=DexCexMix exec-kernel RiskRepair intents (G2 shadow plane - proposes evacuations, NEVER trades)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=ec2-user
+Slice=dexcexmix.slice
+MemoryMax=200M
+WorkingDirectory=/home/ec2-user/dexcexmix
+EnvironmentFile=/home/ec2-user/dexcexmix/.env
+ExecStart=/home/ec2-user/dexcexmix/venv/bin/python repair.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

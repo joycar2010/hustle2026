@@ -8,6 +8,7 @@
 模式严格度序:NORMAL < WATCH < NO_NEW_RISK < REDUCE_ONLY < EXIT_ONLY < FROZEN。
 """
 import json
+import os as _os
 import time
 
 MODES = ["NORMAL", "WATCH", "NO_NEW_RISK", "REDUCE_ONLY", "EXIT_ONLY", "FROZEN"]
@@ -75,6 +76,34 @@ async def _venue_exposure(r, venue: str):
     return notional, float(a.get("equity_usdt") or 0), True, ""
 
 
+# WithdrawalSentinel 提现延迟阈(V5 §7.2;提现罕见无 p95 基线时用绝对阈,crypto 正常分钟~1h 完成)
+WD_WATCH_SEC = int(_os.environ.get("DCM_WD_WATCH_SEC", "21600"))       # pending>6h → WATCH
+WD_REDUCE_SEC = int(_os.environ.get("DCM_WD_REDUCE_SEC", "86400"))     # pending>24h → REDUCE_ONLY
+WD_FAIL_NONEW = int(_os.environ.get("DCM_WD_FAIL_NONEW", "2"))         # 连败≥2 → NO_NEW
+
+
+async def _withdrawal_mode(r, venue):
+    """读 dcm:risk:withdrawal:{venue} → (mode, reason)。提现延迟/连败=平台交易对手风险(V5 §7.2)。
+    有 p95 基线则用 max(绝对阈, 2×p95);无基线用绝对阈。无数据=NORMAL。"""
+    try:
+        wh = json.loads(await r.get(f"dcm:risk:withdrawal:{venue}") or "{}")
+    except Exception:  # noqa: BLE001
+        return "NORMAL", ""
+    if not wh:
+        return "NORMAL", ""
+    age = float(wh.get("oldest_pending_age_sec") or 0)
+    p95 = float(wh.get("p95_sec") or 0)
+    watch_thr = max(WD_WATCH_SEC, 2 * p95) if p95 else WD_WATCH_SEC
+    reduce_thr = max(WD_REDUCE_SEC, 4 * p95) if p95 else WD_REDUCE_SEC
+    if int(wh.get("recent_failures") or 0) >= WD_FAIL_NONEW:
+        return "NO_NEW_RISK", f"提现连败{wh['recent_failures']}次(平台限制嫌疑)"
+    if age > reduce_thr:
+        return "REDUCE_ONLY", f"提现pending {int(age/3600)}h>{int(reduce_thr/3600)}h(严重延迟)"
+    if age > watch_thr:
+        return "WATCH", f"提现pending {int(age/3600)}h>{int(watch_thr/3600)}h(延迟)"
+    return "NORMAL", ""
+
+
 async def _persist_restriction(pool, venue, severity, signal_type, err):
     """落 restriction_event(dedup by venue+code,ON CONFLICT 累加 hit_count/更新 last_seen)。"""
     if pool is None:
@@ -90,7 +119,23 @@ async def _persist_restriction(pool, venue, severity, signal_type, err):
         pass
 
 
-import os as _os
+# trapped capital → NAV haircut(V4 §20/G2):受限 venue 的权益按模式折价——提不出来的钱不是完整的钱。
+# 折价率 env 覆写:DCM_NAV_HAIRCUT="NO_NEW_RISK:0.1,REDUCE_ONLY:0.3,EXIT_ONLY:0.5,FROZEN:1"
+_HAIRCUT_DEFAULT = {"NORMAL": 0.0, "WATCH": 0.0, "NO_NEW_RISK": 0.10,
+                    "REDUCE_ONLY": 0.30, "EXIT_ONLY": 0.50, "FROZEN": 1.00}
+
+
+def _haircuts() -> dict:
+    hc = dict(_HAIRCUT_DEFAULT)
+    for part in _os.environ.get("DCM_NAV_HAIRCUT", "").split(","):
+        k, _, val = part.partition(":")
+        if k.strip() in hc and val:
+            try:
+                hc[k.strip()] = min(1.0, max(0.0, float(val)))
+            except ValueError:
+                pass
+    return hc
+
 
 COREBOX_DROP_USDT = float(_os.environ.get("DCM_COREBOX_DROP_USDT", "2000"))   # 单区间净流出绝对阈
 COREBOX_DROP_PCT = float(_os.environ.get("DCM_COREBOX_DROP_PCT", "0.02"))      # 单区间净流出比例阈
@@ -185,6 +230,14 @@ async def compute_and_publish(pool, r) -> dict:
             mode = _stricter(mode, auto_mode)
             reason = f"账户失败[{severity}:{err[:50]}]|" + reason
             await _persist_restriction(pool, v, severity, sig, err)
+        # WithdrawalSentinel(V5 §7.2):提现延迟/连败=平台交易对手风险,叠加取更严格。
+        # dedupe 用稳定码 WD:<mode>(reason 含小时数会漂移,避免 restriction_event 行churn)。
+        wd_mode, wd_reason = await _withdrawal_mode(r, v)
+        if wd_mode != "NORMAL":
+            mode = _stricter(mode, wd_mode)
+            reason = f"提现哨兵[{wd_reason}]|" + reason
+            await _persist_restriction(pool, v, "MEDIUM" if wd_mode == "WATCH" else "HARD",
+                                       "WITHDRAWAL_DELAY", f"WD:{wd_mode}")
         # 合并 override(venue 级 + 全局,取最严格)
         vovr = overrides.get(f"VENUE:{v}", {}).get("mode")
         if vovr:
@@ -211,11 +264,29 @@ async def compute_and_publish(pool, r) -> dict:
         except Exception:  # noqa: BLE001
             pass
 
+    # NAV haircut:逐 venue trapped = equity × 折价率(按最终有效模式);净 NAV = 总权益 − trapped。
+    hc = _haircuts()
+    gross = trapped = 0.0
+    trapped_by = {}
+    for v, d in venues_out.items():
+        pct = hc.get(d["mode"], 0.0)
+        cut = round(d["equity"] * pct, 2)
+        d["haircut_pct"] = pct
+        d["trapped_usdt"] = cut
+        gross += d["equity"]
+        trapped += cut
+        if cut > 0:
+            trapped_by[v] = cut
+    nav = {"gross_equity_usdt": round(gross, 2), "trapped_usdt": round(trapped, 2),
+           "net_nav_usdt": round(gross - trapped, 2), "trapped_by_venue": trapped_by}
+
     summary = {
         "policy_epoch": epoch, "policy_version": version, "ts": int(time.time()),
         "global_mode": global_ovr,
         "venues": venues_out,
         "capped_venues": [v for v, d in venues_out.items() if d["mode"] != "NORMAL"],
+        "nav": nav,
     }
     await r.set(POLICY_KEY, json.dumps(summary, ensure_ascii=False), ex=180)
+    await r.set("dcm:risk:nav", json.dumps({**nav, "ts": summary["ts"]}, ensure_ascii=False), ex=180)
     return summary

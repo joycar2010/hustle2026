@@ -71,6 +71,7 @@ EXPECTED_HB = {
     "exec-manager": 120,     # 20s/轮,持仓 owner-of-record
     "exec-recon": 400,       # 120s/轮,6所对账
     "exec-opener": 300,      # 60s/轮,shadow 开仓候选决策(不下单)
+    "exec-repair": 300,      # 60s/轮,G2 RiskRepair 修复意图(shadow,不下单)
 }
 RECON_VENUES = ("binance", "bybit", "okx", "gate", "bitget", "hyperliquid")
 STALE_STATUSES = ("PENDING_BORROW", "BORROWED_IDLE", "PENDING_REPAY")
@@ -433,7 +434,19 @@ async def main():
             # G0 风险策略权威:算逐 venue 有效模式+能力位→发布 dcm:risk:policy(唯一发布者)
             try:
                 pol = await compute_and_publish(pool, r)
-                status["policy"] = {"version": pol["policy_version"], "capped": pol["capped_venues"]}
+                status["policy"] = {"version": pol["policy_version"], "capped": pol["capped_venues"],
+                                    "nav": pol.get("nav")}
+                # G2:trapped capital 折价>0 或 venue 落入 REDUCE 以上 → 告警(fire 共享节流防刷屏)
+                nav = pol.get("nav") or {}
+                if float(nav.get("trapped_usdt") or 0) > 0:
+                    by = ", ".join(f"{k}={x}U" for k, x in (nav.get("trapped_by_venue") or {}).items())
+                    await fire("nav-haircut", "NAV haircut:受限venue权益折价",
+                               f"净NAV {nav.get('net_nav_usdt')}U = 总权益 {nav.get('gross_equity_usdt')}U"
+                               f" − 折价 {nav.get('trapped_usdt')}U({by})", level="warn")
+                for vn, vd in (pol.get("venues") or {}).items():
+                    if vd.get("mode") in ("REDUCE_ONLY", "EXIT_ONLY", "FROZEN"):
+                        await fire(f"policy-mode:{vn}", f"{vn} 风险模式={vd['mode']}",
+                                   str(vd.get("reason", ""))[:300], level="fatal")
             except Exception:
                 log.exception("policy compute/publish failed (continuing)")
             # CORE_POOL 封闭盒子不变量:组权益突降/成员限制 → 告警(fire 走共享节流+落库)

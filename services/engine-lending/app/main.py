@@ -9,7 +9,7 @@
   - 数据超龄(>1800s)绝不给决策——ranking 停更时全体 hold 并如实标注
 键契约：
   dcm:engine:lending:positions  {ts, mode:"shadow", would_hold:[{coin,...}], slots}
-  dcm:hb:engine-lending         心跳(EX 240)
+  dcm:hb:engine-lending         心跳(EX max(INTERVAL×3,900))
 """
 import asyncio
 import json
@@ -146,9 +146,11 @@ async def _round(r, pool, held: dict, strikes: dict, executor=None, cli=None):
                            for c, v in sorted(held.items())],
             "ranking_fresh": fresh}
     await r.set(SNAP_KEY, json.dumps(snap, ensure_ascii=False), ex=900)
+    # EX 必须盖过整轮(300s/轮):240 会在每轮末 60s 过期 → risk-ledger 周期性误报心跳缺失
     await r.set(HB_KEY, json.dumps({"service": "engine-lending", "ts": now,
                                     "pid": os.getpid(), "held": len(held),
-                                    "entered": len(entered), "exited": len(exited)}), ex=240)
+                                    "entered": len(entered), "exited": len(exited)}),
+                ex=max(INTERVAL * 3, 900))
     log.info("ROUND_OK held=%s entered=%s exited=%s fresh=%s",
              sorted(held), entered, exited, fresh)
 

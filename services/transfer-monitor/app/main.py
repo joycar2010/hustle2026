@@ -66,6 +66,54 @@ async def _binance_capital(cli: httpx.AsyncClient) -> dict[str, dict] | None:
         return None
 
 
+async def _withdrawal_health(cli: httpx.AsyncClient) -> dict | None:
+    """WithdrawalSentinel(V5 §6.4):拉币安提现历史→pending 龄/时长 p50-p95/连败/最后成功。
+    提现罕见(交易 key 提现关,仅 Treasury 手动),样本少时 p50/p95=None,靠 pending 龄+SLA 兜底。
+    ⚠️读提现历史只需读权限(交易 key 有),不需提现权限。"""
+    q = urlencode({"timestamp": int(time.time() * 1000), "recvWindow": 5000})
+    sig = hmac.new(BINANCE["secret"].encode(), q.encode(), hashlib.sha256).hexdigest()
+    try:
+        r = (await cli.get(f"https://api.binance.com/sapi/v1/capital/withdraw/history?{q}&signature={sig}",
+                           headers={"X-MBX-APIKEY": BINANCE["key"]})).json()
+    except Exception:  # noqa: BLE001
+        return None
+    if not isinstance(r, list):
+        return None
+    now = time.time()
+
+    def _ts(s):
+        try:
+            return time.mktime(time.strptime(str(s)[:19], "%Y-%m-%d %H:%M:%S"))
+        except Exception:  # noqa: BLE001
+            return 0
+
+    pending_ages, durations, fails, last_success = [], [], 0, 0
+    for w in r:
+        st = int(w.get("status", -1))
+        apply_t = _ts(w.get("applyTime"))
+        if st in (0, 2, 4):        # Email Sent/Awaiting Approval/Processing = pending
+            if apply_t:
+                pending_ages.append(now - apply_t)
+        elif st == 6:             # Completed
+            last_success = max(last_success, apply_t)
+            ct = _ts(w.get("completeTime")) or apply_t
+            if ct and apply_t and ct >= apply_t:
+                durations.append(ct - apply_t)
+        elif st in (1, 3, 5):     # Cancelled/Rejected/Failure
+            fails += 1
+    durations.sort()
+
+    def _pct(arr, p):
+        return round(arr[min(len(arr) - 1, int(len(arr) * p))], 1) if arr else None
+
+    return {"ts": int(now), "venue": "binance",
+            "pending_count": len(pending_ages),
+            "oldest_pending_age_sec": int(max(pending_ages)) if pending_ages else 0,
+            "p50_sec": _pct(durations, 0.5), "p95_sec": _pct(durations, 0.95),
+            "sample_n": len(durations), "recent_failures": fails,
+            "last_success_at": int(last_success)}
+
+
 async def _held_assets(r: aioredis.Redis) -> set[str]:
     """dualperp/basis/coin 三引擎在场持仓的 base 资产。"""
     held: set[str] = set()
@@ -122,7 +170,12 @@ async def monitor_round(r: aioredis.Redis, cli: httpx.AsyncClient, notify: Notif
                     notify.fire, f"{field}-off:{asset}", f"币安{label}暂停 {asset}",
                     f"{asset} 币安{label}关闭(非持仓)——风险信号,观察", level="warn")
     await r.ltrim(KEY_EVENTS, 0, 199)
-    return {"coins": len(caps), "held": len(held), "events": events, "held_alerts": held_alerts}
+    # WithdrawalSentinel:发布币安提现健康供 risk-ledger 消费(提现延迟→WATCH/REDUCE 触发)
+    wh = await _withdrawal_health(cli)
+    if wh is not None:
+        await r.set("dcm:risk:withdrawal:binance", json.dumps(wh, ensure_ascii=False), ex=max(INTERVAL * 4, 1200))
+    return {"coins": len(caps), "held": len(held), "events": events, "held_alerts": held_alerts,
+            "wd_pending": (wh or {}).get("pending_count", 0)}
 
 
 async def main():
