@@ -87,9 +87,11 @@ async def _funding(venue: str) -> dict[str, dict]:
 
 
 async def _accounts_snap() -> dict[str, dict]:
-    """{venue: snapshot} —— dcm:account:*"""
+    """{venue 或 venue:account_key: snapshot} —— dcm:account:*。去前缀(非 rsplit),
+    多账户快照保留完整 'venue:account_key' 键(rsplit 会丢 venue 前缀致主账户查不到,已修)。"""
     raw = await ds.keys_values("dcm:account:*")
-    return {k.rsplit(":", 1)[-1]: v for k, v in raw.items() if v}
+    pfx = "dcm:account:"
+    return {(k[len(pfx):] if k.startswith(pfx) else k): v for k, v in raw.items() if v}
 
 
 def _next_settle(interval_h: Optional[float]) -> tuple[Optional[int], str]:
@@ -1071,7 +1073,15 @@ async def account_nodes() -> list[dict]:
                 return vn
         return None
 
-    # registry 登记的子账户按所分组(排除 6 主 venue 键本身;coin panel 账户下面按 note 去重)
+    # 注册的主账户按所归组(account_type=master + 凭证 venue)——真 master 当分组节点(hedge_via_master 用)
+    masters_by_venue = {}
+    for ak, meta in reg.items():
+        if meta.get("account_type") == "master":
+            mv = (cred.get(ak) or {}).get("venue")
+            if mv in VENUES:
+                masters_by_venue.setdefault(mv, []).append(ak)
+
+    # registry 登记的子账户按所分组(排除 6 主 venue 键本身 + master 账户)
     reg_subs = {v: [] for v in VENUES}
     for ak, meta in reg.items():
         if ak in VENUES or meta.get("account_type") == "master":
@@ -1163,15 +1173,29 @@ async def account_nodes() -> list[dict]:
                 "metrics": m, "approvalState": None, "children": [],
             })
 
-        # venue 主账户分组节点(合计净值=各子账户之和;子账户数)。HL=kms_wallet(前端渲染「链上」)。
+        # venue 主账户分组节点:有注册的真 master(joycar2010@…主号)就用它(显示名+自己权益,hedge_via_master
+        # 的合约对冲腿在此账户);否则合成 {venue}-master 分组。合计净值=主账户+各子账户。
+        mak = (masters_by_venue.get(venue) or [None])[0]
+        if mak:
+            mmeta = reg.get(mak) or {}
+            msnap = snaps.get(f"{venue}:{mak}") or {}
+            meq = float(msnap.get("equity_usdt") or 0) if msnap else 0.0
+            total_eq += meq
+            node_id = mak
+            node_metrics = {"账户": _acct_name(mak), "Book": mmeta.get("book") or "—",
+                            "本账户": f"{meq:,.2f} U", "子账户": str(len(children)),
+                            "合计净值": f"{total_eq:,.2f} U"}
+            node_status = "ok" if msnap.get("ok") else ("ok" if (s is not None and s.get("ok")) else "restricted")
+        else:
+            node_id = f"{venue}-master"
+            node_metrics = {("链上" if is_dex else "交易所"): venue,
+                            ("钱包" if is_dex else "子账户"): str(len(children)),
+                            "合计净值": f"{total_eq:,.2f} U"}
+            node_status = "ok" if (s is not None and s.get("ok")) else "restricted"
         out.append({
-            "id": f"{venue}-master", "kind": "master", "platformType": pt, "venue": venue,
-            "domain": "DEX·HL" if is_dex else "B·exec",
-            "apiStatus": "ok" if (s is not None and s.get("ok")) else "restricted",
-            "metrics": {("链上" if is_dex else "交易所"): venue,
-                        ("钱包" if is_dex else "子账户"): str(len(children)),
-                        "合计净值": f"{total_eq:,.2f} U"},
-            "approvalState": None, "children": children,
+            "id": node_id, "kind": "master", "platformType": pt, "venue": venue,
+            "domain": "DEX·HL" if is_dex else "B·exec", "apiStatus": node_status,
+            "metrics": node_metrics, "approvalState": None, "children": children,
         })
     return out
 
