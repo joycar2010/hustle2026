@@ -26,6 +26,7 @@ from dcm_common.heartbeat import Heartbeat
 from dcm_common.notify import Notifier, feishu_from_env
 
 from policy import compute_and_publish, corebox_check  # noqa: E402  # G0 风险策略权威+CORE_POOL 封闭盒子
+import gates_shadow  # noqa: E402  # ADR-002 阶段A:三闸收编 shadow 对比(只记录)
 import incidents  # noqa: E402  # 批次1:有状态 Incident(发生/升级/恢复/超时四时点通知)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -500,6 +501,7 @@ async def main():
                                     "nav": pol.get("nav")}
                 await _post_policy(pool, pol)
                 status["incidents"] = await incidents.active_summary(pool)
+                status["gates_shadow"] = await gates_shadow.snapshot_and_diff(pool, r, pol)
             except Exception:
                 log.exception("policy compute/publish failed (continuing)")
             # CORE_POOL 封闭盒子不变量:组权益突降/成员限制 → 告警(fire 走共享节流+落库)

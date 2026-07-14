@@ -160,6 +160,58 @@ def _haircuts() -> dict:
     return hc
 
 
+# RECOVERY_WATCH 恢复阶梯(V5 §7.3):REDUCE_ONLY+ 事件出清后不许直跳 NORMAL——
+# 额度 10%→25%→50%→100%,每级驻留≥一个结算周期(默认8h)且该 venue 无活跃 fatal Incident;
+# 操作员显式 override NORMAL(审计过的人工放行)可提前关闭恢复期。
+RECOVERY_STAGE_SEC = int(_os.environ.get("DCM_RECOVERY_STAGE_SEC", "28800"))
+_REC_PCT = (0.10, 0.25, 0.50, 1.00)
+POLICY_UNCLEAR_MODE = _os.environ.get("DCM_POLICY_UNCLEAR_MODE", "WATCH")
+
+
+async def _apply_recovery(pool, venue, mode, reason, notional, cap_val, ovr_norm, has_fatal_incident):
+    """恢复阶梯。返回 (mode, reason, recovery|None)。REDUCE+ 期间只登记事件;
+    出清后压 WATCH+阶梯额度帽;满 4 级或操作员显式 NORMAL 放行才回 NORMAL。"""
+    if pool is None:
+        return mode, reason, None
+    try:
+        row = await pool.fetchrow(
+            "SELECT stage, extract(epoch from now()-last_advance_at) AS since "
+            "FROM venue_recovery WHERE venue=$1 AND active", venue)
+        if _RANK.get(mode, 0) >= _RANK["REDUCE_ONLY"]:
+            if row is None:
+                await pool.execute(
+                    "INSERT INTO venue_recovery(venue, active, stage, episode_mode) VALUES($1, TRUE, 0, $2) "
+                    "ON CONFLICT (venue) DO UPDATE SET active=TRUE, stage=0, episode_mode=$2, "
+                    "entered_at=now(), last_advance_at=now(), closed_at=NULL", venue, mode)
+            else:   # 事件仍在:阶梯归零,计时从最后一次受限轮起算
+                await pool.execute("UPDATE venue_recovery SET stage=0, episode_mode=$2, "
+                                   "last_advance_at=now() WHERE venue=$1", venue, mode)
+            return mode, reason, None
+        if row is None or _RANK.get(mode, 0) >= _RANK["NO_NEW_RISK"]:
+            return mode, reason, None   # 无恢复期在途 / NO_NEW 事件未出清,不推进阶梯
+        if ovr_norm:
+            await pool.execute("UPDATE venue_recovery SET active=FALSE, closed_at=now() WHERE venue=$1", venue)
+            return mode, f"恢复期由操作员override NORMAL放行|{reason}", None
+        stage = int(row["stage"])
+        if float(row["since"] or 0) >= RECOVERY_STAGE_SEC and not has_fatal_incident:
+            stage += 1
+            if stage >= 3:   # 完成 100% → 关闭恢复期
+                await pool.execute("UPDATE venue_recovery SET active=FALSE, stage=3, closed_at=now() "
+                                   "WHERE venue=$1", venue)
+                return mode, reason, None
+            await pool.execute("UPDATE venue_recovery SET stage=$2, last_advance_at=now() WHERE venue=$1",
+                               venue, stage)
+        pct = _REC_PCT[min(stage, 3)]
+        rmode = _stricter(mode, "WATCH")
+        rreason = f"RECOVERY_WATCH 阶段{stage} 额度{int(pct * 100)}%|{reason}"
+        if cap_val is not None and notional >= cap_val * pct:
+            rmode = _stricter(rmode, "NO_NEW_RISK")
+            rreason = f"恢复期敞口{notional:.0f}≥阶梯帽{cap_val * pct:.0f}U|" + rreason
+        return rmode, rreason, {"stage": stage, "allow_pct": pct}
+    except Exception:  # noqa: BLE001  # 表未建:恢复阶梯静默降级(不阻塞策略)
+        return mode, reason, None
+
+
 COREBOX_DROP_USDT = float(_os.environ.get("DCM_COREBOX_DROP_USDT", "2000"))   # 单区间净流出绝对阈
 COREBOX_DROP_PCT = float(_os.environ.get("DCM_COREBOX_DROP_PCT", "0.02"))      # 单区间净流出比例阈
 
@@ -232,6 +284,25 @@ async def compute_and_publish(pool, r) -> dict:
         except Exception:  # noqa: BLE001
             pass
 
+    # 批次4/5 输入:条款登记(PROHIBITED→FROZEN/UNCLEAR→WATCH)+ 活跃 Incident(incident_state 分离)
+    vpolicy, inc_active = {}, {}
+    if pool is not None:
+        try:
+            for row in await pool.fetch(
+                    "SELECT venue, arbitrage_status, reviewed_at, next_review_at FROM venue_policy"):
+                vpolicy[row["venue"]] = dict(row)
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            for row in await pool.fetch(
+                    "SELECT venue, state, severity FROM venue_incident WHERE state != 'CLOSED'"):
+                inc_active.setdefault(row["venue"], []).append((row["state"], row["severity"]))
+        except Exception:  # noqa: BLE001
+            pass
+    unreviewed = [v for v, vp in vpolicy.items()
+                  if vp.get("reviewed_at") is None or (vp.get("next_review_at") is not None
+                     and vp["next_review_at"].timestamp() < time.time())]
+
     global_ovr = overrides.get("GLOBAL:GLOBAL", {}).get("mode", "NORMAL")
     venues_out, cred_epochs, cred_rotations = {}, {}, []
     for v in SUPPORTED_VENUES:
@@ -242,14 +313,16 @@ async def compute_and_publish(pool, r) -> dict:
         if rotated:
             cred_rotations.append(v)
         cap_row = caps.get(f"venue:{v}")
-        mode, reason = "NORMAL", "ok"
+        mode, reason, hits = "NORMAL", "ok", []
         cap_val = float(cap_row["max_notional_usdt"]) if cap_row else None
         warn_ratio = float(cap_row["warn_ratio"]) if cap_row else 0.85
         if cap_val is not None:
             if notional >= cap_val:
                 mode, reason = "NO_NEW_RISK", f"敞口{notional:.0f}≥上限{cap_val:.0f}U"
+                hits.append({"scope": "VENUE_CAP", "mode": mode, "why": reason})
             elif notional >= cap_val * warn_ratio:
                 mode, reason = "WATCH", f"敞口{notional:.0f}≥{warn_ratio:.0%}上限"
+                hits.append({"scope": "VENUE_CAP", "mode": mode, "why": reason})
         if not ok:
             # 账户快照失败→分类:HARD 权限/风控/冻结=账户限制→NO_NEW(自动保命反射);
             # TRANSPORT 网络限频=不判封号只 WATCH;落 restriction_event 供追溯。
@@ -257,6 +330,7 @@ async def compute_and_publish(pool, r) -> dict:
             auto_mode = "NO_NEW_RISK" if severity == "HARD" else "WATCH"
             mode = _stricter(mode, auto_mode)
             reason = f"账户失败[{severity}:{err[:50]}]|" + reason
+            hits.append({"scope": "ACCOUNT_FACT", "mode": auto_mode, "why": err[:80]})
             await _persist_restriction(pool, v, severity, sig, err)
         # WithdrawalSentinel(V5 §7.2):提现延迟/连败=平台交易对手风险,叠加取更严格。
         # dedupe 用稳定码 WD:<mode>(reason 含小时数会漂移,避免 restriction_event 行churn)。
@@ -264,16 +338,51 @@ async def compute_and_publish(pool, r) -> dict:
         if wd_mode != "NORMAL":
             mode = _stricter(mode, wd_mode)
             reason = f"提现哨兵[{wd_reason}]|" + reason
+            hits.append({"scope": "WITHDRAWAL", "mode": wd_mode, "why": wd_reason})
             await _persist_restriction(pool, v, "MEDIUM" if wd_mode == "WATCH" else "HARD",
                                        "WITHDRAWAL_DELAY", f"WD:{wd_mode}")
+        # 条款登记(V5 §6.1):PROHIBITED=硬闸 FROZEN;UNCLEAR=WATCH 级弱信号(当前书≈HOUSE_RND)
+        vp = vpolicy.get(v)
+        if vp:
+            if vp["arbitrage_status"] == "PROHIBITED":
+                mode = _stricter(mode, "FROZEN")
+                reason = f"条款禁止套利(venue_policy)|{reason}"
+                hits.append({"scope": "VENUE_POLICY", "mode": "FROZEN", "why": "arbitrage=PROHIBITED"})
+            elif vp["arbitrage_status"] == "UNCLEAR":
+                mode = _stricter(mode, POLICY_UNCLEAR_MODE)
+                hits.append({"scope": "VENUE_POLICY", "mode": POLICY_UNCLEAR_MODE, "why": "条款UNCLEAR未复核"})
         # 合并 override(venue 级 + 全局,取最严格)
-        vovr = overrides.get(f"VENUE:{v}", {}).get("mode")
+        vovr_row = overrides.get(f"VENUE:{v}", {})
+        vovr = vovr_row.get("mode")
         if vovr:
             mode = _stricter(mode, vovr)
             reason = f"override={vovr};{reason}"
+            hits.append({"scope": "OVERRIDE_VENUE", "mode": vovr, "why": str(vovr_row.get("reason"))[:80]})
+        if global_ovr != "NORMAL":
+            hits.append({"scope": "OVERRIDE_GLOBAL", "mode": global_ovr, "why": ""})
         mode = _stricter(mode, global_ovr)
+        # RECOVERY_WATCH 阶梯(V5 §7.3):严重事件出清后逐级恢复,不许直跳 NORMAL
+        has_fatal_inc = any(sev == "fatal" for _, sev in inc_active.get(v, []))
+        mode, reason, recovery = await _apply_recovery(pool, v, mode, reason, notional, cap_val,
+                                                       vovr == "NORMAL", has_fatal_inc)
+        if recovery:
+            hits.append({"scope": "RECOVERY", "mode": "WATCH",
+                         "why": f"阶段{recovery['stage']}额度{int(recovery['allow_pct']*100)}%"})
+        # incident_state 与 enforcement_mode 分离(ADR-001 §4.2):事件生命周期≠风险强度
+        states = inc_active.get(v, [])
+        if any(st in ("OPEN", "ESCALATED") and sev == "fatal" for st, sev in states):
+            inc_state = "ACTIVE"
+        elif any(st == "RECOVERING" for st, _ in states):
+            inc_state = "RECOVERY"
+        elif states:
+            inc_state = "WATCH"
+        else:
+            inc_state = "NORMAL"
         venues_out[v] = {
             "mode": mode, "reason": reason,
+            "incident_state": inc_state,
+            "recovery": recovery,
+            "modes_hit": hits,
             "exposure_notional": round(notional, 2), "equity": round(equity, 2),
             "cap_usdt": cap_val, "warn_ratio": warn_ratio,
             "capabilities": _capabilities(mode),
@@ -303,6 +412,9 @@ async def compute_and_publish(pool, r) -> dict:
         "nav": nav,
         "credential_epochs": cred_epochs,
         "credential_rotations": cred_rotations,
+        "policy_registry": {"unreviewed": unreviewed,
+                            "prohibited": [v for v, vp in vpolicy.items()
+                                           if vp.get("arbitrage_status") == "PROHIBITED"]},
     }
     # (epoch, sequence) 双单调 fencing(ADR-005)+ PG outbox 耐久发布(批次2):
     # 同一事务 bump 版本 + upsert effective_risk_policy 全量快照 + 写 outbox——
