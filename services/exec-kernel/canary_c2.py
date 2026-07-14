@@ -50,6 +50,11 @@ async def _qty_step(venue, symbol):
             d = (await cli.get(f"https://api.bitget.com/api/v2/mix/market/contracts?productType=USDT-FUTURES&symbol={symbol}")).json()
             c = (d.get("data") or [{}])[0]
             return float(c.get("sizeMultiplier") or c.get("minTradeNum") or 1) or 1
+        if venue == "hyperliquid":
+            d = (await cli.post("https://api.hyperliquid.xyz/info", json={"type": "meta"})).json()
+            for u in d.get("universe", []):
+                if u.get("name") == symbol:
+                    return 10 ** -int(u.get("szDecimals") or 0)
     return 1.0
 
 

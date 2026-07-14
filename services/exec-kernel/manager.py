@@ -21,8 +21,48 @@ import exec_core as E  # noqa: E402
 from real_venue import BinanceRealVenue, MultiVenue, venue_armed, venue_sym  # noqa: E402
 from store import PgSagaStore  # noqa: E402
 
+try:
+    from dcm_common.notify import Notifier, feishu_from_env
+    _notifier = Notifier(os.environ.get("DCM_REDIS_URL", "redis://10.0.1.212:6379/0"),
+                         "exec-manager", feishu=feishu_from_env(),
+                         throttle_interval_sec=int(os.environ.get("DCM_MGR_ALERT_THROTTLE_SEC", "600")),
+                         throttle_max_count=1)
+except Exception:  # noqa: BLE001  # dcm_common 缺失时告警降级为仅 Redis key,不 fatal
+    _notifier = None
+
 INTERVAL = int(os.environ.get("DCM_MGR_INTERVAL_SEC", "20"))
 CONFIG_KEY = "dcm:exec:manager:config"
+
+_alert_pool = None   # main() 注入,alerts_log 落库(dcm_main,与 mix 告警历史页同源)
+
+
+async def _alert(r, key, title, content, level="warn", extra=None):
+    """manager 告警统一出口:Redis key(面板)+Notifier(飞书+跑马灯,经节流)+alerts_log(历史页)。
+    绝不抛异常——告警失败不能影响持仓管理主循环。"""
+    try:
+        await r.set(f"dcm:exec:manager:alert:{key}",
+                    json.dumps({"ts": int(time.time()), "key": key, "title": title,
+                                "content": content, "level": level, **(extra or {})},
+                               ensure_ascii=False), ex=3600)
+    except Exception:  # noqa: BLE001
+        pass
+    throttled = False
+    if _notifier is not None:
+        try:
+            res = await asyncio.to_thread(
+                _notifier.fire, f"exec-mgr:{key}", title, content, level=level,
+                marquee=True, color="#ef4444" if level == "fatal" else "#f59e0b",
+                blink=level == "fatal")
+            throttled = isinstance(res, dict) and res.get("throttled")
+        except Exception:  # noqa: BLE001
+            pass
+    if _alert_pool is not None and not throttled:
+        try:
+            await _alert_pool.execute(
+                "INSERT INTO alerts_log(service,akey,level,title,content) VALUES('exec-manager',$1,$2,$3,$4)",
+                key, level, title, content[:500])
+        except Exception:  # noqa: BLE001
+            pass
 
 
 async def _signal_target(sym, cfg, r):
@@ -77,11 +117,9 @@ async def manage_symbol(sym, cfg, store, r):
         return st   # 持有:零下单
     if target == "close_recommend":
         st["action"] = "CLOSE_RECOMMENDED(告警,不自动平——理财腿须人工协调赎回)"
-        try:
-            await r.set(f"dcm:exec:manager:alert:{sym}", json.dumps({"ts": int(time.time()),
-                        "symbol": sym, "reason": signal_why, "perp_amt": amt, "spot": spot}), ex=3600)
-        except Exception:  # noqa: BLE001
-            pass
+        await _alert(r, sym, f"{sym} 建议平仓(C1)",
+                     f"{signal_why};永续{amt}/现货{spot:.2f}。理财腿(LDXVG)须先人工赎回再翻 close。",
+                     level="warn", extra={"perp_amt": amt, "spot": spot})
         return st
     if target == "close":
         if not armed:
@@ -197,23 +235,19 @@ async def manage_pair(pid, cfg, store, r):
     # 单腿裸露=最高风险:告警置顶,不自动动(armed 平残腿须人工确认方向)
     if any(abs(a) < 1e-9 for a in amts):
         st["action"] = "SINGLE_LEG(单腿裸露!告警,人工处置)"
-        try:
-            await r.set(f"dcm:exec:manager:alert:{pid}", json.dumps({"ts": int(time.time()),
-                        "pair": pid, "type": "SINGLE_LEG", "legs": st["legs"]}, ensure_ascii=False), ex=3600)
-        except Exception:  # noqa: BLE001
-            pass
+        legs_txt = " / ".join(f"{x['venue']} {x['amt']}" for x in st["legs"])
+        await _alert(r, pid, f"{pid} 单腿裸露(C2)",
+                     f"跨所对一腿已平一腿在场:{legs_txt}。方向性敞口,须人工确认后平残腿。",
+                     level="fatal", extra={"type": "SINGLE_LEG", "legs": st["legs"]})
         return st
 
     if target == "hold":
         return st
     if target == "close_recommend":
         st["action"] = "CLOSE_RECOMMENDED(告警,不自动平)"
-        try:
-            await r.set(f"dcm:exec:manager:alert:{pid}", json.dumps({"ts": int(time.time()),
-                        "pair": pid, "type": "CLOSE_RECOMMENDED", "reason": signal_why,
-                        "legs": st["legs"]}, ensure_ascii=False), ex=3600)
-        except Exception:  # noqa: BLE001
-            pass
+        await _alert(r, pid, f"{pid} 建议平仓(C2)",
+                     f"{signal_why}。确认后把 pairs.{pid} 翻 mode=armed+target=close 由 manager 平仓。",
+                     level="warn", extra={"type": "CLOSE_RECOMMENDED", "legs": st["legs"]})
         return st
     if target == "close":
         if not armed:
@@ -225,17 +259,17 @@ async def manage_pair(pid, cfg, store, r):
         if final == "CLOSED":
             await r.delete(gen_key)
         else:   # QUARANTINED=有腿平不掉,人工兜底,告警
-            try:
-                await r.set(f"dcm:exec:manager:alert:{pid}", json.dumps({"ts": int(time.time()),
-                            "pair": pid, "type": "CLOSE_QUARANTINED", "legs": st["legs"]},
-                            ensure_ascii=False), ex=3600)
-            except Exception:  # noqa: BLE001
-                pass
+            await _alert(r, pid, f"{pid} 平仓被隔离(C2)",
+                         f"close_pair 有腿平不掉进 QUARANTINED,可能残留敞口。"
+                         f"手动兜底:canary_c2.py {sym} <notional> <多所> <空所> --arm --close",
+                         level="fatal", extra={"type": "CLOSE_QUARANTINED", "legs": st["legs"]})
     return st
 
 
 async def main():
+    global _alert_pool
     pool = await asyncpg.create_pool(os.environ["DCM_PG_DSN"], min_size=1, max_size=2)
+    _alert_pool = pool
     r = aioredis.from_url(os.environ.get("DCM_REDIS_URL", "redis://10.0.1.212:6379/0"), decode_responses=True)
     store = PgSagaStore(pool)
     once = "--once" in sys.argv

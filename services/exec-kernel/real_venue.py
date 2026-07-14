@@ -6,6 +6,7 @@
 - 确定性 clientOrderId 幂等:重试先 query 再 place(exec_core 已保证)。
 本文件当前只投产 query/position(读);place 仅占位+门控,武装另行专场。
 """
+import asyncio
 import base64
 import hashlib
 import hmac
@@ -609,11 +610,121 @@ class OkxRealVenue(_GatedPos):
         return {"ok": True, "positions": out}
 
 
-class HyperliquidRealVenue:
-    """HL 永续读适配器(clearinghouseState,只读钱包地址,无需签名)。szi=base 带符号;符号=币名。"""
+class HyperliquidRealVenue(_GatedPos):
+    """HL 永续读+门控下单。读=clearinghouseState(只读钱包地址无签名);
+    写=hyperliquid-python-sdk(agent 钱包签名,agent 只能交易不能提现,approveAgent 已授权)。
+    szi/sz=base 带符号;符号=币名;cloid=128bit 确定性(md5(cid))。SDK 同步→to_thread。
+    ⚠️HL 最小单 $10 名义;市价单=IOC+滑点保护价(SDK market_open/close 封装)。"""
 
-    def __init__(self, address=""):
+    HL_AGENT_ENV = "/home/ec2-user/dexcexmix/.hl_agent.env"
+
+    def __init__(self, address="", agent_key="", armed=None, arm_symbols=None):
         self.address = address or os.environ.get("HL_WALLET_ADDRESS", "")
+        self._agent_key = agent_key or os.environ.get("HL_AGENT_PRIVKEY", "")
+        self.armed, self.arm_symbols = _env_armed(armed, arm_symbols)
+        self._ex = None       # lazy Exchange(签名端)
+        self._info = None     # lazy Info(查询端)
+        self._szdec = None    # coin -> szDecimals
+
+    def _load_agent_key(self):
+        if not self._agent_key and os.path.exists(self.HL_AGENT_ENV):
+            for ln in open(self.HL_AGENT_ENV, encoding="utf-8"):
+                if ln.strip().startswith("HL_AGENT_PRIVKEY="):
+                    self._agent_key = ln.strip().split("=", 1)[1]
+        if not self._agent_key:
+            raise VenueError("HL agent 私钥缺失(.hl_agent.env)")
+
+    def _exchange(self):
+        if self._ex is None:
+            self._load_agent_key()
+            from eth_account import Account
+            from hyperliquid.exchange import Exchange
+            self._ex = Exchange(Account.from_key(self._agent_key),
+                                account_address=self.address)
+        return self._ex
+
+    def _info_cli(self):
+        if self._info is None:
+            from hyperliquid.info import Info
+            self._info = Info(skip_ws=True)
+        return self._info
+
+    def _szdecs(self):
+        if self._szdec is None:
+            self._szdec = {}
+            try:
+                m = self._info_cli().meta()
+                for u in m.get("universe", []):
+                    self._szdec[u["name"]] = int(u.get("szDecimals") or 0)
+            except Exception:  # noqa: BLE001
+                pass
+        return self._szdec
+
+    @staticmethod
+    def _coid(cid):
+        return "0x" + hashlib.md5(cid.encode()).hexdigest()   # 128bit,截断安全(哈希本体)
+
+    async def query(self, cid, leg=None):
+        """orderStatus by cloid → exec_core dict。unknownOid=NOTFOUND(可安全重下)。"""
+        def _q():
+            from hyperliquid.utils.types import Cloid
+            return self._info_cli().query_order_by_cloid(self.address, Cloid.from_str(self._coid(cid)))
+        try:
+            d = await asyncio.to_thread(_q)
+        except Exception:  # noqa: BLE001
+            return {"status": TIMEOUT, "filled": 0}
+        if not isinstance(d, dict) or d.get("status") != "order":
+            return {"status": NOTFOUND, "filled": 0}
+        o = d.get("order") or {}
+        st = str(o.get("status") or "")
+        od = o.get("order") or {}
+        orig = float(od.get("origSz") or 0)
+        rest = float(od.get("sz") or 0)     # 剩余量
+        filled = max(0.0, orig - rest)
+        if st == "filled":
+            return {"status": FILLED, "filled": orig}
+        if st == "open":
+            return {"status": ACK if filled <= 1e-12 else PARTIAL, "filled": filled}
+        # canceled/rejected/marginCanceled:半成交如实报,零成交=NOTFOUND
+        return {"status": PARTIAL if filled > 1e-12 else NOTFOUND, "filled": filled}
+
+    async def place(self, cid, leg):
+        """市价单(SDK market_open;reduce_only→market_close)。leg.qty=base;硬门控。"""
+        coin = leg.get("symbol", "")
+        self._gate(cid, coin)
+        dec = self._szdecs().get(coin)
+        if dec is None:
+            return {"status": REJECT, "filled": 0, "err": f"HL 无 {coin} 合约(meta 查无)"}
+        sz = math.floor(float(leg["qty"]) * (10 ** dec)) / (10 ** dec)
+        if sz <= 0:
+            return {"status": REJECT, "filled": 0, "err": f"qty {leg['qty']} 落 szDecimals={dec} 后为 0"}
+        is_buy = str(leg["side"]).upper() == "BUY"
+
+        def _p():
+            from hyperliquid.utils.types import Cloid
+            cl = Cloid.from_str(self._coid(cid))
+            ex = self._exchange()
+            if leg.get("reduce_only"):
+                # market_close 按仓位反向平 sz(内部 reduce-only IOC)
+                return ex.market_close(coin, sz=sz, cloid=cl)
+            return ex.market_open(coin, is_buy, sz, cloid=cl)
+        try:
+            d = await asyncio.to_thread(_p)
+        except Exception as e:  # noqa: BLE001
+            return {"status": TIMEOUT, "filled": 0, "err": repr(e)[:120]}
+        if not isinstance(d, dict) or d.get("status") != "ok":
+            return {"status": REJECT, "filled": 0, "err": str(d)[:150]}
+        sts = (((d.get("response") or {}).get("data") or {}).get("statuses") or [{}])
+        s0 = sts[0]
+        if "error" in s0:
+            return {"status": REJECT, "filled": 0, "err": str(s0["error"])[:150]}
+        if "filled" in s0:
+            f = s0["filled"]
+            return {"status": FILLED, "filled": float(f.get("totalSz") or 0),
+                    "venue_order_id": str(f.get("oid") or "")}
+        if "resting" in s0:
+            return {"status": ACK, "filled": 0, "venue_order_id": str(s0["resting"].get("oid") or "")}
+        return {"status": ACK, "filled": 0}
 
     async def all_positions(self) -> dict:
         if not self.address:
@@ -635,9 +746,10 @@ class HyperliquidRealVenue:
 
 
 def venue_armed(name: str, armed: bool, arm_symbols):
-    """带武装门控构造适配器(manager/canary 按 pair 精细控制)。HL 只读无写路径。"""
+    """带武装门控构造适配器(manager/canary 按 pair 精细控制)。六所全支持写路径。"""
     cls = {"binance": BinanceRealVenue, "bybit": BybitRealVenue, "gate": GateRealVenue,
-           "bitget": BitgetRealVenue, "okx": OkxRealVenue}.get(name)
+           "bitget": BitgetRealVenue, "okx": OkxRealVenue,
+           "hyperliquid": HyperliquidRealVenue}.get(name)
     if cls is None:
         raise VenueError(f"{name} 无可武装适配器")
     return cls(armed=armed, arm_symbols=arm_symbols)
