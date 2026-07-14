@@ -1073,60 +1073,83 @@ async def account_nodes() -> list[dict]:
         if v:
             reg_subs[v].append((ak, meta))
 
-    def deco(key, metrics):
-        e = reg.get(key)
-        if e and e.get("alias"):
-            metrics = {"别名": e["alias"], **metrics}
-        if e and e.get("email"):
-            metrics["邮箱"] = e["email"]
-        return metrics
+    def _acct_name(ak):
+        """账户显示名:别名 → 邮箱 → account_key(V5 §2.1:无名回落邮箱,再回落键)。"""
+        e = reg.get(ak) or {}
+        return e.get("alias") or e.get("email") or ak
 
+    # 正确层级模型:venue=主账户分组节点;持 env key 的快照账户(joycar0014/joycar002 等)是【子账户】非主账户。
+    # binance-master → [joycar0014(env key快照) / coin子账户 / CORE_POOL新建子账户] 全部同级。
     out = []
     for venue in VENUES:
         s = snaps.get(venue)
-        if s is None:
-            continue
         children = []
-        if venue == "binance":  # coin 子账户挂在币安主账户之下（借币主引擎在 coin）
+        seen = set()
+        total_eq = 0.0
+
+        # ① 持 env key 的主用子账户(dcm:account:{venue} 快照本体就是这个子账户,如 binance=joycar0014)
+        if s is not None:
+            pm = reg.get(venue) or {}
+            cst = cred.get(venue) or {}
+            eq = float(s.get("equity_usdt") or 0)
+            total_eq += eq
+            children.append({
+                "id": venue, "kind": "sub", "platformType": "cex", "venue": venue,
+                "domain": pm.get("book") or "B·exec",
+                "apiStatus": "ok" if s.get("ok") else "restricted",
+                "metrics": {"账户": _acct_name(venue), "Book": pm.get("book") or "—",
+                            "净值": f"{eq:,.2f} U", "持仓数": str(len(s.get("positions") or {})),
+                            "凭证": (cst.get("state") or "env-key"), "快照": _age_text(s.get("ts"))},
+                "approvalState": None, "children": [],
+            })
+            seen.add(venue)
+
+        # ② coin 面板子账户(币安借币引擎的独立子账户,同级挂在币安分组下)
+        if venue == "binance":
             for acct in (panel.get("balances") or {}).get("balances") or []:
                 note = str(acct.get("note") or f"sub:{acct.get('account_id')}")
+                if note in seen:
+                    continue
+                seen.add(note)
+                total_eq += float(acct.get("margin_net_usdt") or 0)
                 children.append({
                     "id": note, "kind": "sub", "platformType": "cex", "venue": "binance",
                     "domain": "coin·3shard", "apiStatus": "ok",
-                    "metrics": deco(f"binance:{note}", {
-                        "杠杆净资产": f"{float(acct.get('margin_net_usdt') or 0):,.2f} U",
-                        "可用USDT": f"{float(acct.get('margin_usdt_free') or 0):,.2f}",
-                        "借币负债": f"{float(acct.get('margin_usdt_borrowed') or 0):,.2f}",
-                        "风险度": _num(acct.get("margin_level"), 2)}),
+                    "metrics": {"账户": _acct_name(note),
+                                "杠杆净资产": f"{float(acct.get('margin_net_usdt') or 0):,.2f} U",
+                                "可用USDT": f"{float(acct.get('margin_usdt_free') or 0):,.2f}",
+                                "借币负债": f"{float(acct.get('margin_usdt_borrowed') or 0):,.2f}",
+                                "风险度": _num(acct.get("margin_level"), 2)},
                     "approvalState": None, "children": [],
                 })
-        # registry 登记的子账户(CORE_POOL 等新建账户)——即使还没快照也显示,带 book+凭证状态。
-        _shown = {c["id"] for c in children}
+
+        # ③ registry 登记的其它子账户(CORE_POOL 新建等)——即使无快照也显示,带 book+凭证状态
         for ak, meta in reg_subs.get(venue, []):
-            if ak in _shown:
+            if ak in seen:
                 continue
+            seen.add(ak)
             cst = cred.get(ak) or {}
             sub_snap = snaps.get(f"{venue}:{ak}") or snaps.get(ak)   # 多账户快照就绪后带权益
             cred_state = cst.get("state") or "未录凭证"
-            m = {"别名": meta.get("alias") or ak, "Book": meta.get("book") or "—",
+            m = {"账户": _acct_name(ak), "Book": meta.get("book") or "—",
                  "凭证": cred_state, "Key掩码": cst.get("key_mask") or "—"}
             if sub_snap:
-                m["净值"] = f"{float(sub_snap.get('equity_usdt') or 0):,.2f} U"
+                eq = float(sub_snap.get("equity_usdt") or 0)
+                total_eq += eq
+                m["净值"] = f"{eq:,.2f} U"
                 m["快照"] = _age_text(sub_snap.get("ts"))
             children.append({
                 "id": ak, "kind": "sub", "platformType": "cex", "venue": venue,
                 "domain": meta.get("book") or "TEST",
-                # apiStatus 严格枚举(ok/restricted/healing);详细凭证态在 metrics.凭证
                 "apiStatus": "ok" if cred_state == "active" else ("healing" if cred_state == "pending" else "restricted"),
                 "metrics": m, "approvalState": None, "children": [],
             })
-        npos = len(s.get("positions") or {})
+
+        # venue 主账户分组节点(合计净值=各子账户之和;子账户数)
         out.append({
-            "id": venue, "kind": "master", "platformType": "cex", "venue": venue,
-            "domain": "B·exec", "apiStatus": "ok" if s.get("ok") else "restricted",
-            "metrics": deco(venue, {"净值": f"{float(s.get('equity_usdt') or 0):,.2f} U",
-                                    "持仓数": str(npos),
-                                    "快照": _age_text(s.get("ts"))}),
+            "id": f"{venue}-master", "kind": "master", "platformType": "cex", "venue": venue,
+            "domain": "B·exec", "apiStatus": "ok" if (s is not None and s.get("ok")) else "restricted",
+            "metrics": {"交易所": venue, "子账户": str(len(children)), "合计净值": f"{total_eq:,.2f} U"},
             "approvalState": None, "children": children,
         })
     return out
