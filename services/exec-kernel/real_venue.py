@@ -204,6 +204,124 @@ class BinanceRealVenue:
             raise PermissionError("exec 未武装,拒绝撤单")
 
 
+class BinanceMarginRealVenue(_GatedPos):
+    """C3 借币现货空腿适配器(V4.0 §6.1 BORROW_SPOT_SHORT_DERIVATIVE_LONG 模板 / §15 borrow-repay action adapter)。
+    币安全仓杠杆(sapi/v1/margin),用 sideEffectType 让借+卖 / 买+还在交易所端**原子完成**——
+    彻底消除裸债窗口(§11 naked debt 铁律):
+      开空腿 = 市价 SELL + MARGIN_BUY(自动借基础币再卖出 → 债务即空头)
+      平空腿 = 市价 BUY  + AUTO_REPAY(买回再自动还债 → 平空)
+    「仓位」= 基础币负债(borrowed+interest);get_position 返回 -debt(§11 债务现查:还币按活口径)。
+    与 exec_core/Pair Saga 同接口:换上它内核即能驱动 C3 短腿。**只在 B 机(有密钥)运行**。
+    ⚠️engine-lending/coin C3.S 引擎不动(§21 不重写);本适配器是给统一内核补 C3 执行能力。"""
+
+    SAPI = "https://api.binance.com"
+
+    def __init__(self, key: str = "", secret: str = "", armed=None, arm_symbols=None):
+        self.key = key or os.environ.get("BINANCE_KEY", "")
+        self.secret = secret or os.environ.get("BINANCE_SECRET", "")
+        self.armed, self.arm_symbols = _env_armed(armed, arm_symbols)
+        self._step = {}   # symbol -> LOT_SIZE stepSize(现货规格)
+
+    def _sign(self, params: dict) -> str:
+        q = urlencode({**params, "timestamp": int(time.time() * 1000), "recvWindow": 5000})
+        sig = hmac.new(self.secret.encode(), q.encode(), hashlib.sha256).hexdigest()
+        return f"{q}&signature={sig}"
+
+    @staticmethod
+    def _coid(cid: str) -> str:
+        return _det_coid(cid, 36)
+
+    async def _get(self, path, params):
+        async with httpx.AsyncClient(timeout=15) as cli:
+            r = await cli.get(f"{self.SAPI}{path}?{self._sign(params)}", headers={"X-MBX-APIKEY": self.key})
+        try:
+            return r.status_code, r.json()
+        except Exception:  # noqa: BLE001
+            return r.status_code, r.text
+
+    async def _post(self, path, params):
+        async with httpx.AsyncClient(timeout=15) as cli:
+            r = await cli.post(f"{self.SAPI}{path}?{self._sign(params)}", headers={"X-MBX-APIKEY": self.key})
+        try:
+            return r.status_code, r.json()
+        except Exception:  # noqa: BLE001
+            return r.status_code, r.text
+
+    async def _lot_step(self, symbol: str):
+        """现货 LOT_SIZE stepSize(margin 下单量须落步长)。缓存。"""
+        if symbol not in self._step:
+            self._step[symbol] = 0.0
+            try:
+                async with httpx.AsyncClient(timeout=15) as cli:
+                    d = (await cli.get(f"{BINANCE_SPOT}/api/v3/exchangeInfo?symbol={symbol}")).json()
+                for s in d.get("symbols", []):
+                    if s["symbol"] == symbol:
+                        for f in s.get("filters", []):
+                            if f["filterType"] == "LOT_SIZE":
+                                self._step[symbol] = float(f["stepSize"])
+            except Exception:  # noqa: BLE001
+                pass
+        return self._step[symbol] or 0.0
+
+    async def query(self, cid: str, leg: dict = None) -> dict:
+        """GET margin/order by origClientOrderId → exec_core dict。-2013 无此单=NOTFOUND(可安全重下)。"""
+        leg = leg or {}
+        symbol = leg.get("symbol", "")
+        code, d = await self._get("/sapi/v1/margin/order",
+                                  {"symbol": symbol, "origClientOrderId": self._coid(cid), "isIsolated": "FALSE"})
+        if code != 200 or not isinstance(d, dict) or not d.get("orderId"):
+            return {"status": NOTFOUND, "filled": 0}
+        st = d.get("status", "")
+        m = {"FILLED": FILLED, "NEW": ACK, "PARTIALLY_FILLED": PARTIAL}.get(st, NOTFOUND)
+        return {"status": m, "filled": float(d.get("executedQty") or 0)}
+
+    async def place(self, cid: str, leg: dict) -> dict:
+        """C3 借币短腿市价单。开=SELL+MARGIN_BUY(借+卖);平=BUY+AUTO_REPAY(买+还)。硬门控。
+        leg={symbol,side(SELL开/BUY平),qty(base),reduce_only}。"""
+        symbol = leg.get("symbol", "")
+        self._gate(cid, symbol)
+        side = str(leg["side"]).upper()
+        # 开空=借币卖出;平空=买回还债。reduce_only 或 side=BUY 视为平仓侧。
+        closing = bool(leg.get("reduce_only")) or side == "BUY"
+        side_effect = "AUTO_REPAY" if closing else "MARGIN_BUY"
+        step = await self._lot_step(symbol)
+        qty = leg["qty"]
+        if step > 0:
+            qty = math.floor(float(qty) / step) * step
+        if float(qty) <= 0:
+            return {"status": REJECT, "filled": 0, "err": f"qty {leg['qty']} 落步长 {step} 后为 0"}
+        params = {"symbol": symbol, "side": side, "type": "MARKET", "quantity": _qstr(qty),
+                  "isIsolated": "FALSE", "sideEffectType": side_effect, "newClientOrderId": self._coid(cid)}
+        code, d = await self._post("/sapi/v1/margin/order", params)
+        if code != 200 or not isinstance(d, dict) or not d.get("orderId"):
+            return {"status": REJECT, "filled": 0, "err": f"http {code}: {str(d)[:150]}"}
+        st = d.get("status", "")
+        return {"status": {"FILLED": FILLED, "NEW": ACK, "PARTIALLY_FILLED": PARTIAL}.get(st, ACK),
+                "filled": float(d.get("executedQty") or 0), "venue_order_id": str(d.get("orderId") or "")}
+
+    async def all_positions(self) -> dict:
+        """全仓杠杆逐资产负债(borrowed+interest)=空头仓位;返回 {BASEUSDT: -debt}。§11 债务现查。"""
+        code, d = await self._get("/sapi/v1/margin/account", {})
+        if code != 200 or not isinstance(d, dict) or "userAssets" not in d:
+            return {"ok": False, "err": f"http {code}: {str(d)[:120]}"}
+        out = {}
+        for a in d.get("userAssets", []):
+            debt = float(a.get("borrowed") or 0) + float(a.get("interest") or 0)
+            if debt > 1e-12 and a.get("asset") != "USDT":
+                out[f"{a['asset']}USDT"] = -debt   # 负债=空头,带负号
+        return {"ok": True, "positions": out}
+
+    async def debt(self, base_asset: str) -> float:
+        """某基础币活负债(borrowed+interest);平仓/还币按此现查(§11:绝不用开仓快照)。"""
+        code, d = await self._get("/sapi/v1/margin/account", {})
+        if code != 200 or not isinstance(d, dict):
+            return 0.0
+        for a in d.get("userAssets", []):
+            if a.get("asset") == base_asset:
+                return float(a.get("borrowed") or 0) + float(a.get("interest") or 0)
+        return 0.0
+
+
 class BybitRealVenue(_GatedPos):
     """bybit 永续读+门控下单(v5 HMAC-SHA256)。GET 签 ts+key+recv+query;POST 签 ts+key+recv+body。"""
 
@@ -498,7 +616,8 @@ class BitgetRealVenue(_GatedPos):
 def venue_for(name: str):
     return {"binance": BinanceRealVenue, "bybit": BybitRealVenue, "gate": GateRealVenue,
             "bitget": BitgetRealVenue, "okx": OkxRealVenue,
-            "hyperliquid": HyperliquidRealVenue}.get(name, lambda: None)()
+            "hyperliquid": HyperliquidRealVenue,
+            "binance-margin": BinanceMarginRealVenue}.get(name, lambda: None)()
 
 
 class OkxRealVenue(_GatedPos):
@@ -746,10 +865,12 @@ class HyperliquidRealVenue(_GatedPos):
 
 
 def venue_armed(name: str, armed: bool, arm_symbols):
-    """带武装门控构造适配器(manager/canary 按 pair 精细控制)。六所全支持写路径。"""
+    """带武装门控构造适配器(manager/canary 按 pair 精细控制)。六所全支持写路径;
+    binance-margin=C3 借币短腿(§6.1 BORROW_SPOT_SHORT_DERIVATIVE_LONG)。"""
     cls = {"binance": BinanceRealVenue, "bybit": BybitRealVenue, "gate": GateRealVenue,
            "bitget": BitgetRealVenue, "okx": OkxRealVenue,
-           "hyperliquid": HyperliquidRealVenue}.get(name)
+           "hyperliquid": HyperliquidRealVenue,
+           "binance-margin": BinanceMarginRealVenue}.get(name)
     if cls is None:
         raise VenueError(f"{name} 无可武装适配器")
     return cls(armed=armed, arm_symbols=arm_symbols)

@@ -21,6 +21,10 @@ REDIS_URL = os.environ.get("DCM_REDIS_URL", "redis://10.0.1.212:6379/0")
 INTERVAL = int(os.environ.get("DCM_RECON_INTERVAL_SEC", "120"))
 TOL_PCT = float(os.environ.get("DCM_RECON_TOL_PCT", "0.02"))
 SUPPORTED = {"binance", "bybit", "gate", "bitget", "okx", "hyperliquid"}
+# C3 保证金借币短腿(binance-margin):负债=空头。⚠️coin C3.S 引擎共用同一保证金账户,
+# 所以只对 manager 声明的 C3 腿对账,**绝不做裸债全量扫描**(否则误报 coin 合法债务为 NAKED)。
+MARGIN_VENUES = {"binance-margin"}
+CHECK_VENUES = SUPPORTED | MARGIN_VENUES
 
 
 def _venue_sym(venue, sym):
@@ -47,12 +51,13 @@ async def _venue_positions(venue):
 
 async def reconcile(pool, r) -> dict:
     # 期望:{venue: {venue_sym: {source, exp_qty, exp_sign}}}
-    expected = {v: {} for v in SUPPORTED}
+    expected = {v: {} for v in CHECK_VENUES}
     unchecked = []
 
     def add(venue, sym, source, qty, sign):
-        if venue in SUPPORTED:
-            expected[venue][_venue_sym(venue, sym)] = {"source": source, "exp_qty": qty, "exp_sign": sign}
+        if venue in CHECK_VENUES:
+            expected.setdefault(venue, {})[_venue_sym(venue, sym)] = {
+                "source": source, "exp_qty": qty, "exp_sign": sign}
         else:
             unchecked.append({"type": "UNCHECKABLE", "symbol": sym, "venue": venue,
                               "note": f"{venue} 适配器未建"})
@@ -95,8 +100,8 @@ async def reconcile(pool, r) -> dict:
             for lg in (p.get("legs") or []):
                 amt = float(lg.get("amt") or 0)
                 v = lg.get("venue")
-                if abs(amt) > 1e-12 and v in SUPPORTED:
-                    expected[v][str(lg.get("symbol") or "")] = {
+                if abs(amt) > 1e-12 and v in CHECK_VENUES:
+                    expected.setdefault(v, {})[str(lg.get("symbol") or "")] = {
                         "source": f"MGR:{p.get('pair')}:{v}", "exp_qty": abs(amt),
                         "exp_sign": 1 if amt > 0 else -1}
     except Exception:  # noqa: BLE001
@@ -104,8 +109,8 @@ async def reconcile(pool, r) -> dict:
 
     breaks = list(unchecked)
     matched = 0
-    for venue in SUPPORTED:
-        if not expected[venue]:
+    for venue in CHECK_VENUES:
+        if not expected.get(venue):
             continue
         actual = await _venue_positions(venue)
         if actual is None:
@@ -132,12 +137,15 @@ async def reconcile(pool, r) -> dict:
                                "expected": eq, "actual": abs(amt), "diff_pct": round(abs(abs(amt) - eq) / eq * 100, 3)})
             else:
                 matched += 1
-        # 该所剩余实盘 = 裸露仓(内核不知)
-        for sym, amt in actual.items():
-            breaks.append({"type": "NAKED_EXCHANGE", "venue": venue, "symbol": sym, "actual": amt,
-                           "note": "实盘有仓但引擎无声称"})
+        # 该所剩余实盘 = 裸露仓(内核不知)。
+        # ⚠️binance-margin 除外:coin C3.S 引擎共用同一保证金账户,未声明债务是 coin 的合法仓,
+        # 内核无从判断裸露(§21 不越界 coin),只对声明腿对账,不扫裸债。
+        if venue not in MARGIN_VENUES:
+            for sym, amt in actual.items():
+                breaks.append({"type": "NAKED_EXCHANGE", "venue": venue, "symbol": sym, "actual": amt,
+                               "note": "实盘有仓但引擎无声称"})
 
-    summary = {"ts": int(time.time()), "matched": matched, "supported_venues": sorted(SUPPORTED),
+    summary = {"ts": int(time.time()), "matched": matched, "supported_venues": sorted(CHECK_VENUES),
                "breaks": breaks, "break_types": sorted({b["type"] for b in breaks})}
     await r.set("dcm:exec:recon", json.dumps(summary, ensure_ascii=False), ex=max(INTERVAL * 3, 600))
     return summary
