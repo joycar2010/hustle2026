@@ -37,6 +37,11 @@ class BinanceRealVenue:
         sig = hmac.new(self.secret.encode(), q.encode(), hashlib.sha256).hexdigest()
         return f"{q}&signature={sig}"
 
+    @staticmethod
+    def _bcoid(cid: str) -> str:
+        """确定性 cid → 币安 newClientOrderId(字符集/长度约束);place 与 query 必须一致。"""
+        return cid.replace(":", "-")[:36]
+
     async def _get(self, base: str, path: str, params: dict):
         """返回 (status_code, parsed_json_or_text)。parsed 可能是 dict 或 list。"""
         async with httpx.AsyncClient(timeout=15) as cli:
@@ -48,11 +53,15 @@ class BinanceRealVenue:
             return r.status_code, r.text
 
     # ---------- 读路径(投产) ----------
-    async def query(self, cid: str, symbol: str = "", market: str = "perp") -> dict:
-        """按 clientOrderId 查订单状态 → exec_core 接口 dict。找不到=NOTFOUND(幂等安全)。"""
+    async def query(self, cid: str, leg: dict = None) -> dict:
+        """按 clientOrderId 查订单状态 → exec_core 接口 dict(与 exec_core query(cid,leg) 契约一致)。
+        找不到=NOTFOUND(幂等安全)。coid 与 place 同一归一化。"""
+        leg = leg or {}
+        symbol = leg.get("symbol", "")
+        market = leg.get("market", "perp")
         base, path = (BINANCE_FAPI, "/fapi/v1/order") if market == "perp" else (BINANCE_SPOT, "/api/v3/order")
         try:
-            code, d = await self._get(base, path, {"symbol": symbol, "origClientOrderId": cid})
+            code, d = await self._get(base, path, {"symbol": symbol, "origClientOrderId": self._bcoid(cid)})
         except Exception:  # noqa: BLE001
             return {"status": TIMEOUT, "filled": 0}
         if code != 200 or not isinstance(d, dict):
@@ -105,7 +114,7 @@ class BinanceRealVenue:
         market = leg.get("market", "perp")
         base, path = (BINANCE_FAPI, "/fapi/v1/order") if market == "perp" else (BINANCE_SPOT, "/api/v3/order")
         params = {"symbol": sym, "side": leg["side"], "type": "MARKET",
-                  "newClientOrderId": cid.replace(":", "-")[:36]}
+                  "newClientOrderId": self._bcoid(cid)}
         if leg.get("quote_qty") is not None and market == "spot":
             params["quoteOrderQty"] = leg["quote_qty"]
         else:
