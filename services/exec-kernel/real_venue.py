@@ -94,6 +94,16 @@ class BinanceRealVenue:
                 out[p.get("symbol")] = amt
         return {"ok": True, "positions": out}
 
+    async def get_spot_balance(self, asset: str) -> float:
+        """现货某资产 free 余额(C1 现货腿平仓按实际余额卖,防手续费残留超卖)。"""
+        code, d = await self._get(BINANCE_SPOT, "/api/v3/account", {})
+        if code != 200 or not isinstance(d, dict):
+            return 0.0
+        for b in d.get("balances", []):
+            if b.get("asset") == asset:
+                return float(b.get("free") or 0)
+        return 0.0
+
     async def _post(self, base: str, path: str, params: dict):
         async with httpx.AsyncClient(timeout=15) as cli:
             r = await cli.post(f"{base}{path}?{self._sign(params)}", headers={"X-MBX-APIKEY": self.key})
@@ -318,3 +328,8 @@ class HyperliquidRealVenue:
             if abs(szi) > 1e-12:
                 out[pos.get("coin")] = szi
         return {"ok": True, "positions": out}
+
+
+class _SpotHelper:
+    """现货余额读(C1 现货腿平仓精确定量;避免手续费残留超卖)。挂到 BinanceRealVenue 使用。"""
+    pass
