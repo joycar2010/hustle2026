@@ -566,3 +566,115 @@ async def risk_lab(_who=Depends(require_viewer)):
     snap = await ds.get_json("dcm:engine:lending:positions") or {}
     return {"mode": snap.get("mode", "shadow"), "would_hold": snap.get("would_hold") or [],
             "slots": snap.get("slots"), "ts": snap.get("ts")}
+
+
+@router.get("/c3/overview")
+async def c3_overview(_who=Depends(require_viewer)):
+    """C3 工作台(qI0s6/QuReD/ERX5c)聚合:coin 生命周期仓位+七项风险灯+推送/可借监控。
+    数据源=coin-bridge 面板(dcm:coin:panel)+意图账(dcm:engine:coin:positions),零新增交易所调用。"""
+    panel = await ds.get_json("dcm:coin:panel") or {}
+    snap = await ds.get_json("dcm:engine:coin:positions") or {}
+    # symbol_margin 藏在 balances[uid] 里(coin 面板真实结构)——跨子账户合并,利率顶层兜底
+    sm: dict = {}
+    for _uid, bal in (panel.get("balances") or {}).items():
+        if not isinstance(bal, dict):
+            continue
+        for _s, _v in (bal.get("symbol_margin") or {}).items():
+            if not isinstance(_v, dict):
+                continue
+            if _s in sm:   # 跨子账户合并:借币量累加,其余字段first-wins
+                try:
+                    sm[_s]["borrowed"] = float(sm[_s].get("borrowed") or 0) + float(_v.get("borrowed") or 0)
+                except Exception:
+                    pass
+            else:
+                sm[_s] = dict(_v)
+    ir = panel.get("interest_rates") or {}
+    for _s, _v in sm.items():
+        if _v.get("daily_interest_rate") in (None, "") and _s in ir:
+            _v["daily_interest_rate"] = ir.get(_s) if not isinstance(ir.get(_s), dict) else (ir[_s].get("daily") or ir[_s].get("rate"))
+    positions = snap.get("positions") or []
+    # 七项风险灯(ERX5c):有数据源的真判,没有的如实 N/A
+    hi_interest = [{"sym": s, "rate": v.get("daily_interest_rate")} for s, v in sm.items()
+                   if v.get("daily_interest_rate") not in (None, "") and float(v["daily_interest_rate"] or 0) >= 1.0]
+    no_inv = [{"sym": s, "cooldown_sec": v.get("noinv_remaining_sec")} for s, v in sm.items()
+              if v.get("no_inventory")]
+    repayhold = [{"sym": s, "reason": v.get("borrow_cap_reason")} for s, v in sm.items() if v.get("repayhold")]
+    debt_syms = {s: float(v.get("borrowed") or 0) for s, v in sm.items() if float(v.get("borrowed") or 0) > 0}
+    pos_syms = {str(p.get("symbol") or "").replace("USDT", ""): p for p in positions
+                if p.get("status") not in ("CLOSED", "FAILED")}
+    naked_debt = [{"sym": s, "borrowed": b} for s, b in debt_syms.items()
+                  if s not in pos_syms and s not in ("USDT", "BNB")]
+    lights = [
+        {"k": "借息尖峰", "n": len(hi_interest), "detail": hi_interest[:5], "note": "日息≥1%/d"},
+        {"k": "可借归零(-3045)", "n": len(no_inv), "detail": no_inv[:5], "note": "冷却中"},
+        {"k": "债务>回购", "n": None, "detail": [], "note": "N/A(回购深度源待接)"},
+        {"k": "卖未对冲", "n": None, "detail": [], "note": "N/A(单腿判定在 risk-ledger R7/R11)"},
+        {"k": "裸债P0", "n": len(naked_debt), "detail": naked_debt[:5], "note": "有借无仓(意图账口径)"},
+        {"k": "还币失败/闸", "n": len(repayhold), "detail": repayhold[:5], "note": "repayhold"},
+        {"k": "主子划转异常", "n": None, "detail": [], "note": "N/A(transfer事实源待接)"},
+    ]
+    rows = [{"symbol": p.get("symbol"), "status": p.get("status"),
+             "sub": p.get("account_note") or p.get("sub_account") or "",
+             "borrowed": p.get("borrowed_qty") or p.get("borrow_qty"),
+             "spot_sell": p.get("spot_sell_qty"), "spot_buy": p.get("spot_buy_qty"),
+             "futures_long": p.get("futures_long_qty"),
+             "opened_at": str(p.get("created_at") or p.get("opened_at") or "")[:16]}
+            for p in positions]
+    return {"ts": snap.get("ts") or panel.get("ts"), "rows": rows, "lights": lights,
+            "pushed": panel.get("pushed") or (panel.get("pushed_symbols") or []),
+            "borrowable_top": sorted(
+                [{"sym": s, "max_borrowable": v.get("max_borrowable"),
+                  "rate": v.get("daily_interest_rate")} for s, v in sm.items()
+                 if v.get("max_borrowable") not in (None, "", 0, "0")],
+                key=lambda x: float(x["max_borrowable"] or 0), reverse=True)[:12]}
+
+
+@router.get("/c3/brief")
+async def c3_brief(symbol: str, _who=Depends(require_viewer)):
+    """C3 人工推送·系统补数九宫格(qI0s6):逐项真数据,缺=N/A。经济闸/风险闸在此预判展示,
+    权威判定仍在 coin 引擎(推送后 coin 规则/黑名单/借币闸原样生效)。"""
+    sym = symbol.upper().replace("USDT", "")
+    panel = await ds.get_json("dcm:coin:panel") or {}
+    pol = await ds.get_json("dcm:risk:policy") or {}
+    sm = {}
+    for _uid, bal in (panel.get("balances") or {}).items():
+        if not isinstance(bal, dict):
+            continue
+        hit = (bal.get("symbol_margin") or {}).get(sym)
+        if isinstance(hit, dict):
+            sm = dict(hit)
+            break
+    if sm.get("daily_interest_rate") in (None, "") and sym in (panel.get("interest_rates") or {}):
+        sm["daily_interest_rate"] = (panel.get("interest_rates") or {}).get(sym)
+    spreads = panel.get("spreads") or {}
+    sp = spreads.get(sym + "USDT") or spreads.get(sym) or {}
+    if not isinstance(sp, dict):
+        sp = {"value": sp}
+    bl = {str(b.get("symbol", "")).upper() for b in (panel.get("blacklist") or [])}
+    rules = panel.get("rules") or {}
+    vb = ((pol.get("venues") or {}).get("binance") or {})
+    grid = {
+        "spread": sp if sp else None,
+        "daily_interest_rate": sm.get("daily_interest_rate"),
+        "max_borrowable": sm.get("max_borrowable"),
+        "borrow_limit": sm.get("borrow_limit"),
+        "no_inventory": bool(sm.get("no_inventory")),
+        "noinv_remaining_sec": sm.get("noinv_remaining_sec"),
+        "repayhold": bool(sm.get("repayhold")),
+        "blacklist_hit": (sym + "USDT") in bl or sym in bl,
+        "order_amount": rules.get("order_amount"),
+        "policy_mode": vb.get("mode", "N/A"),
+        "policy_can_open": bool((vb.get("capabilities") or {}).get("CAN_OPEN")),
+    }
+    gates = [
+        {"k": "人工推送", "ok": True, "note": "案件登记,不进命令队列不触发借币"},
+        {"k": "系统补数", "ok": bool(sm or sp), "note": "面板九宫格" if (sm or sp) else "面板无此币数据"},
+        {"k": "经济闸", "ok": bool(sp), "note": f"点差快照 {sp}" if sp else "无点差数据=不判"},
+        {"k": "风险闸", "ok": grid["policy_can_open"] and not grid["blacklist_hit"] and not grid["no_inventory"],
+         "note": f"policy={grid['policy_mode']} 黑名单={'命中' if grid['blacklist_hit'] else '无'} 可借={'归零' if grid['no_inventory'] else 'ok'}"},
+        {"k": "DRY_RUN", "ok": None, "note": "N/A(提案链下批)"},
+        {"k": "操作员确认", "ok": None, "note": "确认后走既有 push_symbol(coin 状态机权威)"},
+        {"k": "PositionIntent", "ok": None, "note": "coin 引擎生成"},
+    ]
+    return {"symbol": sym + "USDT", "grid": grid, "gates": gates}
