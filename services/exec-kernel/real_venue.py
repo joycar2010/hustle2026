@@ -9,6 +9,8 @@
 import base64
 import hashlib
 import hmac
+import json
+import math
 import os
 import time
 from urllib.parse import urlencode
@@ -21,6 +23,45 @@ FILLED, ACK, PARTIAL, NOTFOUND, REJECT, TIMEOUT = \
 
 BINANCE_FAPI = "https://fapi.binance.com"
 BINANCE_SPOT = "https://api.binance.com"
+
+
+class VenueError(Exception):
+    pass
+
+
+def venue_sym(venue: str, sym: str) -> str:
+    """dcm 符号(BASEUSDT)→ 各所格式:gate=BASE_USDT / okx=BASE-USDT-SWAP / HL=BASE;其余原样。"""
+    if not sym.endswith("USDT"):
+        return sym
+    base = sym[:-4]
+    return {"gate": base + "_USDT", "okx": base + "-USDT-SWAP", "hyperliquid": base}.get(venue, sym)
+
+
+def _env_armed(armed, arm_symbols):
+    """armed/arm_symbols 构造覆盖(manager 按 symbol 精细控制),否则回落 env。"""
+    a = (os.environ.get("DCM_EXEC_ARMED", "false").lower() == "true") if armed is None else bool(armed)
+    s = ({x.strip() for x in os.environ.get("DCM_EXEC_ARM_SYMBOLS", "").split(",") if x.strip()}
+         if arm_symbols is None else set(arm_symbols))
+    return a, s
+
+
+class _GatedPos:
+    """公共件:下单硬门控 + all_positions→get_position 派生(单币仓)。"""
+    armed = False
+    arm_symbols = frozenset()
+
+    def _gate(self, cid, sym):
+        if not self.armed:
+            raise PermissionError(f"exec 未武装(DCM_EXEC_ARMED!=true),拒绝下单 {cid}")
+        if sym not in self.arm_symbols:
+            raise PermissionError(f"{sym} 不在武装白名单 {sorted(self.arm_symbols)},拒绝下单 {cid}")
+
+    async def get_position(self, symbol: str) -> dict:
+        r = await self.all_positions()
+        if not r.get("ok"):
+            return {"ok": False, "err": r.get("err")}
+        amt = float(r["positions"].get(symbol, 0.0))
+        return {"ok": True, "symbol": symbol, "amt": amt, "flat": abs(amt) < 1e-12}
 
 
 class BinanceRealVenue:
@@ -148,12 +189,70 @@ class BinanceRealVenue:
             raise PermissionError("exec 未武装,拒绝撤单")
 
 
-class BybitRealVenue:
-    """bybit 永续读适配器(v5 签名:HMAC-SHA256(ts+key+recv+query))。读路径。"""
+class BybitRealVenue(_GatedPos):
+    """bybit 永续读+门控下单(v5 HMAC-SHA256)。GET 签 ts+key+recv+query;POST 签 ts+key+recv+body。"""
 
-    def __init__(self, key="", secret=""):
+    def __init__(self, key="", secret="", armed=None, arm_symbols=None):
         self.key = key or os.environ.get("BYBIT_KEY", "")
         self.secret = secret or os.environ.get("BYBIT_SECRET", "")
+        self.armed, self.arm_symbols = _env_armed(armed, arm_symbols)
+
+    @staticmethod
+    def _coid(cid):
+        return cid.replace(":", "-")[:36]
+
+    async def _get_signed(self, path, qs):
+        ts = str(int(time.time() * 1000)); recv = "5000"
+        sign = hmac.new(self.secret.encode(), (ts + self.key + recv + qs).encode(), hashlib.sha256).hexdigest()
+        async with httpx.AsyncClient(timeout=15) as cli:
+            r = await cli.get(f"https://api.bybit.com{path}?{qs}",
+                              headers={"X-BAPI-API-KEY": self.key, "X-BAPI-TIMESTAMP": ts,
+                                       "X-BAPI-RECV-WINDOW": recv, "X-BAPI-SIGN": sign})
+        return r.json()
+
+    async def query(self, cid, leg=None):
+        """按 orderLinkId 查单 → exec_core dict。⚠️市价单成交后 realtime 可能查不到(挪 history),
+        必须兜底查 order/history,否则误判 NOTFOUND → 重下单=双仓。"""
+        qs = f"category=linear&orderLinkId={self._coid(cid)}"
+        try:
+            d = await self._get_signed("/v5/order/realtime", qs)
+            lst = (d.get("result", {}) or {}).get("list") or []
+            if not lst:
+                d = await self._get_signed("/v5/order/history", qs)
+                lst = (d.get("result", {}) or {}).get("list") or []
+        except Exception:  # noqa: BLE001
+            return {"status": TIMEOUT, "filled": 0}
+        if not lst:
+            return {"status": NOTFOUND, "filled": 0}
+        st = lst[0].get("orderStatus", "")
+        m = {"Filled": FILLED, "New": ACK, "PartiallyFilled": PARTIAL,
+             "Created": ACK, "Untriggered": ACK}.get(st, NOTFOUND)
+        return {"status": m, "filled": float(lst[0].get("cumExecQty") or 0)}
+
+    async def place(self, cid, leg):
+        """市价单(v5)。硬门控。side Buy/Sell;reduceOnly 平仓。orderLinkId=确定性 cid(交易所端幂等)。"""
+        sym = leg.get("symbol", "")
+        self._gate(cid, sym)
+        side = "Buy" if str(leg["side"]).upper() == "BUY" else "Sell"
+        body = {"category": "linear", "symbol": sym, "side": side, "orderType": "Market",
+                "qty": str(leg["qty"]), "orderLinkId": self._coid(cid)}
+        if leg.get("reduce_only"):
+            body["reduceOnly"] = True
+        bj = json.dumps(body)
+        ts = str(int(time.time() * 1000)); recv = "5000"
+        sign = hmac.new(self.secret.encode(), (ts + self.key + recv + bj).encode(), hashlib.sha256).hexdigest()
+        try:
+            async with httpx.AsyncClient(timeout=15) as cli:
+                r = await cli.post("https://api.bybit.com/v5/order/create", content=bj,
+                                   headers={"X-BAPI-API-KEY": self.key, "X-BAPI-TIMESTAMP": ts,
+                                            "X-BAPI-RECV-WINDOW": recv, "X-BAPI-SIGN": sign,
+                                            "Content-Type": "application/json"})
+            d = r.json()
+        except Exception as e:  # noqa: BLE001
+            return {"status": TIMEOUT, "filled": 0, "err": repr(e)[:120]}
+        if d.get("retCode") != 0:
+            return {"status": REJECT, "filled": 0, "err": f"{d.get('retCode')}: {d.get('retMsg')}"}
+        return {"status": ACK, "filled": 0, "venue_order_id": (d.get("result") or {}).get("orderId", "")}
 
     async def all_positions(self) -> dict:
         ts = str(int(time.time() * 1000)); recv = "5000"
@@ -177,20 +276,89 @@ class BybitRealVenue:
         return {"ok": True, "positions": out}
 
 
-class GateRealVenue:
-    """gate USDT 永续读适配器(v4 签名:HMAC-SHA512 五段)。size 单位=张,×乘数=base。"""
+class GateRealVenue(_GatedPos):
+    """gate USDT 永续读+门控下单(v4 签名:HMAC-SHA512 五段)。size 单位=张(带符号),×乘数=base。
+    符号=BASE_USDT;text=t-前缀确定性客户单号(30分钟内可按 text 查单)。"""
 
-    def __init__(self, key="", secret=""):
+    def __init__(self, key="", secret="", armed=None, arm_symbols=None):
         self.key = key or os.environ.get("GATE_KEY", "")
         self.secret = secret or os.environ.get("GATE_SECRET", "")
+        self.armed, self.arm_symbols = _env_armed(armed, arm_symbols)
         self._mult = None
 
-    def _sign(self, method, path, query=""):
+    def _sign(self, method, path, query="", body=b""):
         ts = str(int(time.time()))
-        body_hash = hashlib.sha512(b"").hexdigest()
+        body_hash = hashlib.sha512(body).hexdigest()
         s = f"{method}\n{path}\n{query}\n{body_hash}\n{ts}"
         sign = hmac.new(self.secret.encode(), s.encode(), hashlib.sha512).hexdigest()
-        return {"KEY": self.key, "Timestamp": ts, "SIGN": sign, "Accept": "application/json"}
+        h = {"KEY": self.key, "Timestamp": ts, "SIGN": sign, "Accept": "application/json"}
+        if body:
+            h["Content-Type"] = "application/json"
+        return h
+
+    @staticmethod
+    def _coid(cid):
+        # gate text:须 t- 前缀,字符 [0-9a-zA-Z_.-],总长≤30
+        return "t-" + cid.replace(":", "-")[:28]
+
+    async def mult_of(self, symbol_gate: str) -> float:
+        async with httpx.AsyncClient(timeout=15) as cli:
+            return (await self._mults(cli)).get(symbol_gate, 1) or 1
+
+    async def query(self, cid, leg=None):
+        """GET /futures/usdt/orders/{text}(30分钟内支持按 t- text 查)。filled 单位=base。"""
+        coid = self._coid(cid)
+        path = f"/api/v4/futures/usdt/orders/{coid}"
+        try:
+            async with httpx.AsyncClient(timeout=15) as cli:
+                r = await cli.get(f"https://api.gateio.ws{path}", headers=self._sign("GET", path))
+                if r.status_code == 404:
+                    return {"status": NOTFOUND, "filled": 0}
+                d = r.json()
+                mult = (await self._mults(cli)).get(d.get("contract", ""), 1) or 1
+        except Exception:  # noqa: BLE001
+            return {"status": TIMEOUT, "filled": 0}
+        if not isinstance(d, dict) or "status" not in d:
+            return {"status": NOTFOUND, "filled": 0}
+        size = abs(float(d.get("size") or 0)); left = abs(float(d.get("left") or 0))
+        filled = (size - left) * mult
+        if d["status"] == "open":
+            return {"status": ACK if filled <= 1e-12 else PARTIAL, "filled": filled}
+        # finished:ioc 市价单可能零成交(finish_as=ioc/cancelled)→ NOTFOUND(可安全重下)
+        if filled <= 1e-12:
+            return {"status": NOTFOUND, "filled": 0}
+        return {"status": FILLED if left <= 1e-12 else PARTIAL, "filled": filled}
+
+    async def place(self, cid, leg):
+        """市价单(price=0,tif=ioc)。leg.qty 单位=base → 换算张(带符号:BUY+ SELL-)。硬门控。"""
+        sym = leg.get("symbol", "")
+        self._gate(cid, sym)
+        async with httpx.AsyncClient(timeout=15) as cli:
+            mult = (await self._mults(cli)).get(sym, 0) or 0
+        if mult <= 0:
+            return {"status": REJECT, "filled": 0, "err": f"{sym} 无 quanto_multiplier(合约不存在?)"}
+        n = int(round(float(leg["qty"]) / mult))
+        if n <= 0:
+            return {"status": REJECT, "filled": 0, "err": f"qty {leg['qty']} 不足 1 张(乘数={mult})"}
+        size = n if str(leg["side"]).upper() == "BUY" else -n
+        body = {"contract": sym, "size": size, "price": "0", "tif": "ioc", "text": self._coid(cid)}
+        if leg.get("reduce_only"):
+            body["reduce_only"] = True
+        bj = json.dumps(body).encode()
+        path = "/api/v4/futures/usdt/orders"
+        try:
+            async with httpx.AsyncClient(timeout=15) as cli:
+                r = await cli.post(f"https://api.gateio.ws{path}", content=bj,
+                                   headers=self._sign("POST", path, body=bj))
+            d = r.json()
+        except Exception as e:  # noqa: BLE001
+            return {"status": TIMEOUT, "filled": 0, "err": repr(e)[:120]}
+        if r.status_code not in (200, 201) or not isinstance(d, dict) or d.get("label"):
+            return {"status": REJECT, "filled": 0, "err": f"http {r.status_code}: {str(d)[:150]}"}
+        left = abs(float(d.get("left") or 0)); filled = (abs(float(d.get("size") or 0)) - left) * mult
+        if d.get("status") == "finished" and left <= 1e-12 and filled > 0:
+            return {"status": FILLED, "filled": filled, "venue_order_id": str(d.get("id") or "")}
+        return {"status": ACK, "filled": filled, "venue_order_id": str(d.get("id") or "")}
 
     async def _mults(self, cli):
         if self._mult is None:
@@ -223,13 +391,72 @@ class GateRealVenue:
         return {"ok": True, "positions": out}
 
 
-class BitgetRealVenue:
-    """bitget USDT 永续读适配器(base64(HMAC-SHA256(ts+method+path+body)))。total=base。"""
+class BitgetRealVenue(_GatedPos):
+    """bitget USDT 永续读+门控下单(base64(HMAC-SHA256(ts+method+path+body)))。size 单位=base。"""
 
-    def __init__(self, key="", secret="", passphrase=""):
+    def __init__(self, key="", secret="", passphrase="", armed=None, arm_symbols=None):
         self.key = key or os.environ.get("BITGET_KEY", "")
         self.secret = secret or os.environ.get("BITGET_SECRET", "")
         self.passphrase = passphrase or os.environ.get("BITGET_PASSPHRASE", "")
+        self.armed, self.arm_symbols = _env_armed(armed, arm_symbols)
+
+    def _hdr(self, ts, sign):
+        return {"ACCESS-KEY": self.key, "ACCESS-SIGN": sign, "ACCESS-TIMESTAMP": ts,
+                "ACCESS-PASSPHRASE": self.passphrase, "locale": "en-US",
+                "Content-Type": "application/json"}
+
+    @staticmethod
+    def _coid(cid):
+        return cid.replace(":", "-")[:60]
+
+    async def query(self, cid, leg=None):
+        """GET /api/v2/mix/order/detail?clientOid=。无此单(40109等)=NOTFOUND。filled=baseVolume。"""
+        sym = (leg or {}).get("symbol", "")
+        ts = str(int(time.time() * 1000))
+        path = "/api/v2/mix/order/detail"
+        query = f"symbol={sym}&productType=USDT-FUTURES&clientOid={self._coid(cid)}"
+        prehash = ts + "GET" + path + "?" + query
+        sign = base64.b64encode(hmac.new(self.secret.encode(), prehash.encode(), hashlib.sha256).digest()).decode()
+        try:
+            async with httpx.AsyncClient(timeout=15) as cli:
+                r = await cli.get(f"https://api.bitget.com{path}?{query}", headers=self._hdr(ts, sign))
+            d = r.json()
+        except Exception:  # noqa: BLE001
+            return {"status": TIMEOUT, "filled": 0}
+        if str(d.get("code")) != "00000" or not d.get("data"):
+            return {"status": NOTFOUND, "filled": 0}
+        o = d["data"]
+        filled = float(o.get("baseVolume") or 0)
+        st = str(o.get("state") or o.get("status") or "")
+        m = {"filled": FILLED, "live": ACK, "new": ACK, "partially_filled": PARTIAL}.get(st)
+        if m is None:
+            m = PARTIAL if filled > 1e-12 else NOTFOUND   # canceled 半成交如实报
+        return {"status": m, "filled": filled}
+
+    async def place(self, cid, leg):
+        """市价单(v2 place-order,单向持仓 crossed)。size 单位=base。硬门控。clientOid 幂等。"""
+        sym = leg.get("symbol", "")
+        self._gate(cid, sym)
+        body = {"symbol": sym, "productType": "USDT-FUTURES", "marginMode": "crossed",
+                "marginCoin": "USDT", "size": str(leg["qty"]),
+                "side": "buy" if str(leg["side"]).upper() == "BUY" else "sell",
+                "orderType": "market", "clientOid": self._coid(cid)}
+        if leg.get("reduce_only"):
+            body["reduceOnly"] = "YES"
+        bj = json.dumps(body)
+        ts = str(int(time.time() * 1000))
+        path = "/api/v2/mix/order/place-order"
+        prehash = ts + "POST" + path + bj
+        sign = base64.b64encode(hmac.new(self.secret.encode(), prehash.encode(), hashlib.sha256).digest()).decode()
+        try:
+            async with httpx.AsyncClient(timeout=15) as cli:
+                r = await cli.post(f"https://api.bitget.com{path}", content=bj, headers=self._hdr(ts, sign))
+            d = r.json()
+        except Exception as e:  # noqa: BLE001
+            return {"status": TIMEOUT, "filled": 0, "err": repr(e)[:120]}
+        if str(d.get("code")) != "00000":
+            return {"status": REJECT, "filled": 0, "err": f"{d.get('code')}: {d.get('msg')}"}
+        return {"status": ACK, "filled": 0, "venue_order_id": str((d.get("data") or {}).get("orderId") or "")}
 
     async def all_positions(self) -> dict:
         ts = str(int(time.time() * 1000))
@@ -239,10 +466,7 @@ class BitgetRealVenue:
         sign = base64.b64encode(hmac.new(self.secret.encode(), prehash.encode(), hashlib.sha256).digest()).decode()
         try:
             async with httpx.AsyncClient(timeout=15) as cli:
-                r = await cli.get(f"https://api.bitget.com{path}?{query}",
-                                  headers={"ACCESS-KEY": self.key, "ACCESS-SIGN": sign,
-                                           "ACCESS-TIMESTAMP": ts, "ACCESS-PASSPHRASE": self.passphrase,
-                                           "locale": "en-US", "Content-Type": "application/json"})
+                r = await cli.get(f"https://api.bitget.com{path}?{query}", headers=self._hdr(ts, sign))
             d = r.json()
         except Exception as e:  # noqa: BLE001
             return {"ok": False, "err": repr(e)[:120]}
@@ -262,20 +486,27 @@ def venue_for(name: str):
             "hyperliquid": HyperliquidRealVenue}.get(name, lambda: None)()
 
 
-class OkxRealVenue:
-    """okx 永续读适配器(base64(HMAC-SHA256(ts+method+path)))。pos 张×ctVal=base;符号 BASE-USDT-SWAP。"""
+class OkxRealVenue(_GatedPos):
+    """okx 永续读+门控下单(base64(HMAC-SHA256(ts+method+path+body)))。sz 单位=张(×ctVal=base);
+    符号 BASE-USDT-SWAP;clOrdId 只允许字母数字→sha1 归一(place/query 逐字节一致)。"""
 
-    def __init__(self, key="", secret="", passphrase=""):
+    def __init__(self, key="", secret="", passphrase="", armed=None, arm_symbols=None):
         self.key = key or os.environ.get("OKX_KEY", "")
         self.secret = secret or os.environ.get("OKX_SECRET", "")
         self.passphrase = passphrase or os.environ.get("OKX_PASSPHRASE", "")
+        self.armed, self.arm_symbols = _env_armed(armed, arm_symbols)
         self._ctval = None
+        self._lot = {}
 
-    def _hdr(self, method, path):
+    def _hdr(self, method, path, body=""):
         ts = time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime())
-        sig = base64.b64encode(hmac.new(self.secret.encode(), (ts + method + path).encode(), hashlib.sha256).digest()).decode()
-        return {"OK-ACCESS-KEY": self.key, "OK-ACCESS-SIGN": sig,
-                "OK-ACCESS-TIMESTAMP": ts, "OK-ACCESS-PASSPHRASE": self.passphrase}
+        sig = base64.b64encode(hmac.new(self.secret.encode(), (ts + method + path + body).encode(),
+                                        hashlib.sha256).digest()).decode()
+        h = {"OK-ACCESS-KEY": self.key, "OK-ACCESS-SIGN": sig,
+             "OK-ACCESS-TIMESTAMP": ts, "OK-ACCESS-PASSPHRASE": self.passphrase}
+        if body:
+            h["Content-Type"] = "application/json"
+        return h
 
     async def _ctvals(self, cli):
         if self._ctval is None:
@@ -284,9 +515,66 @@ class OkxRealVenue:
                 d = (await cli.get("https://www.okx.com/api/v5/public/instruments?instType=SWAP", timeout=15)).json()
                 for c in d.get("data", []):
                     self._ctval[c["instId"]] = float(c.get("ctVal") or 1) or 1
+                    self._lot[c["instId"]] = float(c.get("lotSz") or 1) or 1
             except Exception:  # noqa: BLE001
                 pass
         return self._ctval
+
+    @staticmethod
+    def _coid(cid):
+        return "m" + hashlib.sha1(cid.encode()).hexdigest()[:30]
+
+    async def query(self, cid, leg=None):
+        """GET /api/v5/trade/order?instId&clOrdId(覆盖 live+近7天成交)。filled=accFillSz×ctVal。"""
+        inst = (leg or {}).get("symbol", "")
+        path = f"/api/v5/trade/order?instId={inst}&clOrdId={self._coid(cid)}"
+        try:
+            async with httpx.AsyncClient(timeout=15) as cli:
+                r = await cli.get("https://www.okx.com" + path, headers=self._hdr("GET", path))
+                d = r.json()
+                ctv = (await self._ctvals(cli)).get(inst, 1)
+        except Exception:  # noqa: BLE001
+            return {"status": TIMEOUT, "filled": 0}
+        if d.get("code") != "0" or not d.get("data"):
+            return {"status": NOTFOUND, "filled": 0}   # 51603 无此单 = 未下到
+        o = d["data"][0]
+        filled = float(o.get("accFillSz") or 0) * ctv
+        st = o.get("state", "")
+        m = {"filled": FILLED, "live": ACK, "partially_filled": PARTIAL}.get(st)
+        if m is None:
+            m = PARTIAL if filled > 1e-12 else NOTFOUND   # canceled 半成交如实报
+        return {"status": m, "filled": filled}
+
+    async def place(self, cid, leg):
+        """市价单(tdMode=cross)。leg.qty=base → sz 张(÷ctVal,落到 lotSz 步长)。硬门控。"""
+        inst = leg.get("symbol", "")
+        self._gate(cid, inst)
+        async with httpx.AsyncClient(timeout=15) as cli:
+            ctv = (await self._ctvals(cli)).get(inst, 0)
+        lot = self._lot.get(inst, 1) or 1
+        if not ctv:
+            return {"status": REJECT, "filled": 0, "err": f"{inst} 无 ctVal(合约不存在?)"}
+        sz = math.floor(float(leg["qty"]) / ctv / lot) * lot
+        if sz <= 0:
+            return {"status": REJECT, "filled": 0, "err": f"qty {leg['qty']} 不足最小张数(ctVal={ctv},lotSz={lot})"}
+        body = {"instId": inst, "tdMode": "cross", "side": "buy" if str(leg["side"]).upper() == "BUY" else "sell",
+                "ordType": "market", "sz": f"{sz:.8f}".rstrip("0").rstrip("."), "clOrdId": self._coid(cid)}
+        if leg.get("reduce_only"):
+            body["reduceOnly"] = True
+        bj = json.dumps(body)
+        path = "/api/v5/trade/order"
+        try:
+            async with httpx.AsyncClient(timeout=15) as cli:
+                r = await cli.post("https://www.okx.com" + path, content=bj,
+                                   headers=self._hdr("POST", path, bj))
+            d = r.json()
+        except Exception as e:  # noqa: BLE001
+            return {"status": TIMEOUT, "filled": 0, "err": repr(e)[:120]}
+        data0 = (d.get("data") or [{}])[0]
+        if d.get("code") != "0" or str(data0.get("sCode", "0")) not in ("0",):
+            return {"status": REJECT, "filled": 0,
+                    "err": f"{d.get('code')}/{data0.get('sCode')}: {data0.get('sMsg') or d.get('msg')}"}
+        return {"status": ACK, "filled": 0, "venue_order_id": str(data0.get("ordId") or "")}
 
     async def all_positions(self) -> dict:
         path = "/api/v5/account/positions?instType=SWAP"
@@ -332,6 +620,41 @@ class HyperliquidRealVenue:
         return {"ok": True, "positions": out}
 
 
-class _SpotHelper:
-    """现货余额读(C1 现货腿平仓精确定量;避免手续费残留超卖)。挂到 BinanceRealVenue 使用。"""
-    pass
+def venue_armed(name: str, armed: bool, arm_symbols):
+    """带武装门控构造适配器(manager/canary 按 pair 精细控制)。HL 只读无写路径。"""
+    cls = {"binance": BinanceRealVenue, "bybit": BybitRealVenue, "gate": GateRealVenue,
+           "bitget": BitgetRealVenue, "okx": OkxRealVenue}.get(name)
+    if cls is None:
+        raise VenueError(f"{name} 无可武装适配器")
+    return cls(armed=armed, arm_symbols=arm_symbols)
+
+
+class MultiVenue:
+    """多所分派器:exec_core 跨所驱动——按 leg['venue'] 路由 place/query 到对应适配器。
+    C2 跨所对(gate 多 / bybit 空 等)用它,exec_core 无感。leg 必须带 venue 字段。"""
+
+    def __init__(self, venues: dict):
+        self.venues = venues   # {venue_name: adapter}
+
+    def _pick(self, leg):
+        v = self.venues.get((leg or {}).get("venue"))
+        if v is None:
+            raise VenueError(f"无 {(leg or {}).get('venue')} 适配器")
+        return v
+
+    async def place(self, cid, leg):
+        return await self._pick(leg).place(cid, leg)
+
+    async def query(self, cid, leg=None):
+        return await self._pick(leg).query(cid, leg)
+
+    async def cancel(self, cid, leg=None):
+        v = self._pick(leg)
+        if hasattr(v, "cancel"):
+            return await v.cancel(cid)
+
+    async def get_position(self, venue: str, symbol: str) -> dict:
+        v = self.venues.get(venue)
+        if v is None:
+            return {"ok": False, "err": f"无 {venue} 适配器"}
+        return await v.get_position(symbol)
