@@ -17,6 +17,7 @@ const routes = [
     { path:'mix/slots', name:'mix-slots', meta:{title:'坑位工作台·C3.S',icon:'Grid',group:'总控',ord:0.15}, component:()=>import('../views/mix/MixSlots.vue') },
     { path:'mix/c3', name:'mix-c3', meta:{title:'C3工作台',icon:'Operation',group:'总控',ord:0.16}, component:()=>import('../views/mix/MixC3.vue') },
     { path:'mix/aicoin', name:'mix-aicoin', meta:{title:'行情研判·AiCoin',icon:'DataAnalysis',group:'总控',ord:0.37}, component:()=>import('../views/mix/MixAiCoin.vue') },
+    { path:'mix/maintenance', name:'mix-maintenance', meta:{title:'网站维护排空',icon:'Tools',group:'系统设置',ord:1.5}, component:()=>import('../views/mix/MixMaintenance.vue') },
     { path:'mix/venuerisk', name:'mix-venuerisk', meta:{title:'平台风险',icon:'Warning',group:'总控',ord:0.35}, component:()=>import('../views/mix/MixVenueRisk.vue') },
     { path:'mix/report', name:'mix-report', meta:{title:'资金收益',icon:'TrendCharts',group:'总控',ord:0.5}, component:()=>import('../views/mix/MixReport.vue') },
     // ===== 系统设置(Mix 版:qh 同名模块已由下列页面替代) =====

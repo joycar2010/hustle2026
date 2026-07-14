@@ -1,0 +1,1560 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC%3Awght%40100..900&family=Roboto+Mono%3Awght%40100..700&display=swap"
+      rel="stylesheet"
+    />
+
+    <style>
+      *, ::before, ::after {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <div
+      data-pencil-name="客户端·桌面·资产总览(CORE_POOL)"
+      style="align-items: flex-start; background-color: #F5F6F8; box-sizing: border-box; display: flex; flex-direction: column; gap: 0px; height: 1024px; justify-content: flex-start; overflow: hidden; width: 1440px"
+    >
+      <div
+        data-pencil-name="顶栏"
+        style="align-items: center; background-color: #FFFFFF; border-color: #E5E8EC; border-style: solid; border-width: 0px 0px 1px 0px; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 0px; height: 56px; justify-content: space-between; padding: 0px 20px; width: 100%"
+      >
+        <div
+          data-pencil-name="左"
+          style="align-items: center; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 12px; height: fit-content; justify-content: flex-start; width: fit-content"
+        >
+          <div
+            data-pencil-name="logo"
+            style="align-items: center; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 8px; height: fit-content; justify-content: flex-start; width: fit-content"
+          >
+            <div
+              data-pencil-name="标"
+              style="align-items: center; background-color: #122B4E; border-radius: 6px; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 0px; height: 26px; justify-content: center; width: 26px"
+            >
+              <div
+                data-pencil-name="字"
+                style='box-sizing: border-box; color: #FFFFFF; font-family: "Roboto Mono", system-ui, sans-serif; font-size: 14px; font-style: normal; font-weight: 700; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+              >
+                H
+              </div>
+            </div>
+            <div
+              data-pencil-name="名"
+              style='box-sizing: border-box; color: #17202B; font-family: "Noto Sans SC", system-ui, sans-serif; font-size: 14px; font-style: normal; font-weight: 700; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+            >
+              HustleCoin · 客户核验中心
+            </div>
+          </div>
+          <div
+            data-pencil-name="只读"
+            style="align-items: flex-start; background-color: #F2F4F7; border-radius: 4px; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 0px; height: fit-content; justify-content: flex-start; padding: 2px 8px; width: fit-content"
+          >
+            <div
+              data-pencil-name="字"
+              style='box-sizing: border-box; color: #55606E; font-family: "Noto Sans SC", system-ui, sans-serif; font-size: 11px; font-style: normal; font-weight: 700; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+            >
+              只读
+            </div>
+          </div>
+        </div>
+        <div
+          data-pencil-name="右"
+          style="align-items: center; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 12px; height: fit-content; justify-content: flex-start; width: fit-content"
+        >
+          <div
+            data-pencil-name="账户选择器"
+            style="align-items: center; background-color: #FFFFFF; border-radius: 6px; border: 1px solid #E5E8EC; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 8px; height: fit-content; justify-content: flex-start; padding: 6px 12px; width: fit-content"
+          >
+            <div
+              data-pencil-name="型"
+              style="align-items: flex-start; background-color: #EFF4FF; border-radius: 4px; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 0px; height: fit-content; justify-content: flex-start; padding: 2px 7px; width: fit-content"
+            >
+              <div
+                data-pencil-name="字"
+                style='box-sizing: border-box; color: #175CD3; font-family: "Noto Sans SC", system-ui, sans-serif; font-size: 11px; font-style: normal; font-weight: 700; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+              >
+                CORE_POOL 份额账户
+              </div>
+            </div>
+            <div
+              data-pencil-name="名"
+              style='box-sizing: border-box; color: #17202B; font-family: "Noto Sans SC", system-ui, sans-serif; font-size: 12.5px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+            >
+              王** · IN-000482
+            </div>
+            <svg
+              data-pencil-name="i"
+              data-icon-name="chevron-down"
+              data-icon-set="lucide"
+              viewBox="0 0 13.99993896484375 14"
+              preserveAspectRatio="xMidYMid meet"
+              xmlns="http://www.w3.org/2000/svg"
+              style="box-sizing: border-box; flex-shrink: 0; height: 14px; width: 14px"
+            >
+              <path
+                d="M3.34619 4.68945q-0.25293 0.08545-0.37939 0.30762-0.04102 0.08545-0.04102 0.25293 0 0.16748 0.04785 0.25977 0.05127 0.08887 1.8628 1.9038 1.81494 1.81152 1.9038 1.8628 0.09229 0.04785 0.25977 0.04785 0.16748 0 0.25635-0.04785 0.09229-0.05127 1.90381-1.8628 1.81494-1.81494 1.86279-1.9038 0.05127-0.09229 0.05127-0.25977 0-0.16748-0.04102-0.25293-0.09912-0.16748-0.28027-0.2666-0.05811-0.02734-0.09912-0.04102-0.04102-0.01367-0.15381-0.01367-0.11279 0-0.15381 0.01367-0.04101 0.01367-0.11279 0.04102-0.09912 0.05811-1.66455 1.62695l-1.56885 1.56543-2.82666-2.81299q-0.31104-0.29395-0.42041-0.37939-0.08545-0.05469-0.19824-0.05469l-0.02735 0q-0.14014 0-0.18115 0.01367z"
+                fill="#8B95A3"
+              ></path>
+            </svg>
+          </div>
+          <svg
+            data-pencil-name="铃"
+            data-icon-name="bell"
+            data-icon-set="lucide"
+            viewBox="0 0 13.99993896484375 14"
+            preserveAspectRatio="xMidYMid meet"
+            xmlns="http://www.w3.org/2000/svg"
+            style="box-sizing: border-box; flex-shrink: 0; height: 17px; width: 17px"
+          >
+            <path
+              d="M6.76074 0.60156q-0.62891 0.02734-1.22363 0.25293-0.59473 0.22217-1.0835 0.62891-0.63232 0.50586-1.03222 1.22705-0.39648 0.72119-0.48194 1.51758-0.01367 0.16748-0.03418 0.70068-0.02051 0.52979-0.0581 0.86817-0.03418 0.33496-0.12988 0.68359-0.09912 0.43408-0.28028 0.78613-0.14014 0.30762-0.29394 0.51953-0.15381 0.2085-0.50586 0.58448-0.22217 0.25293-0.30762 0.38623-0.08203 0.1333-0.12647 0.31445-0.04102 0.14014-0.02734 0.32471 0.01367 0.18115 0.05469 0.30761 0.1709 0.46143 0.60498 0.66993l0.04101 0.02734q0.09912 0.0581 0.28028 0.07178 0.23584 0.01367 1.04931 0.02734l7.5879 0q0.81348-0.01367 1.04931-0.02734 0.18115-0.01367 0.28027-0.07178l0.04102-0.02734q0.43408-0.2085 0.60498-0.66993 0.04102-0.12646 0.05469-0.30761 0.01367-0.18457-0.02735-0.32471-0.04443-0.18115-0.12988-0.32129-0.08203-0.14014-0.3042-0.37939-0.35205-0.37598-0.50586-0.58448-0.15381-0.21191-0.29394-0.51953-0.16748-0.33496-0.2666-0.69726-0.0957-0.36572-0.14014-0.72803-0.04102-0.36572-0.06836-0.9126-0.01367-0.72803-0.08545-1.04932-0.2085-1.08008-0.93652-1.9038-0.72803-0.82715-1.76367-1.1792-0.7417-0.23584-1.54151-0.19483z m0.68701 1.18946q0.46143 0.07178 0.88184 0.28369 0.42041 0.2085 0.7417 0.55713 0.46143 0.46143 0.67334 1.06298 0.0957 0.25293 0.12988 0.49219 0.0376 0.23584 0.05127 0.7417 0.01367 0.58789 0.06836 1.01514 0.05811 0.42725 0.15723 0.84765 0.16748 0.68359 0.46826 1.2168 0.30078 0.5332 0.84766 1.12109l0.19482 0.19483-9.32422 0 0.19482-0.19483q0.54688-0.58789 0.84766-1.12109 0.30078-0.5332 0.46826-1.2168 0.09912-0.42041 0.15381-0.84765 0.05811-0.42725 0.07861-1.01514 0.02051-0.58789 0.06836-0.875 0.05127-0.28711 0.21192-0.63574 0.16064-0.35205 0.46142-0.68701 0.30078-0.33838 0.63575-0.54688 0.60498-0.36572 1.333-0.42041 0.08203-0.01367 0.31104 0 0.23242 0.01367 0.34521 0.02735z m-1.6372 9.89843q-0.22559 0.08545-0.33155 0.28028-0.10254 0.19482-0.04785 0.42041 0.01367 0.08545 0.11963 0.24609 0.10596 0.16065 0.21875 0.27344 0.50244 0.50244 1.23047 0.50244 0.72803 0 1.23047-0.50244 0.11279-0.11279 0.21875-0.27344 0.10596-0.16064 0.11963-0.24609 0.05469-0.19482-0.0376-0.38282-0.08887-0.19141-0.27002-0.29052-0.08545-0.04102-0.25293-0.04102-0.11279 0-0.15381 0.01367-0.04102 0.01367-0.11279 0.04102-0.09912 0.05811-0.18115 0.15723-0.11279 0.15381-0.17774 0.20849-0.06152 0.05469-0.14697 0.09912-0.08203 0.04102-0.23584 0.04102-0.15381 0-0.23926-0.04102-0.08203-0.04443-0.14697-0.09912-0.06152-0.05469-0.17432-0.20849-0.15381-0.19824-0.43408-0.21192-0.14014 0-0.19482 0.01367z"
+              fill="#55606E"
+            ></path>
+          </svg>
+          <div
+            data-pencil-name="头像"
+            style="align-items: center; background-color: #F2F4F7; border-radius: 6px; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 0px; height: 30px; justify-content: center; width: 30px"
+          >
+            <div
+              data-pencil-name="字"
+              style='box-sizing: border-box; color: #55606E; font-family: "Noto Sans SC", system-ui, sans-serif; font-size: 13px; font-style: normal; font-weight: 700; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+            >
+              王
+            </div>
+          </div>
+        </div>
+      </div>
+      <div
+        data-pencil-name="主区"
+        style="align-items: flex-start; box-sizing: border-box; display: flex; flex-direction: row; flex: 1 1 0; gap: 0px; justify-content: flex-start; width: 100%"
+      >
+        <div
+          data-pencil-name="左导航"
+          style="align-items: flex-start; background-color: #FFFFFF; border-color: #E5E8EC; border-style: solid; border-width: 0px 1px 0px 0px; box-sizing: border-box; display: flex; flex-direction: column; flex-shrink: 0; gap: 2px; height: 100%; justify-content: flex-start; padding: 14px 10px; width: 200px"
+        >
+          <div
+            data-pencil-name="导·资产总览"
+            style="align-items: center; background-color: #EFF4FF; border-radius: 6px; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 9px; height: 38px; justify-content: flex-start; padding: 0px 12px; width: 100%"
+          >
+            <svg
+              data-pencil-name="i"
+              data-icon-name="layout-dashboard"
+              data-icon-set="lucide"
+              viewBox="0 0 13.99993896484375 14"
+              preserveAspectRatio="xMidYMid meet"
+              xmlns="http://www.w3.org/2000/svg"
+              style="box-sizing: border-box; flex-shrink: 0; height: 16px; width: 16px"
+            >
+              <path
+                d="M2.03027 1.20313q-0.22559 0.07178-0.42724 0.23242-0.20166 0.16064-0.30078 0.36914l-0.02735 0.04443q-0.05811 0.10938-0.07177 0.2085-0.02734 0.14014-0.02735 0.56054l0 3.51368q0 0.42041 0.02735 0.56054 0.01367 0.09912 0.07177 0.2085l0.02735 0.04443q0.09912 0.22217 0.30761 0.38282 0.2085 0.16064 0.44776 0.21875 0.11279 0.04102 1.72949 0.03417 1.6167-0.00684 1.74316-0.03417 0.29395-0.07178 0.53321-0.30762 0.12305-0.12646 0.1914-0.23242 0.07178-0.10596 0.11621-0.27344l0.04102-0.12647 0-4.46386-0.04102-0.12647q-0.04443-0.16748-0.11621-0.27344-0.06836-0.10596-0.1914-0.23242-0.15381-0.15381-0.29395-0.22217l-0.01709-0.01367q-0.12305-0.05811-0.22217-0.07177-0.12646-0.02734-0.47509-0.02735l-1.14844 0-1.52783 0q-0.24951 0.01367-0.34864 0.02735z m6.43946-0.00001q-0.28027 0.05811-0.53321 0.30762-0.12305 0.12646-0.19482 0.23242-0.06836 0.10596-0.11279 0.27344l-0.04102 0.12647 0 2.15332 0.04102 0.14013q0.08545 0.22559 0.24609 0.40674 0.16064 0.18115 0.35547 0.28028l0.01709 0.01367q0.13672 0.07178 0.22217 0.08545 0.14014 0.01367 0.48877 0.02734l2.92578-0.01367 0.14013-0.04102q0.2666-0.08545 0.46827-0.28711 0.20508-0.20508 0.29052-0.45459 0.02734-0.08545 0.02735-0.25293l0.01367-0.95361 0-0.86816q0-0.23584-0.02735-0.34864-0.01367-0.07178-0.08544-0.21191l-0.01368-0.01367q-0.09912-0.22217-0.30078-0.37598-0.20166-0.15381-0.44092-0.22559-0.09912-0.02734-0.33496-0.02734l-1.41504 0q-1.62354 0-1.73632 0.02734z m-3.21973 3.16504l0 2.05762-2.92578 0 0-4.10156 2.92578 0 0 2.04394z m6.42578-1.16211l0 0.86817-2.92578 0 0-1.75 2.92578 0 0 0.88183z m-3.20605 3.24707q-0.28027 0.05811-0.53321 0.30762-0.12305 0.12646-0.19482 0.23242-0.06836 0.10596-0.11279 0.27344l-0.04102 0.12647 0 4.46386 0.04102 0.12647q0.04443 0.16748 0.11279 0.27344 0.07178 0.10596 0.19482 0.23242 0.23926 0.23584 0.53321 0.30761 0.12646 0.02734 1.74316 0.03418 1.6167 0.00684 1.72949-0.03418 0.30762-0.07178 0.54346-0.30761 0.23926-0.23926 0.31104-0.54688 0.02734-0.11279 0.03417-2.31738 0.00684-2.20459-0.03417-2.31738-0.07178-0.30762-0.3042-0.53662-0.229-0.23242-0.53663-0.31788-0.09912-0.02734-0.33496-0.02734l-1.41504 0q-1.62354 0-1.73632 0.02734z m3.20605 3.16504l0 2.05762-2.92578 0 0-4.10156 2.92578 0 0 2.04394z m-9.54639-0.85449q-0.31104 0.05469-0.56396 0.27344-0.24951 0.21533-0.34863 0.50928-0.02734 0.08545-0.02735 0.25293l-0.01367 0.95361 0 0.86816q0 0.23584 0.02735 0.34864 0.01367 0.07178 0.08544 0.21191l0.01368 0.01367q0.09912 0.22217 0.30761 0.38281 0.2085 0.16065 0.44776 0.21875 0.11279 0.04102 1.72949 0.03418 1.6167-0.00684 1.74316-0.03418 0.29395-0.07178 0.53321-0.30761 0.12305-0.12646 0.1914-0.23242 0.07178-0.10596 0.11621-0.27344l0.04102-0.12647 0-2.15332-0.04102-0.14013q-0.08545-0.22559-0.24609-0.40674-0.16064-0.18115-0.35547-0.28028l-0.01709-0.01367q-0.12305-0.05811-0.22217-0.08545-0.14014-0.01367-0.48877-0.02734l-1.26123 0q-1.55518 0-1.65088 0.01367z m3.12061 2.03028l0 0.88183-2.92578 0 0-1.75 2.92578 0 0 0.86817z"
+                fill="#175CD3"
+              ></path>
+            </svg>
+            <div
+              data-pencil-name="字"
+              style='box-sizing: border-box; color: #175CD3; font-family: "Noto Sans SC", system-ui, sans-serif; font-size: 13px; font-style: normal; font-weight: 700; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+            >
+              资产总览
+            </div>
+          </div>
+          <div
+            data-pencil-name="导·收益分析"
+            style="align-items: center; background-color: #00000000; border-radius: 6px; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 9px; height: 38px; justify-content: flex-start; padding: 0px 12px; width: 100%"
+          >
+            <svg
+              data-pencil-name="i"
+              data-icon-name="chart-line"
+              data-icon-set="lucide"
+              viewBox="0 0 13.99993896484375 14"
+              preserveAspectRatio="xMidYMid meet"
+              xmlns="http://www.w3.org/2000/svg"
+              style="box-sizing: border-box; flex-shrink: 0; height: 16px; width: 16px"
+            >
+              <path
+                d="M1.59619 1.18945q-0.25293 0.08545-0.37939 0.30762l-0.04102 0.08545 0.01367 9.12598q0 0.70068 0.02735 0.78613 0.14014 0.48877 0.46826 0.82031 0.33154 0.32813 0.82031 0.46826 0.08545 0.02734 0.78613 0.02735l9.12598 0.01367 0.08545-0.04102q0.06836-0.04443 0.15039-0.12646 0.08545-0.08545 0.12646-0.16065 0.04443-0.07861 0.04444-0.24609 0-0.16748-0.04102-0.25293-0.09912-0.16748-0.28027-0.2666l-0.08545-0.05469-8.49707-0.01367q-0.84082 0-1.08008-0.01367-0.15381-0.01367-0.20849-0.05811l-0.02735-0.01367q-0.14014-0.0957-0.22558-0.26318l-0.04102-0.09913-0.01367-9.63183-0.04102-0.08545q-0.09912-0.18115-0.28027-0.2666-0.08545-0.04102-0.22559-0.04785-0.14014-0.00684-0.18115 0.00683z m9.26611 3.51368q-0.06836 0.02734-0.2871 0.23925-0.21533 0.2085-1.09717 1.10401l-1.30225 1.28857-1.09033-1.09033q-0.56055-0.54688-0.71436-0.68701-0.21191-0.2085-0.30761-0.2666-0.07178-0.02734-0.19825-0.02735l-0.05468 0q-0.12646 0-0.20508 0.0376-0.0752 0.03418-0.28711 0.229-0.13672 0.12646-0.64258 0.62891l-0.09912 0.09912q-0.92285 0.92285-0.97754 0.99463-0.11279 0.18115-0.09228 0.38623 0.02051 0.20166 0.17431 0.35547 0.12646 0.12646 0.30078 0.16064 0.17773 0.03418 0.35889-0.04785 0.05469-0.03076 0.76904-0.74512l0.71436-0.69726 0.99463 0.97754q0.65625 0.67334 0.84424 0.84765 0.19141 0.17432 0.25976 0.20508 0.14014 0.06836 0.29395 0.05469 0.15381-0.01367 0.28027-0.09912 0.07178-0.05469 1.58252-1.56543l1.18945-1.20654q0.28027-0.29395 0.35205-0.40332 0.04101-0.07178 0.04102-0.18457l0-0.04102q0-0.12646-0.04102-0.23926-0.09912-0.19482-0.29394-0.29394-0.08545-0.04102-0.22559-0.04102-0.14014 0-0.23925 0.02735z"
+                fill="#55606E"
+              ></path>
+            </svg>
+            <div
+              data-pencil-name="字"
+              style='box-sizing: border-box; color: #55606E; font-family: "Noto Sans SC", system-ui, sans-serif; font-size: 13px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+            >
+              收益分析
+            </div>
+          </div>
+          <div
+            data-pencil-name="导·资金流水"
+            style="align-items: center; background-color: #00000000; border-radius: 6px; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 9px; height: 38px; justify-content: flex-start; padding: 0px 12px; width: 100%"
+          >
+            <svg
+              data-pencil-name="i"
+              data-icon-name="arrow-left-right"
+              data-icon-set="lucide"
+              viewBox="0 0 13.99993896484375 14"
+              preserveAspectRatio="xMidYMid meet"
+              xmlns="http://www.w3.org/2000/svg"
+              style="box-sizing: border-box; flex-shrink: 0; height: 16px; width: 16px"
+            >
+              <path
+                d="M4.48096 1.20313q-0.07178 0.01367-0.15039 0.07177-0.0752 0.05469-1.292 1.27149-0.86816 0.88525-1.04589 1.0664-0.17432 0.18115-0.2085 0.27344-0.03418 0.08887-0.03418 0.22217 0 0.1333 0.04785 0.22558 0.05127 0.08887 1.28174 1.32276 0.82715 0.84082 1.04932 1.04931 0.22559 0.2085 0.29394 0.23926 0.23926 0.10938 0.46143 0.01367 0.22559-0.09912 0.32129-0.32128 0.09912-0.22559-0.01026-0.46485-0.03076-0.06836-0.16406-0.20849-0.12988-0.14014-0.57764-0.60157l-0.70068-0.68701 3.96143 0q3.94775 0 4.06054-0.02734 0.16748-0.02734 0.29395-0.15381 0.22217-0.22559 0.16748-0.51953-0.05469-0.29395-0.35205-0.43408l-0.08203-0.02735-8.06299-0.01367 0.78271-0.79639q0.40674-0.39307 0.50244-0.50586 0.15723-0.16748 0.18457-0.23584 0.02734-0.07178 0.02735-0.19824l0-0.02734q0-0.14014-0.04444-0.22901-0.04102-0.09229-0.1333-0.17431-0.08887-0.08545-0.18115-0.11963-0.08887-0.0376-0.20849-0.0376-0.11963 0-0.18799 0.02735z m4.71679 5.81054q-0.19482 0.05469-0.32812 0.23242-0.1333 0.17432-0.11963 0.36914 0.01367 0.12646 0.05469 0.20508 0.04443 0.0752 0.19824 0.25635 0.12646 0.12646 0.54346 0.56055l0.70068 0.68701-3.94775 0q-3.94775 0-4.06055 0.02734-0.24951 0.02734-0.38281 0.23242-0.1333 0.20166-0.09912 0.43409 0.03418 0.229 0.24609 0.36914l0.02734 0.02734q0.05469 0.04443 0.19483 0.05811 0.19824 0.01367 0.89551 0.02734l7.14013 0-0.78271 0.79639q-0.40674 0.39307-0.50244 0.50586-0.15723 0.16748-0.18457 0.23925-0.02734 0.06836-0.02735 0.19483l0 0.02734q0 0.14014 0.04102 0.23926 0.09912 0.19482 0.31445 0.28027 0.21875 0.08203 0.42725 0.01368 0.07178-0.02734 0.2666-0.21534 0.19824-0.19141 1.09375-1.07324l0.18115-0.19482q0.64258-0.63232 0.81348-0.81348 0.23584-0.25293 0.30761-0.34863 0.04102-0.08545 0.02735-0.19824l0-0.04102q0-0.15381-0.04443-0.24268-0.04102-0.09229-1.27149-1.32617-0.81348-0.81006-1.0459-1.02539-0.229-0.21875-0.30078-0.25293-0.06836-0.0376-0.18115-0.05127-0.10938-0.01367-0.19483 0z"
+                fill="#55606E"
+              ></path>
+            </svg>
+            <div
+              data-pencil-name="字"
+              style='box-sizing: border-box; color: #55606E; font-family: "Noto Sans SC", system-ui, sans-serif; font-size: 13px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+            >
+              资金流水
+            </div>
+          </div>
+          <div
+            data-pencil-name="导·对账单"
+            style="align-items: center; background-color: #00000000; border-radius: 6px; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 9px; height: 38px; justify-content: flex-start; padding: 0px 12px; width: 100%"
+          >
+            <svg
+              data-pencil-name="i"
+              data-icon-name="file-text"
+              data-icon-set="lucide"
+              viewBox="0 0 13.99993896484375 14"
+              preserveAspectRatio="xMidYMid meet"
+              xmlns="http://www.w3.org/2000/svg"
+              style="box-sizing: border-box; flex-shrink: 0; height: 16px; width: 16px"
+            >
+              <path
+                d="M3.33252 0.60156q-0.58789 0.04102-1.02197 0.44776-0.43408 0.40674-0.53321 0.99463-0.02734 0.16748-0.02734 4.95605 0 4.78857 0.02734 4.95605 0.09912 0.5332 0.46827 0.92627 0.37256 0.38965 0.90576 0.50245 0.10938 0.01367 0.66992 0.02734l3.17871 0 3.17871 0q0.56055-0.01367 0.66992-0.02734 0.5332-0.11279 0.90235-0.50245 0.37256-0.39307 0.47168-0.92627 0.02734-0.16748 0.02734-3.80078 0-3.6333-0.02734-3.80078-0.08545-0.51953-0.40674-0.92285-0.11279-0.14014-1.24756-1.2749-0.89551-0.88184-1.10742-1.06983-0.2085-0.19141-0.41699-0.29052-0.30762-0.15381-0.67334-0.19483-0.14014-0.02734-2.4917-0.02734-2.35156 0-2.54639 0.02734z m4.25537 2.42334l0 1.27149 0.04102 0.14013q0.08545 0.22559 0.24609 0.40674 0.16064 0.18115 0.35547 0.28028 0.14014 0.07178 0.22558 0.08544 0.12646 0.02734 0.40674 0.04102l2.21143 0 0 6.11816q0 0.43408-0.0376 0.51954-0.03418 0.08203-0.11963 0.17431-0.08203 0.08887-0.16406 0.1333l-0.09912 0.04102-7.30762 0-0.09912-0.04102q-0.08203-0.04443-0.16748-0.1333-0.08203-0.09228-0.11963-0.17431-0.03418-0.08545-0.03418-0.70069l0-4.18701 0-4.18701q0-0.61523 0.02734-0.6836 0.05811-0.12646 0.16749-0.23242 0.11279-0.10596 0.23925-0.1333 0.08545-0.01367 2.14307-0.01367l2.07129 0 0.01367 1.2749z m2.21143 0.01367l1.03564 1.03565-2.08496 0 0-1.03565q0-1.03564 0-1.04931l1.04932 1.04931z m-5.31836 1.66455q-0.18457 0.05811-0.29053 0.21192-0.10254 0.15381-0.10254 0.33496 0 0.23926 0.18115 0.42041 0.08545 0.08203 0.15381 0.11279 0.07178 0.02734 0.25293 0.04102 0.12646 0 0.57422 0 0.44775 0 0.57422 0 0.18115-0.01367 0.24951-0.04102 0.07178-0.03076 0.15723-0.11279 0.18115-0.18115 0.18115-0.42041 0-0.23926-0.16748-0.40674-0.07178-0.06836-0.16748-0.12646l-0.08545-0.04102-0.72803 0q-0.72803 0-0.78271 0.02734z m0.04101 2.31055q-0.14014 0.04102-0.2666 0.16748-0.16748 0.15381-0.17432 0.37256-0.00684 0.21533 0.12647 0.38623 0.1333 0.16748 0.35547 0.2085 0.09912 0.02734 2.43701 0.02734 2.33789 0 2.43701-0.02734 0.23584-0.04102 0.36914-0.23584 0.1333-0.19824 0.09229-0.4375-0.01367-0.0957-0.05127-0.16406-0.03418-0.07178-0.1128-0.14014-0.0752-0.07178-0.15722-0.11621l-0.09912-0.04102-2.43701-0.01367q-2.45068 0-2.51905 0.01367z m0.05469 2.32422q-0.29395 0.05469-0.42725 0.32129-0.12988 0.2666-0.00683 0.5332 0.04443 0.06836 0.11963 0.14014 0.07861 0.06836 0.16064 0.11279l0.09912 0.04102 4.95606 0 0.09912-0.04102q0.08203-0.04443 0.15722-0.11279 0.07861-0.07178 0.1128-0.14014 0.0376-0.07178 0.05127-0.18115 0.04102-0.19824-0.05127-0.36572-0.08887-0.16748-0.28369-0.2666l-0.09912-0.04102-2.40967 0q-2.39258 0-2.47803 0z"
+                fill="#55606E"
+              ></path>
+            </svg>
+            <div
+              data-pencil-name="字"
+              style='box-sizing: border-box; color: #55606E; font-family: "Noto Sans SC", system-ui, sans-serif; font-size: 13px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+            >
+              对账单
+            </div>
+          </div>
+          <div
+            data-pencil-name="导·账户安全"
+            style="align-items: center; background-color: #00000000; border-radius: 6px; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 9px; height: 38px; justify-content: flex-start; padding: 0px 12px; width: 100%"
+          >
+            <svg
+              data-pencil-name="i"
+              data-icon-name="shield-check"
+              data-icon-set="lucide"
+              viewBox="0 0 13.99993896484375 14"
+              preserveAspectRatio="xMidYMid meet"
+              xmlns="http://www.w3.org/2000/svg"
+              style="box-sizing: border-box; flex-shrink: 0; height: 16px; width: 16px"
+            >
+              <path
+                d="M6.84619 0.60156q-0.34863 0.02734-0.68701 0.30762-0.51611 0.42041-1.00147 0.70068-0.48193 0.28027-1.01513 0.4751-0.30762 0.11279-0.58789 0.1709-0.28027 0.05469-0.66992 0.08203-0.23926 0.01367-0.36573 0.07178-0.19482 0.06836-0.37939 0.22217-0.18115 0.15381-0.26319 0.34863l-0.01367 0.03076q-0.07178 0.12646-0.08545 0.22217-0.01367 0.15381-0.02734 0.60156l0 1.78076q0 2.25244 0.01367 2.46094 0.14014 1.6543 1.10742 2.88477 0.14014 0.16748 0.43409 0.46142 0.29395 0.29394 0.48877 0.44775 0.92285 0.7417 2.2832 1.27491 0.46143 0.18115 0.65625 0.23926 0.23926 0.05469 0.43408 0.01367 0.16748-0.02734 0.5332-0.15381 1.35693-0.51953 2.27979-1.20313 0.37939-0.2666 0.71435-0.60498 1.37402-1.3706 1.54151-3.37353 0.01367-0.23584 0.01367-2.46094 0-2.22852-0.02734-2.35498-0.07178-0.32129-0.31787-0.56396-0.24268-0.24609-0.5503-0.31788-0.09912-0.02734-0.37939-0.04101-0.48877-0.02734-0.96387-0.18115-0.81348-0.2666-1.55518-0.77246-0.2666-0.18115-0.64257-0.48877-0.42041-0.33496-0.96729-0.28028z m0.43408 1.34326q0.64258 0.51953 1.32959 0.86817 1.2168 0.61865 2.25244 0.68701l0.21192 0-0.01367 4.31348q0 0.33496-0.02735 0.50244-0.22559 1.34326-1.1416 2.27637-0.91602 0.92969-2.66601 1.57226l-0.21192 0.08545-0.18115-0.05469q-2.32422-0.85449-3.2334-2.22851-0.47852-0.71436-0.63232-1.63721-0.02734-0.18115-0.02735-0.50244l-0.01367-4.32715 0.19483 0q0.86816-0.05469 1.84912-0.48193 0.98096-0.42725 1.83545-1.12793 0.16748-0.14014 0.19482-0.14014 0.02734 0 0.28027 0.19482z m1.32959 3.31885q-0.06836 0.02734-0.12646 0.05127-0.05469 0.02051-1.06299 1.02539l-0.99463 0.99463-0.40674-0.40332q-0.2666-0.2666-0.3623-0.33838-0.12646-0.11279-0.19824-0.14013-0.06836-0.02734-0.19483-0.02735-0.12646 0-0.16748 0.01367-0.04102 0.01367-0.09912 0.04102-0.18115 0.09912-0.28027 0.2666-0.04102 0.08545-0.04102 0.25293l0 0.01367q0 0.14014 0.03418 0.21192 0.0376 0.06836 0.17774 0.22216 0.0957 0.11279 0.48876 0.50586l0.04102 0.04102q0.42041 0.42041 0.55371 0.54687 0.1333 0.12305 0.20166 0.15381 0.14014 0.06836 0.29395 0.05469 0.15381-0.01367 0.28027-0.09912 0.07178-0.05469 1.28857-1.27149 0.86816-0.86816 1.04932-1.06298 0.18457-0.19824 0.21192-0.27002 0.0957-0.27686-0.05811-0.52295-0.15381-0.24609-0.44775-0.25977-0.12646-0.01367-0.18116 0z"
+                fill="#55606E"
+              ></path>
+            </svg>
+            <div
+              data-pencil-name="字"
+              style='box-sizing: border-box; color: #55606E; font-family: "Noto Sans SC", system-ui, sans-serif; font-size: 13px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+            >
+              账户安全
+            </div>
+          </div>
+          <div
+            data-pencil-name="撑"
+            style="align-items: flex-start; box-sizing: border-box; display: flex; flex-direction: row; flex: 1 1 0; gap: 0px; justify-content: flex-start; width: 100%"
+          ></div>
+          <div
+            data-pencil-name="声明"
+            style="align-items: flex-start; background-color: #F2F4F7; border-radius: 6px; box-sizing: border-box; display: flex; flex-direction: column; flex-shrink: 0; gap: 4px; height: fit-content; justify-content: flex-start; padding: 10px 12px; width: 100%"
+          >
+            <div
+              data-pencil-name="题"
+              style='box-sizing: border-box; color: #17202B; font-family: "Noto Sans SC", system-ui, sans-serif; font-size: 11px; font-style: normal; font-weight: 700; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+            >
+              资金控制说明
+            </div>
+            <div
+              data-pencil-name="文"
+              style='box-sizing: border-box; color: #55606E; font-family: "Noto Sans SC", system-ui, sans-serif; font-size: 10.5px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: 16px; text-align: left; width: 100%'
+            >
+              HustleCoin 仅拥有约定范围内的交易权限，不拥有提现、划转、地址管理或账户恢复权限。
+            </div>
+          </div>
+        </div>
+        <div
+          data-pencil-name="内容"
+          style="align-items: flex-start; box-sizing: border-box; display: flex; flex-direction: column; flex: 1 1 0; gap: 12px; height: 100%; justify-content: flex-start; padding: 16px 20px"
+        >
+          <div
+            data-pencil-name="页头"
+            style="align-items: center; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 0px; height: fit-content; justify-content: space-between; width: 100%"
+          >
+            <div
+              data-pencil-name="题"
+              style='box-sizing: border-box; color: #17202B; font-family: "Noto Sans SC", system-ui, sans-serif; font-size: 18px; font-style: normal; font-weight: 700; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+            >
+              资产总览
+            </div>
+            <div
+              data-pencil-name="数据状态"
+              style="align-items: center; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 8px; height: fit-content; justify-content: flex-start; width: fit-content"
+            >
+              <div
+                data-pencil-name="asof"
+                style='box-sizing: border-box; color: #55606E; font-family: "Roboto Mono", system-ui, sans-serif; font-size: 11px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+              >
+                as_of 2026-07-13 16:00 UTC+8 · 估值币种 USDT · 最近核验 16:05
+              </div>
+              <div
+                data-pencil-name="态"
+                style="align-items: center; background-color: #ECFDF3; border-radius: 4px; border: 1px solid #A9EFC5; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 5px; height: fit-content; justify-content: flex-start; padding: 3px 9px; width: fit-content"
+              >
+                <svg
+                  data-pencil-name="i"
+                  data-icon-name="check"
+                  data-icon-set="lucide"
+                  viewBox="0 0 13.99993896484375 14"
+                  preserveAspectRatio="xMidYMid meet"
+                  xmlns="http://www.w3.org/2000/svg"
+                  style="box-sizing: border-box; flex-shrink: 0; height: 12px; width: 12px"
+                >
+                  <path
+                    d="M11.48096 2.95313q-0.07178 0.01367-0.12989 0.0581-0.05469 0.04102-3.07617 3.06592l-3.0249 3.00781-1.28857-1.28857q-1.28857-1.28516-1.38086-1.32618-0.08887-0.04443-0.22217-0.04443-0.1333 0-0.23242 0.0376-0.0957 0.03418-0.18799 0.11279-0.08887 0.0752-0.1333 0.1709-0.02734 0.07178-0.03418 0.11279-0.00684 0.04102-0.00684 0.14014l0 0.04102q-0.01367 0.11279 0.04102 0.19824 0.07178 0.10938 0.36572 0.40332 0.19482 0.21191 0.96729 0.98096l1.49707 1.48339q0.28027 0.2666 0.38964 0.33838 0.07178 0.05469 0.18457 0.04102l0.09571 0.01367q0.07178 0 0.14013-0.02734 0.08545-0.07178 0.32129-0.28711 0.23926-0.21875 0.79981-0.76221l2.2832-2.2832q2.08496-2.09863 2.7002-2.71387 0.61524-0.61865 0.64599-0.68701 0.04102-0.08545 0.04102-0.23926 0-0.09912-0.00684-0.14014-0.00684-0.04102-0.03418-0.11279-0.04443-0.08203-0.13672-0.16406-0.08887-0.08545-0.18115-0.11963-0.08887-0.0376-0.20849-0.0376-0.11963 0-0.18799 0.02734z"
+                    fill="#067647"
+                  ></path>
+                </svg>
+                <div
+                  data-pencil-name="字"
+                  style='box-sizing: border-box; color: #067647; font-family: "Noto Sans SC", system-ui, sans-serif; font-size: 11px; font-style: normal; font-weight: 700; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+                >
+                  RECONCILED · 已完成交易所核对
+                </div>
+              </div>
+            </div>
+          </div>
+          <div
+            data-pencil-name="首屏指标"
+            style="align-items: flex-start; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 12px; height: 104px; justify-content: flex-start; width: 100%"
+          >
+            <div
+              data-pencil-name="卡·当前权益"
+              style="align-items: flex-start; background-color: #FFFFFF; border-radius: 6px; border: 1px solid #E5E8EC; box-sizing: border-box; display: flex; flex-direction: column; flex: 1 1 0; gap: 4px; height: 100%; justify-content: center; padding: 12px 16px"
+            >
+              <div
+                data-pencil-name="标"
+                style='box-sizing: border-box; color: #55606E; font-family: "Noto Sans SC", system-ui, sans-serif; font-size: 11.5px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+              >
+                当前权益
+              </div>
+              <div
+                data-pencil-name="值"
+                style='box-sizing: border-box; color: #17202B; font-family: "Roboto Mono", system-ui, sans-serif; font-size: 24px; font-style: normal; font-weight: 700; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+              >
+                668.42 USDT
+              </div>
+              <div
+                data-pencil-name="注"
+                style='box-sizing: border-box; color: #8B95A3; font-family: "Noto Sans SC", system-ui, sans-serif; font-size: 10.5px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+              >
+                as_of 16:00 · RECONCILED
+              </div>
+            </div>
+            <div
+              data-pencil-name="卡·累计净收益"
+              style="align-items: flex-start; background-color: #FFFFFF; border-radius: 6px; border: 1px solid #E5E8EC; box-sizing: border-box; display: flex; flex-direction: column; flex: 1 1 0; gap: 4px; height: 100%; justify-content: center; padding: 12px 16px"
+            >
+              <div
+                data-pencil-name="标"
+                style='box-sizing: border-box; color: #55606E; font-family: "Noto Sans SC", system-ui, sans-serif; font-size: 11.5px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+              >
+                累计净收益
+              </div>
+              <div
+                data-pencil-name="值"
+                style='box-sizing: border-box; color: #067647; font-family: "Roboto Mono", system-ui, sans-serif; font-size: 19px; font-style: normal; font-weight: 700; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+              >
+                +68.42 USDT
+              </div>
+              <div
+                data-pencil-name="注"
+                style='box-sizing: border-box; color: #8B95A3; font-family: "Noto Sans SC", system-ui, sans-serif; font-size: 10.5px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+              >
+                费后 · 自开户 2026-01-12 起
+              </div>
+            </div>
+            <div
+              data-pencil-name="卡·累计收益率"
+              style="align-items: flex-start; background-color: #FFFFFF; border-radius: 6px; border: 1px solid #E5E8EC; box-sizing: border-box; display: flex; flex-direction: column; flex: 1 1 0; gap: 4px; height: 100%; justify-content: center; padding: 12px 16px"
+            >
+              <div
+                data-pencil-name="标"
+                style='box-sizing: border-box; color: #55606E; font-family: "Noto Sans SC", system-ui, sans-serif; font-size: 11.5px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+              >
+                累计收益率
+              </div>
+              <div
+                data-pencil-name="值"
+                style='box-sizing: border-box; color: #067647; font-family: "Roboto Mono", system-ui, sans-serif; font-size: 19px; font-style: normal; font-weight: 700; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+              >
+                +11.40%
+              </div>
+              <div
+                data-pencil-name="注"
+                style='box-sizing: border-box; color: #8B95A3; font-family: "Noto Sans SC", system-ui, sans-serif; font-size: 10.5px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+              >
+                时间加权 · 与入金/出金无关
+              </div>
+            </div>
+            <div
+              data-pencil-name="卡·净入金"
+              style="align-items: flex-start; background-color: #FFFFFF; border-radius: 6px; border: 1px solid #E5E8EC; box-sizing: border-box; display: flex; flex-direction: column; flex: 1 1 0; gap: 4px; height: 100%; justify-content: center; padding: 12px 16px"
+            >
+              <div
+                data-pencil-name="标"
+                style='box-sizing: border-box; color: #55606E; font-family: "Noto Sans SC", system-ui, sans-serif; font-size: 11.5px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+              >
+                净入金
+              </div>
+              <div
+                data-pencil-name="值"
+                style='box-sizing: border-box; color: #17202B; font-family: "Roboto Mono", system-ui, sans-serif; font-size: 19px; font-style: normal; font-weight: 700; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+              >
+                600.00 USDT
+              </div>
+              <div
+                data-pencil-name="注"
+                style='box-sizing: border-box; color: #8B95A3; font-family: "Noto Sans SC", system-ui, sans-serif; font-size: 10.5px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+              >
+                入金 600.00 − 出金 0.00
+              </div>
+            </div>
+          </div>
+          <div
+            data-pencil-name="份额行"
+            style="align-items: flex-start; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 12px; height: 84px; justify-content: flex-start; width: 100%"
+          >
+            <div
+              data-pencil-name="卡·持有份额"
+              style="align-items: flex-start; background-color: #FFFFFF; border-radius: 6px; border: 1px solid #E5E8EC; box-sizing: border-box; display: flex; flex-direction: column; flex: 1 1 0; gap: 4px; height: 100%; justify-content: center; padding: 12px 16px"
+            >
+              <div
+                data-pencil-name="标"
+                style='box-sizing: border-box; color: #55606E; font-family: "Noto Sans SC", system-ui, sans-serif; font-size: 11.5px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+              >
+                持有份额
+              </div>
+              <div
+                data-pencil-name="值"
+                style='box-sizing: border-box; color: #17202B; font-family: "Roboto Mono", system-ui, sans-serif; font-size: 19px; font-style: normal; font-weight: 700; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+              >
+                588.2353 份
+              </div>
+              <div
+                data-pencil-name="注"
+                style='box-sizing: border-box; color: #8B95A3; font-family: "Noto Sans SC", system-ui, sans-serif; font-size: 10.5px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+              >
+                份额账户 · 发行价 1.0200
+              </div>
+            </div>
+            <div
+              data-pencil-name="卡·单位净值"
+              style="align-items: flex-start; background-color: #FFFFFF; border-radius: 6px; border: 1px solid #E5E8EC; box-sizing: border-box; display: flex; flex-direction: column; flex: 1 1 0; gap: 4px; height: 100%; justify-content: center; padding: 12px 16px"
+            >
+              <div
+                data-pencil-name="标"
+                style='box-sizing: border-box; color: #55606E; font-family: "Noto Sans SC", system-ui, sans-serif; font-size: 11.5px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+              >
+                单位净值
+              </div>
+              <div
+                data-pencil-name="值"
+                style='box-sizing: border-box; color: #17202B; font-family: "Roboto Mono", system-ui, sans-serif; font-size: 19px; font-style: normal; font-weight: 700; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+              >
+                1.1363 USDT / 份
+              </div>
+              <div
+                data-pencil-name="注"
+                style='box-sizing: border-box; color: #8B95A3; font-family: "Noto Sans SC", system-ui, sans-serif; font-size: 10.5px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+              >
+                2026-07-13 日度净值 · RECONCILED
+              </div>
+            </div>
+            <div
+              data-pencil-name="卡·本人份额比例"
+              style="align-items: flex-start; background-color: #FFFFFF; border-radius: 6px; border: 1px solid #E5E8EC; box-sizing: border-box; display: flex; flex-direction: column; flex: 1 1 0; gap: 4px; height: 100%; justify-content: center; padding: 12px 16px"
+            >
+              <div
+                data-pencil-name="标"
+                style='box-sizing: border-box; color: #55606E; font-family: "Noto Sans SC", system-ui, sans-serif; font-size: 11.5px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+              >
+                本人份额比例
+              </div>
+              <div
+                data-pencil-name="值"
+                style='box-sizing: border-box; color: #17202B; font-family: "Roboto Mono", system-ui, sans-serif; font-size: 19px; font-style: normal; font-weight: 700; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+              >
+                0.82%
+              </div>
+              <div
+                data-pencil-name="注"
+                style='box-sizing: border-box; color: #8B95A3; font-family: "Noto Sans SC", system-ui, sans-serif; font-size: 10.5px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+              >
+                占 CORE_POOL 总份额
+              </div>
+            </div>
+            <div
+              data-pencil-name="卡·状态图例"
+              style="align-items: flex-start; background-color: #FFFFFF; border-radius: 6px; border: 1px solid #E5E8EC; box-sizing: border-box; display: flex; flex-direction: column; flex: 1 1 0; gap: 6px; height: 100%; justify-content: center; padding: 10px 16px"
+            >
+              <div
+                data-pencil-name="标"
+                style='box-sizing: border-box; color: #55606E; font-family: "Noto Sans SC", system-ui, sans-serif; font-size: 11.5px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+              >
+                数据状态说明
+              </div>
+              <div
+                data-pencil-name="行"
+                style="align-items: center; box-sizing: border-box; display: flex; flex-direction: column; flex-shrink: 0; gap: 3px; height: fit-content; justify-content: flex-start; width: fit-content"
+              >
+                <div
+                  data-pencil-name="行1"
+                  style="align-items: center; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 5px; height: fit-content; justify-content: flex-start; width: fit-content"
+                >
+                  <div
+                    data-pencil-name="例"
+                    style="align-items: flex-start; background-color: #FFFAEB; border-radius: 4px; border: 1px solid #FEDF89; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 0px; height: fit-content; justify-content: flex-start; padding: 2px 7px; width: fit-content"
+                  >
+                    <div
+                      data-pencil-name="字"
+                      style='box-sizing: border-box; color: #B54708; font-family: "Noto Sans SC", system-ui, sans-serif; font-size: 9.5px; font-style: normal; font-weight: 700; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+                    >
+                      ESTIMATED 盘中估值
+                    </div>
+                  </div>
+                  <div
+                    data-pencil-name="例"
+                    style="align-items: flex-start; background-color: #ECFDF3; border-radius: 4px; border: 1px solid #A9EFC5; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 0px; height: fit-content; justify-content: flex-start; padding: 2px 7px; width: fit-content"
+                  >
+                    <div
+                      data-pencil-name="字"
+                      style='box-sizing: border-box; color: #067647; font-family: "Noto Sans SC", system-ui, sans-serif; font-size: 9.5px; font-style: normal; font-weight: 700; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+                    >
+                      RECONCILED 已核对
+                    </div>
+                  </div>
+                </div>
+                <div
+                  data-pencil-name="行2"
+                  style="align-items: center; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 5px; height: fit-content; justify-content: flex-start; width: fit-content"
+                >
+                  <div
+                    data-pencil-name="例"
+                    style="align-items: flex-start; background-color: #122B4E; border-radius: 4px; border: 1px solid #122B4E; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 0px; height: fit-content; justify-content: flex-start; padding: 2px 7px; width: fit-content"
+                  >
+                    <div
+                      data-pencil-name="字"
+                      style='box-sizing: border-box; color: #FFFFFF; font-family: "Noto Sans SC", system-ui, sans-serif; font-size: 9.5px; font-style: normal; font-weight: 700; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+                    >
+                      FINALIZED 正式净值
+                    </div>
+                  </div>
+                  <div
+                    data-pencil-name="例"
+                    style="align-items: flex-start; background-color: #FEF3F2; border-radius: 4px; border: 1px solid #FECDCA; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 0px; height: fit-content; justify-content: flex-start; padding: 2px 7px; width: fit-content"
+                  >
+                    <div
+                      data-pencil-name="字"
+                      style='box-sizing: border-box; color: #B42318; font-family: "Noto Sans SC", system-ui, sans-serif; font-size: 9.5px; font-style: normal; font-weight: 700; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+                    >
+                      STALE 数据过期
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div
+            data-pencil-name="平台访问风险"
+            style="align-items: center; background-color: #FFFAEB; border-radius: 6px; border: 1px solid #FEDF89; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 12px; height: fit-content; justify-content: flex-start; padding: 9px 14px; width: 100%"
+          >
+            <svg
+              data-pencil-name="i"
+              data-icon-name="triangle-alert"
+              data-icon-set="lucide"
+              viewBox="0 0 13.99993896484375 14"
+              preserveAspectRatio="xMidYMid meet"
+              xmlns="http://www.w3.org/2000/svg"
+              style="box-sizing: border-box; flex-shrink: 0; height: 16px; width: 16px"
+            >
+              <path
+                d="M6.87354 1.16211q-0.46143 0.02734-0.88184 0.30762-0.11279 0.08545-0.24609 0.22558-0.1333 0.14014-0.20166 0.23584-0.11279 0.16748-2.45069 4.26563-2.33789 4.09473-2.3789 4.19043-0.12646 0.29395-0.12647 0.64599-0.01367 0.19482 0.00684 0.32813 0.02051 0.1333 0.07861 0.30078 0.15381 0.43408 0.50244 0.73486 0.34863 0.30078 0.81348 0.39991 0.08203 0.02734 0.89551 0.02734l4.11523 0 4.22803 0q0.68701 0 0.79638-0.02734 0.50586-0.11279 0.86817-0.47852 0.51953-0.51611 0.51953-1.23047 0-0.42041-0.18115-0.78271-0.0581-0.09912-2.36866-4.14258-2.30713-4.04688-2.39257-4.18701-0.18115-0.29395-0.49561-0.50245-0.31445-0.21191-0.65283-0.28369-0.23584-0.04102-0.44775-0.02734z m0.37939 1.2168q0.0957 0.05811 0.15723 0.13671 0.06494 0.0752 2.42334 4.20411 2.36182 4.12891 2.38916 4.21435 0.06836 0.22559-0.05127 0.43408-0.11621 0.2085-0.35547 0.28028-0.06836 0.01367-0.85449 0.01367l-8.76368 0-0.11279-0.05469q-0.19482-0.08545-0.29394-0.29394-0.04102-0.09912-0.04102-0.23243 0-0.1333 0.04785-0.229 0.05127-0.09912 2.3584-4.15283 2.31055-4.05371 2.36865-4.13574 0.11279-0.15381 0.32813-0.2085 0.21533-0.05811 0.3999 0.0376l0-0.01367z m-0.40674 2.31054q-0.25293 0.08545-0.37939 0.30762l-0.04102 0.08545 0 2.46435q0 0.18115 0.03418 0.26661 0.0376 0.08203 0.11963 0.16748 0.08545 0.08203 0.18799 0.1333 0.10596 0.04785 0.23242 0.04785 0.12646 0 0.229-0.04785 0.10596-0.05127 0.18799-0.1333 0.08545-0.08545 0.11963-0.16748 0.0376-0.08545 0.0376-0.26661l0-2.46435-0.04102-0.08545q-0.09912-0.18115-0.28027-0.2666-0.08545-0.04102-0.22559-0.04785-0.14014-0.00684-0.18115 0.00683z m0.05469 4.66211q-0.18115 0.02734-0.32129 0.16748-0.2085 0.21191-0.15381 0.50586 0.05469 0.29395 0.32129 0.42041 0.09912 0.04102 0.25293 0.04102 0.25293 0 0.42041-0.16748 0.12646-0.12646 0.15381-0.30762 0.05469-0.29394-0.15723-0.50244-0.2085-0.21191-0.51611-0.15723z"
+                fill="#B54708"
+              ></path>
+            </svg>
+            <div
+              data-pencil-name="文"
+              style="align-items: flex-start; box-sizing: border-box; display: flex; flex-direction: column; flex: 1 1 0; gap: 2px; height: fit-content; justify-content: flex-start"
+            >
+              <div
+                data-pencil-name="题"
+                style='box-sizing: border-box; color: #17202B; font-family: "Noto Sans SC", system-ui, sans-serif; font-size: 12.5px; font-style: normal; font-weight: 700; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+              >
+                平台访问风险：存在 1 项 — 合作交易平台其一的提现处于人工审核
+              </div>
+              <div
+                data-pencil-name="述"
+                style='box-sizing: border-box; color: #55606E; font-family: "Noto Sans SC", system-ui, sans-serif; font-size: 11px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: 17px; text-align: left; width: 100%'
+              >
+                受限资产对基金 NAV 影响 0.08%（约 0.53 USDT 按您的份额折算）·
+                处理状态：已停止该平台新增，支持工单跟进中 · 下次更新 今日 12:00 ·
+                不影响您的赎回通道
+              </div>
+            </div>
+            <div
+              data-pencil-name="态"
+              style="align-items: flex-start; background-color: #FFFAEB; border-radius: 4px; border: 1px solid #FEDF89; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 0px; height: fit-content; justify-content: flex-start; padding: 3px 9px; width: fit-content"
+            >
+              <div
+                data-pencil-name="字"
+                style='box-sizing: border-box; color: #B54708; font-family: "Noto Sans SC", system-ui, sans-serif; font-size: 10.5px; font-style: normal; font-weight: 700; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+              >
+                处理中 · 已通知
+              </div>
+            </div>
+          </div>
+          <div
+            data-pencil-name="曲线与归因"
+            style="align-items: flex-start; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 12px; height: 340px; justify-content: flex-start; width: 100%"
+          >
+            <div
+              data-pencil-name="收益曲线"
+              style="align-items: flex-start; background-color: #FFFFFF; border-radius: 6px; border: 1px solid #E5E8EC; box-sizing: border-box; display: flex; flex-direction: column; flex-shrink: 0; gap: 0px; height: 100%; justify-content: flex-start; overflow: hidden; width: 700px"
+            >
+              <div
+                data-pencil-name="头"
+                style="align-items: center; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 0px; height: fit-content; justify-content: space-between; padding: 12px 16px 6px 16px; width: 100%"
+              >
+                <div
+                  data-pencil-name="题"
+                  style="align-items: flex-start; box-sizing: border-box; display: flex; flex-direction: column; flex-shrink: 0; gap: 1px; height: fit-content; justify-content: flex-start; width: fit-content"
+                >
+                  <div
+                    data-pencil-name="字"
+                    style='box-sizing: border-box; color: #17202B; font-family: "Noto Sans SC", system-ui, sans-serif; font-size: 13.5px; font-style: normal; font-weight: 700; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+                  >
+                    时间加权收益率（TWR）
+                  </div>
+                  <div
+                    data-pencil-name="副"
+                    style='box-sizing: border-box; color: #8B95A3; font-family: "Noto Sans SC", system-ui, sans-serif; font-size: 10.5px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+                  >
+                    已剔除入金 / 出金影响 — 追加资金不会推高曲线
+                  </div>
+                </div>
+                <div
+                  data-pencil-name="区间"
+                  style="align-items: flex-start; background-color: #F2F4F7; border-radius: 6px; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 2px; height: fit-content; justify-content: flex-start; padding: 2px; width: fit-content"
+                >
+                  <div
+                    data-pencil-name="段·7日"
+                    style="align-items: flex-start; background-color: #00000000; border-radius: 4px; border: 1px solid #00000000; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 0px; height: fit-content; justify-content: flex-start; padding: 3px 10px; width: fit-content"
+                  >
+                    <div
+                      data-pencil-name="字"
+                      style='box-sizing: border-box; color: #55606E; font-family: "Noto Sans SC", system-ui, sans-serif; font-size: 11px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+                    >
+                      7日
+                    </div>
+                  </div>
+                  <div
+                    data-pencil-name="段·30日"
+                    style="align-items: flex-start; background-color: #FFFFFF; border-radius: 4px; border: 1px solid #E5E8EC; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 0px; height: fit-content; justify-content: flex-start; padding: 3px 10px; width: fit-content"
+                  >
+                    <div
+                      data-pencil-name="字"
+                      style='box-sizing: border-box; color: #17202B; font-family: "Noto Sans SC", system-ui, sans-serif; font-size: 11px; font-style: normal; font-weight: 700; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+                    >
+                      30日
+                    </div>
+                  </div>
+                  <div
+                    data-pencil-name="段·90日"
+                    style="align-items: flex-start; background-color: #00000000; border-radius: 4px; border: 1px solid #00000000; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 0px; height: fit-content; justify-content: flex-start; padding: 3px 10px; width: fit-content"
+                  >
+                    <div
+                      data-pencil-name="字"
+                      style='box-sizing: border-box; color: #55606E; font-family: "Noto Sans SC", system-ui, sans-serif; font-size: 11px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+                    >
+                      90日
+                    </div>
+                  </div>
+                  <div
+                    data-pencil-name="段·全部"
+                    style="align-items: flex-start; background-color: #00000000; border-radius: 4px; border: 1px solid #00000000; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 0px; height: fit-content; justify-content: flex-start; padding: 3px 10px; width: fit-content"
+                  >
+                    <div
+                      data-pencil-name="字"
+                      style='box-sizing: border-box; color: #55606E; font-family: "Noto Sans SC", system-ui, sans-serif; font-size: 11px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+                    >
+                      全部
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div
+                data-pencil-name="图"
+                style="align-items: flex-end; box-sizing: border-box; display: flex; flex-direction: row; flex: 1 1 0; gap: 4px; justify-content: flex-start; padding: 4px 16px 0px 16px; width: 100%"
+              >
+                <div
+                  data-pencil-name="柱0"
+                  style="background-color: #3B6BA5; border-radius: 1px; box-sizing: border-box; flex: 1 1 0; height: 13.2px"
+                ></div>
+                <div
+                  data-pencil-name="柱1"
+                  style="background-color: #3B6BA5; border-radius: 1px; box-sizing: border-box; flex: 1 1 0; height: 19.8px"
+                ></div>
+                <div
+                  data-pencil-name="柱2"
+                  style="background-color: #3B6BA5; border-radius: 1px; box-sizing: border-box; flex: 1 1 0; height: 26.4px"
+                ></div>
+                <div
+                  data-pencil-name="柱3"
+                  style="background-color: #3B6BA5; border-radius: 1px; box-sizing: border-box; flex: 1 1 0; height: 22px"
+                ></div>
+                <div
+                  data-pencil-name="柱4"
+                  style="background-color: #3B6BA5; border-radius: 1px; box-sizing: border-box; flex: 1 1 0; height: 33px"
+                ></div>
+                <div
+                  data-pencil-name="柱5"
+                  style="background-color: #3B6BA5; border-radius: 1px; box-sizing: border-box; flex: 1 1 0; height: 39.6px"
+                ></div>
+                <div
+                  data-pencil-name="柱6"
+                  style="background-color: #3B6BA5; border-radius: 1px; box-sizing: border-box; flex: 1 1 0; height: 35.2px"
+                ></div>
+                <div
+                  data-pencil-name="柱7"
+                  style="background-color: #3B6BA5; border-radius: 1px; box-sizing: border-box; flex: 1 1 0; height: 46.2px"
+                ></div>
+                <div
+                  data-pencil-name="柱8"
+                  style="background-color: #3B6BA5; border-radius: 1px; box-sizing: border-box; flex: 1 1 0; height: 52.8px"
+                ></div>
+                <div
+                  data-pencil-name="柱9"
+                  style="background-color: #3B6BA5; border-radius: 1px; box-sizing: border-box; flex: 1 1 0; height: 48.4px"
+                ></div>
+                <div
+                  data-pencil-name="柱10"
+                  style="background-color: #3B6BA5; border-radius: 1px; box-sizing: border-box; flex: 1 1 0; height: 59.4px"
+                ></div>
+                <div
+                  data-pencil-name="柱11"
+                  style="background-color: #3B6BA5; border-radius: 1px; box-sizing: border-box; flex: 1 1 0; height: 55px"
+                ></div>
+                <div
+                  data-pencil-name="柱12"
+                  style="background-color: #3B6BA5; border-radius: 1px; box-sizing: border-box; flex: 1 1 0; height: 66px"
+                ></div>
+                <div
+                  data-pencil-name="柱13"
+                  style="background-color: #3B6BA5; border-radius: 1px; box-sizing: border-box; flex: 1 1 0; height: 74.8px"
+                ></div>
+                <div
+                  data-pencil-name="柱14"
+                  style="background-color: #3B6BA5; border-radius: 1px; box-sizing: border-box; flex: 1 1 0; height: 68.2px"
+                ></div>
+                <div
+                  data-pencil-name="柱15"
+                  style="background-color: #3B6BA5; border-radius: 1px; box-sizing: border-box; flex: 1 1 0; height: 81.4px"
+                ></div>
+                <div
+                  data-pencil-name="柱16"
+                  style="background-color: #3B6BA5; border-radius: 1px; box-sizing: border-box; flex: 1 1 0; height: 88px"
+                ></div>
+                <div
+                  data-pencil-name="柱17"
+                  style="background-color: #3B6BA5; border-radius: 1px; box-sizing: border-box; flex: 1 1 0; height: 83.6px"
+                ></div>
+                <div
+                  data-pencil-name="柱18"
+                  style="background-color: #3B6BA5; border-radius: 1px; box-sizing: border-box; flex: 1 1 0; height: 77px"
+                ></div>
+                <div
+                  data-pencil-name="柱19"
+                  style="background-color: #3B6BA5; border-radius: 1px; box-sizing: border-box; flex: 1 1 0; height: 92.4px"
+                ></div>
+                <div
+                  data-pencil-name="柱20"
+                  style="background-color: #3B6BA5; border-radius: 1px; box-sizing: border-box; flex: 1 1 0; height: 101.2px"
+                ></div>
+                <div
+                  data-pencil-name="柱21"
+                  style="background-color: #3B6BA5; border-radius: 1px; box-sizing: border-box; flex: 1 1 0; height: 96.8px"
+                ></div>
+                <div
+                  data-pencil-name="柱22"
+                  style="background-color: #3B6BA5; border-radius: 1px; box-sizing: border-box; flex: 1 1 0; height: 107.8px"
+                ></div>
+                <div
+                  data-pencil-name="柱23"
+                  style="background-color: #3B6BA5; border-radius: 1px; box-sizing: border-box; flex: 1 1 0; height: 116.6px"
+                ></div>
+                <div
+                  data-pencil-name="柱24"
+                  style="background-color: #3B6BA5; border-radius: 1px; box-sizing: border-box; flex: 1 1 0; height: 110px"
+                ></div>
+                <div
+                  data-pencil-name="柱25"
+                  style="background-color: #3B6BA5; border-radius: 1px; box-sizing: border-box; flex: 1 1 0; height: 123.2px"
+                ></div>
+                <div
+                  data-pencil-name="柱26"
+                  style="background-color: #3B6BA5; border-radius: 1px; box-sizing: border-box; flex: 1 1 0; height: 132px"
+                ></div>
+                <div
+                  data-pencil-name="柱27"
+                  style="background-color: #3B6BA5; border-radius: 1px; box-sizing: border-box; flex: 1 1 0; height: 127.6px"
+                ></div>
+                <div
+                  data-pencil-name="柱28"
+                  style="background-color: #9DB8DD; border-radius: 1px; box-sizing: border-box; flex: 1 1 0; height: 138.6px"
+                ></div>
+                <div
+                  data-pencil-name="柱29"
+                  style="background-color: #9DB8DD; border-radius: 1px; box-sizing: border-box; flex: 1 1 0; height: 145.2px"
+                ></div>
+              </div>
+              <div
+                data-pencil-name="轴"
+                style="align-items: flex-start; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 0px; height: fit-content; justify-content: space-between; padding: 4px 16px 6px 16px; width: 100%"
+              >
+                <div
+                  data-pencil-name="t"
+                  style='box-sizing: border-box; color: #8B95A3; font-family: "Roboto Mono", system-ui, sans-serif; font-size: 9.5px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+                >
+                  06-14
+                </div>
+                <div
+                  data-pencil-name="t"
+                  style='box-sizing: border-box; color: #8B95A3; font-family: "Roboto Mono", system-ui, sans-serif; font-size: 9.5px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+                >
+                  06-21
+                </div>
+                <div
+                  data-pencil-name="t"
+                  style='box-sizing: border-box; color: #8B95A3; font-family: "Roboto Mono", system-ui, sans-serif; font-size: 9.5px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+                >
+                  06-28
+                </div>
+                <div
+                  data-pencil-name="t"
+                  style='box-sizing: border-box; color: #8B95A3; font-family: "Roboto Mono", system-ui, sans-serif; font-size: 9.5px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+                >
+                  07-05
+                </div>
+                <div
+                  data-pencil-name="t"
+                  style='box-sizing: border-box; color: #8B95A3; font-family: "Roboto Mono", system-ui, sans-serif; font-size: 9.5px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+                >
+                  07-13
+                </div>
+              </div>
+              <div
+                data-pencil-name="统计"
+                style="align-items: flex-start; border-color: #EEF1F4; border-style: solid; border-width: 1px 0px 0px 0px; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 0px; height: fit-content; justify-content: flex-start; padding: 8px 16px 10px 16px; width: 100%"
+              >
+                <div
+                  data-pencil-name="计·区间收益率"
+                  style="align-items: flex-start; box-sizing: border-box; display: flex; flex-direction: column; flex: 1 1 0; gap: 1px; height: fit-content; justify-content: flex-start"
+                >
+                  <div
+                    data-pencil-name="k"
+                    style='box-sizing: border-box; color: #8B95A3; font-family: "Noto Sans SC", system-ui, sans-serif; font-size: 10.5px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+                  >
+                    区间收益率
+                  </div>
+                  <div
+                    data-pencil-name="v"
+                    style='box-sizing: border-box; color: #067647; font-family: "Roboto Mono", system-ui, sans-serif; font-size: 14px; font-style: normal; font-weight: 700; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+                  >
+                    +2.84%
+                  </div>
+                </div>
+                <div
+                  data-pencil-name="计·最大回撤"
+                  style="align-items: flex-start; box-sizing: border-box; display: flex; flex-direction: column; flex: 1 1 0; gap: 1px; height: fit-content; justify-content: flex-start"
+                >
+                  <div
+                    data-pencil-name="k"
+                    style='box-sizing: border-box; color: #8B95A3; font-family: "Noto Sans SC", system-ui, sans-serif; font-size: 10.5px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+                  >
+                    最大回撤
+                  </div>
+                  <div
+                    data-pencil-name="v"
+                    style='box-sizing: border-box; color: #B42318; font-family: "Roboto Mono", system-ui, sans-serif; font-size: 14px; font-style: normal; font-weight: 700; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+                  >
+                    -1.12%
+                  </div>
+                </div>
+                <div
+                  data-pencil-name="计·盈利天数"
+                  style="align-items: flex-start; box-sizing: border-box; display: flex; flex-direction: column; flex: 1 1 0; gap: 1px; height: fit-content; justify-content: flex-start"
+                >
+                  <div
+                    data-pencil-name="k"
+                    style='box-sizing: border-box; color: #8B95A3; font-family: "Noto Sans SC", system-ui, sans-serif; font-size: 10.5px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+                  >
+                    盈利天数
+                  </div>
+                  <div
+                    data-pencil-name="v"
+                    style='box-sizing: border-box; color: #17202B; font-family: "Roboto Mono", system-ui, sans-serif; font-size: 14px; font-style: normal; font-weight: 700; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+                  >
+                    19 / 30
+                  </div>
+                </div>
+                <div
+                  data-pencil-name="计·数据状态"
+                  style="align-items: flex-start; box-sizing: border-box; display: flex; flex-direction: column; flex: 1 1 0; gap: 1px; height: fit-content; justify-content: flex-start"
+                >
+                  <div
+                    data-pencil-name="k"
+                    style='box-sizing: border-box; color: #8B95A3; font-family: "Noto Sans SC", system-ui, sans-serif; font-size: 10.5px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+                  >
+                    数据状态
+                  </div>
+                  <div
+                    data-pencil-name="v"
+                    style='box-sizing: border-box; color: #067647; font-family: "Roboto Mono", system-ui, sans-serif; font-size: 14px; font-style: normal; font-weight: 700; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+                  >
+                    RECONCILED
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div
+              data-pencil-name="收益归因"
+              style="align-items: flex-start; background-color: #FFFFFF; border-radius: 6px; border: 1px solid #E5E8EC; box-sizing: border-box; display: flex; flex-direction: column; flex: 1 1 0; gap: 0px; height: 100%; justify-content: flex-start; overflow: hidden"
+            >
+              <div
+                data-pencil-name="头"
+                style="align-items: center; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 0px; height: fit-content; justify-content: space-between; padding: 12px 16px 6px 16px; width: 100%"
+              >
+                <div
+                  data-pencil-name="字"
+                  style='box-sizing: border-box; color: #17202B; font-family: "Noto Sans SC", system-ui, sans-serif; font-size: 13.5px; font-style: normal; font-weight: 700; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+                >
+                  收益归因（累计 · 脱敏汇总）
+                </div>
+                <div
+                  data-pencil-name="副"
+                  style='box-sizing: border-box; color: #8B95A3; font-family: "Roboto Mono", system-ui, sans-serif; font-size: 10.5px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+                >
+                  USDT
+                </div>
+              </div>
+              <div
+                data-pencil-name="体"
+                style="align-items: flex-start; box-sizing: border-box; display: flex; flex-direction: column; flex: 1 1 0; gap: 5px; justify-content: flex-start; padding: 2px 16px 8px 16px; width: 100%"
+              >
+                <div
+                  data-pencil-name="归·资金费收益"
+                  style="align-items: center; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 8px; height: fit-content; justify-content: flex-start; width: 100%"
+                >
+                  <div
+                    data-pencil-name="k"
+                    style="align-items: flex-start; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 0px; height: fit-content; justify-content: flex-start; width: 118px"
+                  >
+                    <div
+                      data-pencil-name="字"
+                      style='box-sizing: border-box; color: #55606E; font-family: "Noto Sans SC", system-ui, sans-serif; font-size: 11.5px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+                    >
+                      资金费收益
+                    </div>
+                  </div>
+                  <div
+                    data-pencil-name="槽"
+                    style="align-items: center; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 0px; height: 8px; justify-content: flex-start; width: 170px"
+                  >
+                    <div
+                      data-pencil-name="条"
+                      style="background-color: #7FB89B; border-radius: 2px; box-sizing: border-box; flex-shrink: 0; height: 8px; width: 170px"
+                    ></div>
+                  </div>
+                  <div
+                    data-pencil-name="v"
+                    style="align-items: flex-start; box-sizing: border-box; display: flex; flex-direction: row; flex: 1 1 0; gap: 0px; height: fit-content; justify-content: flex-end"
+                  >
+                    <div
+                      data-pencil-name="字"
+                      style='box-sizing: border-box; color: #067647; font-family: "Roboto Mono", system-ui, sans-serif; font-size: 12px; font-style: normal; font-weight: 700; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+                    >
+                      +41.20
+                    </div>
+                  </div>
+                </div>
+                <div
+                  data-pencil-name="归·基差 / 价差收益"
+                  style="align-items: center; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 8px; height: fit-content; justify-content: flex-start; width: 100%"
+                >
+                  <div
+                    data-pencil-name="k"
+                    style="align-items: flex-start; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 0px; height: fit-content; justify-content: flex-start; width: 118px"
+                  >
+                    <div
+                      data-pencil-name="字"
+                      style='box-sizing: border-box; color: #55606E; font-family: "Noto Sans SC", system-ui, sans-serif; font-size: 11.5px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+                    >
+                      基差 / 价差收益
+                    </div>
+                  </div>
+                  <div
+                    data-pencil-name="槽"
+                    style="align-items: center; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 0px; height: 8px; justify-content: flex-start; width: 170px"
+                  >
+                    <div
+                      data-pencil-name="条"
+                      style="background-color: #7FB89B; border-radius: 2px; box-sizing: border-box; flex-shrink: 0; height: 8px; width: 132px"
+                    ></div>
+                  </div>
+                  <div
+                    data-pencil-name="v"
+                    style="align-items: flex-start; box-sizing: border-box; display: flex; flex-direction: row; flex: 1 1 0; gap: 0px; height: fit-content; justify-content: flex-end"
+                  >
+                    <div
+                      data-pencil-name="字"
+                      style='box-sizing: border-box; color: #067647; font-family: "Roboto Mono", system-ui, sans-serif; font-size: 12px; font-style: normal; font-weight: 700; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+                    >
+                      +32.10
+                    </div>
+                  </div>
+                </div>
+                <div
+                  data-pencil-name="归·借贷与理财收益"
+                  style="align-items: center; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 8px; height: fit-content; justify-content: flex-start; width: 100%"
+                >
+                  <div
+                    data-pencil-name="k"
+                    style="align-items: flex-start; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 0px; height: fit-content; justify-content: flex-start; width: 118px"
+                  >
+                    <div
+                      data-pencil-name="字"
+                      style='box-sizing: border-box; color: #55606E; font-family: "Noto Sans SC", system-ui, sans-serif; font-size: 11.5px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+                    >
+                      借贷与理财收益
+                    </div>
+                  </div>
+                  <div
+                    data-pencil-name="槽"
+                    style="align-items: center; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 0px; height: 8px; justify-content: flex-start; width: 170px"
+                  >
+                    <div
+                      data-pencil-name="条"
+                      style="background-color: #7FB89B; border-radius: 2px; box-sizing: border-box; flex-shrink: 0; height: 8px; width: 26px"
+                    ></div>
+                  </div>
+                  <div
+                    data-pencil-name="v"
+                    style="align-items: flex-start; box-sizing: border-box; display: flex; flex-direction: row; flex: 1 1 0; gap: 0px; height: fit-content; justify-content: flex-end"
+                  >
+                    <div
+                      data-pencil-name="字"
+                      style='box-sizing: border-box; color: #067647; font-family: "Roboto Mono", system-ui, sans-serif; font-size: 12px; font-style: normal; font-weight: 700; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+                    >
+                      +6.35
+                    </div>
+                  </div>
+                </div>
+                <div
+                  data-pencil-name="归·手续费"
+                  style="align-items: center; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 8px; height: fit-content; justify-content: flex-start; width: 100%"
+                >
+                  <div
+                    data-pencil-name="k"
+                    style="align-items: flex-start; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 0px; height: fit-content; justify-content: flex-start; width: 118px"
+                  >
+                    <div
+                      data-pencil-name="字"
+                      style='box-sizing: border-box; color: #55606E; font-family: "Noto Sans SC", system-ui, sans-serif; font-size: 11.5px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+                    >
+                      手续费
+                    </div>
+                  </div>
+                  <div
+                    data-pencil-name="槽"
+                    style="align-items: center; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 0px; height: 8px; justify-content: flex-start; width: 170px"
+                  >
+                    <div
+                      data-pencil-name="条"
+                      style="background-color: #E8AAA3; border-radius: 2px; box-sizing: border-box; flex-shrink: 0; height: 8px; width: 31px"
+                    ></div>
+                  </div>
+                  <div
+                    data-pencil-name="v"
+                    style="align-items: flex-start; box-sizing: border-box; display: flex; flex-direction: row; flex: 1 1 0; gap: 0px; height: fit-content; justify-content: flex-end"
+                  >
+                    <div
+                      data-pencil-name="字"
+                      style='box-sizing: border-box; color: #B42318; font-family: "Roboto Mono", system-ui, sans-serif; font-size: 12px; font-style: normal; font-weight: 700; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+                    >
+                      -7.42
+                    </div>
+                  </div>
+                </div>
+                <div
+                  data-pencil-name="归·滑点"
+                  style="align-items: center; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 8px; height: fit-content; justify-content: flex-start; width: 100%"
+                >
+                  <div
+                    data-pencil-name="k"
+                    style="align-items: flex-start; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 0px; height: fit-content; justify-content: flex-start; width: 118px"
+                  >
+                    <div
+                      data-pencil-name="字"
+                      style='box-sizing: border-box; color: #55606E; font-family: "Noto Sans SC", system-ui, sans-serif; font-size: 11.5px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+                    >
+                      滑点
+                    </div>
+                  </div>
+                  <div
+                    data-pencil-name="槽"
+                    style="align-items: center; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 0px; height: 8px; justify-content: flex-start; width: 170px"
+                  >
+                    <div
+                      data-pencil-name="条"
+                      style="background-color: #E8AAA3; border-radius: 2px; box-sizing: border-box; flex-shrink: 0; height: 8px; width: 9px"
+                    ></div>
+                  </div>
+                  <div
+                    data-pencil-name="v"
+                    style="align-items: flex-start; box-sizing: border-box; display: flex; flex-direction: row; flex: 1 1 0; gap: 0px; height: fit-content; justify-content: flex-end"
+                  >
+                    <div
+                      data-pencil-name="字"
+                      style='box-sizing: border-box; color: #B42318; font-family: "Roboto Mono", system-ui, sans-serif; font-size: 12px; font-style: normal; font-weight: 700; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+                    >
+                      -2.10
+                    </div>
+                  </div>
+                </div>
+                <div
+                  data-pencil-name="归·借币利息"
+                  style="align-items: center; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 8px; height: fit-content; justify-content: flex-start; width: 100%"
+                >
+                  <div
+                    data-pencil-name="k"
+                    style="align-items: flex-start; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 0px; height: fit-content; justify-content: flex-start; width: 118px"
+                  >
+                    <div
+                      data-pencil-name="字"
+                      style='box-sizing: border-box; color: #55606E; font-family: "Noto Sans SC", system-ui, sans-serif; font-size: 11.5px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+                    >
+                      借币利息
+                    </div>
+                  </div>
+                  <div
+                    data-pencil-name="槽"
+                    style="align-items: center; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 0px; height: 8px; justify-content: flex-start; width: 170px"
+                  >
+                    <div
+                      data-pencil-name="条"
+                      style="background-color: #E8AAA3; border-radius: 2px; box-sizing: border-box; flex-shrink: 0; height: 8px; width: 16px"
+                    ></div>
+                  </div>
+                  <div
+                    data-pencil-name="v"
+                    style="align-items: flex-start; box-sizing: border-box; display: flex; flex-direction: row; flex: 1 1 0; gap: 0px; height: fit-content; justify-content: flex-end"
+                  >
+                    <div
+                      data-pencil-name="字"
+                      style='box-sizing: border-box; color: #B42318; font-family: "Roboto Mono", system-ui, sans-serif; font-size: 12px; font-style: normal; font-weight: 700; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+                    >
+                      -3.83
+                    </div>
+                  </div>
+                </div>
+                <div
+                  data-pencil-name="归·异常处置损益"
+                  style="align-items: center; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 8px; height: fit-content; justify-content: flex-start; width: 100%"
+                >
+                  <div
+                    data-pencil-name="k"
+                    style="align-items: flex-start; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 0px; height: fit-content; justify-content: flex-start; width: 118px"
+                  >
+                    <div
+                      data-pencil-name="字"
+                      style='box-sizing: border-box; color: #55606E; font-family: "Noto Sans SC", system-ui, sans-serif; font-size: 11.5px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+                    >
+                      异常处置损益
+                    </div>
+                  </div>
+                  <div
+                    data-pencil-name="槽"
+                    style="align-items: center; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 0px; height: 8px; justify-content: flex-start; width: 170px"
+                  >
+                    <div
+                      data-pencil-name="条"
+                      style="background-color: #7FB89B; border-radius: 2px; box-sizing: border-box; flex-shrink: 0; height: 8px; width: 9px"
+                    ></div>
+                  </div>
+                  <div
+                    data-pencil-name="v"
+                    style="align-items: flex-start; box-sizing: border-box; display: flex; flex-direction: row; flex: 1 1 0; gap: 0px; height: fit-content; justify-content: flex-end"
+                  >
+                    <div
+                      data-pencil-name="字"
+                      style='box-sizing: border-box; color: #067647; font-family: "Roboto Mono", system-ui, sans-serif; font-size: 12px; font-style: normal; font-weight: 700; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+                    >
+                      +2.12
+                    </div>
+                  </div>
+                </div>
+                <div
+                  data-pencil-name="分"
+                  style="background-color: #EEF1F4; box-sizing: border-box; flex-shrink: 0; height: 1px; width: 100%"
+                ></div>
+                <div
+                  data-pencil-name="合计"
+                  style="align-items: center; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 0px; height: fit-content; justify-content: space-between; width: 100%"
+                >
+                  <div
+                    data-pencil-name="k"
+                    style='box-sizing: border-box; color: #17202B; font-family: "Noto Sans SC", system-ui, sans-serif; font-size: 12.5px; font-style: normal; font-weight: 700; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+                  >
+                    最终净收益
+                  </div>
+                  <div
+                    data-pencil-name="v"
+                    style='box-sizing: border-box; color: #067647; font-family: "Roboto Mono", system-ui, sans-serif; font-size: 16px; font-style: normal; font-weight: 700; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+                  >
+                    +68.42 USDT
+                  </div>
+                </div>
+                <div
+                  data-pencil-name="注"
+                  style='box-sizing: border-box; color: #8B95A3; font-family: "Noto Sans SC", system-ui, sans-serif; font-size: 10px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: 15px; text-align: left; width: 100%'
+                >
+                  恒等式：净收益 = 资金费 + 基差/价差 + 利息理财 − 手续费 − 滑点 − 借币成本 ±
+                  异常损益。已排除 HOUSE_RND / PRE_CARRY / DEX canary
+                  等研发损益；不展示币种、策略、账号与实时仓位。
+                </div>
+              </div>
+            </div>
+          </div>
+          <div
+            data-pencil-name="最近资金变化"
+            style="align-items: flex-start; background-color: #FFFFFF; border-radius: 6px; border: 1px solid #E5E8EC; box-sizing: border-box; display: flex; flex-direction: column; flex: 1 1 0; gap: 0px; justify-content: flex-start; overflow: hidden; width: 100%"
+          >
+            <div
+              data-pencil-name="头"
+              style="align-items: center; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 0px; height: fit-content; justify-content: space-between; padding: 10px 16px 6px 16px; width: 100%"
+            >
+              <div
+                data-pencil-name="字"
+                style='box-sizing: border-box; color: #17202B; font-family: "Noto Sans SC", system-ui, sans-serif; font-size: 13.5px; font-style: normal; font-weight: 700; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+              >
+                最近资金变化
+              </div>
+              <div
+                data-pencil-name="链"
+                style="align-items: center; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 4px; height: fit-content; justify-content: flex-start; width: fit-content"
+              >
+                <div
+                  data-pencil-name="字"
+                  style='box-sizing: border-box; color: #175CD3; font-family: "Noto Sans SC", system-ui, sans-serif; font-size: 11.5px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+                >
+                  查看全部流水
+                </div>
+                <svg
+                  data-pencil-name="i"
+                  data-icon-name="arrow-right"
+                  data-icon-set="lucide"
+                  viewBox="0 0 13.99993896484375 14"
+                  preserveAspectRatio="xMidYMid meet"
+                  xmlns="http://www.w3.org/2000/svg"
+                  style="box-sizing: border-box; flex-shrink: 0; height: 12px; width: 12px"
+                >
+                  <path
+                    d="M6.90088 2.35156q-0.18115 0.02734-0.32129 0.16748-0.11279 0.11279-0.14697 0.28028-0.03418 0.16748 0.02051 0.32129 0.02734 0.08545 0.25976 0.3247 0.23242 0.23584 1.36377 1.37061 1.58252 1.58252 1.58252 1.59619 0 0.01367-3.45557 0.01367l-3.44531 0-0.08545 0.04102q-0.22217 0.11279-0.30078 0.33838-0.0752 0.22217 0.00684 0.43408 0.05811 0.0957 0.14013 0.18115 0.08545 0.08203 0.16748 0.11963 0.08545 0.03418 0.53321 0.03418l3.01123 0q3.42822 0 3.42822 0.01367 0 0.01367-1.58252 1.59619-1.13135 1.13477-1.36377 1.37402-0.23242 0.23584-0.25976 0.3213-0.05469 0.15381-0.02051 0.32128 0.03418 0.16748 0.14697 0.28028 0.18115 0.18115 0.42041 0.18115l0.04102 0q0.11279 0 0.19824-0.05469 0.14014-0.09912 0.51611-0.46484l1.68164-1.67822q2.1123-2.10205 2.15332-2.18409 0.07178-0.12646 0.07178-0.28027 0-0.15381-0.07178-0.28027-0.04102-0.08203-2.1499-2.18067-2.10547-2.10205-2.17725-2.13623-0.06836-0.0376-0.23584-0.06494-0.04102 0-0.12646 0.01367z"
+                    fill="#175CD3"
+                  ></path>
+                </svg>
+              </div>
+            </div>
+            <div
+              data-pencil-name="近·07-13 16:00"
+              style="align-items: center; border-color: #EEF1F4; border-style: solid; border-width: 1px 0px 0px 0px; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 12px; height: 34px; justify-content: flex-start; padding: 0px 16px; width: 100%"
+            >
+              <div
+                data-pencil-name="t"
+                style="align-items: flex-start; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 0px; height: fit-content; justify-content: flex-start; width: 96px"
+              >
+                <div
+                  data-pencil-name="字"
+                  style='box-sizing: border-box; color: #8B95A3; font-family: "Roboto Mono", system-ui, sans-serif; font-size: 10.5px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+                >
+                  07-13 16:00
+                </div>
+              </div>
+              <div
+                data-pencil-name="ty"
+                style="align-items: flex-start; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 0px; height: fit-content; justify-content: flex-start; width: 76px"
+              >
+                <div
+                  data-pencil-name="字"
+                  style='box-sizing: border-box; color: #17202B; font-family: "Noto Sans SC", system-ui, sans-serif; font-size: 11.5px; font-style: normal; font-weight: 700; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+                >
+                  净值结算
+                </div>
+              </div>
+              <div
+                data-pencil-name="d"
+                style="align-items: flex-start; box-sizing: border-box; display: flex; flex-direction: row; flex: 1 1 0; gap: 0px; height: fit-content; justify-content: flex-start"
+              >
+                <div
+                  data-pencil-name="字"
+                  style='box-sizing: border-box; color: #55606E; font-family: "Noto Sans SC", system-ui, sans-serif; font-size: 11.5px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+                >
+                  日度净值 1.1363 · 全员统一
+                </div>
+              </div>
+              <div
+                data-pencil-name="v"
+                style="align-items: flex-start; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 0px; height: fit-content; justify-content: flex-end; width: 120px"
+              >
+                <div
+                  data-pencil-name="字"
+                  style='box-sizing: border-box; color: #8B95A3; font-family: "Roboto Mono", system-ui, sans-serif; font-size: 11.5px; font-style: normal; font-weight: 700; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+                >
+                  —
+                </div>
+              </div>
+              <div
+                data-pencil-name="st"
+                style="align-items: flex-start; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 0px; height: fit-content; justify-content: flex-end; width: 110px"
+              >
+                <div
+                  data-pencil-name="章"
+                  style="align-items: flex-start; background-color: #ECFDF3; border-radius: 4px; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 0px; height: fit-content; justify-content: flex-start; padding: 2px 7px; width: fit-content"
+                >
+                  <div
+                    data-pencil-name="字"
+                    style='box-sizing: border-box; color: #067647; font-family: "Noto Sans SC", system-ui, sans-serif; font-size: 9.5px; font-style: normal; font-weight: 700; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+                  >
+                    RECONCILED
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div
+              data-pencil-name="近·07-12 08:00"
+              style="align-items: center; border-color: #EEF1F4; border-style: solid; border-width: 1px 0px 0px 0px; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 12px; height: 34px; justify-content: flex-start; padding: 0px 16px; width: 100%"
+            >
+              <div
+                data-pencil-name="t"
+                style="align-items: flex-start; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 0px; height: fit-content; justify-content: flex-start; width: 96px"
+              >
+                <div
+                  data-pencil-name="字"
+                  style='box-sizing: border-box; color: #8B95A3; font-family: "Roboto Mono", system-ui, sans-serif; font-size: 10.5px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+                >
+                  07-12 08:00
+                </div>
+              </div>
+              <div
+                data-pencil-name="ty"
+                style="align-items: flex-start; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 0px; height: fit-content; justify-content: flex-start; width: 76px"
+              >
+                <div
+                  data-pencil-name="字"
+                  style='box-sizing: border-box; color: #17202B; font-family: "Noto Sans SC", system-ui, sans-serif; font-size: 11.5px; font-style: normal; font-weight: 700; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+                >
+                  资金费
+                </div>
+              </div>
+              <div
+                data-pencil-name="d"
+                style="align-items: flex-start; box-sizing: border-box; display: flex; flex-direction: row; flex: 1 1 0; gap: 0px; height: fit-content; justify-content: flex-start"
+              >
+                <div
+                  data-pencil-name="字"
+                  style='box-sizing: border-box; color: #55606E; font-family: "Noto Sans SC", system-ui, sans-serif; font-size: 11.5px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+                >
+                  CORE_POOL 分配（按份额）
+                </div>
+              </div>
+              <div
+                data-pencil-name="v"
+                style="align-items: flex-start; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 0px; height: fit-content; justify-content: flex-end; width: 120px"
+              >
+                <div
+                  data-pencil-name="字"
+                  style='box-sizing: border-box; color: #067647; font-family: "Roboto Mono", system-ui, sans-serif; font-size: 11.5px; font-style: normal; font-weight: 700; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+                >
+                  +0.42 USDT
+                </div>
+              </div>
+              <div
+                data-pencil-name="st"
+                style="align-items: flex-start; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 0px; height: fit-content; justify-content: flex-end; width: 110px"
+              >
+                <div
+                  data-pencil-name="章"
+                  style="align-items: flex-start; background-color: #ECFDF3; border-radius: 4px; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 0px; height: fit-content; justify-content: flex-start; padding: 2px 7px; width: fit-content"
+                >
+                  <div
+                    data-pencil-name="字"
+                    style='box-sizing: border-box; color: #067647; font-family: "Noto Sans SC", system-ui, sans-serif; font-size: 9.5px; font-style: normal; font-weight: 700; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+                  >
+                    RECONCILED
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div
+              data-pencil-name="近·07-10 11:24"
+              style="align-items: center; border-color: #EEF1F4; border-style: solid; border-width: 1px 0px 0px 0px; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 12px; height: 34px; justify-content: flex-start; padding: 0px 16px; width: 100%"
+            >
+              <div
+                data-pencil-name="t"
+                style="align-items: flex-start; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 0px; height: fit-content; justify-content: flex-start; width: 96px"
+              >
+                <div
+                  data-pencil-name="字"
+                  style='box-sizing: border-box; color: #8B95A3; font-family: "Roboto Mono", system-ui, sans-serif; font-size: 10.5px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+                >
+                  07-10 11:24
+                </div>
+              </div>
+              <div
+                data-pencil-name="ty"
+                style="align-items: flex-start; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 0px; height: fit-content; justify-content: flex-start; width: 76px"
+              >
+                <div
+                  data-pencil-name="字"
+                  style='box-sizing: border-box; color: #17202B; font-family: "Noto Sans SC", system-ui, sans-serif; font-size: 11.5px; font-style: normal; font-weight: 700; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+                >
+                  份额发行
+                </div>
+              </div>
+              <div
+                data-pencil-name="d"
+                style="align-items: flex-start; box-sizing: border-box; display: flex; flex-direction: row; flex: 1 1 0; gap: 0px; height: fit-content; justify-content: flex-start"
+              >
+                <div
+                  data-pencil-name="字"
+                  style='box-sizing: border-box; color: #55606E; font-family: "Noto Sans SC", system-ui, sans-serif; font-size: 11.5px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+                >
+                  追加入金 100.00 → +88.02 份
+                </div>
+              </div>
+              <div
+                data-pencil-name="v"
+                style="align-items: flex-start; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 0px; height: fit-content; justify-content: flex-end; width: 120px"
+              >
+                <div
+                  data-pencil-name="字"
+                  style='box-sizing: border-box; color: #067647; font-family: "Roboto Mono", system-ui, sans-serif; font-size: 11.5px; font-style: normal; font-weight: 700; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+                >
+                  +100.00 USDT
+                </div>
+              </div>
+              <div
+                data-pencil-name="st"
+                style="align-items: flex-start; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 0px; height: fit-content; justify-content: flex-end; width: 110px"
+              >
+                <div
+                  data-pencil-name="章"
+                  style="align-items: flex-start; background-color: #EFF4FF; border-radius: 4px; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 0px; height: fit-content; justify-content: flex-start; padding: 2px 7px; width: fit-content"
+                >
+                  <div
+                    data-pencil-name="字"
+                    style='box-sizing: border-box; color: #175CD3; font-family: "Noto Sans SC", system-ui, sans-serif; font-size: 9.5px; font-style: normal; font-weight: 700; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+                  >
+                    CONFIRMED
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div
+              data-pencil-name="近·07-01 08:00"
+              style="align-items: center; border-color: #EEF1F4; border-style: solid; border-width: 1px 0px 0px 0px; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 12px; height: 34px; justify-content: flex-start; padding: 0px 16px; width: 100%"
+            >
+              <div
+                data-pencil-name="t"
+                style="align-items: flex-start; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 0px; height: fit-content; justify-content: flex-start; width: 96px"
+              >
+                <div
+                  data-pencil-name="字"
+                  style='box-sizing: border-box; color: #8B95A3; font-family: "Roboto Mono", system-ui, sans-serif; font-size: 10.5px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+                >
+                  07-01 08:00
+                </div>
+              </div>
+              <div
+                data-pencil-name="ty"
+                style="align-items: flex-start; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 0px; height: fit-content; justify-content: flex-start; width: 76px"
+              >
+                <div
+                  data-pencil-name="字"
+                  style='box-sizing: border-box; color: #17202B; font-family: "Noto Sans SC", system-ui, sans-serif; font-size: 11.5px; font-style: normal; font-weight: 700; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+                >
+                  净值结算
+                </div>
+              </div>
+              <div
+                data-pencil-name="d"
+                style="align-items: flex-start; box-sizing: border-box; display: flex; flex-direction: row; flex: 1 1 0; gap: 0px; height: fit-content; justify-content: flex-start"
+              >
+                <div
+                  data-pencil-name="字"
+                  style='box-sizing: border-box; color: #55606E; font-family: "Noto Sans SC", system-ui, sans-serif; font-size: 11.5px; font-style: normal; font-weight: 400; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+                >
+                  月度净值 FINALIZED v1.0
+                </div>
+              </div>
+              <div
+                data-pencil-name="v"
+                style="align-items: flex-start; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 0px; height: fit-content; justify-content: flex-end; width: 120px"
+              >
+                <div
+                  data-pencil-name="字"
+                  style='box-sizing: border-box; color: #8B95A3; font-family: "Roboto Mono", system-ui, sans-serif; font-size: 11.5px; font-style: normal; font-weight: 700; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+                >
+                  —
+                </div>
+              </div>
+              <div
+                data-pencil-name="st"
+                style="align-items: flex-start; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 0px; height: fit-content; justify-content: flex-end; width: 110px"
+              >
+                <div
+                  data-pencil-name="章"
+                  style="align-items: flex-start; background-color: #122B4E; border-radius: 4px; box-sizing: border-box; display: flex; flex-direction: row; flex-shrink: 0; gap: 0px; height: fit-content; justify-content: flex-start; padding: 2px 7px; width: fit-content"
+                >
+                  <div
+                    data-pencil-name="字"
+                    style='box-sizing: border-box; color: #FFFFFF; font-family: "Noto Sans SC", system-ui, sans-serif; font-size: 9.5px; font-style: normal; font-weight: 700; letter-spacing: 0px; line-height: normal; text-align: left; white-space: nowrap'
+                  >
+                    FINALIZED
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>

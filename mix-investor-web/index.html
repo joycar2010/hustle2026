@@ -78,6 +78,9 @@ td b{color:var(--inv-t1)}
     <div class="kpi"><div class="k">组合收益率(TWR)</div><div class="v num" id="ret">—</div><div class="m">剔除入出金 · 全员一致</div></div>
   </div>
 
+  <div id="maintcard" class="risk" style="border-color:#E7C868;background:var(--inv-amberbg);display:none">
+    <b>系统维护</b> <span id="mainttxt" class="sub"></span></div>
+
   <div id="riskcard" class="risk"><b>平台访问风险</b> <span id="risktxt" class="sub"></span><div class="sub" id="riskhandle" style="margin-top:4px"></div></div>
 
   <div class="card">
@@ -121,6 +124,12 @@ async function loadAll(){
     const c=$('riskcard');c.className='risk '+(r.has_access_risk?'warn':'ok');
     $('risktxt').textContent=`${r.status_text}(受影响平台 ${r.affected_platforms} · 对NAV影响 ${fmt(r.nav_impact_usdt)} USDT)`;
     $('riskhandle').textContent=r.handling||'';
+  }catch(e){}
+  try{
+    const m=await (await fetch(API+'/maintenance/status')).json();
+    const mc=$('maintcard');
+    if(m.state&&m.state!=='NORMAL'){mc.style.display='block';$('mainttxt').textContent=(m.banner||'系统维护中')+(m.since?' · 自 '+m.since:'');}
+    else mc.style.display='none';
   }catch(e){}
   try{
     const perf=await api('/investor/performance?limit=180');

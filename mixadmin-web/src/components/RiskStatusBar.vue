@@ -4,6 +4,8 @@
     <div class="r1">
       <span class="envchip prod">PROD</span>
       <span class="envchip">CORE_POOL</span>
+      <span class="maintchip" :class="maintCls" :title="maint.banner || ''" @click="$router.push('/mix/maintenance')">
+        网站维护 {{ maintLabel }}</span>
       <span class="modechip" :class="modeCls(d.worst_mode)">
         平台模式 {{ d.worst_mode || 'STALE' }}<i v-if="d.worst_mode==='NORMAL'">·已核验</i>
         <i v-else-if="d.stale">·数据超龄 fail-closed</i>
@@ -53,7 +55,12 @@ import { mixApi } from '../api/mix'
 import { STRATEGY_META as META } from '../components/PositionTable/types'
 
 const d = ref({ stale: true })
+const maint = ref({ state: 'NORMAL' })
 const strats = ref([])
+const M_LABEL = { NORMAL: '正常', ANNOUNCED: '已公告', DRAINING: '排空中', DRAIN_BLOCKED: '排空受阻', MAINTENANCE: '维护中', RECOVERY_CHECK: '恢复检查' }
+const maintLabel = computed(() => M_LABEL[maint.value.state] || maint.value.state)
+const maintCls = computed(() => ({ NORMAL: 'ok', ANNOUNCED: 'watch', DRAINING: 'nonew',
+  DRAIN_BLOCKED: 'red', MAINTENANCE: 'red', RECOVERY_CHECK: 'recov' }[maint.value.state] || 'ok'))
 const opName = ref('operator')
 const clock = ref('')
 let timer = null; let clkTimer = null
@@ -80,6 +87,7 @@ function openWall(w) { window.open(`/wall/${w}?token=${localStorage.getItem('mix
 async function load() {
   try { d.value = await mixApi.riskSummary() } catch (e) { d.value = { stale: true } }
   try { strats.value = await mixApi.strategies() } catch (e) { /* 页签降级 */ }
+  try { maint.value = await mixApi.maintStatus() } catch (e) { /* */ }
 }
 async function freezeAll() {
   try {
@@ -111,6 +119,12 @@ onUnmounted(() => { timer && clearInterval(timer); clkTimer && clearInterval(clk
 .envchip { font-weight: 800; font-size: 10.5px; padding: 1px 8px; border-radius: 4px;
   background: rgba(94,102,115,.18); color: var(--mix-t1, #EAECEF);
   &.prod { background: rgba(246,70,93,.16); color: #F6465D; } }
+.maintchip { font-weight: 800; font-size: 11.5px; padding: 2px 9px; border-radius: 5px; cursor: pointer;
+  &.ok { background: rgba(14,203,129,.12); color: #35b57c; }
+  &.watch { background: rgba(240,185,11,.14); color: #F0B90B; }
+  &.nonew { background: rgba(255,138,61,.16); color: #FF8A3D; }
+  &.red { background: rgba(246,70,93,.16); color: #F6465D; }
+  &.recov { background: rgba(140,163,199,.16); color: #8CA3C7; } }
 .modechip { font-weight: 800; font-size: 12px; padding: 2px 10px; border-radius: 5px;
   i { font-style: normal; font-weight: 500; opacity: .85; }
   &.ok { background: rgba(14,203,129,.12); color: #35b57c; }

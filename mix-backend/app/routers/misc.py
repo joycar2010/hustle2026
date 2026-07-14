@@ -156,6 +156,10 @@ async def coin_repay_panel(symbol: str, _who=Depends(require_viewer)):
 
 @router.post("/coins/{symbol}/menu", status_code=202)
 async def coin_menu_action(symbol: str, body: dict, op=Depends(require_operator)):
+    # 维护排空期:新增风险类菜单(推送/手动开仓/恢复坑位)API 入口即拒;减险类放行
+    if str(body.get("action")) in ("push_symbol", "manual_open", "resume_slot"):
+        from .maintenance import block_new_risk
+        await block_new_risk()
     """S3 币种/账户/持仓行右键菜单动作代理。coin 状态机权威,桥只透传+校验。"""
     action = str(body.get("action") or "")
     if action not in S3_MENU_CMDS:

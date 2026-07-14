@@ -133,6 +133,8 @@ async def close_preview(symbol: str, _who=Depends(require_viewer)):
 @router.post("/proposal/create")
 async def proposal_create(body: dict, op=Depends(require_operator)):
     """从机会候选生成 DRY_RUN 提案:记录经济闸快照,进入 COOLDOWN 计时。shadow——不下单。"""
+    from .maintenance import block_new_risk
+    await block_new_risk()   # 维护排空期 API 入口即拒新增(权威闸在 policy/engine 层)
     pool = await ds.pg_main()
     if pool is None:
         raise HTTPException(503, "mix_main 不可达")
