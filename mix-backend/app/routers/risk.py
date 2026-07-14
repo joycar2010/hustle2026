@@ -356,3 +356,25 @@ async def risk_venue_detail(venue: str, _who=Depends(require_viewer)):
     except Exception:
         pass
     return out
+
+
+@router.get("/risk/opportunities")
+async def risk_opportunities(_who=Depends(require_viewer)):
+    """通过硬闸的机会(tlOCA 底条+候选行 venue 风险字段,lQKF8):
+    dcm:exec:opener 候选(已带 risk_charge_bps/risk_adjusted_e_bps)× 两腿 venue mode。
+    NO_NEW_RISK 以上的腿=候选行显示限制原因,前端不给开仓入口。"""
+    op = await ds.get_json("dcm:exec:opener") or {}
+    pol = await ds.get_json("dcm:risk:policy") or {}
+    venues = pol.get("venues") or {}
+    out = []
+    for c in (op.get("candidates") or [])[:12]:
+        vl, vs = c.get("venue_long"), c.get("venue_short")
+        ml = (venues.get(vl) or {}).get("mode", "N/A")
+        ms = (venues.get(vs) or {}).get("mode", "N/A")
+        blocked = any(m in ("NO_NEW_RISK", "REDUCE_ONLY", "EXIT_ONLY", "FROZEN") for m in (ml, ms))
+        out.append({**{k: c.get(k) for k in ("symbol", "venue_long", "venue_short", "e_bps",
+                    "net_daily_pct", "risk_charge_bps", "risk_adjusted_e_bps", "target_notional_usdt")},
+                    "venue_long_mode": ml, "venue_short_mode": ms, "blocked": blocked,
+                    "blocked_reason": ("腿venue受限" if blocked else "")})
+    return {"ts": op.get("ts"), "mode": op.get("mode", "shadow"), "candidates": out,
+            "skipped_count": len(op.get("skipped") or [])}

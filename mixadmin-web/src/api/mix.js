@@ -26,6 +26,7 @@ export const mixApi = {
   riskSummary: () => http.get('/risk/summary'),
   riskOverrideAdd: (body) => http.post('/risk/overrides', body),
   riskVenue: (venue) => http.get(`/risk/venue/${venue}`),
+  riskOpportunities: () => http.get('/risk/opportunities'),
   whoami: () => http.get('/auth/whoami'),
   whoamiWith: (t) => http.get('/auth/whoami', { headers: { 'X-Op-Token': t } }),
   login: (username, password) => http.post('/auth/login', { username, password }),
