@@ -153,6 +153,7 @@ def _check_invariants(final, venue):
 
 
 async def main():
+    E.PLACE_PROPAGATION_SLEEP = 0   # 传播窗复查在 sim 中零延迟(逻辑照走,1600 场景不拖慢)
     # 单腿事件字母表(覆盖 §18.2:成交/部分/ACK丢失/超时无成/拒单)
     outcomes = [E.FILLED, "ACK_LOST", "TIMEOUT_NOFILL", E.PARTIAL, E.REJECT]
     # 每腿最多两步序列(第一步逆境,第二步恢复),×崩溃点×分区 → 组合

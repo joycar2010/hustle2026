@@ -22,6 +22,13 @@ PROPOSED, RESERVED, OPENING, HEDGING, OPEN, CLOSING, CLOSED = \
 LEG_IMBALANCE, QUARANTINED = "LEG_IMBALANCE", "QUARANTINED"
 
 MAX_PLACE_RETRY = 3
+# 传播窗复查(真金课 2026-07-14 DOGE 双仓):币安市价单 place 返回 NEW 后 ~30ms 内回查
+# 可能 -2013"无此单"(读路径传播滞后)→若立即重下,同 clientOrderId 两单都成交——
+# 合约端 cid 只对"在挂订单"去重,市价单毫秒成交后同号即可复用,交易所端幂等防不住。
+# 修法:已下过单(placed)后查到 NOTFOUND,必须连续 PLACE_PROPAGATION_RETRY 次复查
+# (间隔 PLACE_PROPAGATION_SLEEP)全部 NOTFOUND 才允许重下。混沌测试将 SLEEP 置 0。
+PLACE_PROPAGATION_RETRY = 4
+PLACE_PROPAGATION_SLEEP = 0.5
 
 
 def coid(saga_id, leg_idx, attempt_ns="open"):
@@ -40,6 +47,7 @@ class SagaExecutor:
         """下单一腿并确认;ACK 丢失(TIMEOUT)先查询再决定重试 —— INV1 的核心。
         返回 True=已成交(FILLED),False=确认失败(达重试上限仍未成交)。"""
         cid = coid(saga_id, leg_idx, ns)
+        placed = False
         for _ in range(MAX_PLACE_RETRY):
             # 每次重试前先查:确定性 cid 意味着上次可能其实已下到交易所
             q = await self.venue.query(cid, leg)
@@ -54,8 +62,25 @@ class SagaExecutor:
                     await self.store.save_leg(saga_id, leg_idx, cid, FILLED, q2["filled"])
                     return True
                 continue
-            # 未下到(NOTFOUND)→ 下单
+            if placed:
+                # 已下过单但查不到:大概率交易所读路径传播窗,绝不能立即重下(双仓真金课)。
+                # 连续复查全 NOTFOUND 才放行到重下。
+                found = False
+                for _ in range(PLACE_PROPAGATION_RETRY):
+                    if PLACE_PROPAGATION_SLEEP:
+                        await asyncio.sleep(PLACE_PROPAGATION_SLEEP)
+                    q3 = await self.venue.query(cid, leg)
+                    if q3["status"] == FILLED:
+                        await self.store.save_leg(saga_id, leg_idx, cid, FILLED, q3["filled"])
+                        return True
+                    if q3["status"] in (ACK, PARTIAL):
+                        found = True
+                        break
+                if found:
+                    continue   # 单在场:回到外层等待成交,不重下
+            # 未下到(NOTFOUND,且传播窗复查确认)→ 下单
             res = await self.venue.place(cid, leg)
+            placed = True
             if res["status"] == FILLED:
                 await self.store.save_leg(saga_id, leg_idx, cid, FILLED, res["filled"])
                 return True
@@ -83,6 +108,15 @@ class SagaExecutor:
             if res["status"] == FILLED:
                 await self.store.save_leg(saga_id, leg_idx, cid, ROLLED_BACK, 0)
                 return True
+            if res["status"] in (ACK, PARTIAL, TIMEOUT):
+                # 已下出(或不确定):传播窗内轮询确认,不立即重下(reduce-only 重复虽无害,避免垃圾单)
+                for _ in range(PLACE_PROPAGATION_RETRY):
+                    if PLACE_PROPAGATION_SLEEP:
+                        await asyncio.sleep(PLACE_PROPAGATION_SLEEP)
+                    q2 = await self.venue.query(cid, rb)
+                    if q2["status"] == FILLED:
+                        await self.store.save_leg(saga_id, leg_idx, cid, ROLLED_BACK, 0)
+                        return True
         return False  # 回滚失败 = 必须人工(fatal),外层置 QUARANTINED
 
     async def open_pair(self, saga_id, legs, resume=False):
