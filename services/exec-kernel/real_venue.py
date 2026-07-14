@@ -209,5 +209,76 @@ class BitgetRealVenue:
 
 
 def venue_for(name: str):
-    return {"binance": BinanceRealVenue, "bybit": BybitRealVenue,
-            "gate": GateRealVenue, "bitget": BitgetRealVenue}.get(name, lambda: None)()
+    return {"binance": BinanceRealVenue, "bybit": BybitRealVenue, "gate": GateRealVenue,
+            "bitget": BitgetRealVenue, "okx": OkxRealVenue,
+            "hyperliquid": HyperliquidRealVenue}.get(name, lambda: None)()
+
+
+class OkxRealVenue:
+    """okx 永续读适配器(base64(HMAC-SHA256(ts+method+path)))。pos 张×ctVal=base;符号 BASE-USDT-SWAP。"""
+
+    def __init__(self, key="", secret="", passphrase=""):
+        self.key = key or os.environ.get("OKX_KEY", "")
+        self.secret = secret or os.environ.get("OKX_SECRET", "")
+        self.passphrase = passphrase or os.environ.get("OKX_PASSPHRASE", "")
+        self._ctval = None
+
+    def _hdr(self, method, path):
+        ts = time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime())
+        sig = base64.b64encode(hmac.new(self.secret.encode(), (ts + method + path).encode(), hashlib.sha256).digest()).decode()
+        return {"OK-ACCESS-KEY": self.key, "OK-ACCESS-SIGN": sig,
+                "OK-ACCESS-TIMESTAMP": ts, "OK-ACCESS-PASSPHRASE": self.passphrase}
+
+    async def _ctvals(self, cli):
+        if self._ctval is None:
+            self._ctval = {}
+            try:
+                d = (await cli.get("https://www.okx.com/api/v5/public/instruments?instType=SWAP", timeout=15)).json()
+                for c in d.get("data", []):
+                    self._ctval[c["instId"]] = float(c.get("ctVal") or 1) or 1
+            except Exception:  # noqa: BLE001
+                pass
+        return self._ctval
+
+    async def all_positions(self) -> dict:
+        path = "/api/v5/account/positions?instType=SWAP"
+        try:
+            async with httpx.AsyncClient(timeout=15) as cli:
+                r = await cli.get("https://www.okx.com" + path, headers=self._hdr("GET", path))
+                d = r.json()
+                if d.get("code") != "0":
+                    return {"ok": False, "err": f"{d.get('code')}: {d.get('msg')}"}
+                ctv = await self._ctvals(cli)
+        except Exception as e:  # noqa: BLE001
+            return {"ok": False, "err": repr(e)[:120]}
+        out = {}
+        for p in d.get("data", []):
+            pos = float(p.get("pos") or 0)   # 已带符号(多+空-);单位=张
+            if abs(pos) > 1e-12:
+                out[p["instId"]] = pos * ctv.get(p["instId"], 1)   # 转 base
+        return {"ok": True, "positions": out}
+
+
+class HyperliquidRealVenue:
+    """HL 永续读适配器(clearinghouseState,只读钱包地址,无需签名)。szi=base 带符号;符号=币名。"""
+
+    def __init__(self, address=""):
+        self.address = address or os.environ.get("HL_WALLET_ADDRESS", "")
+
+    async def all_positions(self) -> dict:
+        if not self.address:
+            return {"ok": False, "err": "HL_WALLET_ADDRESS 未设"}
+        try:
+            async with httpx.AsyncClient(timeout=15) as cli:
+                r = await cli.post("https://api.hyperliquid.xyz/info",
+                                   json={"type": "clearinghouseState", "user": self.address})
+            d = r.json()
+        except Exception as e:  # noqa: BLE001
+            return {"ok": False, "err": repr(e)[:120]}
+        out = {}
+        for ap in (d.get("assetPositions") or []):
+            pos = ap.get("position") or {}
+            szi = float(pos.get("szi") or 0)
+            if abs(szi) > 1e-12:
+                out[pos.get("coin")] = szi
+        return {"ok": True, "positions": out}

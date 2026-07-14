@@ -20,13 +20,20 @@ DCM_PG_DSN = os.environ.get("DCM_PG_DSN", "")
 REDIS_URL = os.environ.get("DCM_REDIS_URL", "redis://10.0.1.212:6379/0")
 INTERVAL = int(os.environ.get("DCM_RECON_INTERVAL_SEC", "120"))
 TOL_PCT = float(os.environ.get("DCM_RECON_TOL_PCT", "0.02"))
-SUPPORTED = {"binance", "bybit", "gate", "bitget"}
+SUPPORTED = {"binance", "bybit", "gate", "bitget", "okx", "hyperliquid"}
 
 
 def _venue_sym(venue, sym):
-    """各所符号格式:gate=BASE_USDT(下划线),其余同 dcm(BASEUSDT)。"""
-    if venue == "gate" and sym.endswith("USDT"):
-        return sym[:-4] + "_USDT"
+    """各所符号格式:gate=BASE_USDT / okx=BASE-USDT-SWAP / HL=BASE(币名);其余同 dcm(BASEUSDT)。"""
+    if not sym.endswith("USDT"):
+        return sym
+    base = sym[:-4]
+    if venue == "gate":
+        return base + "_USDT"
+    if venue == "okx":
+        return base + "-USDT-SWAP"
+    if venue == "hyperliquid":
+        return base
     return sym
 
 
