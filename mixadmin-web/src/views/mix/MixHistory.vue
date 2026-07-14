@@ -1,5 +1,7 @@
 <template>
   <div class="mixhist">
+    <el-tabs v-model="htab" @tab-change="onTab">
+    <el-tab-pane label="平仓成交(逐笔)" name="fills">
     <div class="bar">
       <!-- 自定义时间窗（选定后覆盖天数按钮） -->
       <el-date-picker v-model="customRange" type="datetimerange" size="small"
@@ -56,11 +58,26 @@
     </div>
     <div class="foot">数据=mix_main.trade_history 持久账（S1/S2←dcm 终态行；S3←coin 桥终态透传,300s 汇入）；
       资金费/手续费/返佣/利润=income_records 落袋账单按持有窗归因（S3 账本在 coin 库,暂标 —）</div>
+    </el-tab-pane>
+    <el-tab-pane v-for="k in FACTS" :key="k.v" :label="k.t" :name="k.v" lazy>
+      <div class="fbar">
+        <el-input v-model="fsym" size="small" placeholder="按 symbol 筛选" style="width:160px" @change="loadFacts" clearable />
+        <el-button size="small" @click="loadFacts">刷新</el-button>
+        <span class="dimtxt">{{ facts.length }} 条事实 · 只读不可编辑 · 因果链 Intent→Order→Fill→Bill→Ledger→RECON→NAV</span>
+      </div>
+      <el-table :data="facts" size="small" stripe max-height="440">
+        <el-table-column v-for="col in factCols" :key="col" :prop="col" :label="col" show-overflow-tooltip min-width="90">
+          <template #default="{row}"><span :class="numCls(row[col])">{{ fmtCell(row[col]) }}</span></template>
+        </el-table-column>
+      </el-table>
+      <div class="dimtxt" style="margin-top:6px">检索键:symbol / venue / owner / trace_id / saga_id / incident_id / maintenance_id;历史事实不可编辑,导出需脱敏。</div>
+    </el-tab-pane>
+    </el-tabs>
   </div>
 </template>
 
 <script setup>
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { mixApi } from '../../api/mix'
 
@@ -86,6 +103,15 @@ async function load() {
   } catch (e) { ElMessage.error(e?.detail || '加载失败') }
   finally { loading.value = false }
 }
+const htab = ref('fills')
+const FACTS = [{v:'orders',t:'订单/成交'},{v:'bills',t:'账单(交易所)'},{v:'ledger',t:'账本(归一)'},
+  {v:'proposals',t:'PositionIntent(提案)'},{v:'maintenance',t:'维护事件'},{v:'recon',t:'RECON断点'}]
+const facts = ref([]); const fsym = ref('')
+const factCols = computed(() => facts.value.length ? Object.keys(facts.value[0]) : [])
+const fmtCell = v => (v == null ? 'N/A' : typeof v === 'number' ? (Math.abs(v) < 1000 ? v.toFixed(4) : v.toFixed(2)) : String(v))
+const numCls = v => (typeof v === 'number' ? (v >= 0 ? 'up' : 'down') : '')
+async function loadFacts(){ if(htab.value==='fills')return; try{ facts.value=(await mixApi.auditFacts(htab.value, fsym.value, 30))?.rows||[] }catch(e){ facts.value=[] } }
+function onTab(){ if(htab.value!=='fills') loadFacts() }
 onMounted(load)
 </script>
 
@@ -119,4 +145,7 @@ onMounted(load)
   &.bad { background: rgba(246,70,93,.15); color: #F6465D; } }
 .empty { padding: 24px; text-align: center; color: var(--mix-t3, #5E6673); font-size: 12px; }
 .foot { font-size: 10.5px; color: var(--mix-t3, #5E6673); }
+.fbar { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; flex-wrap: wrap; }
+.dimtxt { color: var(--el-text-color-secondary); font-size: 10.5px; }
+.up { color: #0ECB81; } .down { color: #F6465D; }
 </style>

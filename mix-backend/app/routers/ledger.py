@@ -168,3 +168,46 @@ async def recon_breaks(_who=Depends(require_viewer)):
     return {"breaks": breaks, "total": len(breaks), "position_recon_breaks": pf_breaks,
             "ts": int(time.time()),
             "note": "V2 §14 验收:UNMAPPED=0 且连续14天 NAV bridge 仅精度残差"}
+
+
+@router.get("/audit/facts")
+async def audit_facts(kind: str = Query("orders"), symbol: str = Query(""),
+                      days: int = Query(30, ge=1, le=180), _who=Depends(require_viewer)):
+    """交易与审计历史(SRRZX)多事实流。kind∈orders|bills|ledger|proposals|maintenance|recon。
+    一行一事实,支持 symbol 筛选。原始事实不可编辑,只读。"""
+    mpool = await ds.pg_main()
+    dpool = await ds.pg()
+    rows = []
+    if kind == "bills" and dpool is not None:  # 交易所账单(income_records)
+        conds, args = ["ts > now()-($1||' days')::interval"], [str(days)]
+        if symbol:
+            args.append(symbol.upper()); conds.append(f"symbol=${len(args)}")
+        for r in await dpool.fetch(f"SELECT ts::text, venue, symbol, itype, amount::float8, strategy_code, "
+                                   f"ext_id FROM income_records WHERE {' AND '.join(conds)} ORDER BY ts DESC LIMIT 200", *args):
+            rows.append(dict(r))
+    elif kind == "orders" and mpool is not None:  # 平仓/成交(trade_history)
+        conds, args = ["created_at > now()-($1||' days')::interval"], [str(days)]
+        if symbol:
+            args.append(symbol.upper()); conds.append(f"symbol=${len(args)}")
+        for r in await mpool.fetch(f"SELECT opened_at::text, closed_at::text, symbol, strategy_code, "
+                                   f"master_venue, hedge_venue, qty::float8, notional::float8, pnl::float8, state, source "
+                                   f"FROM trade_history WHERE {' AND '.join(conds)} ORDER BY created_at DESC LIMIT 200", *args):
+            rows.append(dict(r))
+    elif kind == "proposals" and mpool is not None:  # PositionIntent 代理=DRY_RUN 提案
+        for r in await mpool.fetch("SELECT id, symbol, product, venue_long, venue_short, state, "
+                                   "created_by, approved_by, created_at::text FROM dry_run_proposal "
+                                   "ORDER BY id DESC LIMIT 100"):
+            rows.append(dict(r))
+    elif kind == "maintenance" and mpool is not None:
+        for r in await mpool.fetch("SELECT id, mtype, state, reason, created_by, closed_by, "
+                                   "created_at::text, updated_at::text FROM maintenance_request ORDER BY id DESC LIMIT 50"):
+            rows.append(dict(r))
+    elif kind == "ledger":
+        r = await ledger_entries(days=days, symbol=symbol, _who=_who)
+        rows = r["rows"]
+    elif kind == "recon":
+        r = await recon_breaks(_who=_who)
+        rows = r["breaks"]
+    return {"kind": kind, "rows": rows,
+            "kinds": ["orders", "bills", "ledger", "proposals", "maintenance", "recon"],
+            "note": "原始事实不可编辑,只读;时间线因果链 Intent→Order→Fill→Bill→Ledger→RECON→NAV"}

@@ -21,6 +21,24 @@
       </div>
     </div>
 
+    <!-- V5 Camva:唯一权威 fencing 版本 + venue 风险快照网格(心跳绿≠健康) -->
+    <div class="card">
+      <div class="chd"><b>风险权威与 Fencing 版本</b>
+        <span class="sub">心跳绿≠健康:须同看数据年龄与最后成功周期</span></div>
+      <div class="fencerow">
+        <div class="fc"><span>policy epoch·version</span><b>e{{ hv.policy_epoch ?? '—' }}·v{{ hv.policy_version ?? '—' }}</b></div>
+        <div class="fc"><span>策略快照新鲜度</span><b :class="hv.policy_fresh?'ok':'bad'">{{ hv.policy_age_sec==null?'N/A':hv.policy_age_sec+'s' }}{{ hv.fail_closed?' · fail-closed':'' }}</b></div>
+        <div class="fc"><span>max saga_version</span><b>{{ hv.max_saga_version ?? 'N/A' }}</b></div>
+      </div>
+      <div class="vgrid">
+        <div v-for="g in hv.venue_grid||[]" :key="g.venue" class="vg" :class="{stale:!g.fresh}">
+          <div class="vgh"><b>{{ g.venue }}</b><span :class="'m-'+g.mode">{{ g.mode }}</span></div>
+          <div class="vgk">incident {{ g.incident_state || 'N/A' }} · cred epoch {{ g.credential_epoch ?? 'N/A' }}</div>
+          <div class="vgk">{{ g.fresh ? '新鲜' : 'STALE · fail-closed' }} · 权益 {{ g.equity ?? 'N/A' }}U</div>
+        </div>
+      </div>
+    </div>
+
     <div class="grid2">
       <!-- 数据库 -->
       <div class="card">
@@ -81,6 +99,8 @@ const machines = computed(() => {
     services: m.svcs.filter(p => byProc[p]).map(p => byProc[p]),
   }))
 })
+const hv = ref({})
+async function loadHv(){ try{ hv.value = await mixApi.healthV2() }catch(e){} }
 async function load() {
   try {
     ;[hbs.value, st.value, ds.value] = await Promise.all([
@@ -96,7 +116,7 @@ async function run(kind) {
     load()
   } catch (e) { ElMessage.error(e?.detail || e?.error || '操作失败') } finally { busy.value = '' }
 }
-onMounted(load)
+onMounted(() => { load(); loadHv() })
 </script>
 
 <style scoped lang="scss">
@@ -123,4 +143,14 @@ onMounted(load)
 .r { text-align: right; }
 .fnote { font-size: 10.5px; color: var(--el-text-color-placeholder); margin-top: 6px; }
 .up { color: #0ECB81; } .down { color: #F6465D; }
+.fencerow { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+.fc { background: var(--mix-panel,#12151A); border: 1px solid var(--mix-border,#262B33); border-radius: 6px; padding: 7px 12px;
+  span { font-size: 10px; color: var(--mix-t3,#5E6673); } b { display: block; font-size: 13px; color: var(--mix-t1,#EAECEF); &.ok { color: #0ECB81; } &.bad { color: #F6465D; } } }
+.vgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px,1fr)); gap: 8px; }
+.vg { background: var(--mix-panel,#12151A); border: 1px solid var(--mix-border,#262B33); border-radius: 8px; padding: 8px 11px;
+  &.stale { opacity: .55; border-color: #F6465D66; } }
+.vgh { display: flex; align-items: center; gap: 8px; b { color: var(--mix-t1,#EAECEF); } }
+.vgk { font-size: 10.5px; color: var(--mix-t3,#5E6673); margin-top: 3px; }
+.m-NORMAL { color: #35b57c; } .m-WATCH { color: #F0B90B; } .m-NO_NEW_RISK { color: #FF8A3D; }
+.m-REDUCE_ONLY, .m-EXIT_ONLY { color: #F6465D; } .m-FROZEN { color: #8B1E2D; }
 </style>

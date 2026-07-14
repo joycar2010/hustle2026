@@ -1,5 +1,27 @@
 <template>
   <div class="mixacct" @click="menu.open=false">
+    <el-tabs v-model="atab">
+    <el-tab-pane label="托管与权限" name="custody">
+      <div class="cbar"><b>Venue 账户与托管</b>
+        <span class="hint">密钥永不显示 · 换钥/开提现/地址管理=cred-agent 永久 deny(纵深防御,不由 policy 放开)</span>
+        <el-button size="small" @click="loadCustody" style="margin-left:auto">刷新</el-button></div>
+      <el-table :data="custody" size="small" stripe>
+        <el-table-column label="Venue" width="90"><template #default="{row}"><b>{{ row.venue }}</b></template></el-table-column>
+        <el-table-column label="托管模式" width="170"><template #default="{row}">{{ custodyLabel(row.custody_mode) }}</template></el-table-column>
+        <el-table-column label="权益U" width="90" align="right"><template #default="{row}">{{ row.equity ?? 'N/A' }}</template></el-table-column>
+        <el-table-column label="读权限" width="70"><template #default="{row}"><span :class="row.probe_read?'ok':'bad'">{{ row.probe_read?'✓':'✗' }}</span></template></el-table-column>
+        <el-table-column label="交易权限" width="80"><template #default="{row}"><span :class="row.probe_trade?'ok':'bad'">{{ row.probe_trade?'✓':'✗' }}</span></template></el-table-column>
+        <el-table-column label="提现权限" width="140"><template #default="{row}"><span class="deny">{{ row.probe_withdraw }}</span></template></el-table-column>
+        <el-table-column label="划转权限" width="140"><template #default="{row}"><span class="deny">{{ row.probe_transfer }}</span></template></el-table-column>
+        <el-table-column label="Credential Epoch" width="130" align="center"><template #default="{row}">{{ row.credential_epoch ?? 'N/A' }}</template></el-table-column>
+        <el-table-column label="提现 p95/样本" width="120"><template #default="{row}">{{ row.wd_p95_sec != null ? Math.round(row.wd_p95_sec/60)+'m' : 'N/A' }} / {{ row.wd_sample_n ?? 0 }}</template></el-table-column>
+        <el-table-column label="模式" width="120"><template #default="{row}"><span :class="'m-'+row.mode">{{ row.mode || 'N/A' }}</span>
+          <span v-if="row.err" class="bad" style="font-size:10px"> · {{ row.err.slice(0,20) }}</span></template></el-table-column>
+      </el-table>
+      <div class="fnote">权限探针=只读推断(账户快照 ok 反证读/交易权限),绝不主动调提现/划转 endpoint 试探(会触发平台风控);
+        换钥、开启提现、地址管理、删号=独立高危确认页(此表不放危险快捷图标,V2 §15)。</div>
+    </el-tab-pane>
+    <el-tab-pane label="账户明细(操作)" name="list">
     <div class="bar">
       <b>账户列表</b>
       <span class="hint">勾选账户→批量设模式/账本 · PC 行内图标或右键操作</span>
@@ -258,11 +280,14 @@
         <el-button type="warning" :loading="apiSaving" @click="createAccount">创建</el-button>
       </template>
     </el-dialog>
+    </el-tab-pane>
+    </el-tabs>
   </div>
 </template>
 
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
+// V5 MJvpp 托管与权限
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ACCOUNT_MENUS } from '../../components/PositionTable/strategyColumns'
 import { mixApi } from '../../api/mix'
@@ -495,7 +520,12 @@ async function load() {
   tree.value = await mixApi.accounts()
   tree.value.forEach(m => open.add(m.id))   // 默认全展
 }
-onMounted(() => { load(); loadRegistry() })
+const atab = ref('custody')
+const custody = ref([])
+const CUSTODY_LABEL = { SELF_CUSTODY_B_KMS: 'B机KMS托管(交易key,过渡)', CLIENT_OWNED_GUARD: '客户自有+Guard', THIRD_PARTY_MPC: '第三方MPC' }
+const custodyLabel = m => CUSTODY_LABEL[m] || m || 'N/A'
+async function loadCustody(){ try{ custody.value=(await mixApi.accountsCustody())?.rows||[] }catch(e){} }
+onMounted(() => { load(); loadRegistry(); loadCustody() })
 </script>
 
 <style scoped lang="scss">
@@ -540,6 +570,12 @@ onMounted(() => { load(); loadRegistry() })
   .more { display: inline-flex; }
   .c-cred, .c-sub, .thead .c-cred, .thead .c-sub { display: none; }
 }
+.cbar { display: flex; align-items: center; gap: 10px; margin-bottom: 10px;
+  b { font-size: 13px; } .hint { font-size: 10.5px; color: var(--el-text-color-secondary); } }
+.ok { color: #0ECB81; font-weight: 700; } .bad { color: #F6465D; } .deny { color: #FF8A3D; font-size: 10.5px; }
+.fnote { font-size: 10px; color: var(--el-text-color-secondary); margin-top: 8px; line-height: 1.6; }
+.m-NORMAL { color: #35b57c; } .m-WATCH { color: #F0B90B; } .m-NO_NEW_RISK { color: #FF8A3D; }
+.m-REDUCE_ONLY, .m-EXIT_ONLY { color: #F6465D; } .m-FROZEN { color: #8B1E2D; }
 </style>
 
 <style lang="scss">
@@ -551,4 +587,10 @@ onMounted(() => { load(); loadRegistry() })
     .mi { font-size: 14px; color: #9AA0AB; }
     &:hover { background: #20242C; } &:hover .mi { color: #F0B90B; }
     &.danger { color: #F6465D; } &.danger .mi { color: #F6465D; } } }
+.cbar { display: flex; align-items: center; gap: 10px; margin-bottom: 10px;
+  b { font-size: 13px; } .hint { font-size: 10.5px; color: var(--el-text-color-secondary); } }
+.ok { color: #0ECB81; font-weight: 700; } .bad { color: #F6465D; } .deny { color: #FF8A3D; font-size: 10.5px; }
+.fnote { font-size: 10px; color: var(--el-text-color-secondary); margin-top: 8px; line-height: 1.6; }
+.m-NORMAL { color: #35b57c; } .m-WATCH { color: #F0B90B; } .m-NO_NEW_RISK { color: #FF8A3D; }
+.m-REDUCE_ONLY, .m-EXIT_ONLY { color: #F6465D; } .m-FROZEN { color: #8B1E2D; }
 </style>

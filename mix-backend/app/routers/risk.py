@@ -750,3 +750,74 @@ async def quarantine_list(_who=Depends(require_viewer)):
         pass
     return {"rows": rows, "scopes": list(_SCOPE_ENFORCE.keys()),
             "enforce_map": _SCOPE_ENFORCE}
+
+
+@router.get("/system/health-v2")
+async def system_health_v2(_who=Depends(require_viewer)):
+    """系统运行状态(Camva):服务心跳(心跳绿≠健康:另看数据年龄/最后成功周期)+
+    venue 风险快照网格(fencing 四版本:policy_epoch·version/credential_epoch/saga_version;
+    UNKNOWN/STALE fail-closed)。"""
+    import time as _t
+    pol = await ds.get_json("dcm:risk:policy") or {}
+    age = int(_t.time() - float(pol.get("ts") or 0)) if pol else None
+    cred_ep = pol.get("credential_epochs") or {}
+    # 心跳(借既有 monitor)
+    hb = {}
+    try:
+        hb = await ds.get_json("dcm:hb:risk-ledger") or {}
+    except Exception:
+        pass
+    # venue 风险快照网格
+    grid = []
+    for v, vd in (pol.get("venues") or {}).items():
+        grid.append({"venue": v, "mode": vd.get("mode"), "incident_state": vd.get("incident_state"),
+                     "credential_epoch": cred_ep.get(v),
+                     "equity": vd.get("equity"), "fresh": age is not None and age < 90})
+    # saga_version 最新(exec_saga)
+    saga_max = None
+    dcm = await ds.pg()
+    if dcm is not None:
+        try:
+            saga_max = await dcm.fetchval("SELECT max(saga_version) FROM exec_saga")
+        except Exception:
+            pass
+    return {
+        "policy_epoch": pol.get("policy_epoch"), "policy_version": pol.get("policy_version"),
+        "policy_age_sec": age, "policy_fresh": age is not None and age < 90,
+        "fail_closed": age is None or age >= 90,
+        "max_saga_version": saga_max,
+        "venue_grid": grid,
+        "note": "心跳绿≠健康:须同时看数据年龄+最后成功周期;策略快照>90s 或缺失=fail-closed",
+    }
+
+
+@router.get("/accounts/custody")
+async def accounts_custody(_who=Depends(require_viewer)):
+    """账户与托管(MJvpp):逐 venue Custody 模式 + API 权限探针(auth 状态由账户快照 ok/err 反证)
+    + Credential Epoch。**权限探针=只读推断,不主动调提现/划转 endpoint 去试(那会触发平台风控)**。"""
+    pol = await ds.get_json("dcm:risk:policy") or {}
+    cred_ep = pol.get("credential_epochs") or {}
+    rows = []
+    for v in ("binance", "bybit", "okx", "gate", "bitget", "hyperliquid"):
+        a = await ds.get_json(f"dcm:account:{v}") or {}
+        wd = await ds.get_json(f"dcm:risk:withdrawal:{v}") or {}
+        vd = (pol.get("venues") or {}).get(v) or {}
+        rows.append({
+            "venue": v,
+            "custody_mode": "SELF_CUSTODY_B_KMS",   # 当前=B机KMS托管交易key(V2 §2.2 过渡方案)
+            "equity": a.get("equity_usdt"),
+            "ok": a.get("ok"),
+            # 四权限探针(只读推断,不试探危险 endpoint)
+            "probe_read": a.get("ok") is True,        # 账户快照成功=读权限OK
+            "probe_trade": a.get("ok") is True,       # 交易key(读成功即有交易读权限;下单权限只在真下单验)
+            "probe_withdraw": "DENY(cred-agent永久禁)",   # cred-agent 对提现 endpoint 永久 deny
+            "probe_transfer": "DENY(cred-agent永久禁)",
+            "credential_epoch": cred_ep.get(v),
+            "wd_last_success": wd.get("last_success_at"),
+            "wd_p95_sec": wd.get("p95_sec"), "wd_sample_n": wd.get("sample_n"),
+            "mode": vd.get("mode"),
+            "err": a.get("err") if a.get("ok") is False else None,
+        })
+    return {"rows": rows,
+            "note": "密钥永不显示;换钥/开提现/地址管理=cred-agent永久deny(纵深防御,不由policy放开);"
+                    "权限探针为只读推断,绝不主动调危险endpoint试探"}
