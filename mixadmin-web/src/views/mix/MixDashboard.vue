@@ -79,11 +79,11 @@
             <span class="c sy"><b>{{ r.symbol }}</b></span>
             <span class="c rt">{{ r.route }}</span>
             <span class="c sg"><i class="sdot" :class="sagaCls(r)"></i>{{ sagaText(r) }}</span>
-            <span class="c cf">{{ r.next_cashflow ? '净差 ' + r.next_cashflow.net_daily_pct + '%/d' : 'N/A' }}</span>
+            <span class="c cf">{{ r.next_cashflow ? ((r.next_cashflow.est_usdt != null ? (r.next_cashflow.est_usdt>=0?'+':'') + r.next_cashflow.est_usdt + ' U · ' : '') + Math.floor(r.next_cashflow.in_min/60) + 'h' + r.next_cashflow.in_min%60 + 'm 后') : 'N/A' }}</span>
             <span class="c pn">{{ r.net_pnl == null ? 'N/A' : r.net_pnl + ' U' }}</span>
             <span class="c dl" :class="{ok: Math.abs(r.net_delta_usdt||0) < 25}">{{ r.net_delta_usdt == null ? 'N/A' : (r.net_delta_usdt>=0?'+':'') + r.net_delta_usdt + ' U' }}</span>
-            <span class="c mb">{{ r.margin_buffer == null ? 'N/A' : r.margin_buffer }}</span>
-            <span class="c xc">{{ r.exit_cost == null ? 'N/A' : r.exit_cost }}</span>
+            <span class="c mb" :class="{down: (r.margin_buffer ?? 100) < 25}">{{ r.margin_buffer == null ? 'N/A' : r.margin_buffer + '%' }}</span>
+            <span class="c xc">{{ r.exit_cost == null ? 'N/A' : r.exit_cost + ' U' }}</span>
             <span class="c rc" :class="{bad: r.recon!=='ok'}">{{ r.recon==='ok' ? '✓ 0 差异' : '⚠ ' + r.recon }}</span>
             <span class="c op2"><el-button size="small" text @click.stop="$router.push('/mix/strategies')">详情</el-button></span>
           </div>
@@ -92,14 +92,14 @@
               <div class="dh">腿明细</div>
               <div v-for="(lg,j) in r.legs" :key="j" class="dline">
                 <b>{{ lg.venue }}</b> {{ (lg.amt||0) >= 0 ? '多' : '空' }} {{ lg.amt }}
-                <span class="dimtxt"> mark {{ lg.mark ?? 'N/A' }} · venue {{ lg.mode ?? 'N/A' }}</span>
+                <span class="dimtxt"> mark {{ lg.mark ?? 'N/A' }} · upnl {{ lg.upnl ?? 'N/A' }} · 距强平 {{ lg.dist_liq_pct != null ? lg.dist_liq_pct + '%' : 'N/A' }} · venue {{ lg.mode ?? 'N/A' }}</span>
               </div>
             </div>
             <div class="dcol">
               <div class="dh">FUNDING 现金流</div>
               <div class="dline">{{ r.next_cashflow ? '本组合净差 ' + r.next_cashflow.net_daily_pct + '%/d(空腿收−多腿付)' : 'N/A(资金费日历待接)' }}</div>
               <div class="dh">净收益拆分(开仓以来)</div>
-              <div class="dline dimtxt">Funding N/A · Basis N/A · Fee N/A · Slippage N/A(逐组合账本待接)</div>
+              <div class="dline dimtxt">未实现PnL {{ r.upnl_sum ?? 'N/A' }} U · Funding/Fee/Slippage 已实现拆分 N/A(逐组合账本待接)</div>
             </div>
             <div class="dcol">
               <div class="dh">退出 & THESIS</div>
@@ -161,6 +161,21 @@ const todo = computed(() => {
     sub: `建议名义 ${o.target_notional_usdt}U · shadow 候选,审批走 DRY_RUN 链` }))
   return { p0, p1, p2 }
 })
+// 组合表聚合→八卡(四采集件点亮)
+const agg = computed(() => {
+  const rows = pf.value.rows || []
+  const withDelta = rows.filter(r => r.net_delta_usdt != null)
+  const delta = withDelta.length ? Math.round(withDelta.reduce((t, r) => t + r.net_delta_usdt, 0) * 100) / 100 : null
+  const bufRows = rows.filter(r => r.margin_buffer != null)
+  const bufMin = bufRows.length ? Math.min(...bufRows.map(r => r.margin_buffer)) : null
+  const bufferAt = bufRows.find(r => r.margin_buffer === bufMin)?.symbol
+  const bad = rows.filter(r => r.recon !== 'ok')
+  const cfs = rows.filter(r => r.next_cashflow?.in_min != null)
+    .sort((a, b) => a.next_cashflow.in_min - b.next_cashflow.in_min)
+  return { delta, buffer: bufMin, bufferAt, reconN: rows.length ? bad.length : null,
+    reconTxt: bad.map(r => r.symbol).join('/').slice(0, 26),
+    cf: cfs[0]?.next_cashflow || null, cfSym: cfs[0]?.symbol || '' }
+})
 // 八卡(宪法:格子=设计稿,数据不够 N/A 绝不换卡)
 const sumCards = computed(() => {
   const nav = rs.value.nav || {}
@@ -175,12 +190,19 @@ const sumCards = computed(() => {
       vc: pnl >= 0 ? 'up' : 'down', note: 'Funding/Basis/费 拆分 N/A(逐组合账本待接)' },
     { k: '总名义仓位', v: notional != null ? Math.round(notional).toLocaleString() + ' U' : NA,
       note: `${(pf.value.rows || []).length} 组合` },
-    { k: '净Delta', v: NA, note: 'BTC当量/bps NAV N/A(净敞口源待接)' },
-    { k: '最低保证金缓冲', v: NA, note: '逐组合保证金源待接 · 告警线 25%' },
+    { k: '净Delta', v: agg.delta != null ? (agg.delta >= 0 ? '+' : '') + agg.delta + ' U' : NA,
+      vc: Math.abs(agg.delta || 0) < 25 ? '' : 'down',
+      note: agg.delta != null ? (Math.abs(agg.delta) < 25 ? '容差内 ✓(地板25U)' : '超容差!') + ' · BTC当量 N/A' : '无在管组合' },
+    { k: '最低保证金缓冲', v: agg.buffer != null ? agg.buffer + '%' : NA,
+      vc: (agg.buffer ?? 100) < 25 ? 'down' : '',
+      note: agg.buffer != null ? `${agg.bufferAt || ''} · 告警线 25%(距强平)` : '无带保证金腿' },
     { k: 'P0 事件', v: String(p0), vc: p0 ? 'down' : '', cls: p0 ? 'hot' : '',
       note: p0 ? (rs.value.top_incident?.title || '见待办') : '无', nc: p0 ? 'down' : '' },
-    { k: 'RECON 差异', v: NA, note: 'R11 逐组合差异表待接(告警在岗)' },
-    { k: '下一现金流', v: NA, note: 'funding 结算日历待接' },
+    { k: 'RECON 差异', v: agg.reconN != null ? `${agg.reconN} 项` : NA,
+      vc: agg.reconN ? 'down' : '', note: agg.reconN ? agg.reconTxt : '期望腿=实盘快照 ✓' },
+    { k: '下一现金流', v: agg.cf ? (agg.cf.est_usdt != null ? (agg.cf.est_usdt >= 0 ? '+' : '') + agg.cf.est_usdt + ' U' : '净差' + agg.cf.net_daily_pct + '%/d') : NA,
+      vc: agg.cf && (agg.cf.est_usdt ?? agg.cf.net_daily_pct) >= 0 ? 'up' : 'down',
+      note: agg.cf ? `${Math.floor(agg.cf.in_min/60)}h${agg.cf.in_min%60}m 后 · ${agg.cfSym} funding` : '无在管组合' },
   ]
 })
 // Saga 链:manager 快照行 → 步骤化(数据有多细画多细,缺=进行中,绝不臆造)

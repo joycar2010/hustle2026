@@ -1,5 +1,7 @@
 <template>
   <div class="mixsys">
+    <el-tabs v-model="tab">
+    <el-tab-pane label="系统配置" name="sys">
     <div class="grid">
       <div class="card">
         <div class="chd"><b>版本管理</b></div>
@@ -37,11 +39,39 @@
         <div v-if="!(st.backups||[]).length" class="fnote">暂无备份文件</div>
       </div>
     </div>
+    </el-tab-pane>
+    <el-tab-pane label="网站设置" name="site" lazy><MixSite /></el-tab-pane>
+    <el-tab-pane label="LLM设置" name="llm" lazy><MixLLM /></el-tab-pane>
+    <el-tab-pane label="AiCoin配置" name="aicoin" lazy>
+      <div class="card" style="max-width:560px">
+        <div class="chd"><b>AiCoin 行情接口配置</b></div>
+        <div class="fnote" style="margin-bottom:10px">为 K线/币种搜索(行情研判·AiCoin 页)提供数据。凭据从 open.aicoin.com 获取,保存后 60s 内生效。secret 只存服务端,前端仅见掩码。</div>
+        <el-form label-width="110px" size="small">
+          <el-form-item label="AccessKeyId"><el-input v-model="ac.api_key" placeholder="如 abc123def456..." /></el-form-item>
+          <el-form-item label="Secret Key">
+            <el-input v-model="ac.api_secret" type="password" show-password
+              :placeholder="ac.configured ? `当前 ${ac.api_secret_masked||'已设置'}(保存须重输)` : '请输入 Secret Key'" />
+          </el-form-item>
+          <el-form-item label="API Base"><el-input v-model="ac.api_base" placeholder="https://open.aicoin.com" /></el-form-item>
+          <el-form-item label="启用"><el-switch v-model="ac.enabled" /></el-form-item>
+          <el-form-item label="到期时间"><el-input v-model="ac.expires_at" placeholder="从 AiCoin 控制台 API Key 详情获取" /></el-form-item>
+        </el-form>
+        <div style="display:flex;gap:8px;align-items:center">
+          <el-button size="small" type="warning" :loading="acBusy==='save'" @click="acSave">保存配置</el-button>
+          <el-button size="small" :loading="acBusy==='test'" @click="acTest">测试连接</el-button>
+          <span class="fnote">{{ acMsg }}</span>
+        </div>
+        <div class="fnote" v-if="ac.updated_at" style="margin-top:8px">最后更新: {{ ac.updated_at }} ({{ ac.updated_by || '-' }})</div>
+      </div>
+    </el-tab-pane>
+    </el-tabs>
   </div>
 </template>
 
 <script setup>
 import { onMounted, ref } from 'vue'
+import MixSite from './MixSite.vue'
+import MixLLM from './MixLLM.vue'
 import { ElMessage } from 'element-plus'
 import { mixApi } from '../../api/mix'
 
@@ -58,7 +88,21 @@ async function run(which) {
   } catch (e) { ElMessage.error(e?.detail || '执行失败（需 SUPER_ADMIN 令牌）') }
   finally { busy.value = '' }
 }
-onMounted(load)
+const tab = ref('sys')
+const ac = ref({ api_base: 'https://open.aicoin.com', enabled: true })
+const acBusy = ref(''); const acMsg = ref('')
+async function acLoad() { try { ac.value = { ...ac.value, ...(await mixApi.aicoinConfigGet()), api_secret: '' } } catch (e) { /* 未配置 */ } }
+async function acSave() {
+  acBusy.value = 'save'
+  try { const r = await mixApi.aicoinConfigSave(ac.value); ElMessage.success(r?.note || '已保存'); acLoad() }
+  catch (e) { ElMessage.error(e?.detail || e?.error || '保存失败') } finally { acBusy.value = '' }
+}
+async function acTest() {
+  acBusy.value = 'test'; acMsg.value = ''
+  try { const r = await mixApi.aicoinConfigTest(ac.value); acMsg.value = r.ok ? '✓ 连接成功(quota 可读)' : '✗ ' + (r.error || '失败') }
+  catch (e) { acMsg.value = '✗ ' + (e?.detail || e?.error || '失败') } finally { acBusy.value = '' }
+}
+onMounted(() => { load(); acLoad() })
 </script>
 
 <style scoped lang="scss">

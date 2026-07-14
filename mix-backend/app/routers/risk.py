@@ -382,68 +382,127 @@ async def risk_opportunities(_who=Depends(require_viewer)):
 
 @router.get("/risk/portfolio")
 async def risk_portfolio(_who=Depends(require_viewer)):
-    """经济组合表(tlOCA 生产持仓,1:1 十二列)数据源:manager 快照(owner-of-record)
-    ×feed mark(净Delta)×funding(下一现金流方向)×repair 意图(Saga 链)。
-    缺数据列如实 N/A(净PnL 逐组合/保证金缓冲/退出成本=后续采集,绝不用哨兵值)。"""
+    """经济组合表(tlOCA 十二列)+四采集件:
+    保证金缓冲=逐腿 dist_liq_pct 最小值 · RECON=期望腿 vs 账户快照实盘差 ·
+    下一现金流=funding 结算边界(interval_h 对齐 UTC)+净差×名义估额 ·
+    退出成本=两腿半点差+taker费估算。净PnL 仍 N/A(逐组合账本=下批,upnl 进抽屉不冒充净PnL)。"""
+    import json as _j
+    import time as _t
     mgr = await ds.get_json("dcm:exec:manager") or {}
     pol = await ds.get_json("dcm:risk:policy") or {}
     rep = await ds.get_json("dcm:exec:repair") or {}
-    rows = []
+    acct: dict = {}
 
-    async def _mark(venue, sym):
+    async def _acct(venue):
+        if venue not in acct:
+            acct[venue] = await ds.get_json(f"dcm:account:{venue}") or {}
+        return acct[venue]
+
+    async def _l1(venue, sym):
         try:
             raw = await ds.rds().hget(f"dcm:feed:{venue}:perp", sym)
-            import json as _j
             l1 = _j.loads(raw) if raw else None
-            return (float(l1["bid"]) + float(l1["ask"])) / 2 if l1 else None
+            if l1:
+                b, a = float(l1.get("bid") or 0), float(l1.get("ask") or 0)
+                if b > 0 and a > 0:
+                    return (b + a) / 2, b, a
         except Exception:
-            return None
+            pass
+        return None, None, None
 
     async def _fund(venue, sym):
         try:
             raw = await ds.rds().hget(f"dcm:feed:funding:{venue}", sym)
-            import json as _j
             return _j.loads(raw) if raw else None
         except Exception:
             return None
 
+    TAKER_BPS = 5.0
+    rows = []
     for ps in (mgr.get("pairs") or []):
         sym = ps.get("symbol") or ps.get("pair")
         legs, delta_usdt, route = [], 0.0, []
+        buffers, recon_diffs, exit_cost, notional = [], [], 0.0, 0.0
         for lg in (ps.get("legs") or []):
             v, amt = lg.get("venue"), float(lg.get("amt") or 0)
-            mk = await _mark(v, sym)
-            legs.append({"venue": v, "amt": amt, "mark": mk,
+            mid, bid, ask = await _l1(v, sym)
+            snap = await _acct(v)
+            pd = (snap.get("pos_detail") or {}).get(sym) or {}
+            live_amt = float((snap.get("positions") or {}).get(sym) or 0)
+            if snap.get("ok") and abs(live_amt - amt) > max(1e-9, abs(amt) * 0.05):
+                recon_diffs.append(f"{v} 期望{amt}实盘{live_amt}")
+            if pd.get("dist_liq_pct") is not None:
+                buffers.append(float(pd["dist_liq_pct"]))
+            leg_notional = abs(amt) * mid if mid else 0.0
+            notional += leg_notional
+            if mid and bid and ask and leg_notional:
+                exit_cost += leg_notional * ((ask - bid) / 2 / mid + TAKER_BPS / 10000)
+            legs.append({"venue": v, "amt": amt, "mark": mid,
+                         "upnl": pd.get("upnl"), "dist_liq_pct": pd.get("dist_liq_pct"),
                          "mode": ((pol.get("venues") or {}).get(v) or {}).get("mode", "N/A")})
             route.append(f"{v}永续")
-            if mk:
-                delta_usdt += amt * mk
+            if mid:
+                delta_usdt += amt * mid
+        # funding 结算日历:净差(空腿−多腿 daily_pct)+ 最近结算边界(interval_h 对齐 UTC)
         fl = await _fund(legs[0]["venue"], sym) if legs else None
         fs = await _fund(legs[-1]["venue"], sym) if len(legs) > 1 else None
-        net_daily = None
+        cashflow = None
         if fl and fs:
-            net_daily = round(float(fs.get("daily_pct") or 0) - float(fl.get("daily_pct") or 0), 4)
+            net_daily = float(fs.get("daily_pct") or 0) - float(fl.get("daily_pct") or 0)
+            ih = min(float(fl.get("interval_h") or 8), float(fs.get("interval_h") or 8))
+            now = _t.time()
+            next_ts = (int(now // (ih * 3600)) + 1) * int(ih * 3600)
+            est = notional * (net_daily / 100.0) / (24.0 / ih) / 2 if notional else None
+            cashflow = {"net_daily_pct": round(net_daily, 4), "next_at": next_ts,
+                        "in_min": int((next_ts - now) / 60),
+                        "est_usdt": round(est, 3) if est is not None else None}
         rows.append({
             "owner": "exec-mgr", "product": "C2.H", "symbol": sym,
             "route": " + ".join(route) or "N/A",
             "saga": ps.get("saga"), "saga_state": ps.get("action") or "N/A",
-            "target": ps.get("target"), "mode": ps.get("mode"),
-            "signal": ps.get("signal"),
-            "next_cashflow": ({"net_daily_pct": net_daily} if net_daily is not None else None),
-            "net_pnl": None, "net_delta_usdt": round(delta_usdt, 2) if legs else None,
-            "margin_buffer": None, "exit_cost": None,
-            "recon": "单腿!" if "SINGLE_LEG" in str(ps.get("action")) else "ok",
+            "target": ps.get("target"), "mode": ps.get("mode"), "signal": ps.get("signal"),
+            "next_cashflow": cashflow,
+            "net_pnl": None,
+            "upnl_sum": (round(sum(float(x["upnl"]) for x in legs if x.get("upnl") is not None), 2)
+                         if any(x.get("upnl") is not None for x in legs) else None),
+            "net_delta_usdt": round(delta_usdt, 2) if legs else None,
+            "margin_buffer": (round(min(buffers), 1) if buffers else None),
+            "exit_cost": (round(-exit_cost, 2) if exit_cost else None),
+            "recon": ("⚠ " + "; ".join(recon_diffs)[:60]) if recon_diffs
+                     else ("单腿!" if "SINGLE_LEG" in str(ps.get("action")) else "ok"),
+            "notional_usdt": round(notional, 2),
             "legs": legs,
         })
     for ss in (mgr.get("symbols") or []):
+        sym = ss.get("symbol")
+        snap = await _acct("binance")
+        pd = (snap.get("pos_detail") or {}).get(sym) or {}
+        f = await _fund("binance", sym)
+        cashflow = None
+        if f:
+            dp = float(f.get("daily_pct") or 0)
+            ih = float(f.get("interval_h") or 8)
+            now = _t.time()
+            next_ts = (int(now // (ih * 3600)) + 1) * int(ih * 3600)
+            # C1 期现=现货多+永续空:fr>0 时空腿**收**资金费 → 组合净差=+daily_pct
+            mk = float(pd.get("mark") or 0)
+            perp_notional = abs(float(ss.get("perp_amt") or 0)) * mk
+            est = perp_notional * (dp / 100.0) / (24.0 / ih) if perp_notional else None
+            cashflow = {"net_daily_pct": round(dp, 4), "next_at": next_ts,
+                        "in_min": int((next_ts - now) / 60),
+                        "est_usdt": round(est, 3) if est is not None else None}
         rows.append({
-            "owner": "exec-mgr", "product": "C1", "symbol": ss.get("symbol"),
-            "route": "BN现货+BN永续", "saga": None, "saga_state": ss.get("action") or "N/A",
+            "owner": "exec-mgr", "product": "C1", "symbol": sym,
+            "route": "BN现货 + BN永续", "saga": None, "saga_state": ss.get("action") or "N/A",
             "target": ss.get("target"), "mode": ss.get("mode"), "signal": ss.get("signal"),
-            "next_cashflow": None, "net_pnl": None,
-            "net_delta_usdt": ss.get("delta"), "margin_buffer": None, "exit_cost": None,
-            "recon": "ok", "legs": [{"venue": "binance", "amt": ss.get("perp_amt"),
-                                     "spot": ss.get("spot")}],
+            "next_cashflow": cashflow, "net_pnl": None, "upnl_sum": pd.get("upnl"),
+            # manager 的 delta 是 base 数量——换成 USDT 口径(mark 缺=N/A,绝不冒充)
+            "net_delta_usdt": (round(float(ss.get("delta") or 0) * float(pd.get("mark") or 0), 2)
+                               if pd.get("mark") else None),
+            "margin_buffer": (round(float(pd["dist_liq_pct"]), 1) if pd.get("dist_liq_pct") is not None else None),
+            "exit_cost": None, "recon": "ok", "notional_usdt": None,
+            "legs": [{"venue": "binance", "amt": ss.get("perp_amt"), "spot": ss.get("spot"),
+                      "upnl": pd.get("upnl"), "dist_liq_pct": pd.get("dist_liq_pct")}],
         })
     return {"ts": mgr.get("ts"), "rows": rows,
             "repair": {"trigger_venues": rep.get("trigger_venues") or [],

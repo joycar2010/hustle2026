@@ -15,14 +15,15 @@ const routes = [
     { path:'mix/coins', name:'mix-coins', meta:{title:'币管理',icon:'Coin',group:'总控',ord:0.45}, component:()=>import('../views/mix/MixCoins.vue') },
     { path:'mix/venue/:venue', name:'mix-venue-detail', meta:{title:'平台详情',icon:'Warning',group:'总控',hidden:true}, component:()=>import('../views/mix/MixVenueDetail.vue') },
     { path:'mix/slots', name:'mix-slots', meta:{title:'坑位工作台·C3.S',icon:'Grid',group:'总控',ord:0.15}, component:()=>import('../views/mix/MixSlots.vue') },
+    { path:'mix/aicoin', name:'mix-aicoin', meta:{title:'行情研判·AiCoin',icon:'DataAnalysis',group:'总控',ord:0.37}, component:()=>import('../views/mix/MixAiCoin.vue') },
     { path:'mix/venuerisk', name:'mix-venuerisk', meta:{title:'平台风险',icon:'Warning',group:'总控',ord:0.35}, component:()=>import('../views/mix/MixVenueRisk.vue') },
     { path:'mix/report', name:'mix-report', meta:{title:'资金收益',icon:'TrendCharts',group:'总控',ord:0.5}, component:()=>import('../views/mix/MixReport.vue') },
     // ===== 系统设置(Mix 版:qh 同名模块已由下列页面替代) =====
     { path:'mix/notify', name:'mix-notify', meta:{title:'通知模块',icon:'Bell',group:'系统设置',ord:2}, component:()=>import('../views/mix/MixNotify.vue') },
-    { path:'mix/site', name:'mix-site', meta:{title:'官网管理',icon:'Link',group:'系统设置',ord:2.5}, component:()=>import('../views/mix/MixSite.vue') },
+    { path:'mix/site', name:'mix-site', meta:{hidden:true,title:'网站设置',icon:'Link',group:'系统设置',ord:2.5}, component:()=>import('../views/mix/MixSite.vue') },
     { path:'mix/operators', name:'mix-operators', meta:{title:'操作员管理',icon:'Avatar',group:'系统设置',ord:3}, component:()=>import('../views/mix/MixOperators.vue') },
     { path:'mix/system', name:'mix-system', meta:{title:'系统配置',icon:'Coin',group:'系统设置',ord:4}, component:()=>import('../views/mix/MixSystem.vue') },
-    { path:'mix/llm', name:'mix-llm', meta:{title:'LLM设置',icon:'Service',group:'系统设置',ord:5}, component:()=>import('../views/mix/MixLLM.vue') },
+    { path:'mix/llm', name:'mix-llm', meta:{hidden:true,title:'LLM设置',icon:'Service',group:'系统设置',ord:5}, component:()=>import('../views/mix/MixLLM.vue') },
     // ===== 总控(qh 原有, 待 M3+ 逐模块替换) =====
     { path:'dashboard', name:'dashboard', meta:{hidden:true,title:'总控面板',icon:'Odometer',group:'总控',ord:0.5}, component:()=>import('../views/Dashboard.vue') },
     // ===== 分析 =====
