@@ -100,6 +100,10 @@ export const mixApi = {
 
   blacklist: () => http.get('/blacklist'),
   quarantine: () => http.get('/quarantine'),
+  navBridge: (days=14) => http.get('/ledger/nav-bridge', { params: { days } }),
+  ledgerEntries: (p={}) => http.get('/ledger/entries', { params: p }),
+  reconBreaks: () => http.get('/ledger/recon-breaks'),
+  navCurrent: () => http.get('/system/nav/current'),
   quarantineAdd: (b) => http.post('/risk/overrides', b),
   blacklistAdd: (symbol, reason) => http.post('/blacklist', { symbol, reason }),
   blacklistRemove: (symbol) => http.post('/blacklist/remove', { symbol }),
