@@ -37,6 +37,20 @@ def venue_sym(venue: str, sym: str) -> str:
     return {"gate": base + "_USDT", "okx": base + "-USDT-SWAP", "hyperliquid": base}.get(venue, sym)
 
 
+def _qstr(q) -> str:
+    """数量→字符串,trim 尾零("83.0"→"83")——bybit/bitget 对小数位超步长精度会拒单。"""
+    return f"{float(q):.8f}".rstrip("0").rstrip(".")
+
+
+def _det_coid(cid: str, maxlen: int, prefix: str = "") -> str:
+    """确定性客户单号,截断安全:可读前缀 + sha1 短哈希(8位)。
+    ⚠️真金课(gate DOGE):裸截断 [:N] 会把 ':open'/':close' 后缀切掉 → open/close 撞同一单号
+    → close 时 query 查到旧 open 单 FILLED 误判已平,静默跳过下单=裸腿。哈希尾保证任意截断下唯一。"""
+    h = hashlib.sha1(cid.encode()).hexdigest()[:8]
+    room = maxlen - len(prefix) - 9   # 9 = "-" + 8位哈希
+    return prefix + cid.replace(":", "-")[:room] + "-" + h
+
+
 def _env_armed(armed, arm_symbols):
     """armed/arm_symbols 构造覆盖(manager 按 symbol 精细控制),否则回落 env。"""
     a = (os.environ.get("DCM_EXEC_ARMED", "false").lower() == "true") if armed is None else bool(armed)
@@ -82,8 +96,8 @@ class BinanceRealVenue:
 
     @staticmethod
     def _bcoid(cid: str) -> str:
-        """确定性 cid → 币安 newClientOrderId(字符集/长度约束);place 与 query 必须一致。"""
-        return cid.replace(":", "-")[:36]
+        """确定性 cid → 币安 newClientOrderId(≤36,截断安全);place 与 query 必须一致。"""
+        return _det_coid(cid, 36)
 
     async def _get(self, base: str, path: str, params: dict):
         """返回 (status_code, parsed_json_or_text)。parsed 可能是 dict 或 list。"""
@@ -199,7 +213,7 @@ class BybitRealVenue(_GatedPos):
 
     @staticmethod
     def _coid(cid):
-        return cid.replace(":", "-")[:36]
+        return _det_coid(cid, 36)
 
     async def _get_signed(self, path, qs):
         ts = str(int(time.time() * 1000)); recv = "5000"
@@ -235,7 +249,7 @@ class BybitRealVenue(_GatedPos):
         self._gate(cid, sym)
         side = "Buy" if str(leg["side"]).upper() == "BUY" else "Sell"
         body = {"category": "linear", "symbol": sym, "side": side, "orderType": "Market",
-                "qty": str(leg["qty"]), "orderLinkId": self._coid(cid)}
+                "qty": _qstr(leg["qty"]), "orderLinkId": self._coid(cid)}
         if leg.get("reduce_only"):
             body["reduceOnly"] = True
         bj = json.dumps(body)
@@ -298,8 +312,8 @@ class GateRealVenue(_GatedPos):
 
     @staticmethod
     def _coid(cid):
-        # gate text:须 t- 前缀,字符 [0-9a-zA-Z_.-],总长≤30
-        return "t-" + cid.replace(":", "-")[:28]
+        # gate text:须 t- 前缀,字符 [0-9a-zA-Z_.-],总长≤30(截断安全哈希尾,真金课)
+        return _det_coid(cid, 30, "t-")
 
     async def mult_of(self, symbol_gate: str) -> float:
         async with httpx.AsyncClient(timeout=15) as cli:
@@ -407,7 +421,7 @@ class BitgetRealVenue(_GatedPos):
 
     @staticmethod
     def _coid(cid):
-        return cid.replace(":", "-")[:60]
+        return _det_coid(cid, 60)
 
     async def query(self, cid, leg=None):
         """GET /api/v2/mix/order/detail?clientOid=。无此单(40109等)=NOTFOUND。filled=baseVolume。"""
@@ -438,7 +452,7 @@ class BitgetRealVenue(_GatedPos):
         sym = leg.get("symbol", "")
         self._gate(cid, sym)
         body = {"symbol": sym, "productType": "USDT-FUTURES", "marginMode": "crossed",
-                "marginCoin": "USDT", "size": str(leg["qty"]),
+                "marginCoin": "USDT", "size": _qstr(leg["qty"]),
                 "side": "buy" if str(leg["side"]).upper() == "BUY" else "sell",
                 "orderType": "market", "clientOid": self._coid(cid)}
         if leg.get("reduce_only"):
