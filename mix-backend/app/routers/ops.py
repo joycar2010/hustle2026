@@ -477,7 +477,8 @@ async def registry_list(_who=Depends(require_viewer)):
     if pool is None:
         return []
     return [dict(r) for r in await pool.fetch(
-        "SELECT account_key, alias, email, note, machine, enabled FROM accounts_registry")]
+        "SELECT account_key, alias, email, note, machine, enabled, account_type, parent_key, "
+        "book, account_mode FROM accounts_registry")]
 
 
 @router.put("/accounts/registry")

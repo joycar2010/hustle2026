@@ -118,6 +118,44 @@
       </template>
     </el-dialog>
 
+    <!-- #3 设置主账户关联（hedge_via_master 对冲腿路由靠此） -->
+    <el-dialog v-model="masterDlg" :title="`设置主账户关联 · ${masterForm.account_key}`" width="460">
+      <el-alert type="info" :closable="false" show-icon style="margin-bottom:12px"
+        title="子账户关联到哪个主账户，决定 hedge_via_master 的合约对冲腿下到哪个主账户。" />
+      <el-form label-width="90">
+        <el-form-item label="主账户">
+          <el-select v-model="masterForm.master_key" style="width:280px" clearable placeholder="选主账户（清空=解除关联）">
+            <el-option v-for="m in masterForm.options" :key="m.account_key" :value="m.account_key"
+              :label="`${m.name}（${m.venue||'?'}·${m.book||'TEST'}）`" />
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="masterDlg=false">取消</el-button>
+        <el-button type="warning" @click="saveMaster">保存</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- #5 账户模式（决定能跑什么策略，经资格矩阵） -->
+    <el-dialog v-model="modeDlg" :title="`账户模式 · ${modeForm.account_key}`" width="460">
+      <el-alert type="info" :closable="false" show-icon style="margin-bottom:12px"
+        title="经典=钱包分离可跑 C3 借币点差；统一账户=组合保证金跑借贷利率套利。模式经资格矩阵门控策略。" />
+      <el-form label-width="90">
+        <el-form-item label="账户模式">
+          <el-select v-model="modeForm.account_mode" style="width:280px">
+            <el-option value="classic" label="经典（钱包分离·C3 借币点差）" />
+            <el-option value="portfolio_margin" label="统一账户（组合保证金·借贷利率套利）" />
+            <el-option value="cross_margin" label="全仓杠杆" />
+            <el-option value="isolated" label="逐仓" />
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="modeDlg=false">取消</el-button>
+        <el-button type="warning" @click="saveMode">保存</el-button>
+      </template>
+    </el-dialog>
+
     <!-- 新建账户：主 / 子 + 别名/邮箱 + 可选 API Key/密码（一步录入，密钥仍浏览器端加密） -->
     <el-dialog v-model="createDlg" title="新建账户" width="480">
       <el-form label-width="96">
@@ -140,10 +178,21 @@
         </el-form-item>
         <el-form-item label="别名"><el-input v-model="createForm.alias" placeholder="如 套利1号" /></el-form-item>
         <el-form-item label="邮箱"><el-input v-model="createForm.email" /></el-form-item>
-        <el-form-item label="作用域机">
-          <el-radio-group v-model="createForm.machine" size="small">
-            <el-radio-button value="A">A</el-radio-button><el-radio-button value="B">B</el-radio-button><el-radio-button value="C">C</el-radio-button>
-          </el-radio-group>
+        <el-form-item label="资金账本(Book)">
+          <el-select v-model="createForm.book" style="width:220px">
+            <el-option value="TEST" label="测试账户（TEST）" />
+            <el-option value="HOUSE_RND" label="自营研发金（HOUSE_RND）" />
+            <el-option value="CORE_POOL" label="核心投资池（CORE_POOL·投资人资金）" />
+          </el-select>
+          <div v-if="createForm.book==='CORE_POOL'" class="hint" style="color:#F0B90B">投资人资金，创建需二次确认</div>
+        </el-form-item>
+        <el-form-item label="账户模式">
+          <el-select v-model="createForm.account_mode" style="width:220px">
+            <el-option value="classic" label="经典（钱包分离·可跑 C3 借币点差）" />
+            <el-option value="portfolio_margin" label="统一账户（组合保证金·跑借贷利率套利）" />
+            <el-option value="cross_margin" label="全仓杠杆" />
+            <el-option value="isolated" label="逐仓" />
+          </el-select>
         </el-form-item>
         <el-divider content-position="left" style="font-size:12px">API 凭证（选填，浏览器端加密）</el-divider>
         <el-form-item label="API Key"><el-input v-model="createForm.apiKey" show-password autocomplete="new-password" /></el-form-item>
@@ -169,7 +218,7 @@ const tree = ref([])
 const open = reactive(new Set())
 const menu = reactive({ open: false, x: 0, y: 0, node: null })
 const createDlg = ref(false)
-const createForm = reactive({ account_type: 'sub', account_key: '', venue: 'binance', parent_key: '', alias: '', email: '', machine: 'B', apiKey: '', apiSecret: '', passphrase: '' })
+const createForm = reactive({ account_type: 'sub', account_key: '', venue: 'binance', parent_key: '', alias: '', email: '', machine: 'B', book: 'TEST', account_mode: 'classic', apiKey: '', apiSecret: '', passphrase: '' })
 const reg = ref({})
 const regDlg = ref(false)
 const regForm = reactive({ account_key: '', alias: '', email: '', note: '' })
@@ -179,6 +228,20 @@ const proxyDlg = ref(false)
 const proxyForm = reactive({ account_key: '', proxy_url: '' })
 const scopeDlg = ref(false)
 const scopeForm = reactive({ account_key: '', machine: 'B' })
+const masterDlg = ref(false)
+const masterForm = reactive({ account_key: '', master_key: '', options: [] })
+const modeDlg = ref(false)
+const modeForm = reactive({ account_key: '', account_mode: 'classic' })
+async function saveMaster() {
+  try { await mixApi.setAccountMaster(masterForm.account_key, masterForm.master_key)
+    ElMessage.success(masterForm.master_key ? '主账户关联已设' : '已解除关联'); masterDlg.value = false; loadRegistry(); load() }
+  catch (e) { ElMessage.error(e?.detail || e?.error || '保存失败') }
+}
+async function saveMode() {
+  try { await mixApi.setAccountMode(modeForm.account_key, modeForm.account_mode)
+    ElMessage.success('账户模式已设'); modeDlg.value = false; loadRegistry(); load() }
+  catch (e) { ElMessage.error(e?.detail || e?.error || '保存失败') }
+}
 async function saveScope() {
   try {
     const r = await mixApi.accountAction(scopeForm.account_key, 'assign_scope', { machine: scopeForm.machine })
@@ -197,8 +260,11 @@ const credLabel = c => ({ active: `🔑${c.key_mask||'已配'}`, pending: '🔑�
 
 const menuItems = computed(() => menu.node
   ? [...(ACCOUNT_MENUS[menu.node.platformType] || []),
-     { key: 'assign_scope', label: '分配作用域（A/B/C 机）…', kind: 'registry', dividerBefore: true },
-     { key: 'edit_registry', label: '别名 / 备注…', kind: 'registry' }]
+     ...(typeOf(menu.node.id) === 'sub'
+       ? [{ key: 'set_master', label: '设置主账户关联…', kind: 'registry', dividerBefore: true }] : []),
+     { key: 'set_mode', label: '账户模式…', kind: 'registry',
+       dividerBefore: typeOf(menu.node.id) !== 'sub' },
+     { key: 'edit_registry', label: '别名 / 邮箱…', kind: 'registry' }]
   : [])
 
 function toggle(id) { open.has(id) ? open.delete(id) : open.add(id) }
@@ -221,6 +287,18 @@ async function doAction(it) {
       scopeForm.account_key = node.id
       scopeForm.machine = reg.value[node.id]?.machine || 'B'
       scopeDlg.value = true; return
+    }
+    if (it.key === 'set_master') {   // #3 设主子关联
+      masterForm.account_key = node.id
+      masterForm.master_key = reg.value[node.id]?.parent_key || ''
+      try { const r = await mixApi.accountMasters(node.venue || ''); masterForm.options = r.masters || [] }
+      catch { masterForm.options = [] }
+      masterDlg.value = true; return
+    }
+    if (it.key === 'set_mode') {   // #5 设账户模式
+      modeForm.account_key = node.id
+      modeForm.account_mode = reg.value[node.id]?.account_mode || 'classic'
+      modeDlg.value = true; return
     }
     if (it.key === 'create_sub' || it.key === 'create_wallet') { createDlg.value = true; return }
     if (it.key === 'set_api') {
@@ -284,10 +362,17 @@ async function saveProxy() {
 }
 async function createAccount() {
   if (!createForm.account_key) return ElMessage.warning('账户标识必填')
+  // #1 护栏:CORE_POOL/SMA(投资人资金)二次确认
+  let confirm = false
+  if (createForm.book === 'CORE_POOL' || createForm.book.startsWith('SMA')) {
+    try { await ElMessageBox.confirm(`「${createForm.book}」是投资人/客户资金账户，确认创建？`, '二次确认', { type: 'warning' }); confirm = true }
+    catch { return }
+  }
   apiSaving.value = true
   try {
     await mixApi.registryFull({ account_key: createForm.account_key, account_type: createForm.account_type,
-      parent_key: createForm.parent_key, alias: createForm.alias, email: createForm.email, machine: createForm.machine })
+      parent_key: createForm.parent_key, alias: createForm.alias, email: createForm.email, machine: createForm.machine,
+      book: createForm.book, account_mode: createForm.account_mode, confirm })
     if (createForm.apiKey && createForm.apiSecret) {
       const enc = await encryptCred(createForm.apiKey, createForm.apiSecret, createForm.passphrase)
       await mixApi.credPut({ account_key: createForm.account_key, venue: createForm.venue, ...enc })
