@@ -46,6 +46,7 @@
           <span v-else class="mq-idle">通知通道待命</span>
         </div>
         <el-button size="small" class="wall-btn" @click="openWall('market')">屏1·机会墙</el-button>
+        <el-button size="small" class="wall-btn" @click="openWall('exec')">屏2·持仓墙</el-button>
         <el-button size="small" class="wall-btn" @click="openWall('risk')">屏3·风控墙</el-button>
         <el-popover trigger="click" width="320" :teleported="false" popper-class="op-panel-pop" @show="loadPanelHealth">
           <template #reference>

@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>HustleCoin · 资产与收益核验中心</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700&family=Roboto+Mono:wght@500;700&display=swap" rel="stylesheet">
+<style>
+/* 客户查看端(SrnEE 数据演示版):独立浅色 inv- token,与主控台暗色完全分离(设计规约) */
+:root{--inv-bg:#F5F6F8;--inv-panel:#FFFFFF;--inv-card2:#F0F2F5;--inv-border:#E3E8EF;--inv-line:#EDF0F4;
+--inv-t1:#1B2A41;--inv-t2:#5B6B82;--inv-t3:#8B99AC;--inv-green:#0F8A56;--inv-greenbg:#E8F5EE;
+--inv-red:#C2334D;--inv-redbg:#FBEBEE;--inv-amber:#B8860B;--inv-amberbg:#FFF7E6;
+--inv-blue:#2563EB;--inv-bluebg:#EBF1FE;--inv-navy:#122B4E}
+*{box-sizing:border-box}body{margin:0;font-family:'Noto Sans SC',sans-serif;background:var(--inv-bg);color:var(--inv-t1);font-size:13px}
+.num{font-family:'Roboto Mono',monospace}
+.wrap{max-width:1180px;margin:0 auto;padding:18px 20px 40px}
+.top{display:flex;align-items:center;gap:12px;padding:6px 0 14px;border-bottom:1px solid var(--inv-border)}
+.logo{font-weight:700;color:var(--inv-navy);font-size:16px}
+.sub{color:var(--inv-t3);font-size:11px}
+.badge{font-size:10.5px;font-weight:700;border-radius:4px;padding:2px 9px;background:var(--inv-bluebg);color:var(--inv-blue)}
+.grow{flex:1}
+.btn{border:1px solid var(--inv-border);background:var(--inv-panel);border-radius:5px;padding:5px 13px;font-size:12px;color:var(--inv-t1);cursor:pointer}
+.btn:hover{border-color:var(--inv-blue);color:var(--inv-blue)}
+.card{background:var(--inv-panel);border:1px solid var(--inv-border);border-radius:6px;padding:14px 16px;margin-top:14px}
+.chd{font-weight:700;font-size:13px;margin-bottom:8px;display:flex;align-items:center;gap:8px}
+.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+@media(max-width:860px){.grid{grid-template-columns:repeat(2,1fr)}}
+.kpi{background:var(--inv-panel);border:1px solid var(--inv-border);border-radius:6px;padding:12px 14px}
+.kpi .k{font-size:11px;color:var(--inv-t2)}
+.kpi .v{font-size:21px;font-weight:700;margin:3px 0}
+.kpi .m{font-size:10px;color:var(--inv-t3)}
+.st{font-size:9.5px;font-weight:700;border-radius:3px;padding:1px 6px;vertical-align:2px}
+.st.EST,.st.ESTIMATED{background:var(--inv-amberbg);color:var(--inv-amber)}
+.st.RECONCILED{background:var(--inv-greenbg);color:var(--inv-green)}
+.st.FINALIZED{background:var(--inv-navy);color:#fff}
+.st.STALE,.st.NA{background:var(--inv-redbg);color:var(--inv-red)}
+.risk{border:1px solid #E7C868;background:var(--inv-amberbg);border-radius:6px;padding:11px 14px;margin-top:14px;display:none}
+.risk b{color:var(--inv-amber)}
+.risk.ok{border-color:var(--inv-border);background:var(--inv-panel);display:block}
+.risk.warn{display:block}
+svg{display:block;width:100%}
+table{width:100%;border-collapse:collapse;font-size:12px}
+th{font-size:10.5px;color:var(--inv-t3);text-align:left;font-weight:500;border-bottom:1px solid var(--inv-border);padding:4px 6px}
+td{border-bottom:1px solid var(--inv-line);padding:6px;color:var(--inv-t2)}
+td b{color:var(--inv-t1)}
+.pos{color:var(--inv-green)}.neg{color:var(--inv-red)}
+.gate{max-width:420px;margin:12vh auto;background:var(--inv-panel);border:1px solid var(--inv-border);border-radius:6px;padding:34px 36px;text-align:center}
+.gate input{width:100%;border:1px solid var(--inv-border);border-radius:5px;padding:9px 12px;font-size:13px;margin:14px 0 10px}
+.gate .btn{width:100%;background:var(--inv-navy);color:#fff;border:none;padding:9px}
+.err{color:var(--inv-red);font-size:11.5px;min-height:16px;margin-top:6px}
+.foot{color:var(--inv-t3);font-size:10.5px;margin-top:18px;line-height:1.7}
+</style>
+</head>
+<body>
+<div id="gate" class="gate">
+  <div class="logo" style="font-size:18px">资产与收益核验中心</div>
+  <div class="sub" style="margin-top:6px">HustleCoin Mix · 客户查看端(只读)</div>
+  <input id="tok" type="password" placeholder="请输入投资人访问令牌" onkeydown="if(event.key==='Enter')login()">
+  <button class="btn" onclick="login()">进入</button>
+  <div id="gerr" class="err"></div>
+  <div class="foot">服务端按令牌身份映射数据,仅可见本人份额与组合级收益;全站唯一动作=查看/导出。</div>
+</div>
+
+<div id="app" class="wrap" style="display:none">
+  <div class="top">
+    <span class="logo">资产与收益核验中心</span>
+    <span class="badge">CORE_POOL · 份额×单位净值</span>
+    <span class="sub" id="who"></span>
+    <span class="grow"></span>
+    <span class="sub" id="asof"></span>
+    <button class="btn" onclick="loadAll()">刷新</button>
+    <button class="btn" onclick="logout()">退出</button>
+  </div>
+
+  <div class="grid" style="margin-top:14px">
+    <div class="kpi"><div class="k">当前权益</div><div class="v num" id="eq">—</div><div class="m">USDT · <span id="eqst" class="st NA">N/A</span> <span id="eqasof"></span></div></div>
+    <div class="kpi"><div class="k">单位净值</div><div class="v num" id="nav">—</div><div class="m">USDT/份 · 日度 FINALIZED 为准,盘中 ESTIMATED 可修订</div></div>
+    <div class="kpi"><div class="k">持有份额</div><div class="v num" id="units">—</div><div class="m">份 · 份额事件见下方流水</div></div>
+    <div class="kpi"><div class="k">组合收益率(TWR)</div><div class="v num" id="ret">—</div><div class="m">剔除入出金 · 全员一致</div></div>
+  </div>
+
+  <div id="riskcard" class="risk"><b>平台访问风险</b> <span id="risktxt" class="sub"></span><div class="sub" id="riskhandle" style="margin-top:4px"></div></div>
+
+  <div class="card">
+    <div class="chd">权益曲线 <span class="sub">近 180 期 · 状态随点标注</span></div>
+    <svg id="chart" height="220" viewBox="0 0 1120 220" preserveAspectRatio="none"></svg>
+    <div class="sub" id="chartnote"></div>
+  </div>
+
+  <div class="card">
+    <div class="chd">份额事件流水 <span class="sub">发行/赎回/调整 · 修正只冲正不删</span></div>
+    <table><thead><tr><th>时间</th><th>类型</th><th style="text-align:right">份额</th><th>外部流水号</th><th>备注</th></tr></thead>
+    <tbody id="flows"><tr><td colspan="5">—</td></tr></tbody></table>
+  </div>
+
+  <div class="foot">口径:组合收益率全员一致,权益金额按各自份额不同 ｜ 归因恒等式=资金费+基差+利息−费−滑点−借币±异常(排除 HOUSE_RND/PRE_CARRY/DEX canary)｜ 数据缺失显示 N/A ｜ 本门户不能交易、提现或替操作员恢复风险状态。</div>
+</div>
+
+<script>
+const API='/api/v1';let TOK=localStorage.getItem('inv_token')||'';
+const $=id=>document.getElementById(id);
+async function api(p){const r=await fetch(API+p,{headers:{Authorization:'Bearer '+TOK}});if(!r.ok)throw(await r.json().catch(()=>({detail:r.status})));return r.json()}
+const fmt=(v,d=2)=>v==null?'N/A':Number(v).toLocaleString(undefined,{minimumFractionDigits:d,maximumFractionDigits:d});
+function stTag(s){return s?`<span class="st ${s}">${s}</span>`:'<span class="st NA">N/A</span>'}
+async function login(){TOK=$('tok').value.trim();try{await api('/investor/me');localStorage.setItem('inv_token',TOK);$('gate').style.display='none';$('app').style.display='block';loadAll()}catch(e){$('gerr').textContent='令牌无效或服务不可达:'+(e.detail||'')}}
+function logout(){localStorage.removeItem('inv_token');location.reload()}
+async function loadAll(){
+  try{
+    const me=await api('/investor/me');
+    $('who').textContent=me.investor||'';
+    $('eq').textContent=fmt(me.investor_equity);
+    $('nav').textContent=me.nav_per_unit==null?'N/A':fmt(me.nav_per_unit,4);
+    $('units').textContent=fmt(me.units,4);
+    $('ret').textContent=me.pool_return_pct==null?'N/A':(me.pool_return_pct>=0?'+':'')+fmt(me.pool_return_pct)+'%';
+    $('ret').className='v num '+(me.pool_return_pct>=0?'pos':'neg');
+    $('eqst').outerHTML=stTag(me.nav_status);
+    $('asof').textContent=me.as_of?('as of '+me.as_of.replace('T',' ').slice(0,16)):'';
+    if(me.note)$('chartnote').textContent=me.note;
+  }catch(e){}
+  try{
+    const r=await api('/investor/platform-risk');
+    const c=$('riskcard');c.className='risk '+(r.has_access_risk?'warn':'ok');
+    $('risktxt').textContent=`${r.status_text}(受影响平台 ${r.affected_platforms} · 对NAV影响 ${fmt(r.nav_impact_usdt)} USDT)`;
+    $('riskhandle').textContent=r.handling||'';
+  }catch(e){}
+  try{
+    const perf=await api('/investor/performance?limit=180');
+    drawChart(perf);
+  }catch(e){}
+  try{
+    const fl=await api('/investor/capital-history');
+    $('flows').innerHTML=fl.length?fl.map(f=>`<tr><td>${(f.at||'').replace('T',' ').slice(0,16)}</td><td><b>${f.type}</b></td><td class="num" style="text-align:right">${fmt(f.units,4)}</td><td>${f.flow||'—'}</td><td>${f.note||''}</td></tr>`).join(''):'<tr><td colspan="5">暂无份额事件</td></tr>';
+  }catch(e){}
+}
+function drawChart(rows){
+  const svg=$('chart');if(!rows||!rows.length){svg.innerHTML='<text x="20" y="110" fill="#8B99AC" font-size="12">暂无净值序列(份额发行后开始记录)</text>';return}
+  const vs=rows.map(r=>r.equity),min=Math.min(...vs),max=Math.max(...vs),pad=(max-min)||1;
+  const X=i=>20+i*(1080/(rows.length-1||1)),Y=v=>200-((v-min)/pad)*170;
+  let d='M'+rows.map((r,i)=>`${X(i).toFixed(1)},${Y(r.equity).toFixed(1)}`).join(' L');
+  const last=rows[rows.length-1];
+  svg.innerHTML=`<path d="${d}" fill="none" stroke="#2563EB" stroke-width="2"/>`+
+    `<circle cx="${X(rows.length-1)}" cy="${Y(last.equity)}" r="3.5" fill="${last.nav_status==='FINALIZED'?'#122B4E':last.nav_status==='RECONCILED'?'#0F8A56':'#B8860B'}"/>`+
+    `<text x="20" y="14" fill="#8B99AC" font-size="10" class="num">max ${fmt(max)}</text>`+
+    `<text x="20" y="214" fill="#8B99AC" font-size="10" class="num">min ${fmt(min)}</text>`;
+}
+if(TOK){$('gate').style.display='none';$('app').style.display='block';loadAll()}
+</script>
+</body>
+</html>

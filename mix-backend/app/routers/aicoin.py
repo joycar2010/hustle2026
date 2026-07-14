@@ -169,3 +169,66 @@ async def aicoin_search(q: str = Query(...), _who=Depends(require_viewer)):
         return await ac.search(q)
     except Exception as e:  # noqa: BLE001
         raise HTTPException(502, f"AiCoin API error: {str(e)[:150]}")
+
+
+_LAB_DDL = """CREATE TABLE IF NOT EXISTS lab_case (
+    id BIGSERIAL PRIMARY KEY,
+    symbol TEXT NOT NULL,
+    operator TEXT NOT NULL DEFAULT '',
+    action TEXT NOT NULL DEFAULT 'OBSERVE',
+    structure TEXT NOT NULL DEFAULT '',
+    confidence TEXT NOT NULL DEFAULT '',
+    stage TEXT NOT NULL DEFAULT '',
+    product TEXT NOT NULL DEFAULT '',
+    evidence_for TEXT NOT NULL DEFAULT '',
+    evidence_against TEXT NOT NULL DEFAULT '',
+    invalidation TEXT NOT NULL DEFAULT '',
+    review_by TEXT NOT NULL DEFAULT '',
+    tail_budget TEXT NOT NULL DEFAULT '',
+    aicoin_price TEXT NOT NULL DEFAULT '',
+    official_price TEXT NOT NULL DEFAULT '',
+    outcome TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now())"""
+
+
+@router.post("/aicoin/labcase")
+async def labcase_save(body: dict, op=Depends(require_viewer)):
+    """人工研判表→LabCase(XurMj 右栏)。规约:全字段必填(OBSERVE 除外);
+    控盘置信度=仅人工标签非系统事实;案件只追加不覆盖(复盘用)。"""
+    pool = await ds.pg_main()
+    if pool is None:
+        raise HTTPException(503, "mix_main 不可达")
+    await pool.execute(_LAB_DDL)
+    sym = str(body.get("symbol") or "").strip().upper()
+    if not sym:
+        raise HTTPException(400, "symbol 必填")
+    action = str(body.get("action") or "OBSERVE")
+    if action != "OBSERVE":
+        for f in ("structure", "confidence", "stage", "product", "invalidation", "review_by", "tail_budget"):
+            if not str(body.get(f) or "").strip():
+                raise HTTPException(400, f"研判表字段 {f} 必填(规约:LabCase 全必填)")
+    row = await pool.fetchrow(
+        "INSERT INTO lab_case(symbol, operator, action, structure, confidence, stage, product, "
+        "evidence_for, evidence_against, invalidation, review_by, tail_budget, aicoin_price, official_price) "
+        "VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING id",
+        sym, str(op.get("operator") or op.get("username") or op.get("admin") or "viewer"),
+        action, *(str(body.get(k) or "") for k in
+                  ("structure", "confidence", "stage", "product", "evidence_for", "evidence_against",
+                   "invalidation", "review_by", "tail_budget", "aicoin_price", "official_price")))
+    return {"ok": True, "id": row["id"]}
+
+
+@router.get("/aicoin/labcases")
+async def labcase_list(symbol: str = "", _who=Depends(require_viewer)):
+    pool = await ds.pg_main()
+    if pool is None:
+        return {"rows": []}
+    try:
+        if symbol:
+            rows = await pool.fetch("SELECT * FROM lab_case WHERE symbol=$1 ORDER BY id DESC LIMIT 20",
+                                    symbol.upper())
+        else:
+            rows = await pool.fetch("SELECT * FROM lab_case ORDER BY id DESC LIMIT 20")
+        return {"rows": [{k: (str(v) if k == "created_at" else v) for k, v in dict(r).items()} for r in rows]}
+    except Exception:
+        return {"rows": []}

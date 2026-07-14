@@ -106,3 +106,23 @@ async def investor_pool(inv=Depends(require_investor)):
             "nav_per_unit": float(row["nav_per_unit"]) if row else None,
             "as_of": row["as_of"].isoformat() if row and row["as_of"] else None,
             "note": "组合收益率全员一致,权益金额按各自份额不同;日度 FINALIZED 为准,盘中 ESTIMATED 可修订"}
+
+
+@router.get("/investor/platform-risk")
+async def investor_platform_risk(inv=Depends(require_investor)):
+    """客户端"平台访问风险"黄卡(V5 §16.1):只给 NAV 影响与处理状态,
+    不暴露具体交易所账号/内部阈值/仓位明细。"""
+    pol = await ds.get_json("dcm:risk:policy") or {}
+    nav = pol.get("nav") or {}
+    restricted = [v for v, d in (pol.get("venues") or {}).items()
+                  if d.get("mode") in ("NO_NEW_RISK", "REDUCE_ONLY", "EXIT_ONLY", "FROZEN")]
+    trapped = float(nav.get("trapped_usdt") or 0)
+    return {
+        "has_access_risk": bool(restricted) or trapped > 0,
+        "affected_platforms": len(restricted),
+        "nav_impact_usdt": round(trapped, 2),
+        "status_text": ("部分交易平台访问受限,系统已自动禁止新增风险并按风险政策对受限资产折价;"
+                        "处理进展将在本页更新" if restricted or trapped > 0
+                        else "全部交易平台访问正常"),
+        "handling": "自动风控:禁止新增→受限资产折价→必要时外部对冲;人工事件处置流程在岗" if restricted else "",
+    }

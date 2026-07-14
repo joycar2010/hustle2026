@@ -62,5 +62,6 @@ const routes = [
   // ===== 三分屏指挥墙：免登录只读路由（?token= 墙令牌，后端校验），无侧栏壳 =====
   { path:'/wall/market', name:'wall-market', component:()=>import('../views/mix/MixWallMarket.vue') },
   { path:'/wall/risk', name:'wall-risk', component:()=>import('../views/mix/MixWallRisk.vue') },
+  { path:'/wall/exec', name:'wall-exec', component:()=>import('../views/mix/MixWallExec.vue') },
 ]
 export default createRouter({ history:createWebHistory(), routes })

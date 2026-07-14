@@ -439,6 +439,7 @@ async def risk_portfolio(_who=Depends(require_viewer)):
                 exit_cost += leg_notional * ((ask - bid) / 2 / mid + TAKER_BPS / 10000)
             legs.append({"venue": v, "amt": amt, "mark": mid,
                          "upnl": pd.get("upnl"), "dist_liq_pct": pd.get("dist_liq_pct"),
+                         "adl": pd.get("adl"),
                          "mode": ((pol.get("venues") or {}).get(v) or {}).get("mode", "N/A")})
             route.append(f"{v}永续")
             if mid:
@@ -507,3 +508,61 @@ async def risk_portfolio(_who=Depends(require_viewer)):
     return {"ts": mgr.get("ts"), "rows": rows,
             "repair": {"trigger_venues": rep.get("trigger_venues") or [],
                        "intents": rep.get("intents") or []}}
+
+
+@router.get("/risk/cashflows")
+async def risk_cashflows(_who=Depends(require_viewer)):
+    """屏3·资金流水:withdrawal_observation 近20笔(全所,链上tx/状态/耗时)。"""
+    pool = await ds.pg()
+    if pool is None:
+        return {"rows": []}
+    try:
+        rows = await pool.fetch(
+            "SELECT venue, asset, network, amount::text, status, venue_tx_id, chain_tx, "
+            "initiated_at::text, confirmed_at::text, duration_sec::text "
+            "FROM withdrawal_observation ORDER BY id DESC LIMIT 20")
+        return {"rows": [dict(r) for r in rows]}
+    except Exception:
+        return {"rows": []}
+
+
+@router.get("/risk/symbol-analysis")
+async def risk_symbol_analysis(symbol: str, _who=Depends(require_viewer)):
+    """屏1·标的分析:逐所 L1中价/点差/资金费(按结算周期日化)/新鲜度 + venue mode。OI=N/A(未采集)。"""
+    import json as _j
+    import time as _t
+    pol = await ds.get_json("dcm:risk:policy") or {}
+    out = []
+    for v in ("binance", "okx", "bybit", "gate", "bitget", "hyperliquid"):
+        row = {"venue": v, "mode": ((pol.get("venues") or {}).get(v) or {}).get("mode", "N/A"),
+               "mid": None, "spread_bps": None, "funding_daily_pct": None,
+               "interval_h": None, "fresh": False, "oi": None}
+        try:
+            raw = await ds.rds().hget(f"dcm:feed:{v}:perp", symbol)
+            l1 = _j.loads(raw) if raw else None
+            if l1:
+                b, a = float(l1.get("bid") or 0), float(l1.get("ask") or 0)
+                if b > 0 and a > 0:
+                    row["mid"] = round((b + a) / 2, 8)
+                    row["spread_bps"] = round((a - b) / ((a + b) / 2) * 10000, 2)
+                    row["fresh"] = (_t.time() * 1000 - float(l1.get("recv_ts") or 0)) < 120000
+        except Exception:
+            pass
+        try:
+            raw = await ds.rds().hget(f"dcm:feed:funding:{v}", symbol)
+            f = _j.loads(raw) if raw else None
+            if f:
+                row["funding_daily_pct"] = round(float(f.get("daily_pct") or 0), 4)
+                row["interval_h"] = f.get("interval_h")
+        except Exception:
+            pass
+        out.append(row)
+    return {"symbol": symbol, "venues": out}
+
+
+@router.get("/risk/lab")
+async def risk_lab(_who=Depends(require_viewer)):
+    """屏1·LAB 卡:engine-lending shadow 决策账快照(HOUSE_RND,不进 CORE_POOL)。"""
+    snap = await ds.get_json("dcm:engine:lending:positions") or {}
+    return {"mode": snap.get("mode", "shadow"), "would_hold": snap.get("would_hold") or [],
+            "slots": snap.get("slots"), "ts": snap.get("ts")}

@@ -1,165 +1,206 @@
 <template>
-  <div class="wall" v-if="ok">
-    <div class="hd">
-      <b>HustleCoin Mix · 多屏指挥墙</b><span class="pos">屏 3 / 3 · 风控指挥</span>
-      <span class="clk">{{ clock }}</span>
-    </div>
-
-    <!-- 第一排：支撑域A(AI 决策) / 风控护栏 / 系统健康 -->
-    <div class="toprow">
-      <div class="card gold">
-        <div class="chd">支撑域 A · AI 决策 <span class="sub">分域顾问制 · 可整体摘除</span></div>
-        <div v-for="a in ov.advisors || []" :key="a.name" class="adv">
-          <i class="dot" :class="{bad: a.status==='停更'}"></i>
-          <b class="anm">{{ a.name }}</b><span class="acad">{{ a.cadence }}</span>
-          <em class="ast" :class="{off: a.status==='停更'}">{{ a.status }}</em>
+  <div class="wall3" v-if="authed">
+    <RiskStatusBar />
+    <div class="main">
+      <!-- 列1·保证金与ADL(JyEvC,w560) -->
+      <div class="col c1">
+        <div class="card">
+          <div class="chd2"><b>保证金压力</b><span class="grow" /><span class="dimtxt">逐venue账户</span></div>
+          <div class="mhead"><span>账户</span><span class="r">权益U</span><span class="r">敞口U</span><span class="r">距强平%</span><span>模式</span></div>
+          <div v-for="v in venues" :key="v.venue" class="mrow" :class="{bad: (minLiq(v.venue) ?? 999) < 25}">
+            <span><b>{{ v.venue }}</b> <i class="dimtxt">Tier {{ v.tier || '—' }}</i></span>
+            <span class="r">{{ n(v.equity) }}</span>
+            <span class="r">{{ n(v.exposure_notional) }}</span>
+            <span class="r">{{ minLiq(v.venue) ?? 'N/A' }}</span>
+            <span :class="'m-'+v.mode">{{ v.mode }}</span>
+          </div>
+          <div class="cfoot">距强平=该所持仓腿 dist_liq 最小值 · 告警线 25%</div>
         </div>
-        <div class="adv dim">
-          <i class="dot off"></i><b class="anm">折价分诊分析师</b><span class="acad">事件触发</span><em class="ast off">S5 未启用</em>
+        <div class="card">
+          <div class="chd2"><b>ADL 面板</b><span class="grow" /><span class="dimtxt">≥4 档预警</span></div>
+          <div v-if="!adlRows.length" class="dimtxt pad">无带 ADL 档位的持仓腿</div>
+          <div v-for="(a,i) in adlRows" :key="i" class="lrow">
+            <b>{{ a.symbol }}</b><span class="dimtxt">{{ a.venue }}</span>
+            <span class="grow" />
+            <span :class="{bad: a.adl >= 4}">ADL {{ a.adl }}</span>
+          </div>
         </div>
-        <div class="adv dim">
-          <i class="dot off"></i><b class="anm">全局配置器</b><span class="acad">周级·资金权重</span><em class="ast off">未启用</em>
-        </div>
-        <div class="gov">
-          <span class="gstep">schema 强制</span><i>→</i><span class="gstep">硬校验钳位</span><i>→</i>
-          <span class="gstep">快照回滚</span><i>→</i><span class="gstep">shadow 对照跑赢才 enforce</span>
-        </div>
-        <div class="gnote">摘除 AI 层 = 只持有不新增 · 只告警不动手</div>
-      </div>
-
-      <div class="card">
-        <div class="chd">支撑域 B · 风控护栏</div>
-        <div class="kv"><span>实盘总权益</span><b>{{ num(ov.risk?.total_equity) }} U</b></div>
-        <div class="kv"><span>跨域净敞口越线</span><b :class="ov.risk?.net_breaches ? 'down' : 'up'">{{ ov.risk?.net_breaches ?? '—' }}（地板 {{ ov.risk?.net_floor ?? '—' }}U）</b></div>
-        <div class="kv"><span>孤儿实盘仓（RECON）</span><b :class="ov.risk?.orphans ? 'down' : 'up'">{{ ov.risk?.orphans ?? '—' }}</b></div>
-        <div class="kv"><span>最高有效杠杆</span><b>{{ ov.risk?.max_lev ?? '—' }}x</b></div>
-        <div class="kv"><span>本轮告警</span><b :class="ov.risk?.alerts_this_round ? 'warn' : 'up'">{{ ov.risk?.alerts_this_round ?? '—' }}</b></div>
-        <div class="kv"><span>当日净收益（落袋）</span><b :class="(ov.pnl_today||0) >= 0 ? 'up' : 'down'">{{ num(ov.pnl_today) }} U</b></div>
-        <div class="bgrid">
-          <span v-for="g in ov.support_b || []" :key="g.name" class="svc">
-            <i class="dot" :class="{bad: !g.ok}"></i>{{ g.name }}
-          </span>
+        <div class="card fill2">
+          <div class="chd2"><b>减险建议</b><span class="grow" /><span class="dimtxt">减险=立即执行类</span></div>
+          <div v-if="!suggests.length" class="dimtxt pad">无建议(策略/修复面全静)</div>
+          <div v-for="(s2,i) in suggests" :key="i" class="lrow">
+            <span class="pri" :class="s2.lvl">{{ s2.tag }}</span><span>{{ s2.txt }}</span>
+          </div>
         </div>
       </div>
 
-      <div class="card">
-        <div class="chd">系统健康 <b class="up">{{ ov.health?.ok ?? '—' }}/{{ ov.health?.total ?? '—' }}</b></div>
-        <div class="svc-grid">
-          <span v-for="(st, name) in ov.health?.services || {}" :key="name" class="svc">
-            <i class="dot" :class="{bad: st !== 'ok'}"></i>{{ name }}
-          </span>
+      <!-- 列2·残腿与RECON(UL4Lb) -->
+      <div class="col c2">
+        <div class="card urgent" :class="{quiet: !urgentRows.length}">
+          <div class="chd2"><b>紧急残腿处理</b><span class="grow" />
+            <span class="cnt" :class="urgentRows.length ? 'p0' : 'okc'">{{ urgentRows.length }}</span></div>
+          <div v-if="!urgentRows.length" class="dimtxt pad">无残腿 · 全组合两腿对称</div>
+          <div v-for="(u,i) in urgentRows" :key="i" class="ulist">
+            <b class="bad">{{ u.symbol }}</b> {{ u.recon }}
+            <div class="dimtxt">单腿操作唯一入口:此处确认方向后收敛;绝不在持仓表行内平单腿</div>
+          </div>
         </div>
-        <div class="chd" style="margin-top:10px">进程心跳 <span class="sub">dcm:hb:* 真相源</span></div>
-        <div class="hb-grid">
-          <span v-for="h in heartbeats.slice(0,12)" :key="h.proc" class="svc">
-            <i class="dot" :class="{bad: !h.ok}"></i>{{ h.proc }} <em>{{ h.age }}</em>
-          </span>
+        <div class="card fill2">
+          <div class="chd2"><b>RECON 对账</b><span class="grow" /><span class="dimtxt">期望腿 vs 实盘快照</span></div>
+          <div class="mhead"><span>组合</span><span>产品</span><span class="r">净Delta U</span><span>状态</span></div>
+          <div v-for="(r,i) in pfRows" :key="i" class="mrow" :class="{bad: r.recon!=='ok'}">
+            <span><b>{{ r.symbol }}</b></span>
+            <span><i class="pbadge">{{ r.product }}</i></span>
+            <span class="r">{{ r.net_delta_usdt ?? 'N/A' }}</span>
+            <span :class="r.recon==='ok' ? 'up' : 'bad'">{{ r.recon==='ok' ? '✓ 0差异' : '⚠ '+r.recon }}</span>
+          </div>
+          <div v-if="!pfRows.length" class="dimtxt pad">无在管组合</div>
+        </div>
+        <div class="card">
+          <div class="chd2"><b>冻结与干预历史</b><span class="grow" /><span class="dimtxt">模式转变(近10)</span></div>
+          <div v-if="!transitions.length" class="dimtxt pad">无记录</div>
+          <div v-for="(t,i) in transitions.slice(0,10)" :key="i" class="lrow">
+            <b>{{ t.venue }}</b>
+            <span class="mch sm" :class="'m2-'+t.before_mode">{{ t.before_mode }}</span>→
+            <span class="mch sm" :class="'m2-'+t.after_mode">{{ t.after_mode }}</span>
+            <span class="dimtxt">{{ String(t.reason||'').split('|')[0].slice(0,30) }} · {{ (t.recorded_at||'').slice(5,16) }}</span>
+          </div>
         </div>
       </div>
-    </div>
 
-    <!-- 第二排：变更审计（规则/干预/AI 决策留痕,自规则中心迁入） -->
-    <div class="card">
-      <div class="chd">变更审计 <span class="sub">admin_audit 全量留痕 · S3 借币点差 规则模板变更 + 干预 + AI 配置</span></div>
-      <div class="audit3">
-        <div v-for="(a,i) in audit" :key="i" class="arec">
-          <span class="at">{{ a.at }}</span><b class="au">{{ a.user }}</b>
-          <span class="af">{{ a.field }}</span><em class="ac" :title="a.change">{{ a.change }}</em>
+      <!-- 列3·NAV与资金(u8ld44,w500) -->
+      <div class="col c3">
+        <div class="card">
+          <div class="chd2"><b>NAV bridge</b><span class="grow" /><span class="dimtxt">三口径分离</span></div>
+          <div class="kv"><span>Accounting NAV(账面)</span><b>{{ n(nav.accounting_nav_usdt) }} U</b></div>
+          <div class="kv"><span>− 情景 haircut(受限折价)</span><b :class="{bad:(nav.trapped_usdt||0)>0}">{{ n(nav.trapped_usdt) }} U</b></div>
+          <div class="kv"><span>= Risk-adjusted NAV</span><b>{{ n(nav.risk_adjusted_nav_usdt) }} U</b></div>
+          <div class="kv"><span>− 保证金预留</span><b>{{ n(nav.reservation_usdt) }} U</b></div>
+          <div class="kv"><span>− 运营缓冲</span><b>{{ n(nav.operational_buffer_usdt) }} U</b></div>
+          <div class="kv tot"><span>= Available Equity(可部署)</span><b>{{ n(nav.available_equity_usdt) }} U</b></div>
+          <div class="cfoot">同一笔 trapped 只扣一次;冻结资产不删除只折价(V5 §11.2)</div>
         </div>
-        <div v-if="!audit.length" class="arec"><span style="color:#5E6673">暂无变更记录</span></div>
-      </div>
-    </div>
-
-    <!-- 实时告警流水 · 底部三列 -->
-    <div class="chd alerts-hd">实时告警流水（最近 {{ alerts.length }} 条）</div>
-    <div class="alerts3">
-      <div v-for="(a, i) in alerts.slice(0, 30)" :key="i" class="arow">
-        <span class="lv" :class="a.level.toLowerCase()">{{ a.level }}</span>
-        <span v-if="a.strategy" class="sb" :style="{background: SC[a.strategy]}">{{ a.strategy }}</span>
-        <span class="at">{{ a.at }}</span>
-        <span class="tx" :title="a.text">{{ a.text }}</span>
+        <div class="card">
+          <div class="chd2"><b>逐所权益</b></div>
+          <div v-for="v in venues" :key="v.venue" class="lrow">
+            <b>{{ v.venue }}</b>
+            <span class="grow" />
+            <span :class="{bad: (v.trapped_usdt||0)>0}">{{ n(v.equity) }} U{{ (v.trapped_usdt||0)>0 ? ` (折价 ${v.trapped_usdt})` : '' }}</span>
+          </div>
+        </div>
+        <div class="card fill2">
+          <div class="chd2"><b>资金流水</b><span class="grow" /><span class="dimtxt">提现事实(近20)</span></div>
+          <div v-if="!flows.length" class="dimtxt pad">窗口内无提现记录</div>
+          <div v-for="(f,i) in flows" :key="i" class="lrow">
+            <b>{{ f.venue }}</b><span>{{ f.asset }} {{ f.amount }}</span>
+            <span class="mch sm" :class="f.status==='CONFIRMED' ? 'okc2' : f.status==='PENDING' ? 'pend' : 'failc'">{{ f.status }}</span>
+            <span class="grow" /><span class="dimtxt">{{ (f.initiated_at||'').slice(5,16) }}</span>
+          </div>
+          <div class="cfoot">允许动作=查事实/停新增/工单/标审核/证据包;禁止重复提现/换IP重试(V5 §14.4)</div>
+        </div>
       </div>
     </div>
   </div>
-  <div class="gate" v-else>
-    <b>屏 3 · 风控墙</b>
-    <p>需要墙令牌：/wall/risk?token=…</p>
-  </div>
+  <div v-else class="gate">屏3 · 风控与账务<br /><small>URL 需携带 ?token=(只读墙令牌,后端校验)</small></div>
 </template>
 
 <script setup>
-import { onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
+import RiskStatusBar from '../../components/RiskStatusBar.vue'
 import { mixApi } from '../../api/mix'
 
-const SC = { S1: '#4A9CFF', S2: '#F0B90B', S3: '#A78BFA', S4: '#2DD4BF', S5: '#FF9F43', S6: '#F472B6' }
 const route = useRoute()
-const ok = ref(false)
-const ov = ref({}); const heartbeats = ref([]); const alerts = ref([]); const audit = ref([])
-const clock = ref('')
-const num = v => (v == null ? '—' : Number(v).toLocaleString(undefined, { maximumFractionDigits: 2 }))
+const authed = ref(!!route.query.token || !!localStorage.getItem('mix_token'))
+if (route.query.token) localStorage.setItem('mix_token', String(route.query.token))
 
+const rs = ref({}); const pf = ref({}); const flows = ref([])
+let t1 = null
+const venues = computed(() => rs.value.venues || [])
+const nav = computed(() => rs.value.nav || {})
+const pfRows = computed(() => pf.value.rows || [])
+const transitions = computed(() => rs.value.transitions || [])
+const urgentRows = computed(() => pfRows.value.filter(r => r.recon !== 'ok'))
+const adlRows = computed(() => pfRows.value.flatMap(r =>
+  (r.legs || []).filter(l => l.adl != null).map(l => ({ symbol: r.symbol, venue: l.venue, adl: l.adl }))))
+const suggests = computed(() => {
+  const out = []
+  ;(pf.value.repair?.intents || []).forEach(it => out.push({
+    tag: it.kind === 'RESCUE_HEDGE' ? '救援' : '撤离', lvl: 'p0',
+    txt: `${it.symbol} → 撤出 ${it.venue}(est ${it.est_notional_usdt}U,shadow 提案)` }))
+  pfRows.value.filter(r => String(r.saga_state).includes('RECOMMEND')).forEach(r =>
+    out.push({ tag: '建议平', lvl: 'p1', txt: `${r.symbol} ${r.signal || ''}`.slice(0, 60) }))
+  venues.value.filter(v => (v.trapped_usdt || 0) > 0).forEach(v =>
+    out.push({ tag: '折价', lvl: 'p1', txt: `${v.venue} 受限权益 ${v.trapped_usdt}U 计入 haircut` }))
+  return out
+})
+function minLiq(venue) {
+  const ls = pfRows.value.flatMap(r => (r.legs || []).filter(l => l.venue === venue && l.dist_liq_pct != null))
+  return ls.length ? Math.min(...ls.map(l => l.dist_liq_pct)) : null
+}
+const n = v => (v == null ? 'N/A' : Number(v).toLocaleString())
 async function load() {
   try {
-    ;[ov.value, heartbeats.value, alerts.value] =
-      await Promise.all([mixApi.monitor.overview(), mixApi.monitor.heartbeats(), mixApi.alerts()])
-    ok.value = true
-    try { audit.value = (await mixApi.rulesAudit('strategy:S3')).slice(0, 24) } catch (e) { /* 降级 */ }
-  } catch (e) { ok.value = !!ov.value?.health }
+    rs.value = await mixApi.riskSummary()
+    pf.value = await mixApi.riskPortfolio()
+    flows.value = (await mixApi.riskCashflows())?.rows || []
+  } catch (e) { /* 状态条示 STALE */ }
 }
-let t1, t2
-onMounted(() => {
-  const qt = route.query.token
-  if (qt) localStorage.setItem('mix_token', String(qt))   // 墙令牌引导（同源 API 头）
-  load()
-  t1 = setInterval(load, 5000)
-  t2 = setInterval(() => { clock.value = new Date().toTimeString().slice(0, 8) }, 1000)
-})
-onUnmounted(() => { clearInterval(t1); clearInterval(t2) })
+onMounted(() => { load(); t1 = setInterval(load, 15000) })
+onUnmounted(() => t1 && clearInterval(t1))
 </script>
 
 <style scoped lang="scss">
-.wall { min-height: 100vh; background: #0B0E11; color: #EAECEF; padding: 18px 22px; display: flex; flex-direction: column; gap: 12px; }
-.hd { display: flex; align-items: baseline; gap: 12px; b { font-size: 18px; } .pos { color: #848E9C; font-size: 12px; flex: 1; } .clk { font-size: 14px; color: #F0B90B; } }
-.toprow { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
-.card { background: #181B21; border: 1px solid #262B33; border-radius: 10px; padding: 12px 14px; }
-.chd { font-size: 13px; font-weight: 700; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center;
-  .sub { color: #5E6673; font-size: 10.5px; font-weight: 400; } }
-.svc-grid, .hb-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 10px; }
-.svc { font-size: 11px; color: #848E9C; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  em { font-style: normal; color: #5E6673; margin-left: 4px; } }
-.dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #0ECB81; margin-right: 6px;
-  &.bad { background: #F6465D; } }
-.kv { display: flex; justify-content: space-between; font-size: 12px; color: #848E9C; padding: 3px 0; b { color: #EAECEF; } }
-.alerts-hd { margin-top: 2px; }
-.alerts3 { column-count: 3; column-gap: 14px; }
-.arow { break-inside: avoid; display: flex; align-items: center; gap: 6px; font-size: 11.5px; padding: 3px 0; }
-.lv { font-size: 9.5px; font-weight: 700; border-radius: 3px; padding: 0 4px;
-  &.fatal { background: rgba(246,70,93,.18); color: #F6465D; }
-  &.warn { background: rgba(240,185,11,.15); color: #F0B90B; }
-  &.info { background: rgba(74,156,255,.15); color: #4A9CFF; } }
-.sb { font-size: 9.5px; font-weight: 800; color: #0B0E11; border-radius: 3px; padding: 0 4px; }
-.at { color: #5E6673; }
-.tx { flex: 1; color: #848E9C; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.up { color: #0ECB81; } .down { color: #F6465D; } .warn { color: #F0B90B; }
-.card.gold { border-color: rgba(240,185,11,.35); }
-.adv { display: flex; align-items: center; gap: 8px; font-size: 11.5px; padding: 3.5px 0;
-  &.dim { opacity: .55; }
-  .anm { color: #EAECEF; min-width: 108px; }
-  .acad { flex: 1; color: #5E6673; font-size: 10px; }
-  .ast { font-style: normal; color: #0ECB81; font-weight: 700; font-size: 10.5px; &.off { color: #5E6673; font-weight: 400; } } }
-.dot.off { background: #5E6673; }
-.gov { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; margin-top: 10px; padding-top: 8px; border-top: 1px dashed #262B33;
-  .gstep { background: rgba(240,185,11,.1); border: 1px solid rgba(240,185,11,.3); color: #F0B90B;
-    border-radius: 10px; padding: 1px 8px; font-size: 9.5px; font-weight: 700; }
-  i { color: #5E6673; font-style: normal; font-size: 10px; } }
-.gnote { margin-top: 6px; font-size: 10px; color: #5E6673; }
-.bgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 3px 10px; margin-top: 10px; padding-top: 8px; border-top: 1px dashed #262B33; }
-.audit3 { column-count: 3; column-gap: 16px; }
-.arec { break-inside: avoid; display: flex; align-items: baseline; gap: 6px; font-size: 11px; padding: 2.5px 0;
-  .at { color: #5E6673; flex: none; } .au { color: #F0B90B; flex: none; }
-  .af { color: #EAECEF; flex: none; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .ac { font-style: normal; color: #848E9C; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } }
-.gate { min-height: 100vh; background: #0B0E11; color: #848E9C; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
-  b { color: #EAECEF; font-size: 18px; } }
+.wall3 { display: flex; flex-direction: column; gap: 10px; min-height: 100vh; background: var(--mix-bg, #0B0E11); padding: 10px 16px 12px; }
+.gate { min-height: 100vh; display: flex; align-items: center; justify-content: center; text-align: center;
+  background: #0B0E11; color: #848E9C; font-size: 15px; }
+.main { flex: 1; display: grid; grid-template-columns: 560px minmax(0,1fr) 500px; gap: 10px; min-height: 0; }
+.col { display: flex; flex-direction: column; gap: 10px; min-height: 0; min-width: 0;
+  .fill2 { flex: 1; } }
+.card { background: var(--mix-card, #181B21); border: 1px solid var(--mix-border, #262B33); border-radius: 10px;
+  display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
+.card.urgent { border-color: rgba(246,70,93,.4);
+  .chd2 { background: rgba(246,70,93,.05); }
+  &.quiet { border-color: var(--mix-border, #262B33); .chd2 { background: transparent; } } }
+.chd2 { font-size: 12.5px; font-weight: 700; color: var(--mix-t1, #EAECEF); padding: 10px 14px 6px; display: flex; align-items: center; gap: 8px; }
+.grow { flex: 1; }
+.dimtxt { color: var(--mix-t3, #5E6673); font-size: 10.5px; font-weight: 400; }
+.pad { padding: 6px 14px 10px; }
+.up { color: #0ECB81; } .bad { color: #F6465D; }
+.cnt { font-size: 10.5px; font-weight: 800; padding: 1px 9px; border-radius: 4px;
+  &.p0 { background: rgba(246,70,93,.16); color: #F6465D; }
+  &.okc { background: rgba(14,203,129,.12); color: #35b57c; } }
+.pbadge { font-style: normal; font-size: 9px; font-weight: 800; padding: 0 5px; border-radius: 3px;
+  background: rgba(240,185,11,.14); color: #F0B90B; }
+.mhead, .mrow { display: grid; grid-template-columns: minmax(110px,1.2fr) 76px 76px 80px 100px; align-items: center; font-size: 10.5px; padding: 0 14px; }
+.mhead { color: var(--mix-t3, #5E6673); font-size: 10px; height: 22px; background: var(--mix-panel, #12151A);
+  border-top: 1px solid var(--mix-border, #262B33); border-bottom: 1px solid var(--mix-border, #262B33); }
+.mrow { height: 30px; border-bottom: 1px solid var(--mix-border, #262B33); color: var(--mix-t2, #848E9C);
+  b { color: var(--mix-t1, #EAECEF); }
+  &.bad { background: rgba(246,70,93,.05); } }
+.r { text-align: right; padding-right: 10px; font-variant-numeric: tabular-nums; }
+.m-NORMAL { color: #35b57c; } .m-WATCH { color: #F0B90B; } .m-NO_NEW_RISK { color: #FF8A3D; }
+.m-REDUCE_ONLY, .m-EXIT_ONLY { color: #F6465D; } .m-FROZEN { color: #8B1E2D; }
+.lrow { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--mix-t2, #848E9C);
+  padding: 4px 14px; border-bottom: 1px dashed var(--mix-border, #262B33);
+  b { color: var(--mix-t1, #EAECEF); } }
+.ulist { padding: 4px 14px 8px; font-size: 11.5px; color: var(--mix-t2, #848E9C); }
+.pri { flex: none; font-size: 10px; font-weight: 800; padding: 1px 7px; border-radius: 4px;
+  &.p0 { background: rgba(246,70,93,.16); color: #F6465D; }
+  &.p1 { background: rgba(240,185,11,.14); color: #F0B90B; } }
+.mch { font-weight: 800; font-size: 9.5px; padding: 0 5px; border-radius: 4px;
+  &.okc2 { background: rgba(14,203,129,.12); color: #35b57c; }
+  &.pend { background: rgba(240,185,11,.14); color: #F0B90B; }
+  &.failc { background: rgba(246,70,93,.16); color: #F6465D; } }
+.m2-NORMAL { background: rgba(14,203,129,.12); color: #35b57c; }
+.m2-WATCH { background: rgba(240,185,11,.14); color: #F0B90B; }
+.m2-NO_NEW_RISK { background: rgba(255,138,61,.16); color: #FF8A3D; }
+.m2-REDUCE_ONLY, .m2-EXIT_ONLY { background: rgba(246,70,93,.16); color: #F6465D; }
+.m2-FROZEN { background: #8B1E2D; color: #fff; }
+.kv { display: flex; justify-content: space-between; font-size: 11.5px; color: var(--mix-t2, #848E9C);
+  padding: 4px 14px;
+  b { color: var(--mix-t1, #EAECEF); font-variant-numeric: tabular-nums; }
+  &.tot { border-top: 1px solid var(--mix-border, #262B33); margin-top: 4px; padding-top: 8px;
+    b { color: #F0B90B; font-size: 13px; } } }
+.cfoot { font-size: 10px; color: var(--mix-t3, #5E6673); padding: 6px 14px; border-top: 1px solid var(--mix-border, #262B33); margin-top: auto; }
 </style>
