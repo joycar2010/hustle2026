@@ -231,3 +231,81 @@ async def risk_restrictions(_who=Depends(require_viewer)):
         "SELECT venue, account_key, scope, signal_type, source_type, severity, raw_code, http_status, "
         "endpoint, first_seen, last_seen, hit_count FROM restriction_event ORDER BY last_seen DESC LIMIT 100")
     return {"events": [dict(r) for r in rows]}
+
+
+@router.get("/risk/summary")
+async def risk_summary(_who=Depends(require_viewer)):
+    """V2 双行状态条+平台风险工作台数据源(批次6e/V5 §14):
+    行2风险摘要=受限账户/受限权益/风险调整可用权益/最老pending提现/24h提现成功率/未复核条款/最高Incident;
+    venue 表=模式/incident_state/恢复阶梯/权益/折价/tier/提现健康/命中作用域。
+    数据超龄→stale=true,前端必须按 UNKNOWN/STALE 灰 fail-closed 展示,禁止装绿。"""
+    import time
+    pol = await ds.get_json("dcm:risk:policy")
+    age = int(time.time() - float((pol or {}).get("ts") or 0)) if pol else None
+    stale = (pol is None) or age > 90
+    venues = (pol or {}).get("venues") or {}
+    nav = (pol or {}).get("nav") or {}
+    reg = (pol or {}).get("policy_registry") or {}
+    # 提现健康逐所 + 最老 pending
+    wd, oldest = {}, {"venue": None, "age_sec": 0}
+    for v in venues:
+        h = await ds.get_json(f"dcm:risk:withdrawal:{v}")
+        if h:
+            wd[v] = h
+            if float(h.get("oldest_pending_age_sec") or 0) > oldest["age_sec"]:
+                oldest = {"venue": v, "age_sec": int(h["oldest_pending_age_sec"])}
+    # 活跃 Incident + 24h 提现成功率 + 最近模式转变(dcm_main,mix_ro 只读)
+    incidents, wd24, transitions = [], {"total": 0, "ok": 0, "rate": None}, []
+    pool = await ds.pg()
+    if pool is not None:
+        try:
+            incidents = [dict(r) for r in await pool.fetch(
+                "SELECT venue, rule, state, severity, title, detail, hit_count, "
+                "extract(epoch from now()-first_seen)::int AS age_sec "
+                "FROM venue_incident WHERE state != 'CLOSED' ORDER BY severity DESC, first_seen DESC LIMIT 30")]
+        except Exception:
+            pass
+        try:
+            row = await pool.fetchrow(
+                "SELECT count(*) AS total, count(*) FILTER (WHERE status='CONFIRMED') AS ok "
+                "FROM withdrawal_observation WHERE recorded_at > now() - interval '24 hours' "
+                "AND status != 'CANCELLED'")
+            if row and row["total"]:
+                wd24 = {"total": int(row["total"]), "ok": int(row["ok"]),
+                        "rate": round(int(row["ok"]) / int(row["total"]) * 100, 1)}
+        except Exception:
+            pass
+        try:
+            transitions = [dict(r) for r in await pool.fetch(
+                "SELECT scope_key AS venue, before_mode, after_mode, reason, recorded_at::text "
+                "FROM venue_mode_transition ORDER BY id DESC LIMIT 20")]
+        except Exception:
+            pass
+    _sev = {"QUARANTINED": 6, "FROZEN": 6, "EXIT_ONLY": 5, "REDUCE_ONLY": 4,
+            "NO_NEW_RISK": 3, "WATCH": 2, "RECOVERY_WATCH": 1, "NORMAL": 0}
+    worst = max(venues.values(), key=lambda d: _sev.get(d.get("mode"), 0), default=None)
+    restricted = {v: d for v, d in venues.items()
+                  if _sev.get(d.get("mode"), 0) >= _sev["NO_NEW_RISK"]}
+    rows = [{"venue": v, **{k: d.get(k) for k in (
+        "mode", "incident_state", "recovery", "reason", "modes_hit", "equity",
+        "exposure_notional", "cap_usdt", "tier", "haircut_pct", "trapped_usdt")},
+        "withdrawal": wd.get(v)} for v, d in venues.items()]
+    rows.sort(key=lambda r: (-_sev.get(r["mode"], 0), -(r.get("equity") or 0)))
+    return {
+        "stale": stale, "age_sec": age,
+        "policy_epoch": (pol or {}).get("policy_epoch"), "policy_version": (pol or {}).get("policy_version"),
+        "global_mode": (pol or {}).get("global_mode", "NORMAL"),
+        "worst_mode": (worst or {}).get("mode", "NORMAL") if not stale else "STALE",
+        "restricted_accounts": len(restricted),
+        "restricted_equity_usdt": round(sum(float(d.get("equity") or 0) for d in restricted.values()), 2),
+        "nav": nav,
+        "oldest_pending": oldest,
+        "wd_24h": wd24,
+        "unreviewed_terms": reg.get("unreviewed") or [],
+        "prohibited": reg.get("prohibited") or [],
+        "top_incident": incidents[0] if incidents else None,
+        "incidents": incidents,
+        "venues": rows,
+        "transitions": transitions,
+        "credential_epochs": (pol or {}).get("credential_epochs") or {},
+    }

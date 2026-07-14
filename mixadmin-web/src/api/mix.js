@@ -23,6 +23,8 @@ http.interceptors.response.use(r => r.data, e => {
 
 export const mixApi = {
   enums: () => http.get('/meta/enums'),
+  riskSummary: () => http.get('/risk/summary'),
+  riskOverrideAdd: (body) => http.post('/risk/overrides', body),
   whoami: () => http.get('/auth/whoami'),
   whoamiWith: (t) => http.get('/auth/whoami', { headers: { 'X-Op-Token': t } }),
   login: (username, password) => http.post('/auth/login', { username, password }),

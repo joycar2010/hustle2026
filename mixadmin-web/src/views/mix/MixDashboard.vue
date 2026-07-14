@@ -1,5 +1,7 @@
 <template>
   <div class="mixdash">
+    <!-- V2 全局状态条(双行:平台模式+风险摘要,V5 §14.1;数据超龄 fail-closed 灰) -->
+    <RiskStatusBar />
     <!-- 跑马灯已全局化(Layout 顶栏);本页 WS 仅消费 position:updates -->
     <!-- 全局工作流管道（8 段·分策略六色堆叠·活跃段流光动效） -->
     <div class="pipeline" v-if="ov.pipeline?.length">
@@ -117,6 +119,7 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { connectStream } from '../../api/mixWs'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import RiskStatusBar from '../../components/RiskStatusBar.vue'
 import VirtualPositionTable from '../../components/PositionTable/VirtualPositionTable.vue'
 import RuleSettingsModal from '../../components/rules/RuleSettingsModal.vue'
 import SymbolRuleModal from '../../components/rules/SymbolRuleModal.vue'
@@ -294,7 +297,7 @@ onUnmounted(() => { wsDisconnect && wsDisconnect(); auxTimer && clearInterval(au
 /* 满高布局: 坑位表 flex 填余量,主控台整页不出浏览器滚动条(窗口过矮时回落到 .page 内滚动)
    注意:固定行必须 flex:none,否则被 flex 压缩产生遮挡(管道条被剪的回归课) */
 .mixdash { display: flex; flex-direction: column; gap: 10px; height: 100%;
-  > .pipeline, > .dfeed, > .bar, > .botrow, > .foot { flex: none; } }
+  > .riskbar, > .pipeline, > .dfeed, > .bar, > .botrow, > .foot { flex: none; } }
 
 .pipeline { display: flex; gap: 8px; align-items: stretch; overflow-x: auto; padding: 2px 0; }
 .pseg { position: relative; flex: 1; min-width: 104px; background: var(--mix-card, #181B21); border: 1px solid var(--mix-border, #262B33);

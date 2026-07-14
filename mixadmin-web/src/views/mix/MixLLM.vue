@@ -333,9 +333,10 @@ async function testModel(rs, model) {
   try {
     const r = await mixApi.system.llmRelayTest(rs.id, m)
     rs._st = r.ok
-      ? `✅ ${r.model} 可用 · ${r.latency_ms}ms · 回复:${r.reply}`
+      ? `✅ ${r.model} 可用 · ${r.latency_ms}ms · 回复:${r.reply}` + (r.note ? `（${r.note}）` : '')
       : `❌ ${r.model} 不可用(${r.latency_ms}ms):${r.error}`
     if (chip) rs._chipTest = { ...(rs._chipTest || {}), [m]: r.ok ? 'ok' : 'bad' }
+    if (r.ok && r.note) loadRelays()   // 地址被自愈(补/v1)→刷新列表看到新地址
   } catch (e) {
     rs._st = '❌ ' + (e?.detail || e?.error || '测试失败')
     if (chip) rs._chipTest = { ...(rs._chipTest || {}), [m]: 'bad' }
