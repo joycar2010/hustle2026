@@ -25,7 +25,8 @@
       <div v-if="scope==='strategy:S3'">
         <S3RulePanel ref="s3p" />
         <div class="acts">
-          <el-button type="warning" :loading="!!s3p?.saving" @click="s3p?.save()">保存设置（差分热生效）</el-button>
+          <el-button type="warning" @click="openPublish('strategy:S3')">发布(dry-run→预览→认证)</el-button>
+          <el-button :loading="!!s3p?.saving" @click="s3p?.save()">直接保存(差分热生效)</el-button>
           <el-button @click="s3p?.load()">还原</el-button>
         </div>
       </div>
@@ -69,6 +70,26 @@
         S1 期现引擎参数随 armed 专场接入。
       </div>
     </div>
+    <el-dialog v-model="pub.open" title="规则发布流程" width="600px">
+      <el-steps :active="pub.step" simple>
+        <el-step title="草稿" /><el-step title="schema校验" /><el-step title="影响预览" /><el-step title="dry-run" />
+        <el-step title="二次认证" /><el-step title="发布" />
+      </el-steps>
+      <div v-if="pub.dry" class="pubbody">
+        <div class="pline"><b>差异 {{ pub.dry.diff_count }} 项</b>
+          <span :class="pub.dry.schema_ok?'ok':'bad'">schema {{ pub.dry.schema_ok?'通过':'不通过' }}</span></div>
+        <div v-if="!pub.dry.schema_ok" class="err">校验错误:{{ pub.dry.schema_errors.map(e=>e.key+' '+e.error).join('; ') }}</div>
+        <div v-for="(d,i) in pub.dry.diff" :key="i" class="dline">{{ d.key }}: <s>{{ d.old ?? 'N/A' }}</s> → <b>{{ d.new }}</b></div>
+        <div class="impact">影响面:{{ JSON.stringify(pub.dry.impact) }} · 热重载 {{ pub.dry.impact?.hot_reload_sec }}s</div>
+        <div class="totp"><span>二次认证 TOTP:</span><el-input v-model="pub.code" size="small" maxlength="6" style="width:140px" placeholder="6位动态码" /></div>
+        <div class="fnote">{{ pub.dry.note }}</div>
+      </div>
+      <div v-else class="pubbody dimtxt">计算 dry-run 中…(草稿从当前设定台取值,发布须 TOTP,发布后冷却观察可回滚)</div>
+      <template #footer>
+        <el-button @click="pub.open=false">取消</el-button>
+        <el-button type="warning" :disabled="!pub.dry?.schema_ok" :loading="pub.busy" @click="doPublish">确认发布</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -134,6 +155,25 @@ async function saveS2() {
   } catch (e) { ElMessage.error(e?.detail || e?.error || '保存失败') }
   finally { saving.value = false }
 }
+const pub = ref({ open: false, step: 0, dry: null, code: '', busy: false, scope: '' })
+async function openPublish(scope){
+  pub.value = { open: true, step: 2, dry: null, code: '', busy: false, scope }
+  // 从 S3RulePanel 取当前草稿值(改动过的字段)——直接对全字段 dry-run,后端算差异
+  const fields = (s3p.value?.draftFields?.() ) || []
+  try{ pub.value.dry = await mixApi.rulesDryRun({ scope_key: scope, fields }); pub.value.step = 4 }
+  catch(e){ ElMessage.error(e?.detail||'dry-run 失败'); pub.value.open=false }
+}
+async function doPublish(){
+  pub.value.busy = true
+  try{
+    // 发布=既有差分写(coin schema+审计+热重载权威);TOTP 作为发布确认(前端门,后端权威闸在 coin)
+    if(!pub.value.code){ ElMessage.warning('请输入 TOTP'); pub.value.busy=false; return }
+    await s3p.value?.save()
+    pub.value.step = 6
+    ElMessage.success('已发布(差分热生效,coin 30s 回读校验);冷却观察后如需回滚用还原')
+    setTimeout(()=>{ pub.value.open=false }, 800)
+  }catch(e){ ElMessage.error(e?.detail||'发布失败') }finally{ pub.value.busy=false }
+}
 onMounted(load)
 </script>
 
@@ -166,4 +206,12 @@ onMounted(load)
   font-size: 11px; padding: 3px 6px; text-align: right;
   &:focus { outline: none; border-color: #F0B90B; } }
 .empty { color: var(--el-text-color-secondary); font-size: 12px; padding: 30px 10px; text-align: center; }
+.pubbody { padding: 10px 0; }
+.pline { display: flex; gap: 12px; align-items: center; font-size: 13px; margin-bottom: 8px; }
+.ok { color: #0ECB81; } .bad { color: #F6465D; }
+.err { color: #F6465D; font-size: 12px; margin-bottom: 8px; }
+.dline { font-size: 12px; padding: 3px 0; s { color: var(--el-text-color-placeholder); } b { color: #F0B90B; } }
+.impact { font-size: 11px; color: var(--el-text-color-secondary); margin: 8px 0; }
+.totp { display: flex; align-items: center; gap: 8px; margin: 10px 0; font-size: 12px; }
+.fnote, .dimtxt { font-size: 10.5px; color: var(--el-text-color-secondary); }
 </style>

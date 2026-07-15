@@ -821,3 +821,52 @@ async def accounts_custody(_who=Depends(require_viewer)):
     return {"rows": rows,
             "note": "密钥永不显示;换钥/开提现/地址管理=cred-agent永久deny(纵深防御,不由policy放开);"
                     "权限探针为只读推断,绝不主动调危险endpoint试探"}
+
+
+@router.get("/registry/instruments")
+async def registry_instruments(venue: str = "binance", _who=Depends(require_viewer)):
+    """标的与路由(lWn32):Instrument Matrix——合约乘数/linear-inverse/结算/到期/tick/minqty。
+    数据源=i1_collectors 公开 instruments 端点(无需 key,实时拉)。"""
+    from .. import i1_collectors
+    try:
+        raw = await i1_collectors.collect(venue)
+    except Exception as e:  # noqa: BLE001
+        return {"venue": venue, "rows": [], "note": f"采集失败: {str(e)[:80]}"}
+    cols = ("venue", "instrument_id", "underlying", "market_type", "linear_inverse", "multiplier",
+            "quote", "settle_ccy", "settle2", "contract_type", "expiry", "min_qty", "tick_size", "status")
+    rows = [dict(zip(cols, r)) for r in raw[:300]]
+    return {"venue": venue, "count": len(raw), "rows": rows,
+            "note": "Registry 状态≠开仓资格(开仓资格看 policy+经济闸);合约规格实时采集"}
+
+
+@router.get("/registry/routes")
+async def registry_routes(_who=Depends(require_viewer)):
+    """Route Registry:route_assignments 权威路由(引擎/状态/venue腿)+ policy 资格叠加。"""
+    ra = await ds.hgetall_json("dcm:route:assignments")
+    pol = await ds.get_json("dcm:risk:policy") or {}
+    venues = pol.get("venues") or {}
+    rows = []
+    for sym, r in (ra or {}).items():
+        vl, vs = r.get("venue_long"), r.get("venue_short")
+        ml = (venues.get(vl) or {}).get("mode", "N/A")
+        ms = (venues.get(vs) or {}).get("mode", "N/A")
+        rows.append({"symbol": sym, "engine": r.get("engine"), "state": r.get("state"),
+                     "venue_long": vl, "venue_short": ms and vs, "venue_short_": vs,
+                     "target_notional": r.get("target_notional_usdt"),
+                     "policy_eligibility": ("OK" if ml in ("NORMAL", "WATCH") and ms in ("NORMAL", "WATCH")
+                                            else f"受限({vl}={ml}/{vs}={ms})"),
+                     "reason": r.get("reason")})
+    return {"rows": rows, "note": "Route Registry 只是权威路由表;开仓资格另看 policy_eligibility+经济闸"}
+
+
+@router.get("/registry/asset-network")
+async def registry_asset_network(_who=Depends(require_viewer)):
+    """Asset/Network Registry:充提网络状态(coin transfer_status)+ 提现健康。"""
+    st = await ds.hgetall_json("dcm:coin:transfer_status")
+    rows = []
+    for asset, s in (st or {}).items():
+        rows.append({"asset": asset, "deposit": s.get("dep"), "withdraw": s.get("wd"),
+                     "ts": s.get("ts")})
+    rows.sort(key=lambda x: (x["deposit"] is not False, x["withdraw"] is not False))
+    return {"rows": rows[:200], "total": len(st or {}),
+            "note": "任一网络可充/可提归并;持仓币提现关=下架/脱锚前兆(见平台风险)"}

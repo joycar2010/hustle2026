@@ -189,7 +189,7 @@ async function save() {
 }
 
 onMounted(load)
-defineExpose({ load, save, saving, loading })
+defineExpose({ load, save, saving, loading, draftFields: () => fields.value })
 </script>
 
 <style scoped lang="scss">

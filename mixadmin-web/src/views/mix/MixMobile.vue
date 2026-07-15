@@ -155,6 +155,14 @@ onUnmounted(() => { t1 && clearInterval(t1); t2 && clearInterval(t2) })
 <style scoped lang="scss">
 .mob { min-height: 100vh; background: var(--mix-bg, #0B0E11); color: var(--mix-t2, #848E9C);
   display: flex; flex-direction: column; max-width: 834px; margin: 0 auto; position: relative; font-size: 13px; }
+/* HCD9I 横屏 1280×800:放宽容器,body 双列铺满,页签移左侧栏形态(仍 44×44 触控) */
+@media (min-width: 1024px) and (orientation: landscape) {
+  .mob { max-width: 1280px; }
+  .body { display: grid; grid-template-columns: 1fr 1fr; align-items: start; gap: 10px; padding: 8px 16px 72px; }
+  .body > .empty { grid-column: 1 / -1; }
+  .vr { font-size: 12.5px; }
+  .mcard { min-height: 44px; }
+}
 .gate { min-height: 100vh; display: flex; align-items: center; justify-content: center; text-align: center;
   background: #0B0E11; color: #848E9C; font-size: 15px; }
 .stale { position: fixed; inset: 0; z-index: 50; background: rgba(11,14,17,.96); display: flex; flex-direction: column;
@@ -200,7 +208,7 @@ onUnmounted(() => { t1 && clearInterval(t1); t2 && clearInterval(t2) })
 .empty { text-align: center; padding: 26px 0; color: var(--mix-t3, #5E6673); font-size: 12.5px; line-height: 1.8; }
 .tabs { position: fixed; bottom: 0; left: 50%; transform: translateX(-50%); width: 100%; max-width: 834px;
   display: flex; background: var(--mix-panel, #12151A); border-top: 1px solid var(--mix-border, #262B33); z-index: 40; }
-.tb { flex: 1; text-align: center; padding: 10px 0 12px; font-size: 11px; color: var(--mix-t3, #5E6673);
+.tb { flex: 1; text-align: center; padding: 10px 0 12px; min-height: 44px; font-size: 11px; color: var(--mix-t3, #5E6673);
   display: flex; flex-direction: column; gap: 2px; align-items: center; cursor: pointer; position: relative;
   .ti { font-size: 16px; }
   &.on { color: #F0B90B; } }

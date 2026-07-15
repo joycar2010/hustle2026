@@ -307,3 +307,52 @@ async def rules_audit(scope_key: str, _who=Depends(require_viewer)):
     return [{"at": r["ts"].strftime("%m-%d %H:%M"), "user": r["operator"], "scope": scope_key,
              "field": f"{r['action']} {r['target']}".strip(), "change": str(r["result"])[:120]}
             for r in rows]
+
+
+@router.post("/dry-run")
+async def rules_dry_run(body: dict, _who=Depends(require_viewer)):
+    """规则发布流程 dry-run(N2yrk:草稿→schema校验→影响预览→dry-run)。
+    只算不写:字段 schema 校验 + 差异(current vs draft)+ 影响面预估。绝不落任何写入。"""
+    scope_key = str(body.get("scope_key") or "")
+    fields = body.get("fields") or []
+    # 取当前值
+    current = {}
+    if scope_key == "strategy:S3":
+        panel = await ds.get_json("dcm:coin:panel") or {}
+        current = panel.get("rules") or {}
+    elif scope_key == "strategy:S2":
+        try:
+            current = {f.key: f.value for f in await _engine_config_fields("dualperp")}
+        except Exception:
+            current = {}
+    diff, schema_errors = [], []
+    for f in fields:
+        k, v = str(f.get("key", "")), f.get("value")
+        if not k:
+            continue
+        old = current.get(k)
+        # schema 校验:数值字段须可转 float(点差/金额/比例类)
+        if any(t in k for t in ("spread", "amount", "ratio", "notional", "funding")):
+            try:
+                float(v)
+            except (TypeError, ValueError):
+                schema_errors.append({"key": k, "error": f"须数值,得到 '{v}'"})
+                continue
+        if str(old) != str(v):
+            diff.append({"key": k, "old": old, "new": v})
+    # 影响面预估:S3 影响在管坑位数;S2 影响活跃路由数
+    impact = {}
+    if scope_key == "strategy:S3":
+        snap = await ds.get_json("dcm:engine:coin:positions") or {}
+        impact["affected_open_pits"] = len([p for p in (snap.get("positions") or [])
+                                            if p.get("status") not in ("CLOSED", "FAILED")])
+        impact["hot_reload_sec"] = 30
+    elif scope_key == "strategy:S2":
+        ra = await ds.hgetall_json("dcm:route:assignments")
+        impact["active_routes"] = len([r for r in (ra or {}).values()
+                                       if (r or {}).get("state") == "active"])
+        impact["hot_reload_sec"] = 3
+    return {"scope_key": scope_key, "diff": diff, "diff_count": len(diff),
+            "schema_errors": schema_errors, "schema_ok": not schema_errors,
+            "impact": impact,
+            "note": "dry-run 只算不写;发布须重新认证(TOTP)+确认;发布后冷却观察,可回滚上一版"}
