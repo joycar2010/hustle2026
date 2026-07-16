@@ -18,6 +18,29 @@ from app.models.order import OrderRecord
 from app.websocket.manager import manager
 from app.utils.trading_time import is_bybit_trading_hours
 
+_MAKER_POLICY_CACHE = {"ts": 0.0, "cfg": {}}
+
+
+def _maker_only_policy() -> dict:
+    """P0-0716补丁§3.1: maker-only策略闸配置, 30s热读。
+    config/maker_only_policy.json {"mode": "off|shadow|enforce", "symbols": [...]}
+    shadow=只告警不拦; enforce=非maker订单(MARKET/IOC/FOK/普通GTC limit)拒发。
+    只约束s-策略路径; m-手动单带独立审计放行(P0方案§3.1.5)。"""
+    import time as _t_mp
+    import json as _j_mp
+    import os as _o_mp
+    now = _t_mp.time()
+    c = _MAKER_POLICY_CACHE
+    if now - c["ts"] > 30.0:
+        c["ts"] = now
+        try:
+            _p = _o_mp.path.join(_o_mp.path.dirname(__file__), '..', '..', 'config', 'maker_only_policy.json')
+            with open(_p) as _f:
+                c["cfg"] = _j_mp.load(_f) or {}
+        except Exception:
+            c["cfg"] = c.get("cfg") or {}
+    return c["cfg"]
+
 
 async def _query_bridge_order_status(bridge_url, request_id, headers,
                                      attempts=3, _transport=None):
@@ -151,6 +174,25 @@ class OrderExecutor:
         import logging
         from app.services.binance_client import BinanceIPBanError, BinanceTerminalError
         logger = logging.getLogger(__name__)
+
+        # ── P0-0716 §3.1 maker-only策略闸(中央闸门, 全部币安下单必经) ──
+        # 策略路径(s-前缀/无前缀默认按策略对待)只允许 post_only maker;
+        # MARKET/IOC/FOK/普通GTC limit: shadow=告警, enforce=拒发。
+        # m-手动单放行但打审计标(独立PnL分类的地基)。
+        _mp_cfg = _maker_only_policy()
+        _mp_mode = str(_mp_cfg.get("mode", "off"))
+        _is_manual = bool(client_order_id_prefix and str(client_order_id_prefix).startswith("m"))
+        _is_maker_path = bool(post_only and order_type.upper() == "LIMIT")
+        if _mp_mode in ("shadow", "enforce") and not _is_manual and not _is_maker_path:
+            _syms = _mp_cfg.get("symbols")
+            if not _syms or symbol in _syms:
+                _viol = (f"[MAKER_ONLY] 非maker策略订单: symbol={symbol} side={side} "
+                         f"type={order_type} post_only={post_only} prefix={client_order_id_prefix!r}")
+                if _mp_mode == "enforce":
+                    logger.error(_viol + " → 已拒发(enforce)")
+                    return {"success": False, "error": "MAKER_ONLY_POLICY: 策略路径禁止非maker订单",
+                            "policy_violation": True}
+                logger.error(_viol + " (shadow, 放行但标记)")
 
         # 强制精度：按产品配置步长截断，防 -1111
         specs = _get_pair_specs()

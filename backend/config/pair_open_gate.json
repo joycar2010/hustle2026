@@ -1,4 +1,7 @@
 {
-  "_comment": "按对新开仓闸(V1.1 §7.6)。false=禁新开仓(平仓/补腿/手动不受影响), 未列出默认允许。30s热读。",
-  "NG": false
+  "_comment": "按对新开仓闸(V1.1 §7.6 + P0-0716补丁§5.3)。false=禁新开仓(平仓/补腿/手动不受影响), 未列出默认允许。30s热读。冻结原因: NG=经济PnL专项验收中; ICXAG=conversion_factor 1000 vs IC实际contract_size 5000(5倍错配); CL/BZ=conversion_factor 100 vs IC实际1000(10倍错配)+IC vol_min=0.5(50桶起步)+部分用户B账户绑Bybit与IC品种路由冲突。",
+  "NG": false,
+  "ICXAG": false,
+  "CL": false,
+  "BZ": false
 }

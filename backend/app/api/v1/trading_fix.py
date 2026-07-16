@@ -80,8 +80,8 @@ def _build_stats_v2(orders, accounts_map):
         if order.fee and order.fee > 0:
             fee = _to_decimal(order.fee)
         else:
-            # 估算手续费：Binance ~0.02%, Bybit MT5 ~0.01%
-            fee = amount * Decimal("0.0002") if not is_mt5 else amount * Decimal("0.0001")
+            # P0-0716 §3.3: 不再猜0.0002/0.0001 — maker-only下显性佣金=0, 缺失按0
+            fee = Decimal("0")
 
         # 按平台分类统计
         if is_mt5:

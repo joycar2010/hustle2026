@@ -159,25 +159,11 @@ def _build_stats(orders, accounts_map, enable_logging=True):
         if not order.price or order.price <= 0:
             continue
 
-        # Use actual fee from database if available, otherwise estimate
-        # Check if fee exists and is a valid positive number
-        if order.fee is not None and order.fee > 0:
-            fee = float(order.fee)
-        else:
-            # Estimate fees based on platform and order type
-            if is_binance:
-                # Binance XAUUSDT Perpetual Futures fees (VIP 0)
-                # Maker: 0.02% (0.0002), Taker: 0.04% (0.0004)
-                # Assume Maker for limit orders, Taker for market orders
-                if order.order_type and order.order_type.lower() == 'limit':
-                    # Limit orders are typically Maker (0.02%)
-                    fee = amount * 0.0002
-                else:
-                    # Market orders are Taker (0.04%)
-                    fee = amount * 0.0004
-            else:
-                # Bybit MT5 ~0.01% estimate
-                fee = amount * 0.0001
+        # P0-0716 §3.3: 只用真实fee, 缺失=0且不再猜0.0002/0.0004。
+        # 旧估算把免费maker(priceMatch=QUEUE+GTX, 显性佣金=0)按VIP0静态
+        # 费率虚扣, 直接扭曲PnL; fee=0与fee缺失原本就该是两个状态 —
+        # 本接口层面统一按0计入并靠账单对账兜真值, 不再制造假成本。
+        fee = float(order.fee) if (order.fee is not None and order.fee > 0) else 0.0
 
         # Determine if this is a buy or sell order
         is_buy = order.order_side.lower() == 'buy'
@@ -1573,17 +1559,10 @@ async def sync_trades_from_exchanges(
                             commission = abs(float(trade.get("commission", 0)))  # Use abs() to handle negative values
                             commission_asset = trade.get("commissionAsset", "USDT")
 
-                            # Convert commission to USDT if needed
-                            if commission_asset != "USDT":
-                                # For simplicity, if commission is in other asset, estimate in USDT
-                                qty = float(trade.get("qty", 0))
-                                price = float(trade.get("price", 0))
-                                # Estimate based on order type: Maker 0.02%, Taker 0.04%
-                                if trade_type and trade_type.lower() == 'limit':
-                                    commission = qty * price * 0.0002  # Maker
-                                else:
-                                    commission = qty * price * 0.0004  # Taker
-
+                            # P0-0716 §3.3: 非USDT佣金不再按0.0002/0.0004猜测换算 —
+                            # userTrades的commission已是真实值, 直接保留原币种数值
+                            # (maker-only下正常为0; 非0即POLICY_VIOLATION信号, 猜测
+                            # 换算会把违规成本洗白成"正常maker费")。
                             # Ensure commission is positive
                             commission = abs(commission)
 

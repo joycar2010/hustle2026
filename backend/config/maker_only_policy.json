@@ -1,0 +1,5 @@
+{
+  "_comment": "P0-0716 §3.1 maker-only策略闸。mode: off|shadow|enforce。shadow=非maker策略订单告警放行(先观测谁在走旁路); enforce=拒发。m-前缀手动单始终放行(带审计标)。symbols留空=全部品种。",
+  "mode": "shadow",
+  "symbols": []
+}
