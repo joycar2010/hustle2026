@@ -326,6 +326,98 @@ async def _sweep_orphan_orders(uid, pc, acc_a):
             f"已撤{ok}笔 — 残留挂单成交即历史单腿事故根源, 若持续出现请检查策略停止流程")
 
 
+_REPAIRED_ORDERS = {}   # order_id -> ts, 补腿幂等闸(触发源唯一=本进程崩溃现场, 进程内即全局)
+_REPAIR_TASKS = set()   # 强引用防task被GC(mt5-agent同款坑)
+
+
+async def _crash_repair_leg(ex, ctx, ladder_idx, strategy_type, binance_account, bybit_account):
+    """崩溃自动补腿(20260716)。把崩溃路径从"只告警靠人工"升级为"自动补腿+告警"。
+    三道闸保证与手动交易绝缘:
+    ① 触发源限定: 只由策略执行协程崩溃现场触发(绝不由净敞口对账触发 —— 净敞口
+       混手动仓, 按敞口补会把手动单当缺口);
+    ② 对象限定: 补腿量 = ctx里本次策略订单order_id的REST实查成交 - 已对冲量,
+       clientOrderId须s-前缀(手动m-单从源头进不了ctx);
+    ③ 幂等: 每order_id仅补一次 + 按增量对冲进度扣减, 防双补; 桥单失败回退告警等人工。
+    以独立task运行: 不随ladder task被强杀; 每个远程调用独立短超时; 成败都发跟进
+    告警(带真实成交数字), 成功文案明示"无需人工"消除人工双补竞态。"""
+    import time as _t
+    import math as _m
+    order_id = ctx.get("order_id")
+    if not order_id or not ctx.get("repair_armed"):
+        return
+    if order_id in _REPAIRED_ORDERS:
+        return
+    _REPAIRED_ORDERS[order_id] = _t.time()
+    if len(_REPAIRED_ORDERS) > 500:
+        for _k in list(_REPAIRED_ORDERS)[:250]:
+            _REPAIRED_ORDERS.pop(_k, None)
+    coid = str(ctx.get("client_order_id") or "")
+    if coid and not coid.startswith("s-"):
+        logger.error(f"[AUTO_REPAIR] 拒绝补腿: order={order_id} clientOrderId={coid!r} 非s-策略单")
+        return
+    hedged = float(ctx.get("hedged_xau", 0) or 0)
+    filled = None
+    lot = 0.0
+    try:
+        st = await asyncio.wait_for(
+            ex.order_executor.base_executor.check_binance_order_status(
+                binance_account, ctx["symbol"], order_id), timeout=8.0)
+        if st and st.get("success"):
+            filled = float(st.get("filled_qty", 0) or 0)
+    except Exception as _e:
+        logger.error(f"[AUTO_REPAIR] REST核查失败 order={order_id}: {_e!r}")
+    if filled is None:
+        outcome = f"补腿核查失败(REST不可用), 请人工核对 order={order_id}"
+    else:
+        gap = filled - hedged
+        mult = float(ctx.get("hedge_multiplier", 1) or 1)
+        try:
+            from app.services.order_executor_v2 import _a_to_b as _a2b_rp
+            raw_lot = _a2b_rp(gap, ex.pair_code) * mult
+        except Exception:
+            raw_lot = quantity_converter.xau_to_lot(gap) * mult
+        lot = _m.floor(round(raw_lot * 100, 4)) / 100.0
+        if gap <= 0 or lot < 0.01:
+            logger.warning(f"[AUTO_REPAIR] 无需补腿: order={order_id} filled={filled} hedged={hedged}")
+            return
+        side = "Buy" if ctx.get("hedge_is_buy") else "Sell"
+        close_pos = bool(ctx.get("hedge_close_position"))
+        logger.error(f"[AUTO_REPAIR] 崩溃补腿开始: order={order_id} filled={filled} hedged={hedged} "
+                     f"→ B侧 {side} {lot} lot ({ctx.get('sym_b')}, close={close_pos})")
+        try:
+            res = await asyncio.wait_for(
+                ex.order_executor.base_executor.place_bybit_order(
+                    account=bybit_account, symbol=ctx["sym_b"], side=side,
+                    order_type="Market", quantity=str(round(lot, 2)),
+                    close_position=close_pos), timeout=20.0)
+        except Exception as _pe:
+            res = {"success": False, "error": repr(_pe)}
+        if res.get("success"):
+            outcome = f"已自动补腿 {lot} lot (B侧{side}, ticket={res.get('order_id')}), 无需人工"
+            logger.error(f"[AUTO_REPAIR] 补腿成功: order={order_id} {outcome}")
+            if 'opening' in strategy_type:
+                try:  # 账本同步记账, 前端策略持仓不再漏显本笔(平仓方向账本由对账兜)
+                    ex.position_mgr.record_opening(ex.strategy_id, ladder_idx, strategy_type, gap)
+                except Exception as _le:
+                    logger.warning(f"[AUTO_REPAIR] 账本记录失败(不影响补腿): {_le}")
+        else:
+            outcome = f"自动补腿失败({res.get('error')}), 请人工补 {lot} lot"
+            logger.error(f"[AUTO_REPAIR] 补腿失败: order={order_id} {outcome}")
+    try:
+        await asyncio.wait_for(ex._send_single_leg_alert(
+            strategy_type=strategy_type,
+            exec_result={"single_leg_details": {
+                "binance_filled": filled if filled is not None else 0,
+                "bybit_filled": hedged,
+                "unfilled_qty": (filled - hedged) if filled is not None else 0,
+                "error": f"[崩溃补腿] {outcome}",
+                "trigger": "AUTO_REPAIR",
+                "verification_method": "crash_auto_repair",
+            }}), timeout=15.0)
+    except Exception as _ae:
+        logger.warning(f"[AUTO_REPAIR] 跟进告警发送失败: {_ae}")
+
+
 async def _recon_binance_net(acc_a, sym_a):
     """A腿带号净持仓(A单位)。客户端按account_id模块级复用(防SSL重建)。"""
     _cli = _RECON_BN_CLIENTS.get(acc_a.account_id)
@@ -1318,6 +1410,9 @@ class ContinuousStrategyExecutor:
                 # (order_executor_v2._budget_guard_result): 剩余预算不足一轮监控
                 # 就不再挂单干净返回, 避免"下单数秒后被本总超时cancel成孤儿挂单"。
                 _exec_deadline = asyncio.get_event_loop().time() + 25.0
+                # 20260716 崩溃补腿上下文: 执行链把本次策略订单的身份/对冲进度写进来,
+                # 崩溃时独立补腿task按它补齐B腿(只认自己的order_id, 与手动单绝缘)
+                _inflight_ctx = {}
                 exec_result = await asyncio.wait_for(
                     self._execute_order(
                         strategy_type,
@@ -1328,6 +1423,7 @@ class ContinuousStrategyExecutor:
                         bybit_price,
                         spread_threshold,
                         exec_deadline=_exec_deadline,
+                        inflight=_inflight_ctx,
                     ),
                     timeout=25.0,
                 )
@@ -1352,6 +1448,17 @@ class ContinuousStrategyExecutor:
                             "error": f"execution exception: {e!r}"
                         }}
                     ))
+                except Exception:
+                    pass
+                # ①b 崩溃自动补腿(20260716): 独立task核查本次策略订单终态, 已成交未对冲
+                # 则按缺口自动补B腿(三道闸见 _crash_repair_leg), 补完发带真实数字的跟进告警。
+                # 独立task不随本ladder task被强杀; 手动m-单与净敞口对账均不在其视野内。
+                try:
+                    _rp_task = asyncio.create_task(_crash_repair_leg(
+                        self, dict(_inflight_ctx), ladder_idx, strategy_type,
+                        binance_account, bybit_account))
+                    _REPAIR_TASKS.add(_rp_task)
+                    _rp_task.add_done_callback(_REPAIR_TASKS.discard)
                 except Exception:
                     pass
                 # ②再清理: 撤掉本策略在途挂单防孤儿成交。每个远程调用独立短超时(不再
@@ -2758,6 +2865,7 @@ class ContinuousStrategyExecutor:
         bybit_price: float,
         spread_threshold: float = None,
         exec_deadline: float = None,
+        inflight: dict = None,
     ) -> Dict:
         """Execute order based on strategy type"""
         # ── GATEWAY GUARD ──
@@ -2786,6 +2894,7 @@ class ContinuousStrategyExecutor:
                 hedge_multiplier=self.hedge_multiplier,
                 accumulated_unhedged_xau=getattr(self, '_unhedged_binance_xau', 0.0),
                 exec_deadline=exec_deadline,
+                inflight=inflight,
             )
         elif strategy_type == 'reverse_closing':
             return await self.order_executor.execute_reverse_closing(
@@ -2798,6 +2907,7 @@ class ContinuousStrategyExecutor:
                 pair_code=self.pair_code,
                 hedge_multiplier=self.hedge_multiplier,
                 exec_deadline=exec_deadline,
+                inflight=inflight,
             )
         elif strategy_type == 'forward_opening':
             return await self.order_executor.execute_forward_opening(
@@ -2811,6 +2921,7 @@ class ContinuousStrategyExecutor:
                 hedge_multiplier=self.hedge_multiplier,
                 accumulated_unhedged_xau=getattr(self, '_unhedged_binance_xau', 0.0),
                 exec_deadline=exec_deadline,
+                inflight=inflight,
             )
         elif strategy_type == 'forward_closing':
             return await self.order_executor.execute_forward_closing(
@@ -2823,6 +2934,7 @@ class ContinuousStrategyExecutor:
                 pair_code=self.pair_code,
                 hedge_multiplier=self.hedge_multiplier,
                 exec_deadline=exec_deadline,
+                inflight=inflight,
             )
         else:
             raise ValueError(f"Unknown strategy type: {strategy_type}")

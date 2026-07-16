@@ -258,6 +258,7 @@ class OrderExecutorV2:
         hedge_multiplier: float = 1.0,
         accumulated_unhedged_xau: float = 0.0,
         exec_deadline: float = None,
+        inflight: dict = None,
     ) -> Dict[str, Any]:
         """
         Execute reverse opening (Binance short, Bybit long).
@@ -311,12 +312,18 @@ class OrderExecutorV2:
             }
 
         binance_order_id = binance_result["order_id"]
+        if inflight is not None:
+            # 20260716 崩溃补腿上下文: 记录本次策略订单身份。补腿只认这里写入的
+            # order_id(s-前缀策略单), 手动m-单从源头就进不了补腿视野。
+            inflight.update({"order_id": binance_order_id, "symbol": sym_a,
+                             "client_order_id": binance_result.get("client_order_id"),
+                             "hedged_xau": 0.0})
 
         # ── 增量对冲分支(默认关,config/incremental_hedge.json enabled=true 时启用) ──
         if self._load_incr_cfg().get("enabled"):
             return await self._monitor_and_hedge_incrementally(
                 binance_account=binance_account, sym_a=sym_a, binance_order_id=binance_order_id,
-                bybit_account=bybit_account, sym_b=sym_b,
+                bybit_account=bybit_account, sym_b=sym_b, inflight=inflight,
                 hedge_is_buy=True, hedge_close_position=False,
                 spread_threshold=spread_threshold, compare_op='>=',
                 strategy_type='reverse_opening', hedge_multiplier=hedge_multiplier,
@@ -504,6 +511,7 @@ class OrderExecutorV2:
         pair_code: str = "XAU",
         hedge_multiplier: float = 1.0,
         exec_deadline: float = None,
+        inflight: dict = None,
     ) -> Dict[str, Any]:
         """
         Execute reverse closing (Binance long close, Bybit short close).
@@ -572,12 +580,18 @@ class OrderExecutorV2:
             }
 
         binance_order_id = binance_result["order_id"]
+        if inflight is not None:
+            # 20260716 崩溃补腿上下文: 记录本次策略订单身份。补腿只认这里写入的
+            # order_id(s-前缀策略单), 手动m-单从源头就进不了补腿视野。
+            inflight.update({"order_id": binance_order_id, "symbol": sym_a,
+                             "client_order_id": binance_result.get("client_order_id"),
+                             "hedged_xau": 0.0})
 
         # ── 增量对冲分支(默认关,config/incremental_hedge.json enabled=true 时启用) ──
         if self._load_incr_cfg().get("enabled"):
             return await self._monitor_and_hedge_incrementally(
                 binance_account=binance_account, sym_a=sym_a, binance_order_id=binance_order_id,
-                bybit_account=bybit_account, sym_b=sym_b,
+                bybit_account=bybit_account, sym_b=sym_b, inflight=inflight,
                 hedge_is_buy=False, hedge_close_position=True,
                 spread_threshold=spread_threshold, compare_op='<=',
                 strategy_type='reverse_closing', hedge_multiplier=hedge_multiplier,
@@ -766,6 +780,7 @@ class OrderExecutorV2:
         hedge_multiplier: float = 1.0,
         accumulated_unhedged_xau: float = 0.0,
         exec_deadline: float = None,
+        inflight: dict = None,
     ) -> Dict[str, Any]:
         """
         Execute forward opening (Binance long, Bybit short).
@@ -819,12 +834,18 @@ class OrderExecutorV2:
             }
 
         binance_order_id = binance_result["order_id"]
+        if inflight is not None:
+            # 20260716 崩溃补腿上下文: 记录本次策略订单身份。补腿只认这里写入的
+            # order_id(s-前缀策略单), 手动m-单从源头就进不了补腿视野。
+            inflight.update({"order_id": binance_order_id, "symbol": sym_a,
+                             "client_order_id": binance_result.get("client_order_id"),
+                             "hedged_xau": 0.0})
 
         # ── 增量对冲分支(默认关,config/incremental_hedge.json enabled=true 时启用) ──
         if self._load_incr_cfg().get("enabled"):
             return await self._monitor_and_hedge_incrementally(
                 binance_account=binance_account, sym_a=sym_a, binance_order_id=binance_order_id,
-                bybit_account=bybit_account, sym_b=sym_b,
+                bybit_account=bybit_account, sym_b=sym_b, inflight=inflight,
                 hedge_is_buy=False, hedge_close_position=False,
                 spread_threshold=spread_threshold, compare_op='>=',
                 strategy_type='forward_opening', hedge_multiplier=hedge_multiplier,
@@ -987,6 +1008,7 @@ class OrderExecutorV2:
         pair_code: str = "XAU",
         hedge_multiplier: float = 1.0,
         exec_deadline: float = None,
+        inflight: dict = None,
     ) -> Dict[str, Any]:
         """
         Execute forward closing (Binance short close, Bybit long close).
@@ -1070,7 +1092,7 @@ class OrderExecutorV2:
         if self._load_incr_cfg().get("enabled"):
             return await self._monitor_and_hedge_incrementally(
                 binance_account=binance_account, sym_a=sym_a, binance_order_id=binance_order_id,
-                bybit_account=bybit_account, sym_b=sym_b,
+                bybit_account=bybit_account, sym_b=sym_b, inflight=inflight,
                 hedge_is_buy=True, hedge_close_position=True,
                 spread_threshold=spread_threshold, compare_op='<=',
                 strategy_type='forward_closing', hedge_multiplier=hedge_multiplier,
@@ -1657,7 +1679,8 @@ class OrderExecutorV2:
     async def _monitor_and_hedge_incrementally(self, *, binance_account, sym_a, binance_order_id,
                                                bybit_account, sym_b, hedge_is_buy, hedge_close_position,
                                                spread_threshold, compare_op, strategy_type,
-                                               hedge_multiplier, pair_code, accumulated_unhedged_xau):
+                                               hedge_multiplier, pair_code, accumulated_unhedged_xau,
+                                               inflight=None):
         """主腿(maker)部分成交 → 即时增量对冲。
         复用 _monitor_a_side_order(终态等待 + 点差撤单, 不改);本方法并发轮询
         _order_fill_registry 的累计成交, 逐增量发对冲 taker。返回与 execute_* 同形 dict。
@@ -1669,6 +1692,12 @@ class OrderExecutorV2:
         max_unhedged = float(cfg.get("max_unhedged_xau", 200.0))
         poll = float(cfg.get("poll_sec", 0.15))
         mult = hedge_multiplier or 1.0
+        if inflight is not None:
+            # 20260716 崩溃补腿武装: 只有走增量对冲分支的执行才可被崩溃补腿
+            # (对冲方向/系数取自本调用自身参数, 与策略类型映射解耦, 绝无方向错配)
+            inflight.update({"repair_armed": True, "hedge_is_buy": hedge_is_buy,
+                             "hedge_close_position": hedge_close_position,
+                             "hedge_multiplier": mult, "sym_b": sym_b})
 
         st = {"stop": False, "final": None}
         hedged_xau = 0.0
@@ -1723,6 +1752,8 @@ class OrderExecutorV2:
                         byb_quote += fl * ap
                         cov_xau = _b_to_a(lot, pair_code) / mult
                         hedged_xau += cov_xau
+                        if inflight is not None:
+                            inflight["hedged_xau"] = hedged_xau  # 崩溃补腿按此扣减, 防双补
                         logger.info(f"[INCR_HEDGE] {strategy_type} cum={cum:.2f} hedged={hedged_xau:.2f} "
                                     f"+lot={lot} fl={fl} rem={max(0.0, cum + accumulated_unhedged_xau - hedged_xau):.4f}")
                 if (cum - hedged_xau) > max_unhedged and not cancelled_for_safety:
