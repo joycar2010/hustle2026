@@ -276,11 +276,54 @@ async def s12_timeout_status_recovery():
            f"done={st_done.get('state') if st_done else None} lost={st_404}")
 
 
+# ── S13 两级超时: SLO告警不杀, 硬兜底才杀 ────────────────────────────────────
+async def s13_slo_two_stage():
+    from app.services.continuous_executor import _await_exec_with_slo
+
+    async def slow_but_alive(sec, ret):
+        await asyncio.sleep(sec)
+        return ret
+
+    # ① 慢于SLO但活着 → 不被杀, 拿到结果
+    r1 = await _await_exec_with_slo(slow_but_alive(0.3, {"ok": 1}),
+                                    execution_id=None, slo_s=0.1, hard_s=2.0)
+    # ② 真挂死 → 硬兜底TimeoutError
+    hard_killed = False
+    try:
+        await _await_exec_with_slo(slow_but_alive(5.0, {}), execution_id=None,
+                                   slo_s=0.1, hard_s=0.4)
+    except asyncio.TimeoutError:
+        hard_killed = True
+    # ③ 外层被cancel → 内层任务不泄漏
+    inner_cancelled = [False]
+
+    async def track_cancel():
+        try:
+            await asyncio.sleep(30)
+        except asyncio.CancelledError:
+            inner_cancelled[0] = True
+            raise
+
+    outer = asyncio.create_task(_await_exec_with_slo(track_cancel(), execution_id=None,
+                                                     slo_s=5.0, hard_s=10.0))
+    await asyncio.sleep(0.1)
+    outer.cancel()
+    try:
+        await outer
+    except asyncio.CancelledError:
+        pass
+    await asyncio.sleep(0.1)
+    ok = r1 == {"ok": 1} and hard_killed and inner_cancelled[0]
+    record("S13 两级超时(SLO放行/硬兜底杀/外层cancel不泄漏)", ok,
+           f"slow_ok={r1=={'ok': 1}} hard={hard_killed} propagate={inner_cancelled[0]}")
+
+
 async def main():
     scenarios = [s1_watcher_preregistration, s2_budget_guard, s3_shield_cancel,
                  s4_crash_repair, s5_strict_identity, s6_unknown_no_resend,
                  s7_check_retry, s8_bridge_contract, s9_actual_fill_consumption,
-                 s10_quote_gate, s11_bridge_idempotency, s12_timeout_status_recovery]
+                 s10_quote_gate, s11_bridge_idempotency, s12_timeout_status_recovery,
+                 s13_slo_two_stage]
     for s in scenarios:
         try:
             await s()

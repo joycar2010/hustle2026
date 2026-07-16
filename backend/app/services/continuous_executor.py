@@ -329,6 +329,40 @@ async def _sweep_orphan_orders(uid, pc, acc_a):
 _REPAIRED_ORDERS = {}   # order_id -> ts, 补腿幂等闸(触发源唯一=本进程崩溃现场, 进程内即全局)
 _REPAIR_TASKS = set()   # 强引用防task被GC(mt5-agent同款坑)
 
+_EXEC_SLO_S = 25.0    # M2b: wall-clock SLO — 超过只告警+落SLO_BREACH事件, 不再强杀(V1.1 §7.3)
+_EXEC_HARD_S = 90.0   # 硬兜底 — 真挂死(事件循环阻塞/代理黑洞)才cancel, 残局由崩溃安全网+RecoveryWorker收敛
+
+
+async def _await_exec_with_slo(coro, execution_id=None, slo_s=None, hard_s=None):
+    """M2b(V1.1 §7.3): 两级超时替代旧25s wait_for强杀。
+    旧行为: 25s一到直接cancel整条执行协程 → 正常慢执行(开市首小时REST慢)也被
+    腰斩, 撤单/对冲协程陪葬成孤儿单(0716 06:36事故根源)。
+    新行为: ①SLO(25s)超过 → ERROR告警+事实层SLO_BREACH事件, 执行继续跑完;
+    ②硬兜底(90s)才cancel — 此时必是真挂死, 三重保险(shield撤单/崩溃补腿/
+    RecoveryWorker)接手残局。外层被cancel时内层任务同步cancel不泄漏。"""
+    slo = _EXEC_SLO_S if slo_s is None else slo_s
+    hard = _EXEC_HARD_S if hard_s is None else hard_s
+    task = asyncio.ensure_future(coro)
+    try:
+        return await asyncio.wait_for(asyncio.shield(task), timeout=slo)
+    except asyncio.TimeoutError:
+        logger.error(f"[EXEC_SLO] 执行超过SLO {slo:.0f}s(未杀, 继续等到硬兜底{hard:.0f}s) execution={execution_id}")
+        try:
+            from app.services import execution_ledger as _ledger_slo
+            _ledger_slo.log_event(execution_id, 'SLO_BREACH', {"slo_s": slo, "hard_s": hard})
+        except Exception:
+            pass
+        return await asyncio.wait_for(task, timeout=max(0.1, hard - slo))
+    except BaseException:
+        if not task.done():
+            task.cancel()
+            try:
+                await task
+            except BaseException:
+                pass
+        raise
+
+
 _QUOTE_GATE_CACHE = {"ts": 0.0, "cfg": {}}
 
 
@@ -1526,15 +1560,12 @@ class ContinuousStrategyExecutor:
                     continue
 
             try:
-                # 防挂死(20260616): 给整条下单/对冲执行加 25s 总超时兜底。
-                # 正常一次 forward/reverse 执行 <5s; 25s 留单腿重试余量。
-                # 超时抛 asyncio.TimeoutError → 被下方 except Exception 接住 →
-                # 走 HALT 分支干净退出本阶梯循环(而非无限挂死拖垮全部策略)。
-                # 退出后由重启自恢复/下次触发周期带新配置重新评估。
-                # 20260716: 截止时刻(exec_deadline)传入执行链 — 下单前预算护栏
-                # (order_executor_v2._budget_guard_result): 剩余预算不足一轮监控
-                # 就不再挂单干净返回, 避免"下单数秒后被本总超时cancel成孤儿挂单"。
-                _exec_deadline = asyncio.get_event_loop().time() + 25.0
+                # M2b(20260716, V1.1 §7.3): 25s由"强杀"降级为"SLO告警", 90s才硬cancel。
+                # 旧25s wait_for强杀是0716 06:36孤儿单事故根源(正常慢执行被腰斩,
+                # 撤单/对冲协程陪葬)。现预算护栏/幂等/RecoveryWorker三重保险已齐,
+                # 真挂死才需要杀。exec_deadline仍按SLO算 — 预算护栏行为不变
+                # (宁可保守不挂单, 也不做贴着硬兜底的冒险挂单)。
+                _exec_deadline = asyncio.get_event_loop().time() + _EXEC_SLO_S
                 # 20260716 崩溃补腿上下文: 执行链把本次策略订单的身份/对冲进度写进来,
                 # 崩溃时独立补腿task按它补齐B腿(只认自己的order_id, 与手动单绝缘)
                 # 20260716d M1: execution_id 四级身份首级, 贯穿下单/成交/对冲/补腿,
@@ -1552,7 +1583,7 @@ class ContinuousStrategyExecutor:
                         _ledger_m1.log_event(_exec_id_m1, 'QUOTE_SNAPSHOT', _qsnap)
                 except Exception:
                     pass
-                exec_result = await asyncio.wait_for(
+                exec_result = await _await_exec_with_slo(
                     self._execute_order(
                         strategy_type,
                         binance_account,
@@ -1564,7 +1595,7 @@ class ContinuousStrategyExecutor:
                         exec_deadline=_exec_deadline,
                         inflight=_inflight_ctx,
                     ),
-                    timeout=25.0,
+                    execution_id=_exec_id_m1,
                 )
             except BaseException as e:
                 # 20260706: Exception→BaseException — HB看门狗强杀/停机发出的 CancelledError
