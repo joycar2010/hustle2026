@@ -1,5 +1,5 @@
 {
-  "_comment": "V1.1 §7.1 实际成交口径灰度。enabled=true全局生效, 或将MT5侧account_id加入accounts按账户生效。前提: 该账户的桥已升级(返回filled_volume)。当前已升级桥: 8024/ic02-0(canary)。",
+  "_comment": "V1.1 §7.1 实际成交口径灰度。enabled=true全局生效, 或将MT5侧account_id加入accounts按账户生效。20260716: 11桥已全部升级(返回filled_volume), 先开hcz987 XAU单账户canary, 验收后再enabled=true全局。",
   "enabled": false,
-  "accounts": []
+  "accounts": ["ea0c585f-f278-494a-8f9e-d8a714045a3a"]
 }

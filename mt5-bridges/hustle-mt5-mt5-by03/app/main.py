@@ -562,18 +562,29 @@ async def place_order(req: OrderRequest):
         result = mt5.order_send(request)
         if result is None:
             raise HTTPException(500, f"order_send returned None: {mt5.last_error()}")
-        if result.retcode == mt5.TRADE_RETCODE_DONE:
+        # 20260716 实际成交口径(V1.1 §7.1): 同时接受 DONE 和 DONE_PARTIAL(10010)。
+        # 旧行为把部分成交抛400 → 后端当整单失败按全量重试, 已成交部分成双重敞口。
+        # volume 字段语义升级为"实际成交量"(DONE时=请求量, 向后兼容), 并补
+        # requested/normalized/filled/remaining 四量与 partial 标志。
+        if result.retcode in (mt5.TRADE_RETCODE_DONE, mt5.TRADE_RETCODE_DONE_PARTIAL):
             mgr.ping()
-            logger.info(f"Order OK | sym={req.symbol} side={req.order_type} vol={volume} "
-                        f"price={request.get('price')} order={result.order}")
+            _filled = float(result.volume or 0.0)
+            _partial = (result.retcode == mt5.TRADE_RETCODE_DONE_PARTIAL)
+            logger.info(f"Order OK{' (PARTIAL)' if _partial else ''} | sym={req.symbol} side={req.order_type} "
+                        f"req_vol={volume} filled={_filled} price={result.price} order={result.order}")
             return {
                 "success":  True,
                 "retcode":  result.retcode,
                 "order":    result.order,
                 "deal":     result.deal,
-                "volume":   result.volume,
+                "volume":   _filled,
                 "price":    result.price,
                 "comment":  result.comment,
+                "requested_volume": req.volume,
+                "normalized_volume": volume,
+                "filled_volume": _filled,
+                "remaining_volume": max(0.0, round(volume - _filled, 8)),
+                "partial": _partial,
             }
         # 可重试错误（重新报价/流动性不足）
         if result.retcode in (10030, 10018) and attempt < MAX_RETRY - 1:
