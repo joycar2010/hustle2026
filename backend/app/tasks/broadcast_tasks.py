@@ -2888,10 +2888,19 @@ _order_fill_registry = {}     # order_id -> {"filled_qty": float, "status": str}
 
 
 def register_order_watch(order_id):
-    """Register an asyncio.Event for an order. Returns the event to await."""
+    """Register an asyncio.Event for an order. Returns the event to await.
+
+    20260716: 不再无条件清空 registry — 下单成功到监控注册之间有竞态窗口,
+    WS 早到的 ORDER_TRADE_UPDATE 已把成交写进 registry, 旧实现 `= {}` 会把它
+    抹掉(快速成交只能靠 REST 心跳兜底, 增加裸腿时间与均价缺失)。改为保留已有
+    记录; 若早到记录已是终态, 立即 set 事件让监控零等待拿到成交。"""
     evt = _asyncio.Event()
     _order_fill_events[order_id] = evt
-    _order_fill_registry[order_id] = {}
+    rec = _order_fill_registry.get(order_id)
+    if rec is None:
+        _order_fill_registry[order_id] = {}
+    elif rec.get("status") in ("FILLED", "CANCELED", "EXPIRED", "REJECTED"):
+        evt.set()
     return evt
 
 

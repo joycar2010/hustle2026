@@ -352,22 +352,44 @@ async def _crash_repair_leg(ex, ctx, ladder_idx, strategy_type, binance_account,
         for _k in list(_REPAIRED_ORDERS)[:250]:
             _REPAIRED_ORDERS.pop(_k, None)
     coid = str(ctx.get("client_order_id") or "")
-    if coid and not coid.startswith("s-"):
-        logger.error(f"[AUTO_REPAIR] 拒绝补腿: order={order_id} clientOrderId={coid!r} 非s-策略单")
+    if not coid.startswith("s-"):
+        # 20260716b 严格身份闸(P0): 空/缺失/非s-一律拒绝自动补腿(只告警等人工)。
+        # 身份不明的单宁可人工处理也不自动动仓, 与"手动m-单绝缘"同级铁律。
+        logger.error(f"[AUTO_REPAIR] 拒绝补腿: order={order_id} clientOrderId={coid!r} 非s-策略单/身份缺失")
+        _REPAIRED_ORDERS.pop(order_id, None)
+        try:
+            await asyncio.wait_for(ex._send_single_leg_alert(
+                strategy_type=strategy_type,
+                exec_result={"single_leg_details": {
+                    "binance_filled": 0, "bybit_filled": 0, "unfilled_qty": 0,
+                    "error": f"[崩溃补腿] 订单{order_id}身份缺失(clientOrderId={coid!r}), 拒绝自动补腿, 请人工核对",
+                    "trigger": "AUTO_REPAIR_IDENTITY_REFUSED",
+                    "verification_method": "crash_auto_repair",
+                }}), timeout=15.0)
+        except Exception:
+            pass
         return
     hedged = float(ctx.get("hedged_xau", 0) or 0)
     filled = None
     lot = 0.0
-    try:
-        st = await asyncio.wait_for(
-            ex.order_executor.base_executor.check_binance_order_status(
-                binance_account, ctx["symbol"], order_id), timeout=8.0)
-        if st and st.get("success"):
-            filled = float(st.get("filled_qty", 0) or 0)
-    except Exception as _e:
-        logger.error(f"[AUTO_REPAIR] REST核查失败 order={order_id}: {_e!r}")
+    # 20260716b 有限重试+去重时点修正(P0): 旧实现幂等标记先占位、单次核查失败
+    # 即放弃 → 一次瞬时网络失败让该单永久失去补腿资格。改为核查重试3次(2/4/6s
+    # 退避); 全部失败时释放幂等位再请人工 — 此时未做任何补腿动作, 释放是安全的。
+    for _try_i in range(3):
+        try:
+            st = await asyncio.wait_for(
+                ex.order_executor.base_executor.check_binance_order_status(
+                    binance_account, ctx["symbol"], order_id), timeout=8.0)
+            if st and st.get("success"):
+                filled = float(st.get("filled_qty", 0) or 0)
+                break
+        except Exception as _e:
+            logger.error(f"[AUTO_REPAIR] REST核查失败(第{_try_i+1}/3次) order={order_id}: {_e!r}")
+        if _try_i < 2:
+            await asyncio.sleep(2.0 * (_try_i + 1))
     if filled is None:
-        outcome = f"补腿核查失败(REST不可用), 请人工核对 order={order_id}"
+        _REPAIRED_ORDERS.pop(order_id, None)
+        outcome = f"补腿核查3次均失败(REST不可用), 已释放幂等位, 请人工核对 order={order_id}"
     else:
         gap = filled - hedged
         mult = float(ctx.get("hedge_multiplier", 1) or 1)
@@ -384,15 +406,32 @@ async def _crash_repair_leg(ex, ctx, ladder_idx, strategy_type, binance_account,
         close_pos = bool(ctx.get("hedge_close_position"))
         logger.error(f"[AUTO_REPAIR] 崩溃补腿开始: order={order_id} filled={filled} hedged={hedged} "
                      f"→ B侧 {side} {lot} lot ({ctx.get('sym_b')}, close={close_pos})")
-        try:
-            res = await asyncio.wait_for(
+        async def _fire_repair():
+            return await asyncio.wait_for(
                 ex.order_executor.base_executor.place_bybit_order(
                     account=bybit_account, symbol=ctx["sym_b"], side=side,
                     order_type="Market", quantity=str(round(lot, 2)),
                     close_position=close_pos), timeout=20.0)
+        # 20260716b 未知≠失败(P0): 桥超时/异常=结果未知(可能已成交), 绝不盲目
+        # 重发(防双补), 保留幂等占位并请人工核对; 桥明确回失败(拿到了响应)才
+        # 安全重试一次。
+        _unknown = False
+        try:
+            res = await _fire_repair()
         except Exception as _pe:
-            res = {"success": False, "error": repr(_pe)}
-        if res.get("success"):
+            res, _unknown = {"success": False, "error": repr(_pe)}, True
+        if not _unknown and not res.get("success"):
+            logger.warning(f"[AUTO_REPAIR] 桥明确拒单({res.get('error')}), 3s后重试一次 order={order_id}")
+            await asyncio.sleep(3.0)
+            try:
+                res = await _fire_repair()
+            except Exception as _pe2:
+                res, _unknown = {"success": False, "error": repr(_pe2)}, True
+        if _unknown:
+            outcome = (f"补腿结果未知(桥无响应): B侧 {side} {lot} lot 可能已成交, "
+                       f"已锁定幂等位防重复下单, 请人工核对MT5持仓后处理")
+            logger.error(f"[AUTO_REPAIR] 补腿未知 order={order_id}: {outcome}")
+        elif res.get("success"):
             outcome = f"已自动补腿 {lot} lot (B侧{side}, ticket={res.get('order_id')}), 无需人工"
             logger.error(f"[AUTO_REPAIR] 补腿成功: order={order_id} {outcome}")
             if 'opening' in strategy_type:
