@@ -304,8 +304,13 @@ class BinanceFuturesClient:
             # 尝试获取当前服务器IP
             server_ip = self._detect_server_ip()
             ip_hint = f" (当前服务器IP: {server_ip})" if server_ip else ""
+            # 20260716 溯源: 带key前缀+调用栈帧, 定位是哪个账户/哪条链路在直连撞白名单
+            import traceback as _tb
+            _frames = [f for f in _tb.extract_stack() if '/app/' in (f.filename or '')]
+            _src = ' <- '.join(f"{f.filename.split('/app/')[-1]}:{f.lineno}" for f in _frames[-5:-1])
+            _kp = (self.api_key[:8] + '…') if self.api_key else '<empty-key>'
             error_msg = (
-                f"Binance API 错误: {friendly}{ip_hint}\n"
+                f"Binance API 错误: {friendly}{ip_hint} [key={_kp}] [src={_src}]\n"
                 f"请检查: 1) API Key是否有效 2) 当前服务器IP是否已添加到Binance API Key的IP白名单中"
             )
             _logger.error(error_msg)

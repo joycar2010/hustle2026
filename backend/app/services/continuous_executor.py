@@ -163,6 +163,11 @@ async def _recon_targets():
                 JOIN accounts ab ON ab.account_id = upa.account_b_id
                 LEFT JOIN strategy_configs sc
                        ON sc.user_id = upa.user_id AND sc.pair_code = upa.pair_code
+                -- 20260716: 过滤停用账户 — cq987/xy123的旧绑定引用disabled无代理账户,
+                -- recon拿死key直连币安每45s撞一次-2015白名单错(纯噪音, 键都认证不过,
+                -- 对账零价值)。停用=用户明示弃用, 不进对账目标。
+                WHERE aa.is_active = TRUE AND COALESCE(aa.status, 'active') = 'active'
+                  AND ab.is_active = TRUE AND COALESCE(ab.status, 'active') = 'active'
                 GROUP BY 1,2,3,4,5,6,7
             """))).all()
         for uid, pc, a_id, a_key, a_sec, a_proxy, b_id, hm in rows:
