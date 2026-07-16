@@ -53,9 +53,16 @@ class MarketDataService:
                 ask_price=quote["ask"],
                 ask_qty=quote.get("ask_qty", 0),
                 timestamp=quote["ts"] or int(time.time() * 1000),
+                src_ms=quote.get("src_event_ms"),   # M1续: 交易所事件时间
+                recv_ms=quote.get("ts"),
             )
         # Backward compat: try old .bid/.ask (single-symbol mode)
-        if binance_ws.connected and binance_ws.bid and binance_ws.ask:
+        # 20260707修: 仅当请求的正是首选symbol才允许此回退 — 否则等于"拿别的品种
+        # 价格冒充"(BTC对实证: BTCUSDT未订阅时此回退返回XAUUSDT金价并贴上BTC标签,
+        # 前端主账号显示金价、点差-59103)。宁可抛错让上层跳过本对, 错值比空值危险。
+        _primary_sym = (getattr(binance_ws, "_symbols", None) or ["xauusdt"])[0]
+        if (binance_ws.connected and binance_ws.bid and binance_ws.ask
+                and symbol.lower() == _primary_sym):
             return MarketQuote(
                 symbol=symbol,
                 bid_price=binance_ws.bid,
@@ -113,13 +120,24 @@ class MarketDataService:
                     tick = await mt5_client.get_tick(mt5_symbol)
 
                     if tick and tick.get("bid", 0) > 0 and tick.get("ask", 0) > 0:
+                        _recv_ms = int(time.time() * 1000)
+                        _src_ms = int(tick.get("time_msc") or 0) or None
+                        if _src_ms:
+                            # M1续时区自校(20260716实测): MT5 time_msc是broker服务器
+                            # 时区的epoch(IC=UTC+3, 实测快10800s), 直接用会把行情闸
+                            # skew打爆拦死全部开仓。偏移按30min取整就地剥离(覆盖各
+                            # broker时区+DST), 剩余残差=真实tick年龄。
+                            _off = round((_src_ms - _recv_ms) / 1800000.0) * 1800000
+                            _src_ms -= _off
                         return MarketQuote(
                             symbol=symbol,
                             bid_price=float(tick["bid"]),
                             bid_qty=0,
                             ask_price=float(tick["ask"]),
                             ask_qty=0,
-                            timestamp=int(time.time() * 1000),
+                            timestamp=_recv_ms,
+                            src_ms=_src_ms,  # M1续: MT5 tick源时间(桥一直有返回, 旧代码丢弃)
+                            recv_ms=_recv_ms,
                         )
                     if tick is not None:
                         got_zero_tick = True

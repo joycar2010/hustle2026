@@ -189,10 +189,53 @@ async def s9_actual_fill_consumption():
     record("S9 部分成交循环补挂+真实均价", ok, f"filled={fq} avg={ap:.2f} calls={place.await_count}")
 
 
+# ── S10 开仓行情新鲜度硬闸 ───────────────────────────────────────────────────
+async def s10_quote_gate():
+    import time as _t
+    from app.services.continuous_executor import ContinuousStrategyExecutor
+    from app.services import market_service as ms_mod
+    from app.schemas.market import MarketQuote
+
+    def q(sym, age_ms):
+        now = int(_t.time() * 1000)
+        return MarketQuote(symbol=sym, bid_price=2400.0, bid_qty=1, ask_price=2400.5,
+                           ask_qty=1, timestamp=now, src_ms=now - age_ms, recv_ms=now)
+
+    ex = object.__new__(ContinuousStrategyExecutor)  # 只用pair_code, 绕开重构造器
+    ex.pair_code = "XAU"
+    orig_a, orig_b = ms_mod.market_data_service.get_binance_quote, ms_mod.market_data_service.get_bybit_quote
+    try:
+        # 新鲜 → 放行
+        ms_mod.market_data_service.get_binance_quote = AsyncMock(return_value=q("XAUUSDT", 100))
+        ms_mod.market_data_service.get_bybit_quote = AsyncMock(return_value=q("XAUUSD+", 200))
+        r1 = await ex._quote_gate_check()
+        # A腿过期 → 拦
+        ms_mod.market_data_service.get_binance_quote = AsyncMock(return_value=q("XAUUSDT", 9000))
+        r2 = await ex._quote_gate_check()
+        # 跨腿skew → 拦(双腿各自新鲜但源时间相差5s)
+        ms_mod.market_data_service.get_binance_quote = AsyncMock(return_value=q("XAUUSDT", 100))
+        ms_mod.market_data_service.get_bybit_quote = AsyncMock(return_value=q("XAUUSD+", 100))
+        now = int(_t.time() * 1000)
+        skewed = q("XAUUSD+", 100)
+        skewed.src_ms = now - 5100  # 但接收新鲜 → age按src算也超skew
+        ms_mod.market_data_service.get_bybit_quote = AsyncMock(return_value=skewed)
+        r3 = await ex._quote_gate_check()
+        # 行情不可得 → 拦
+        ms_mod.market_data_service.get_binance_quote = AsyncMock(side_effect=Exception("ws down"))
+        r4 = await ex._quote_gate_check()
+    finally:
+        ms_mod.market_data_service.get_binance_quote = orig_a
+        ms_mod.market_data_service.get_bybit_quote = orig_b
+    snap_ok = isinstance(getattr(ex, '_last_quote_snapshot', None), dict)
+    ok = r1 is None and r2 is not None and r3 is not None and r4 is not None and snap_ok
+    record("S10 行情新鲜度硬闸(放行/过期/skew/不可得)", ok, f"r2={r2} r3={r3}")
+
+
 async def main():
     scenarios = [s1_watcher_preregistration, s2_budget_guard, s3_shield_cancel,
                  s4_crash_repair, s5_strict_identity, s6_unknown_no_resend,
-                 s7_check_retry, s8_bridge_contract, s9_actual_fill_consumption]
+                 s7_check_retry, s8_bridge_contract, s9_actual_fill_consumption,
+                 s10_quote_gate]
     for s in scenarios:
         try:
             await s()

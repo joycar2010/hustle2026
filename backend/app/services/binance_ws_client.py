@@ -173,6 +173,11 @@ class BinanceWebSocketClient:
                                 "bid_qty": float(payload.get("B", 0)),
                                 "ask_qty": float(payload.get("A", 0)),
                                 "ts": int(time.time() * 1000),
+                                # 20260716 M1续(V1.1 §10): 保留交易所源时间与序列,
+                                # 不再只存本地now — E=事件时间/T=撮合时间/u=更新序号
+                                "src_event_ms": int(payload.get("E") or 0) or None,
+                                "src_txn_ms": int(payload.get("T") or 0) or None,
+                                "update_id": payload.get("u"),
                             }
             except asyncio.CancelledError:
                 logger.info("[BinanceWS] Task cancelled")

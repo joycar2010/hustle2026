@@ -329,6 +329,33 @@ async def _sweep_orphan_orders(uid, pc, acc_a):
 _REPAIRED_ORDERS = {}   # order_id -> ts, 补腿幂等闸(触发源唯一=本进程崩溃现场, 进程内即全局)
 _REPAIR_TASKS = set()   # 强引用防task被GC(mt5-agent同款坑)
 
+_QUOTE_GATE_CACHE = {"ts": 0.0, "cfg": {}}
+
+
+def _quote_gate_cfg() -> dict:
+    """20260716 M1续(V1.1 §10) 开仓行情新鲜度硬闸配置, 30s热读。
+    config/quote_gate.json: enabled/binance_max_age_ms/mt5_max_age_ms/max_skew_ms。
+    初始阈值偏宽(1500/3000/2000), 按方案跑7天真实p99后收紧到1000/500。
+    注意MT5 time_msc与bookTicker E同为"最后变动时间", 静市无tick≠行情坏,
+    但静市=薄流动性, 拦开仓方向安全。"""
+    import time as _t_q
+    import json as _j_q
+    import os as _o_q
+    now = _t_q.time()
+    c = _QUOTE_GATE_CACHE
+    if now - c["ts"] > 30.0:
+        c["ts"] = now
+        try:
+            _p = _o_q.path.join(_o_q.path.dirname(__file__), '..', '..', 'config', 'quote_gate.json')
+            with open(_p) as _f:
+                c["cfg"] = _j_q.load(_f) or {}
+        except FileNotFoundError:
+            c["cfg"] = {}
+        except Exception:
+            pass
+    return c["cfg"]
+
+
 _PAIR_OPEN_GATE_CACHE = {"ts": 0.0, "cfg": {}}
 
 
@@ -1486,6 +1513,18 @@ class ContinuousStrategyExecutor:
                 _pos_before_cap = (base_pos if base_pos is not None else 0.0) + current_position
                 _cap_guard_task = asyncio.create_task(self._capacity_reduce_guard(
                     strategy_type, binance_account, ladder_idx, _pos_before_cap, order_qty, _cap_stop))
+            # ── 20260716 M1续: 开仓行情新鲜度硬闸(V1.1 §10) ────────────────────
+            # 双腿源时间(币安E/MT5 time_msc)过期或跨腿skew越限 → 本轮不执行,
+            # 1s后重评(触发计数保留)。只拦opening; 平仓/减险用降级行情放行。
+            if is_opening:
+                _qgate_reason = await self._quote_gate_check()
+                if _qgate_reason is not None:
+                    if loop_count % 5 == 1:
+                        logger.warning(f"[ladder={ladder_idx}] QUOTE_GATE 拦开仓: {_qgate_reason} "
+                                       f"(snapshot={getattr(self, '_last_quote_snapshot', {})})")
+                    await asyncio.sleep(1.0)
+                    continue
+
             try:
                 # 防挂死(20260616): 给整条下单/对冲执行加 25s 总超时兜底。
                 # 正常一次 forward/reverse 执行 <5s; 25s 留单腿重试余量。
@@ -1508,6 +1547,9 @@ class ContinuousStrategyExecutor:
                     _ledger_m1.log_execution_start(
                         _exec_id_m1, self.strategy_id, getattr(self, 'user_id', None),
                         self.pair_code, strategy_type, ladder_idx, order_qty)
+                    _qsnap = getattr(self, '_last_quote_snapshot', None)
+                    if _qsnap:  # M1续: 下单时点引用行情快照(年龄/skew/双腿价), 供毒性/滑点/闸校准
+                        _ledger_m1.log_event(_exec_id_m1, 'QUOTE_SNAPSHOT', _qsnap)
                 except Exception:
                     pass
                 exec_result = await asyncio.wait_for(
@@ -2981,6 +3023,42 @@ class ContinuousStrategyExecutor:
             else:
                 # Forward closing: Bybit LONG close, use ask for market buy
                 return market_data.bybit_quote.ask_price
+
+    async def _quote_gate_check(self):
+        """20260716 M1续(V1.1 §10): 开仓前双腿行情新鲜度硬闸。
+        返回 None=通过, 否则返回拦截原因。副作用: self._last_quote_snapshot
+        记录本次双腿价/源时间/年龄/skew(下单时随QUOTE_SNAPSHOT事件落账,
+        供7天后按真实p99收紧阈值)。拿不到行情=不开仓(错值比空值危险)。"""
+        cfg = _quote_gate_cfg()
+        if not cfg.get("enabled", True):
+            return None
+        try:
+            from app.services.market_service import market_data_service as _mds_qg
+            sym_a_qg, sym_b_qg, _ = _get_pair_config(self.pair_code)
+            aq = await _mds_qg.get_binance_quote(sym_a_qg)
+            bq = await _mds_qg.get_bybit_quote(sym_b_qg)
+        except Exception as _qe:
+            self._last_quote_snapshot = {"error": str(_qe)[:200]}
+            return f"行情不可得: {str(_qe)[:120]}"
+        import time as _t_qg
+        _now_qg = _t_qg.time() * 1000.0
+        a_src = getattr(aq, 'src_ms', None) or getattr(aq, 'recv_ms', None) or aq.timestamp
+        b_src = getattr(bq, 'src_ms', None) or getattr(bq, 'recv_ms', None) or bq.timestamp
+        a_age = max(0.0, _now_qg - float(a_src))
+        b_age = max(0.0, _now_qg - float(b_src))
+        skew = abs(float(a_src) - float(b_src))
+        self._last_quote_snapshot = {
+            "a_bid": aq.bid_price, "a_ask": aq.ask_price, "b_bid": bq.bid_price, "b_ask": bq.ask_price,
+            "a_src_ms": int(a_src), "b_src_ms": int(b_src),
+            "a_age_ms": round(a_age), "b_age_ms": round(b_age), "skew_ms": round(skew),
+        }
+        if a_age > float(cfg.get("binance_max_age_ms", 1500)):
+            return f"A腿行情过期 {a_age:.0f}ms"
+        if b_age > float(cfg.get("mt5_max_age_ms", 3000)):
+            return f"B腿行情过期 {b_age:.0f}ms"
+        if skew > float(cfg.get("max_skew_ms", 2000)):
+            return f"跨腿skew {skew:.0f}ms"
+        return None
 
     async def _execute_order(
         self,

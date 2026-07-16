@@ -1,0 +1,7 @@
+{
+  "_comment": "M1续 开仓行情新鲜度硬闸(V1.1 §10)。源时间=币安bookTicker E/MT5 tick time_msc。初始阈值偏宽, 跑7天真实p99(QUOTE_SNAPSHOT事件)后按方案收紧到1000/500。只拦opening。",
+  "enabled": true,
+  "binance_max_age_ms": 1500,
+  "mt5_max_age_ms": 3000,
+  "max_skew_ms": 2000
+}
