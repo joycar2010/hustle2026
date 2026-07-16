@@ -329,6 +329,30 @@ async def _sweep_orphan_orders(uid, pc, acc_a):
 _REPAIRED_ORDERS = {}   # order_id -> ts, 补腿幂等闸(触发源唯一=本进程崩溃现场, 进程内即全局)
 _REPAIR_TASKS = set()   # 强引用防task被GC(mt5-agent同款坑)
 
+_PAIR_OPEN_GATE_CACHE = {"ts": 0.0, "cfg": {}}
+
+
+def _pair_new_open_allowed(pair_code) -> bool:
+    """20260716 按对新开仓闸(V1.1 §7.6)。config/pair_open_gate.json: {"NG": false}
+    即禁NG新开仓; 未列出的对默认允许。30s热读; 读失败沿用上次缓存(闸只用于明确
+    止血, 不能因IO瞬时错误全局禁开)。只作用于策略opening路径, 平仓/补腿/手动不经此闸。"""
+    import time as _t_g
+    import json as _j_g
+    import os as _o_g
+    now = _t_g.time()
+    c = _PAIR_OPEN_GATE_CACHE
+    if now - c["ts"] > 30.0:
+        c["ts"] = now
+        try:
+            _p = _o_g.path.join(_o_g.path.dirname(__file__), '..', '..', 'config', 'pair_open_gate.json')
+            with open(_p) as _f:
+                c["cfg"] = _j_g.load(_f) or {}
+        except FileNotFoundError:
+            c["cfg"] = {}
+        except Exception:
+            pass  # 保留上次缓存
+    return bool(c["cfg"].get(pair_code, True))
+
 
 async def _crash_repair_leg(ex, ctx, ladder_idx, strategy_type, binance_account, bybit_account):
     """崩溃自动补腿(20260716)。把崩溃路径从"只告警靠人工"升级为"自动补腿+告警"。
@@ -1000,6 +1024,11 @@ class ContinuousStrategyExecutor:
 
         consecutive_no_fills = 0  # Track consecutive Binance timeouts/cancels without any fill
         MAX_CONSECUTIVE_NO_FILLS = 5  # After 5 consecutive no-fills, stop the ladder
+        # 20260716c 有限chase(V1.1 §7.4): SPREAD CHASE连续追挂上限。旧行为点差持续
+        # 满足时无限重挂 — 每轮都丢队列位, 平稳行情永远追不上, 且是25s总超时风暴
+        # 的燃料。超过上限落回"重置触发+递进退避"正常路径(不暂停不HALT), 下轮
+        # 触发周期重新评估。
+        MAX_CONSECUTIVE_CHASES = 3
         unhedged_binance_xau = 0.0  # Accumulated Binance fills not yet hedged (below 0.01 Lot)
         MIN_HEDGE_LOT = 0.01         # ICMarkets minimum lot size
         loop_count = 0
@@ -1027,6 +1056,15 @@ class ContinuousStrategyExecutor:
         while self.is_running and not self.stop_requested:
             loop_count += 1
             import time as _hb_t; self._last_heartbeat = _hb_t.monotonic()  # 心跳
+
+            # ── 20260716 按对新开仓闸(V1.1 §7.6 ng_allow_new_open 的通用实现) ──
+            # config/pair_open_gate.json {"NG": false} 即禁该对新开仓, 30s热读。
+            # 只拦opening; closing/崩溃补腿/手动交易不受影响(方案第4.6条三capability分离)。
+            if is_opening and not _pair_new_open_allowed(self.pair_code):
+                if loop_count % 10 == 1:
+                    logger.warning(f"[ladder={ladder_idx}] {self.pair_code} 新开仓被 pair_open_gate 禁止, 持仓管理/平仓不受影响")
+                await asyncio.sleep(30)
+                continue
 
             # ── 内层 MT5 收盘自动停闸(根因修复 2026-06-23) ──────────────────────
             # 收盘软/硬停闸原本只在外层 V2 主循环; 一旦本内层 ladder 持有 active 阶梯,
@@ -1821,14 +1859,19 @@ class ContinuousStrategyExecutor:
                 except Exception:
                     _chase_ok = False
 
-                if _chase_ok and not spread_cancelled:
+                if _chase_ok and not spread_cancelled and consecutive_no_fills <= MAX_CONSECUTIVE_CHASES:
                     logger.info(
-                        f"Scenario 1 [SPREAD CHASE]: no-fill #{consecutive_no_fills} but spread "
+                        f"Scenario 1 [SPREAD CHASE]: no-fill #{consecutive_no_fills}/{MAX_CONSECUTIVE_CHASES} but spread "
                         f"{_chase_spread:.3f} still meets threshold {spread_threshold}, "
                         f"skipping trigger re-accumulation, immediate re-hang"
                     )
                     await asyncio.sleep(0.5)
                     continue
+                if _chase_ok and not spread_cancelled:
+                    logger.info(
+                        f"Scenario 1 [CHASE CAP]: 连续追挂已达{MAX_CONSECUTIVE_CHASES}次上限, "
+                        f"落回退避路径(点差仍满足, 下轮触发周期重评估)"
+                    )
 
                 # Spread no longer favorable — full reset + backoff
                 logger.info(f"Scenario 1: Binance not filled ({consecutive_no_fills}/{MAX_CONSECUTIVE_NO_FILLS}), resetting triggers")

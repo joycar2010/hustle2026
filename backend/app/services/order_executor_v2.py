@@ -222,6 +222,38 @@ class OrderExecutorV2:
 
         return {"ok": True, "error": None, "detail": {}}
 
+    def _mt5_actual_fill_cfg(self):
+        """20260716 实际成交口径灰度(V1.1 §7.1): config/mt5_actual_fill.json
+        {"enabled": false, "accounts": []} — enabled 全局或 account_id 列入
+        accounts 时, B侧开仓采信桥返回的实际成交量(filled_volume)与成交价;
+        否则维持旧行为(请求量=成交量)。默认关; 按"低风险桥→其余"滚动灰度,
+        与桥模板升级(接受DONE_PARTIAL+四量字段)配套。30s热读。"""
+        import json as _j_maf
+        import os as _o_maf
+        import time as _t_maf
+        c = getattr(self, '_maf_cache', None)
+        now = _t_maf.time()
+        if c and now - c[0] < 30.0:
+            return c[1]
+        cfg = {"enabled": False, "accounts": []}
+        try:
+            _p = _o_maf.path.join(_o_maf.path.dirname(__file__), '..', '..', 'config', 'mt5_actual_fill.json')
+            with open(_p) as _f:
+                cfg = _j_maf.load(_f) or cfg
+        except Exception:
+            pass
+        self._maf_cache = (now, cfg)
+        return cfg
+
+    def _mt5_actual_fill_enabled(self, account):
+        cfg = self._mt5_actual_fill_cfg()
+        if cfg.get("enabled"):
+            return True
+        try:
+            return str(account.account_id) in [str(a) for a in (cfg.get("accounts") or [])]
+        except Exception:
+            return False
+
     def _budget_guard_result(self, exec_deadline, tag):
         """20260716 预算护栏: 距外层25s总超时不足一轮监控(binance_timeout+8s撤单/确认/REST
         fallback余量)则本轮不再挂单, 干净返回无成交(外层按no-fill重新评估, 下一轮拿全新预算)。
@@ -2329,15 +2361,33 @@ class OrderExecutorV2:
             # HTTP 200 返回时单已成交，直接采信。
             # 旧的持仓轮询 min(pos_total, remaining) 仅对首单(pos_before=0)正确；
             # 多单累积场景 pos_total>=remaining 导致首次轮询假阳性，已弃用。
-            actual_filled = remaining
+            # 20260716 实际成交口径(V1.1 §7.1, mt5_actual_fill灰度): 采信桥
+            # filled_volume与price(修IOC部分成交高估对冲量 + avg_price恒0两缺陷);
+            # 部分成交继续循环补挂剩余量; 旧桥无该字段/灰度关=旧行为。
+            _d_fill = (result.get("data") or {})
+            _bridge_filled = _d_fill.get("filled_volume")
+            _bridge_price = float(_d_fill.get("price") or 0.0)
+            if _bridge_filled is not None and self._mt5_actual_fill_enabled(account):
+                actual_filled = round(float(_bridge_filled), 2)
+                if _bridge_price > 0 and actual_filled > 0:
+                    total_quote += actual_filled * _bridge_price
+                logger.info(f"[BYBIT_BUY] Ticket {ticket}: 桥实际成交 {actual_filled:.2f}/{remaining:.2f} Lot price={_bridge_price}")
+            else:
+                actual_filled = remaining
+                logger.info(
+                    f"[BYBIT_BUY] Ticket {ticket}: HTTP 200 即时成交 {actual_filled:.2f} Lot "
+                    f"(legacy直接采信，无持仓轮询)"
+                )
             total_filled += actual_filled
             _fill_ticket = ticket  # 风险1: 供上层异步回填B侧均价
-            logger.info(
-                f"[BYBIT_BUY] Ticket {ticket}: HTTP 200 即时成交 {actual_filled:.2f} Lot "
-                f"(直接采信，无持仓轮询)"
-            )
+            if actual_filled + 1e-9 < remaining:
+                remaining = round(remaining - actual_filled, 2)
+                logger.warning(f"[BYBIT_BUY] 部分成交, 剩余 {remaining:.2f} Lot 继续补挂")
+                continue
             break
 
+        if total_filled > 0 and total_quote > 0:
+            total_avg_price = total_quote / total_filled
         logger.info(f"[BYBIT_BUY] Completed: total_filled={total_filled} Lot avg_price={total_avg_price:.4f}")
         return {"filled_qty": total_filled, "avg_price": total_avg_price, "ticket": _fill_ticket}
 
@@ -2464,15 +2514,31 @@ class OrderExecutorV2:
             # HTTP 200 返回时单已成交，直接采信。
             # 旧的持仓轮询 min(pos_total, remaining) 仅对首单(pos_before=0)正确；
             # 多单累积场景 pos_total>=remaining 导致首次轮询假阳性，已弃用。
-            actual_filled = remaining
+            # 20260716 实际成交口径(V1.1 §7.1, mt5_actual_fill灰度): 同BUY路径。
+            _d_fill = (result.get("data") or {})
+            _bridge_filled = _d_fill.get("filled_volume")
+            _bridge_price = float(_d_fill.get("price") or 0.0)
+            if _bridge_filled is not None and self._mt5_actual_fill_enabled(account):
+                actual_filled = round(float(_bridge_filled), 2)
+                if _bridge_price > 0 and actual_filled > 0:
+                    total_quote += actual_filled * _bridge_price
+                logger.info(f"[BYBIT_SELL] Ticket {ticket}: 桥实际成交 {actual_filled:.2f}/{remaining:.2f} Lot price={_bridge_price}")
+            else:
+                actual_filled = remaining
+                logger.info(
+                    f"[BYBIT_SELL] Ticket {ticket}: HTTP 200 即时成交 {actual_filled:.2f} Lot "
+                    f"(legacy直接采信，无持仓轮询)"
+                )
             total_filled += actual_filled
             _fill_ticket = ticket  # 风险1: 供上层异步回填B侧均价
-            logger.info(
-                f"[BYBIT_SELL] Ticket {ticket}: HTTP 200 即时成交 {actual_filled:.2f} Lot "
-                f"(直接采信，无持仓轮询)"
-            )
+            if actual_filled + 1e-9 < remaining:
+                remaining = round(remaining - actual_filled, 2)
+                logger.warning(f"[BYBIT_SELL] 部分成交, 剩余 {remaining:.2f} Lot 继续补挂")
+                continue
             break
 
+        if total_filled > 0 and total_quote > 0:
+            total_avg_price = total_quote / total_filled
         logger.info(f"[BYBIT_SELL] Completed: total_filled={total_filled} Lot avg_price={total_avg_price:.4f}")
         return {"filled_qty": total_filled, "avg_price": total_avg_price, "ticket": _fill_ticket}
 

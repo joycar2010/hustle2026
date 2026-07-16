@@ -71,6 +71,10 @@ class BinanceWebSocketClient:
         self._load_symbols()
         if self._task is None or self._task.done():
             self._task = asyncio.create_task(self._run())
+        # 20260707 品种清单热重载(新建交易对免重启)
+        _watch = getattr(self, "_symbol_watch_task", None)
+        if _watch is None or _watch.done():
+            self._symbol_watch_task = asyncio.create_task(self._symbol_watch())
 
     def _load_symbols(self):
         """Load active Binance symbols from hedging pair config."""
@@ -81,12 +85,47 @@ class BinanceWebSocketClient:
                 syms = []
                 for p in pairs:
                     if p.symbol_a.platform_type == "cex":
-                        syms.append(p.symbol_a.symbol.lower())
+                        _s = p.symbol_a.symbol.lower()
+                        # 20260716 NG止血(V1.1 §7.6): 只订阅合法币安venue symbol。
+                        # okx/gate等platform_type也是cex, xau_usdt/xau-usdt-swap混进
+                        # binance combined stream属非法订阅(NATGASUSDT行情反复不可用
+                        # 元凶之一); 同时去重(同symbol多对重复订阅)。
+                        if getattr(p.symbol_a, 'platform_id', 1) != 1:
+                            continue
+                        if not _s.isalnum():
+                            logger.warning(f"[BinanceWS] 跳过非法binance symbol: {_s}")
+                            continue
+                        if _s not in syms:
+                            syms.append(_s)
                 if syms:
                     self._symbols = syms
                     logger.info(f"[BinanceWS] Loaded {len(syms)} symbols from DB: {syms}")
         except Exception as e:
             logger.warning(f"[BinanceWS] Failed to load symbols from DB, using defaults: {e}")
+
+    async def _symbol_watch(self):
+        """20260707 品种清单热重载: 每300s重载 hedging_pairs 的A腿品种集合, 变更即
+        强制断开当前连接 → _run 重连时按新清单重建订阅URL(天然完成重订阅)。
+        根治"新建交易对必须重启后端才有币安行情"(BTC/PAXG两次实证; 配合
+        get_binance_quote 的防冒充闸, 变更生效前新对显示空白而非错价)。
+        生效时延 ≤ hedging_pair_service 5min缓存 + 本监视300s ≈ 最长10分钟。"""
+        while True:
+            await asyncio.sleep(300)
+            try:
+                _before = set(self._symbols)
+                self._load_symbols()
+                if set(self._symbols) != _before:
+                    logger.info(
+                        f"[BinanceWS] 品种清单变更 {sorted(_before)} → {sorted(set(self._symbols))}, "
+                        f"断开重连以重建订阅")
+                    _w = getattr(self, "_ws", None)
+                    if _w is not None:
+                        try:
+                            await _w.close()
+                        except Exception:
+                            pass
+            except Exception as _e:
+                logger.debug(f"[BinanceWS] symbol watch error: {_e}")
 
     async def stop(self):
         """Stop the WebSocket listener."""
@@ -112,6 +151,7 @@ class BinanceWebSocketClient:
             try:
                 logger.info(f"[BinanceWS] Connecting: {len(self._symbols)} symbols (attempt #{reconnect_count + 1})")
                 async with websockets.connect(url, ping_interval=20, ping_timeout=10) as ws:
+                    self._ws = ws  # 供品种热重载强制断开触发重订阅
                     self._connected = True
                     reconnect_count = 0
                     logger.info(f"[BinanceWS] Connected successfully ({len(self._symbols)} symbols: {self._symbols})")
