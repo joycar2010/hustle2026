@@ -2333,6 +2333,11 @@ class OrderExecutorV2:
             if not result["success"]:
                 err = str(result.get('error') or '')
                 logger.error(f"[BYBIT_BUY] Order placement failed: {err}")
+                if result.get("unknown"):
+                    # M2(V1.1 §9.2): 桥结果未知=可能已成交, 盲目重试=双开。
+                    # 停止重试, 缺口交由RecoveryWorker/单腿对账处置。
+                    logger.error(f"[BYBIT_BUY] 桥结果未知(request_id={result.get('request_id')}), 禁止盲目重试")
+                    break
                 if "10014" in err and close_position and not getattr(self, "_buy_10014_retried", False):
                     try:
                         self._buy_10014_retried = True
@@ -2483,6 +2488,9 @@ class OrderExecutorV2:
             if not result["success"]:
                 err = str(result.get('error') or '')
                 logger.error(f"[BYBIT_SELL] Order placement failed: {err}")
+                if result.get("unknown"):
+                    logger.error(f"[BYBIT_SELL] 桥结果未知(request_id={result.get('request_id')}), 禁止盲目重试")
+                    break
                 # retcode=10014 = invalid volume → likely request > current LONG
                 # position. Snap to actual position and retry once.
                 if "10014" in err and close_position and not getattr(self, "_sell_10014_retried", False):

@@ -69,8 +69,37 @@ async def reset():
     return {"ok": True}
 
 
+class OrderReqV2(OrderReq):
+    request_id: Optional[str] = None
+
+
+_IDEM = {}  # request_id -> response (M2幂等仿真)
+
+
+@app.get("/mt5/order-status/{request_id}")
+async def order_status(request_id: str):
+    from fastapi import HTTPException
+    if request_id not in _IDEM:
+        raise HTTPException(404, "unknown request_id")
+    rec = _IDEM[request_id]
+    return {"request_id": request_id, "state": rec["state"],
+            "terminal": rec["state"] in ("DONE", "FAILED"),
+            "result": rec.get("result")}
+
+
 @app.post("/mt5/order")
-async def place_order(req: OrderReq):
+async def place_order(req: OrderReqV2):
+    # M2幂等: 同request_id重放只返回原结果, 不再计入orders流水
+    if req.request_id and req.request_id in _IDEM:
+        rec = _IDEM[req.request_id]
+        if rec["state"] == "DONE":
+            out = dict(rec["result"])
+            out["idempotency_hit"] = True
+            return out
+        return {"success": False, "unknown": True, "state": rec["state"],
+                "request_id": req.request_id, "idempotency_hit": True}
+    if req.request_id:
+        _IDEM[req.request_id] = {"state": "SENDING"}
     STATE["orders"].append(req.model_dump())
     mode = STATE["mode"]
     if mode == "hang":
@@ -87,7 +116,7 @@ async def place_order(req: OrderReq):
     else:  # done (hang 睡醒后也按 done 返回 — 模拟"已成交但响应迟到")
         filled = normalized
         retcode, partial = 10009, False
-    return {
+    resp = {
         "success": True,
         "retcode": retcode,
         "order": ticket,
@@ -100,7 +129,11 @@ async def place_order(req: OrderReq):
         "filled_volume": filled,
         "remaining_volume": max(0.0, round(normalized - filled, 8)),
         "partial": partial,
+        "request_id": req.request_id,
     }
+    if req.request_id:
+        _IDEM[req.request_id] = {"state": "DONE", "result": resp}
+    return resp
 
 
 if __name__ == "__main__":

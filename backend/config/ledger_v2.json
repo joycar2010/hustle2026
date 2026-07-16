@@ -1,4 +1,5 @@
 {
-  "_comment": "M1 事实层双写开关(V1.1 §8.2)。shadow只写不读, fire-and-forget不阻塞热路径。",
-  "dual_write": true
+  "_comment": "M1 事实层双写 + M2 RecoveryWorker 开关。shadow只写不读; worker扫描超龄RUNNING execution收敛终态(只回收s-订单+补全事实, 不自动开新仓)。",
+  "dual_write": true,
+  "recovery_worker": true
 }

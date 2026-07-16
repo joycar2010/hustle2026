@@ -270,6 +270,14 @@ async def lifespan(app: FastAPI):
     except Exception as _mte:
         logger.error(f'[MT5Sync] failed to start: {_mte}')
 
+    # M2 RecoveryWorker(V1.1 §8.4): 扫描超龄RUNNING execution收敛终态。
+    # config/ledger_v2.json {"recovery_worker": true} 开关, 关时空转零成本。
+    try:
+        from app.services.recovery_worker import ensure_started as _rw_start
+        _rw_start()
+    except Exception as _rwe:
+        logger.error(f'[RECOVERY] failed to start: {_rwe}')
+
     # OpenCLAW agent loop (Shadow mode by default)
     try:
         from app.services.agent import agent_loop as openclaw_loop
@@ -287,6 +295,8 @@ async def lifespan(app: FastAPI):
         openclaw_reviewer.start()
         from app.services.agent import ladder_advisor as openclaw_ladder_advisor
         openclaw_ladder_advisor.start()  # 阶梯自动调参(env LADDER_ADVISOR_ENABLED 默认off)
+        from app.services.continuous_executor import _recon_ensure_started as _gr_start
+        _gr_start()  # 20260707: GOLD_RECON随应用启动(不再依赖首个策略注册, 停策略的账户也在对账范围)
         openclaw_legs.start()
         logger.info('[OpenCLAW] agent loop + equity FSM + no-profit + balance + reviewer + leg_monitor scheduled')
     except Exception as e:

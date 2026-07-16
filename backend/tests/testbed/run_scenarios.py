@@ -231,11 +231,56 @@ async def s10_quote_gate():
     record("S10 行情新鲜度硬闸(放行/过期/skew/不可得)", ok, f"r2={r2} r3={r3}")
 
 
+# ── S11 桥幂等重放 ───────────────────────────────────────────────────────────
+async def s11_bridge_idempotency():
+    import httpx
+    from tests.testbed.fake_bridge import app as bridge_app, _IDEM, STATE
+    _IDEM.clear()
+    transport = httpx.ASGITransport(app=bridge_app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://fake") as c:
+        await c.post("/ctl/reset")
+        body = {"symbol": "XAUUSD+", "volume": 0.15, "order_type": "BUY", "request_id": "exe-idem-1"}
+        r1 = (await c.post("/mt5/order", json=body)).json()
+        n_after_first = len(STATE["orders"])
+        r2 = (await c.post("/mt5/order", json=body)).json()   # 重放
+        n_after_replay = len(STATE["orders"])
+        st = (await c.post("/mt5/order", json={**body, "request_id": None})).json()  # 无键=正常新单
+        q = (await c.get("/mt5/order-status/exe-idem-1")).json()
+        q404 = (await c.get("/mt5/order-status/never-sent")).status_code
+    ok = (r1["order"] != st["order"]                       # 无键请求是新单
+          and r2.get("idempotency_hit") is True and r2["order"] == r1["order"]  # 重放=原结果
+          and n_after_replay == n_after_first              # 重放不二次order_send
+          and q["state"] == "DONE" and q["terminal"] is True
+          and q404 == 404)
+    record("S11 桥幂等重放+status端点", ok, f"replay_order={r2.get('order')} orig={r1['order']}")
+
+
+# ── S12 超时后凭request_id查回真相 ───────────────────────────────────────────
+async def s12_timeout_status_recovery():
+    import httpx
+    from tests.testbed.fake_bridge import app as bridge_app, _IDEM
+    from app.services.order_executor import _query_bridge_order_status
+    _IDEM.clear()
+    transport = httpx.ASGITransport(app=bridge_app)
+    # 预置: 桥已成交但后端超时没收到响应
+    async with httpx.AsyncClient(transport=transport, base_url="http://fake") as c:
+        await c.post("/ctl/reset")
+        await c.post("/mt5/order", json={"symbol": "XAUUSD+", "volume": 0.15,
+                                         "order_type": "BUY", "request_id": "exe-lost-1"})
+    st_done = await _query_bridge_order_status("http://fake", "exe-lost-1", {}, _transport=transport)
+    st_404 = await _query_bridge_order_status("http://fake", "exe-never", {}, attempts=1, _transport=transport)
+    ok = (st_done and st_done.get("state") == "DONE"
+          and (st_done.get("result") or {}).get("filled_volume") == 0.15
+          and st_404 == {"state": "NOT_DELIVERED"})
+    record("S12 超时后status查询恢复真相/未送达判定", ok,
+           f"done={st_done.get('state') if st_done else None} lost={st_404}")
+
+
 async def main():
     scenarios = [s1_watcher_preregistration, s2_budget_guard, s3_shield_cancel,
                  s4_crash_repair, s5_strict_identity, s6_unknown_no_resend,
                  s7_check_retry, s8_bridge_contract, s9_actual_fill_consumption,
-                 s10_quote_gate]
+                 s10_quote_gate, s11_bridge_idempotency, s12_timeout_status_recovery]
     for s in scenarios:
         try:
             await s()

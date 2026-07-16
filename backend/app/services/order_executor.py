@@ -19,6 +19,28 @@ from app.websocket.manager import manager
 from app.utils.trading_time import is_bybit_trading_hours
 
 
+async def _query_bridge_order_status(bridge_url, request_id, headers,
+                                     attempts=3, _transport=None):
+    """M2(V1.1 §9.2): HTTP超时=UNKNOWN≠失败。按request_id查桥幂等日志拿真相,
+    禁止盲重发。返回 {"state": "DONE"|"SENDING"|"FAILED"|"NOT_DELIVERED", ...}
+    或 None(查询本身失败, 调用方按unknown处理)。_transport 供测试床注入。"""
+    import httpx
+    import logging as _lg
+    _logger = _lg.getLogger(__name__)
+    for i in range(attempts):
+        try:
+            async with httpx.AsyncClient(timeout=5.0, transport=_transport) as c:
+                r = await c.get(f"{bridge_url}/mt5/order-status/{request_id}", headers=headers)
+            if r.status_code == 404:
+                return {"state": "NOT_DELIVERED"}  # 桥没收到该请求 → 安全失败可重试
+            if r.status_code == 200:
+                return r.json()
+        except Exception as _qe:
+            _logger.debug(f"[BYBIT_ORDER] status查询失败({i+1}/{attempts}): {_qe}")
+        await asyncio.sleep(1.0 + i)
+    return None
+
+
 def _get_pair_specs():
     """Get trading specs from hedging pair config, with fallback to XAU defaults"""
     try:
@@ -269,6 +291,10 @@ class OrderExecutor:
             headers["X-Api-Key"] = api_key
 
         qty_val = round(float(quantity), 2)
+        # M2 幂等键(V1.1 §9.2): 随开仓请求发给桥; HTTP超时后凭它查真相, 杜绝
+        # "超时→重试→双开"(桥同键重放只返回原结果, 绝不二次order_send)
+        import uuid as _uuid_m2
+        _req_id = "exe-" + _uuid_m2.uuid4().hex[:20]
 
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
@@ -282,7 +308,8 @@ class OrderExecutor:
                     # Open new position: POST /mt5/order {symbol, volume, order_type}
                     # order_type must be "BUY" or "SELL" (not "Market")
                     ot = side.upper()  # "BUY" or "SELL"
-                    payload = {"symbol": symbol, "volume": qty_val, "order_type": ot}
+                    payload = {"symbol": symbol, "volume": qty_val, "order_type": ot,
+                               "request_id": _req_id}
                     logger.info(f"[BYBIT_ORDER] Bridge order: {bridge_url}/mt5/order {payload}")
                     resp = await client.post(f"{bridge_url}/mt5/order", json=payload, headers=headers)
 
@@ -333,6 +360,25 @@ class OrderExecutor:
 
         except Exception as e:
             logger.error(f"[BYBIT_ORDER] Bridge request failed: {e}")
+            # M2(V1.1 §9.2): 超时/断连=UNKNOWN≠失败 — 桥可能已成交。按request_id
+            # 查桥幂等日志拿真相: DONE→按真结果返回(杜绝超时双开); 404→桥未收到,
+            # 安全失败可重试; 查不清→unknown=True, 调用方禁止盲重试。
+            if not close_position:
+                _st = await _query_bridge_order_status(bridge_url, _req_id, headers)
+                if _st and _st.get("state") == "DONE" and _st.get("result"):
+                    _res = _st["result"]
+                    logger.warning(f"[BYBIT_ORDER] 超时后凭request_id查回真相: 已成交 "
+                                   f"order={_res.get('order')} filled={_res.get('filled_volume')}")
+                    return {"success": True, "platform": "bybit",
+                            "order_id": str(_res.get("order", 0)), "data": _res,
+                            "resolved_via_status": True}
+                if _st and _st.get("state") == "NOT_DELIVERED":
+                    return {"success": False, "platform": "bybit",
+                            "error": f"bridge超时且未送达, 可安全重试: {e}",
+                            "not_delivered": True}
+                return {"success": False, "platform": "bybit", "unknown": True,
+                        "request_id": _req_id,
+                        "error": f"bridge超时且结果未知, 禁止盲重试: {e}"}
             return {
                 "success": False,
                 "platform": "bybit",
