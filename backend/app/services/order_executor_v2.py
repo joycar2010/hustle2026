@@ -350,6 +350,13 @@ class OrderExecutorV2:
             inflight.update({"order_id": binance_order_id, "symbol": sym_a,
                              "client_order_id": binance_result.get("client_order_id"),
                              "hedged_xau": 0.0})
+            try:  # M1 事实层: A腿下单落库(shadow)
+                from app.services import execution_ledger as _ledger_ord
+                _ledger_ord.log_order(inflight.get("execution_id"), 'binance',
+                                      binance_account.account_id, sym_a, None, quantity,
+                                      binance_order_id, binance_result.get("client_order_id"))
+            except Exception:
+                pass
 
         # ── 增量对冲分支(默认关,config/incremental_hedge.json enabled=true 时启用) ──
         if self._load_incr_cfg().get("enabled"):
@@ -618,6 +625,13 @@ class OrderExecutorV2:
             inflight.update({"order_id": binance_order_id, "symbol": sym_a,
                              "client_order_id": binance_result.get("client_order_id"),
                              "hedged_xau": 0.0})
+            try:  # M1 事实层: A腿下单落库(shadow)
+                from app.services import execution_ledger as _ledger_ord
+                _ledger_ord.log_order(inflight.get("execution_id"), 'binance',
+                                      binance_account.account_id, sym_a, None, quantity,
+                                      binance_order_id, binance_result.get("client_order_id"))
+            except Exception:
+                pass
 
         # ── 增量对冲分支(默认关,config/incremental_hedge.json enabled=true 时启用) ──
         if self._load_incr_cfg().get("enabled"):
@@ -872,6 +886,13 @@ class OrderExecutorV2:
             inflight.update({"order_id": binance_order_id, "symbol": sym_a,
                              "client_order_id": binance_result.get("client_order_id"),
                              "hedged_xau": 0.0})
+            try:  # M1 事实层: A腿下单落库(shadow)
+                from app.services import execution_ledger as _ledger_ord
+                _ledger_ord.log_order(inflight.get("execution_id"), 'binance',
+                                      binance_account.account_id, sym_a, None, quantity,
+                                      binance_order_id, binance_result.get("client_order_id"))
+            except Exception:
+                pass
 
         # ── 增量对冲分支(默认关,config/incremental_hedge.json enabled=true 时启用) ──
         if self._load_incr_cfg().get("enabled"):
@@ -1786,6 +1807,13 @@ class OrderExecutorV2:
                         hedged_xau += cov_xau
                         if inflight is not None:
                             inflight["hedged_xau"] = hedged_xau  # 崩溃补腿按此扣减, 防双补
+                            try:  # M1 事实层: B腿增量对冲成交落库(shadow)
+                                from app.services import execution_ledger as _ledger_hf
+                                _ledger_hf.log_fill(inflight.get("execution_id"), 'mt5',
+                                                    (res.get("ticket") if isinstance(res, dict) else None),
+                                                    fl, ap, 'lot', 'bridge')
+                            except Exception:
+                                pass
                         logger.info(f"[INCR_HEDGE] {strategy_type} cum={cum:.2f} hedged={hedged_xau:.2f} "
                                     f"+lot={lot} fl={fl} rem={max(0.0, cum + accumulated_unhedged_xau - hedged_xau):.4f}")
                 if (cum - hedged_xau) > max_unhedged and not cancelled_for_safety:
@@ -1813,6 +1841,13 @@ class OrderExecutorV2:
         binance_api_error = monitor_result.get("api_error", False)
         st["final"] = final_filled
         st["stop"] = True
+        if inflight is not None and final_filled and final_filled > 0:
+            try:  # M1 事实层: A腿最终成交落库(shadow)
+                from app.services import execution_ledger as _ledger_af
+                _ledger_af.log_fill(inflight.get("execution_id"), 'binance',
+                                    binance_order_id, final_filled, binance_avg, 'A', 'monitor')
+            except Exception:
+                pass
         try:
             await asyncio.wait_for(hedger, timeout=max(5.0, self.bybit_timeout * 6))
         except asyncio.TimeoutError:

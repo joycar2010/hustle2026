@@ -1,0 +1,4 @@
+{
+  "_comment": "M1 事实层双写开关(V1.1 §8.2)。shadow只写不读, fire-and-forget不阻塞热路径。",
+  "dual_write": true
+}

@@ -466,6 +466,15 @@ async def _crash_repair_leg(ex, ctx, ladder_idx, strategy_type, binance_account,
         else:
             outcome = f"自动补腿失败({res.get('error')}), 请人工补 {lot} lot"
             logger.error(f"[AUTO_REPAIR] 补腿失败: order={order_id} {outcome}")
+    try:  # M1 事实层: 补腿结果落事件链(shadow)
+        from app.services import execution_ledger as _ledger_rp
+        _ledger_rp.log_event(ctx.get("execution_id"), 'CRASH_REPAIR', {
+            "order_id": order_id, "filled": filled, "hedged": hedged,
+            "repair_lot": lot, "outcome": outcome})
+        if filled and lot > 0 and "已自动补腿" in outcome:
+            _ledger_rp.log_fill(ctx.get("execution_id"), 'mt5', None, lot, 0, 'lot', 'repair')
+    except Exception:
+        pass
     try:
         await asyncio.wait_for(ex._send_single_leg_alert(
             strategy_type=strategy_type,
@@ -1489,7 +1498,18 @@ class ContinuousStrategyExecutor:
                 _exec_deadline = asyncio.get_event_loop().time() + 25.0
                 # 20260716 崩溃补腿上下文: 执行链把本次策略订单的身份/对冲进度写进来,
                 # 崩溃时独立补腿task按它补齐B腿(只认自己的order_id, 与手动单绝缘)
-                _inflight_ctx = {}
+                # 20260716d M1: execution_id 四级身份首级, 贯穿下单/成交/对冲/补腿,
+                # 事实层shadow双写(fire-and-forget, 不阻塞热路径)
+                import uuid as _uuid_m1
+                _exec_id_m1 = str(_uuid_m1.uuid4())
+                _inflight_ctx = {"execution_id": _exec_id_m1}
+                try:
+                    from app.services import execution_ledger as _ledger_m1
+                    _ledger_m1.log_execution_start(
+                        _exec_id_m1, self.strategy_id, getattr(self, 'user_id', None),
+                        self.pair_code, strategy_type, ladder_idx, order_qty)
+                except Exception:
+                    pass
                 exec_result = await asyncio.wait_for(
                     self._execute_order(
                         strategy_type,
@@ -1512,6 +1532,11 @@ class ContinuousStrategyExecutor:
                 if isinstance(e, GeneratorExit):
                     raise
                 logger.error(f"[ladder={ladder_idx}] CRITICAL: Exception executing order: {e!r}", exc_info=True)
+                try:
+                    from app.services import execution_ledger as _ledger_cr
+                    _ledger_cr.log_execution_end(_inflight_ctx.get("execution_id"), 'CRASHED', error=repr(e))
+                except Exception:
+                    pass
                 # SAFETY重排(20260706): ①先告警 — 分离task发送(走Redis纯内存不依赖代理),
                 # 即使本任务随后被强制cancel也带不走它。旧顺序先清理后告警:
                 # get_open_orders无超时卡死在阻塞代理上61s→看门狗强杀(CancelledError越过
@@ -1587,6 +1612,26 @@ class ContinuousStrategyExecutor:
                         await _cap_guard_task
                     except Exception:
                         pass
+
+            # M1 事实层: 执行终态落库(shadow)
+            try:
+                from app.services import execution_ledger as _ledger_end
+                if isinstance(exec_result, dict):
+                    if exec_result.get('budget_exhausted'):
+                        _st_m1 = 'BUDGET_GATED'
+                    elif exec_result.get('halted_after_crash'):
+                        _st_m1 = 'HALTED'
+                    elif exec_result.get('binance_filled_qty', 0) > 0:
+                        _st_m1 = 'FILLED'
+                    else:
+                        _st_m1 = 'NO_FILL'
+                    _ledger_end.log_execution_end(
+                        _inflight_ctx.get('execution_id'), _st_m1,
+                        exec_result.get('binance_filled_qty'),
+                        exec_result.get('bybit_filled_qty'),
+                        exec_result.get('error'))
+            except Exception:
+                pass
 
             # ── 容量护栏触发: 在途开仓单已撤(本阶梯新累计上限 < 已开+在途) → 记录已成交部分后干净结束本阶梯 ──
             if is_opening and getattr(self, '_cap_cancel', False):
