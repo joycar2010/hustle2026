@@ -222,6 +222,29 @@ class OrderExecutorV2:
 
         return {"ok": True, "error": None, "detail": {}}
 
+    def _budget_guard_result(self, exec_deadline, tag):
+        """20260716 预算护栏: 距外层25s总超时不足一轮监控(binance_timeout+8s撤单/确认/REST
+        fallback余量)则本轮不再挂单, 干净返回无成交(外层按no-fill重新评估, 下一轮拿全新预算)。
+        根治"开市首小时慢REST吃掉预算→下单数秒后被总超时cancel→监控协程带走撤单→挂单成
+        孤儿"模式(0716 06:36 cq002 20手悬14.5min事故)。返回None=预算充足, 正常下单。"""
+        if exec_deadline is None:
+            return None
+        try:
+            _rem = exec_deadline - asyncio.get_event_loop().time()
+        except Exception:
+            return None
+        _need = float(self.binance_timeout or 1.5) + 8.0
+        if _rem >= _need:
+            return None
+        logger.warning(
+            f"[BUDGET_GUARD] {tag}: 剩余执行预算 {_rem:.1f}s < 一轮监控所需 {_need:.1f}s "
+            f"— 本轮不挂单, 干净返回待外层重评估(防总超时孤儿单)"
+        )
+        return {"success": True, "binance_filled_qty": 0, "bybit_filled_qty": 0,
+                "binance_avg_price": 0, "bybit_avg_price": 0,
+                "binance_order_id": None, "is_single_leg": False,
+                "budget_exhausted": True, "message": "执行预算不足,本轮未挂单"}
+
     async def execute_reverse_opening(
         self,
         binance_account: Account,
@@ -234,6 +257,7 @@ class OrderExecutorV2:
         pair_code: str = "XAU",
         hedge_multiplier: float = 1.0,
         accumulated_unhedged_xau: float = 0.0,
+        exec_deadline: float = None,
     ) -> Dict[str, Any]:
         """
         Execute reverse opening (Binance short, Bybit long).
@@ -265,6 +289,9 @@ class OrderExecutorV2:
             }
 
         # Step 1: Place A-side SELL order (MAKER/PostOnly) — routes by platform_id
+        _bg = self._budget_guard_result(exec_deadline, "REVERSE_OPENING")
+        if _bg is not None:
+            return _bg
         sym_a, sym_b = _get_pair_symbols(pair_code)
         binance_result = await self._place_a_side_order(
             account=binance_account,
@@ -476,6 +503,7 @@ class OrderExecutorV2:
         spread_threshold: float = None,
         pair_code: str = "XAU",
         hedge_multiplier: float = 1.0,
+        exec_deadline: float = None,
     ) -> Dict[str, Any]:
         """
         Execute reverse closing (Binance long close, Bybit short close).
@@ -523,6 +551,9 @@ class OrderExecutorV2:
             quantity = _b_to_a(total_long_volume, pair_code)  # 缩减 Binance 下单量
 
         # Step 1: Place A-side BUY order (MAKER/PostOnly) — routes by platform_id
+        _bg = self._budget_guard_result(exec_deadline, "REVERSE_CLOSING")
+        if _bg is not None:
+            return _bg
         binance_result = await self._place_a_side_order(
             account=binance_account,
             symbol=sym_a,
@@ -734,6 +765,7 @@ class OrderExecutorV2:
         pair_code: str = "XAU",
         hedge_multiplier: float = 1.0,
         accumulated_unhedged_xau: float = 0.0,
+        exec_deadline: float = None,
     ) -> Dict[str, Any]:
         """
         Execute forward opening (Binance long, Bybit short).
@@ -765,6 +797,9 @@ class OrderExecutorV2:
             }
 
         # Step 1: Place A-side BUY order (MAKER/PostOnly) — routes by platform_id
+        _bg = self._budget_guard_result(exec_deadline, "FORWARD_OPENING")
+        if _bg is not None:
+            return _bg
         sym_a, sym_b = _get_pair_symbols(pair_code)
         binance_result = await self._place_a_side_order(
             account=binance_account,
@@ -951,6 +986,7 @@ class OrderExecutorV2:
         spread_threshold: float = None,
         pair_code: str = "XAU",
         hedge_multiplier: float = 1.0,
+        exec_deadline: float = None,
     ) -> Dict[str, Any]:
         """
         Execute forward closing (Binance short close, Bybit long close).
@@ -1005,6 +1041,9 @@ class OrderExecutorV2:
             quantity = _b_to_a(total_short_volume, pair_code)  # 缩减 Binance 下单量
 
         # Step 1: Place A-side SELL order (MAKER/PostOnly) — routes by platform_id
+        _bg = self._budget_guard_result(exec_deadline, "FORWARD_CLOSING")
+        if _bg is not None:
+            return _bg
         logger.info(f"[FORWARD_CLOSING] Placing A-side SELL order: quantity={quantity}, price={binance_price}")
         binance_result = await self._place_a_side_order(
             account=binance_account,
@@ -2018,6 +2057,33 @@ class OrderExecutorV2:
                 "api_error": False,
                 "avg_price": record.get("avg_price", 0.0)
             }
+
+        except asyncio.CancelledError:
+            # 20260716: 外层25s总超时/看门狗强杀/停止会cancel本监控协程 — 旧行为直接退出,
+            # 交易所侧在途挂单无人撤成孤儿(0716 06:36 cq002 20手悬14.5min手撤 + 22:14另一笔
+            # 163s后被动成交单腿, 同7/6事故机制)。shield撤单: 独立task不随本任务cancel而死,
+            # 最多再占5s; 已终态(FILLED/CANCELED等)则跳过; 撤单失败仅告警(-2011=已成交,无害)。
+            try:
+                _rec_cx = _order_fill_registry.get(order_id, {}) or {}
+                if _rec_cx.get("status", "") not in ("FILLED", "CANCELED", "EXPIRED", "REJECTED"):
+                    logger.warning(
+                        f"[BINANCE_MONITOR] monitor cancelled mid-flight, order {order_id} may be live "
+                        f"— firing shielded cancel to prevent orphan"
+                    )
+                    _cx_res = await asyncio.shield(asyncio.wait_for(
+                        self.base_executor.cancel_binance_order(account, symbol, order_id),
+                        timeout=5.0,
+                    ))
+                    logger.warning(
+                        f"[BINANCE_MONITOR] shielded cancel for order {order_id}: "
+                        f"result={_cx_res.get('success') if isinstance(_cx_res, dict) else _cx_res}"
+                    )
+            except BaseException as _cx_err:
+                logger.error(
+                    f"[BINANCE_MONITOR] shielded cancel failed for order {order_id}: {_cx_err!r} "
+                    f"— 孤儿风险交由GOLD_RECON悬挂委托清扫兜底"
+                )
+            raise
 
         finally:
             if rest_heartbeat_task and not rest_heartbeat_task.done():

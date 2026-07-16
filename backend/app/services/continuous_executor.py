@@ -71,13 +71,16 @@ def _load_single_leg_filter():
     c = _sl_filter_cache
     if c["val"] is not None and (_now - c["ts"]) < 5.0:
         return c["val"]
-    val = {"min_trade_xau": 1.0, "min_gap_xau": 10.0, "enabled": True}
+    val = {"min_trade_xau": 1.0, "min_gap_xau": 10.0, "delta_gap_xau": 16.0,
+           "hard_gap_xau": 60.0, "gold_abs_gap_xau": 0.6, "gold_pct_gap": 0.05,
+           "enabled": True}
     try:
         _p = _os.path.join(_os.path.dirname(__file__), "..", "..", "config", "single_leg_filter.json")
         with open(_p, "r", encoding="utf-8") as _f:
             data = _j.load(_f)
         if isinstance(data, dict):
-            for k in ("min_trade_xau", "min_gap_xau"):
+            for k in ("min_trade_xau", "min_gap_xau", "delta_gap_xau",
+                      "hard_gap_xau", "gold_abs_gap_xau", "gold_pct_gap"):
                 if k in data and isinstance(data[k], (int, float)):
                     val[k] = float(data[k])
             if "enabled" in data:
@@ -87,6 +90,436 @@ def _load_single_leg_filter():
     c["ts"] = _now
     c["val"] = val
     return val
+
+
+
+# ── 黄金净敞口周期对账(2026-07-06) ──────────────────────────────────────────
+# 背景: 单腿检测原为纯"成交事件驱动"(Step 8.5 在 exec_result 返回后才spawn),
+# 执行器体外形成的持仓变化——孤儿挂单成交(cq002 0706: 25s总超时cancel监控协程
+# 但交易所挂单未撤, 20 XAU无人对冲成交)、外部平仓、强平——没有 exec_result,
+# 永远不会被看见, 直到下一笔策略成交。本对账器以45s周期独立协程实查两腿带号
+# 净持仓, 判定与黄金地板同口径(|币安净+MT5净|>gold_abs_gap_xau 或 >两腿较大
+# 净仓×gold_pct_gap), 只读+告警, 永不下单/撤单/停策略。与下单/对冲协程零共享
+# 状态, 不在A腿成交→B腿发单链路上, 对成交速度无影响(每对每45s一次轻量查询)。
+# 告警复用 _send_single_leg_alert(弹框+飞书+跑马灯), 本地300s冷却; 缺口未消除
+# 会持续重报——登出窗口错过的弹框, 登回来后下一轮必再弹。
+_RECON_EXECUTORS = {}
+_RECON_TASK = None
+_RECON_LAST_ALERT = {}
+_RECON_INTERVAL_S = 45.0
+_RECON_COOLDOWN_S = 300.0
+
+
+def _recon_ensure_started() -> None:
+    """确保全局对账协程在跑。20260707起由 app 启动时调用(原懒启动依赖首个执行器
+    注册 — 后端重启后若无策略运行, 对账器永不启动, 与"只盯运行中策略"叠加成
+    双重盲区, cq002 停策略+残留挂单成交裸多11 XAU全程零告警即此)。"""
+    global _RECON_TASK
+    try:
+        if _RECON_TASK is None or _RECON_TASK.done():
+            _RECON_TASK = asyncio.create_task(_gold_net_recon_loop())
+    except Exception:
+        pass
+
+
+def _recon_register(ex) -> None:
+    """执行器启动时兜底拉起对账协程(目标清单已改DB全量, 注册表仅留作诊断)。"""
+    try:
+        _RECON_EXECUTORS[ex.strategy_id] = ex
+    except Exception:
+        pass
+    _recon_ensure_started()
+
+
+_RECON_TARGETS_CACHE = {"ts": 0.0, "items": []}
+_RECON_PENDING = {}  # tkey -> 上次越限时刻(连续两周期确认, 滤在途对冲瞬时敞口)
+_RECON_SWEEP_TS = {}  # (account_id,pair) -> 上次孤儿挂单清扫时刻(300s节流)
+_RECON_BN_CLIENTS = {}  # account_id -> BinanceFuturesClient(复用, 防SSL上下文反复重建)
+
+
+async def _recon_targets():
+    """对账目标=「用户已绑定A+B账户」的XAU族交易对全量(DB直查, 60s缓存)。
+    20260707改: 不再依赖运行中执行器 — 持仓的存在不以策略运行为前提(停策略后的
+    残留挂单成交/外部平仓/强平都发生在执行器体外), 对账目标必须以「账户绑定」为
+    准而非「策略在跑」。hedge_multiplier≠1 的用户对(放大对冲天然净敞口)跳过。"""
+    import time as _t
+    c = _RECON_TARGETS_CACHE
+    now = _t.time()
+    if c["items"] and now - c["ts"] < 60.0:
+        return c["items"]
+    items = []
+    try:
+        from sqlalchemy import text as _sqt_t
+        from app.core.database import AsyncSessionLocal as _ASL_t
+        from types import SimpleNamespace as _NS
+        async with _ASL_t() as db:
+            rows = (await db.execute(_sqt_t("""
+                SELECT upa.user_id::text, upa.pair_code,
+                       aa.account_id::text, aa.api_key, aa.api_secret, aa.proxy_config,
+                       ab.account_id::text,
+                       COALESCE(MAX(COALESCE(sc.hedge_multiplier, 1)), 1) AS hm
+                FROM user_pair_accounts upa
+                JOIN accounts aa ON aa.account_id = upa.account_a_id
+                JOIN accounts ab ON ab.account_id = upa.account_b_id
+                LEFT JOIN strategy_configs sc
+                       ON sc.user_id = upa.user_id AND sc.pair_code = upa.pair_code
+                GROUP BY 1,2,3,4,5,6,7
+            """))).all()
+        for uid, pc, a_id, a_key, a_sec, a_proxy, b_id, hm in rows:
+            # 20260707c: 不再按金族过滤 — 净敞口检查在 _recon_two_leg_net 内只对
+            # XAU族生效, 但孤儿挂单清扫须覆盖全部品种(NG/油/银的残留挂单同样会
+            # 被行情打成交形成单腿)。
+            items.append((
+                uid, pc,
+                _NS(account_id=a_id, api_key=a_key, api_secret=a_sec, proxy_config=a_proxy),
+                _NS(account_id=b_id),
+                float(hm or 1),
+            ))
+    except Exception as e:
+        logger.warning(f"[GOLD_RECON] targets query failed: {e}")
+        return c["items"]  # 查询失败沿用旧目标, 不清空
+    c["ts"], c["items"] = now, items
+    return items
+
+
+async def _recon_two_leg_net(pair_code, acc_a, acc_b):
+    """实查两腿带号净持仓(XAU单位)。任一侧失败返回None——宁可本轮跳过, 绝不拿0误报。
+    20260707: 参数由执行器实例改为账户凭证(DB驱动目标), 币安客户端按account_id
+    模块级复用(防60s缓存刷新导致客户端/SSL上下文反复重建)。"""
+    sym_a, sym_b, conv = _get_pair_config(pair_code)
+    # 20260708: 取消金族限制 — 换算系数已按对全部核正, 净敞口口径对所有品种成立
+    if acc_a is None or acc_b is None:
+        return None
+    _cli = _RECON_BN_CLIENTS.get(acc_a.account_id)
+    if _cli is None:
+        from app.services.binance_client import BinanceFuturesClient as _BFC_rc
+        from app.core.proxy_utils import build_proxy_url as _bpu_rc
+        _cli = _BFC_rc(acc_a.api_key, acc_a.api_secret,
+                       proxy_url=_bpu_rc(acc_a.proxy_config))
+        _RECON_BN_CLIENTS[acc_a.account_id] = _cli
+    _pos = await asyncio.wait_for(_cli.get_position_risk(symbol=sym_a), timeout=8.0)
+    b_net = sum(float(p.get('positionAmt', 0)) for p in _pos)
+    from app.models.mt5_client import MT5Client as _MC_rc
+    from app.core.database import AsyncSessionLocal as _ASL_rc
+    from sqlalchemy import select as _sel_rc
+    import httpx as _hx_rc
+    import os as _os_rc
+    async with _ASL_rc() as _db:
+        _mc = (await _db.execute(
+            _sel_rc(_MC_rc)
+            .where(_MC_rc.account_id == acc_b.account_id)
+            .where(_MC_rc.is_active == True)
+            .where(_MC_rc.is_system_service == False)
+            .order_by(_MC_rc.priority).limit(1)
+        )).scalar_one_or_none()
+    if not _mc:
+        return None
+    _bridge = _mc.bridge_url or f"http://172.31.14.113:{_mc.bridge_service_port}"
+    _key = _os_rc.getenv("MT5_API_KEY", "")
+    _hdr = {"X-Api-Key": _key} if _key else {}
+    async with _hx_rc.AsyncClient(timeout=3.0) as _hc:  # 桥是VPC内网纯http, 无SSL上下文重建之忧
+        _r = await _hc.get(f"{_bridge}/mt5/positions", headers=_hdr)
+        if _r.status_code != 200:
+            return None
+        _body = _r.json()
+        _pl = _body if isinstance(_body, list) else _body.get("positions", [])
+    m_net_lot = sum((1.0 if int(p.get("type", 0)) == 0 else -1.0) * abs(float(p.get("volume", 0)))
+                    for p in _pl if p.get("symbol", "") == sym_b)
+    return b_net, m_net_lot * conv
+
+
+def _has_running_executor(uid, pc) -> bool:
+    """该用户×对当前是否有运行中执行器(注册表实时判定, 运行中=挂单有主人不清扫)。"""
+    for ex in list(_RECON_EXECUTORS.values()):
+        try:
+            if getattr(ex, 'is_running', False) and str(getattr(ex, 'user_id', '')) == str(uid) \
+                    and getattr(ex, 'pair_code', None) == pc:
+                return True
+        except Exception:
+            continue
+    return False
+
+
+async def _sweep_orphan_orders(uid, pc, acc_a):
+    """孤儿s-挂单清扫(2026-07-07c, 20260716扩)。形成机制: 执行器仅在"下次下单前"清理
+    遗留挂单(Step7.9, 且8s超时会跳过), 停止/崩溃/重启路径零撤单 → 在途maker挂单
+    永久残留, 被行情打成交=无人对冲(cq002 7/6两次事故均此机制)。
+    两种场景:
+    ① 无运行中执行器: A侧存在任何s-策略挂单 → 全撤(原逻辑)。
+    ② 运行中执行器(20260716新增): 25s总超时cancel监控协程后挂单无人看管, 而策略
+       本身仍在跑/被用户秒重开 → 旧逻辑因running直接跳过, 孤儿单悬14.5min直到手撤
+       (0716 06:36事故)。新判据: s-挂单 (a)下单龄>90s(正常maker单生命周期≤~15s)
+       且 (b)不在_order_fill_events(无活跃监控协程) → 判悬挂孤儿, 撤掉+单腿告警。
+    只撤s-单(m-手动单只能由用户Cancel-All撤, 既有约定); 每账户×对60s节流(原300s,
+    悬挂孤儿检出要快); 查询/撤单失败静默, 下轮再试。"""
+    import time as _t
+    _k = (acc_a.account_id, pc)
+    now = _t.time()
+    if now - _RECON_SWEEP_TS.get(_k, 0.0) < 60.0:
+        return
+    _RECON_SWEEP_TS[_k] = now
+    _running = _has_running_executor(uid, pc)
+    sym_a, _, _ = _get_pair_config(pc)
+    if not sym_a:
+        return
+    _cli = _RECON_BN_CLIENTS.get(acc_a.account_id)
+    if _cli is None:
+        from app.services.binance_client import BinanceFuturesClient as _BFC_sw
+        from app.core.proxy_utils import build_proxy_url as _bpu_sw
+        _cli = _BFC_sw(acc_a.api_key, acc_a.api_secret,
+                       proxy_url=_bpu_sw(acc_a.proxy_config))
+        _RECON_BN_CLIENTS[acc_a.account_id] = _cli
+    try:
+        open_orders = await asyncio.wait_for(_cli.get_open_orders(symbol=sym_a), timeout=8.0)
+    except Exception:
+        return
+    own = [o for o in (open_orders or []) if str(o.get("clientOrderId", "")).startswith("s-")]
+    if _running and own:
+        # 场景②: 只清"超龄且无人监控"的悬挂孤儿, 正被监控协程盯着的在途单绝不碰
+        try:
+            from app.tasks.broadcast_tasks import _order_fill_events as _evt_sw
+        except Exception:
+            _evt_sw = {}
+        _now_ms = _t.time() * 1000.0
+        own = [o for o in own
+               if (_now_ms - float(o.get("time", _now_ms) or _now_ms)) > 90_000.0
+               and o.get("orderId") not in _evt_sw
+               and str(o.get("orderId")) not in _evt_sw]
+    if not own:
+        return
+    ok = 0
+    for od in own:
+        try:
+            await asyncio.wait_for(_cli.cancel_order(sym_a, od["orderId"]), timeout=5.0)
+            ok += 1
+        except Exception:
+            pass
+    if _running:
+        _qty_sw = sum(float(o.get("origQty", 0) or 0) for o in own)
+        logger.error(
+            f"[GOLD_RECON] 悬挂孤儿挂单清扫(运行中): user={uid} pair={pc} 发现{len(own)}笔超龄(>90s)"
+            f"且无监控协程的s-挂单(合计{_qty_sw:g}), 已撤{ok}笔 — 成因通常为25s总超时cancel监控协程, "
+            f"若频繁出现请查执行耗时/REST阻塞")
+        # 推送告警(复用单腿告警通道, 事件真相是"悬挂孤儿已自动撤", 不是已成交单腿)
+        try:
+            from types import SimpleNamespace as _NS_sw
+            _shim_sw = _NS_sw(user_id=str(uid), pair_code=pc)
+            await asyncio.wait_for(ContinuousStrategyExecutor._send_single_leg_alert(_shim_sw,
+                strategy_type='reverse_opening',
+                exec_result={'single_leg_details': {
+                    'binance_filled': 0, 'bybit_filled': 0,
+                    'unfilled_qty': round(_qty_sw, 4),
+                    'error': f'悬挂孤儿挂单x{len(own)}已自动撤{ok}笔(挂龄>90s无监控协程)',
+                    'trigger': 'ORPHAN_ORDER_SWEEP',
+                    'verification_method': 'orphan_order_sweep',
+                }}), timeout=15.0)
+        except Exception as _ae_sw:
+            logger.warning(f"[GOLD_RECON] 悬挂孤儿告警发送失败: {_ae_sw}")
+    else:
+        logger.error(
+            f"[GOLD_RECON] 孤儿挂单清扫: user={uid} pair={pc} 无运行中策略但A侧残留{len(own)}笔s-策略挂单, "
+            f"已撤{ok}笔 — 残留挂单成交即历史单腿事故根源, 若持续出现请检查策略停止流程")
+
+
+async def _recon_binance_net(acc_a, sym_a):
+    """A腿带号净持仓(A单位)。客户端按account_id模块级复用(防SSL重建)。"""
+    _cli = _RECON_BN_CLIENTS.get(acc_a.account_id)
+    if _cli is None:
+        from app.services.binance_client import BinanceFuturesClient as _BFC_rc2
+        from app.core.proxy_utils import build_proxy_url as _bpu_rc2
+        _cli = _BFC_rc2(acc_a.api_key, acc_a.api_secret,
+                        proxy_url=_bpu_rc2(acc_a.proxy_config))
+        _RECON_BN_CLIENTS[acc_a.account_id] = _cli
+    _pos = await asyncio.wait_for(_cli.get_position_risk(symbol=sym_a), timeout=8.0)
+    return sum(float(p.get('positionAmt', 0)) for p in _pos)
+
+
+async def _recon_mt5_net_units(acc_b, sym_b, conv):
+    """B腿带号净持仓(折A单位)。桥查询失败返回None(绝不拿0误报)。"""
+    from app.models.mt5_client import MT5Client as _MC_rc2
+    from app.core.database import AsyncSessionLocal as _ASL_rc2
+    from sqlalchemy import select as _sel_rc2
+    import httpx as _hx_rc2
+    import os as _os_rc2
+    async with _ASL_rc2() as _db:
+        _mc = (await _db.execute(
+            _sel_rc2(_MC_rc2)
+            .where(_MC_rc2.account_id == acc_b.account_id)
+            .where(_MC_rc2.is_active == True)
+            .where(_MC_rc2.is_system_service == False)
+            .order_by(_MC_rc2.priority).limit(1)
+        )).scalar_one_or_none()
+    if not _mc:
+        return None
+    _bridge = _mc.bridge_url or f"http://172.31.14.113:{_mc.bridge_service_port}"
+    _key = _os_rc2.getenv("MT5_API_KEY", "")
+    _hdr = {"X-Api-Key": _key} if _key else {}
+    async with _hx_rc2.AsyncClient(timeout=3.0) as _hc:
+        _r = await _hc.get(f"{_bridge}/mt5/positions", headers=_hdr)
+        if _r.status_code != 200:
+            return None
+        _body = _r.json()
+        _pl = _body if isinstance(_body, list) else _body.get("positions", [])
+    m_net_lot = sum((1.0 if int(p.get("type", 0)) == 0 else -1.0) * abs(float(p.get("volume", 0)))
+                    for p in _pl if p.get("symbol", "") == sym_b)
+    return m_net_lot * float(conv or 0)
+
+
+async def _sibling_binance_net(uid, pair_code, sym_b):
+    """20260708 共享B品种组口径: 同用户其它共享同一MT5品种(等conv)交易对的A腿净合计。
+    供成交后Phase2并入, 防把姊妹对(ICXAU↔PAXG共用XAUUSD)的对冲腿当成本对裸敞口。
+    复用 _recon_targets 缓存的账户凭证与客户端。"""
+    _sa_self, _sb_self, _cv_self = _get_pair_config(pair_code)
+    total = 0.0
+    targets = await _recon_targets()
+    seen = set()
+    for t_uid, t_pc, t_acc_a, t_acc_b, t_hm in targets:
+        if str(t_uid) != str(uid) or t_pc == pair_code:
+            continue
+        t_sa, t_sb, t_cv = _get_pair_config(t_pc)
+        if t_sb != sym_b or not t_sa:
+            continue
+        if abs(float(t_cv or 0) - float(_cv_self or 0)) > 1e-9:
+            continue  # conv不一致无法合并(周期对账会对该组警示)
+        k = (t_acc_a.account_id, t_sa)
+        if k in seen:
+            continue
+        seen.add(k)
+        total += await _recon_binance_net(t_acc_a, t_sa)
+    return total
+
+
+async def _gold_net_recon_loop():
+    """45s周期黄金净敞口对账。只读+告警, 永不干预交易。"""
+    logger.info("[GOLD_RECON] periodic net-exposure reconciler started")
+    while True:
+        try:
+            await asyncio.sleep(_RECON_INTERVAL_S)
+            flt = _load_single_leg_filter()
+            if not flt.get("enabled", True):
+                continue
+            gold_abs = float(flt.get("gold_abs_gap_xau", 0.6))
+            gold_pct = float(flt.get("gold_pct_gap", 0.05))
+            targets = await _recon_targets()
+            # ── 20260708 共享B品种组合口径 ──────────────────────────────────
+            # 同一(用户,对冲账户,MT5品种)可被多个交易对共享(ICXAU/PAXG共用IC XAUUSD),
+            # 按对分账会把共享对冲腿双重计入 → 交叉误报并诱导用户拆掉健康对冲
+            # (0708实证: PAXG成交→"ICXAU单腿"误报→用户平共享腿→PAXG真裸奔→乒乓)。
+            # 组口径: 组净敞口 = Σ成员对A腿净 + 共享MT5净×conv(组内conv必须一致,
+            # 不一致跳过并警示); 告警标签=成员对拼接, 冷却/两周期确认按组键。
+            _groups = {}
+            _seen_member = set()
+            for uid, pc, acc_a, acc_b, hmult in targets:
+                if hmult != 1.0:
+                    continue  # 放大对冲模式天然净敞口, 不适用
+                _mk = (str(uid), acc_a.account_id, acc_b.account_id, pc)
+                if _mk in _seen_member:
+                    continue
+                _seen_member.add(_mk)
+                _sa_g, _sb_g, _cv_g = _get_pair_config(pc)
+                if not _sa_g or not _sb_g:
+                    continue
+                _groups.setdefault((str(uid), acc_b.account_id, _sb_g), []).append(
+                    (pc, acc_a, acc_b, _sa_g, float(_cv_g or 0)))
+            _seen_grp_acc = set()
+            for (_uid_g, _accb_id, _sb_g), _members in _groups.items():
+                # 共享账户去重(关联用户绑同套账户): 同(B账户,B品种,A账户集)只查/报一次
+                _acc_sig = (_accb_id, _sb_g, tuple(sorted({m[1].account_id for m in _members})))
+                if _acc_sig in _seen_grp_acc:
+                    continue
+                _seen_grp_acc.add(_acc_sig)
+                # 孤儿挂单清扫(全品种, 300s节流, 只撤s-单) — 与净敞口检查互相独立
+                for _pc_m, _acc_a_m, _accb_m, _sa_m, _cv_m in _members:
+                    try:
+                        await _sweep_orphan_orders(_uid_g, _pc_m, _acc_a_m)
+                    except Exception:
+                        pass
+                _convs = {round(m[4], 9) for m in _members}
+                if len(_convs) != 1 or 0.0 in _convs:
+                    logger.warning(
+                        f"[GOLD_RECON] 组内换算系数不一致或为0, 跳过组 {_sb_g}: "
+                        f"{[(m[0], m[4]) for m in _members]}")
+                    continue
+                _conv_grp = _members[0][4]
+                uid = _uid_g
+                pc = "+".join(sorted(m[0] for m in _members))  # 告警标签(多成员拼接)
+                tkey = f"{_uid_g}:{_accb_id}:{_sb_g}"
+                # A腿净: 组内按(A账户,A品种)去重求和; 任一查询失败整组跳过(绝不拿0误报)
+                b_net = 0.0
+                _a_ok = True
+                _seen_asym = set()
+                for _pc_m, _acc_a_m, _accb_m, _sa_m, _cv_m in _members:
+                    _ak = (_acc_a_m.account_id, _sa_m)
+                    if _ak in _seen_asym:
+                        continue
+                    _seen_asym.add(_ak)
+                    try:
+                        b_net += await _recon_binance_net(_acc_a_m, _sa_m)
+                    except Exception:
+                        _a_ok = False
+                        break
+                if not _a_ok:
+                    continue
+                try:
+                    m_net_xau = await _recon_mt5_net_units(_members[0][2], _sb_g, _conv_grp)
+                except Exception:
+                    continue
+                if m_net_xau is None:
+                    continue
+                net = b_net + m_net_xau
+                base = max(abs(b_net), abs(m_net_xau))
+                # 金族沿用配置阈值(0.6/5%), 其它绝对地板=conv×0.01; 族别按共享B品种判
+                _is_gold_rc = 'XAU' in _sb_g.upper()
+                _abs_thr = gold_abs if _is_gold_rc else max(_conv_grp * 0.01, 1e-9)
+                trig = None
+                if _abs_thr > 0 and abs(net) > _abs_thr:
+                    trig = 'GOLD_RECON_ABS' if _is_gold_rc else 'RECON_ABS'
+                elif gold_pct > 0 and base > 0 and abs(net) > base * gold_pct:
+                    trig = 'GOLD_RECON_PCT' if _is_gold_rc else 'RECON_PCT'
+                if not trig:
+                    _RECON_PENDING.pop(tkey, None)
+                    continue
+                _now = asyncio.get_event_loop().time()
+                # 瞬时抑制(20260707b): A腿成交→B腿taker相隔1~2s, 单周期采样会把在途
+                # 对冲抓成越限(cq001实证: 采样恰逢开仓半程报+10, 下一笔B腿即对平)。
+                # 连续两个周期(≈90s)都越限才告警 — 真实站立缺口必然连续越限,
+                # 代价仅为45s检出延迟; 在途瞬时敞口下周期已对平自动消失。
+                _prev_pend = _RECON_PENDING.get(tkey, 0.0)
+                _RECON_PENDING[tkey] = _now
+                if _now - _prev_pend > _RECON_INTERVAL_S * 3:
+                    continue  # 首次越限(或距上次越限过久): 挂起待下周期复核
+                if _now - _RECON_LAST_ALERT.get(tkey, 0.0) < _RECON_COOLDOWN_S:
+                    continue
+                _RECON_LAST_ALERT[tkey] = _now
+                logger.error(
+                    f"[GOLD_RECON] 净敞口越限({trig}): user={uid} pair={pc} "
+                    f"净敞口={net:+.4f} XAU (币安净={b_net:+.4f}, MT5净={m_net_xau:+.4f}; "
+                    f"abs阈={gold_abs}, pct阈={gold_pct:.0%})"
+                )
+                # shim复用执行器告警方法(该方法仅读self.user_id/self.pair_code);
+                # 方向标签按净敞口符号取语境, 文案主体是两腿实盘/净敞口数字
+                from types import SimpleNamespace as _NS_a
+                _shim = _NS_a(user_id=str(uid), pair_code=pc)
+                _st = 'forward_opening' if net >= 0 else 'reverse_opening'
+                try:
+                    await asyncio.wait_for(ContinuousStrategyExecutor._send_single_leg_alert(_shim,
+                        strategy_type=_st,
+                        exec_result={'single_leg_details': {
+                            'binance_filled': 0, 'bybit_filled': 0,
+                            'unfilled_qty': round(net, 4),
+                            'position_gap': round(abs(net), 4),
+                            'post_binance': round(b_net, 4),
+                            'post_bybit': round(m_net_xau, 4),
+                            'net_exposure': round(net, 4),
+                            'trigger': trig,
+                            'verification_method': 'gold_periodic_recon',
+                        }}), timeout=15.0)
+                except Exception as _ae:
+                    logger.warning(f"[GOLD_RECON] alert send failed: {_ae}")
+        except asyncio.CancelledError:
+            raise
+        except Exception as _le:
+            logger.warning(f"[GOLD_RECON] loop error: {_le}")
 
 
 @dataclass
@@ -349,7 +782,8 @@ class ContinuousStrategyExecutor:
             pass
         self.user_id = user_id
         self._bybit_account = bybit_account
-        self._binance_account = binance_account  # stored for position snapshot
+        self._binance_account = binance_account
+        _recon_register(self)  # 黄金净敞口周期对账注册(独立协程, 不碰下单/对冲路径)  # stored for position snapshot
         await self._init_redis()
         self._active_key = self._make_active_key('reverse_opening')
 
@@ -483,7 +917,9 @@ class ContinuousStrategyExecutor:
                     if _mins_i <= _HARD_MIN_i:
                         logger.info(f"[ladder={ladder_idx}][MT5收盘] 距收盘 {_mins_i:.1f} 分钟 <= {_HARD_MIN_i}，内层硬停 {strategy_type}")
                         _do_stop = True
-                    elif _mins_i <= _SOFT_MIN_i and (_sm_i is not None and _sm_i > _SOFT_MIN_i):
+                    # 20260708: 豁免线+2分钟宽限 — 0708事故: 用户软停后20:44:36重启,
+                    # 距收盘15.4min比15min豁免线早24秒, 被判'非手动重启'36秒击杀。
+                    elif _mins_i <= _SOFT_MIN_i and (_sm_i is not None and _sm_i > _SOFT_MIN_i + 2.0):
                         logger.info(f"[ladder={ladder_idx}][MT5收盘] 距收盘 {_mins_i:.1f} 分钟 <= {_SOFT_MIN_i}，内层软停 {strategy_type}（启动时={_sm_i:.1f}分钟）")
                         _do_stop = True
                     if _do_stop:
@@ -873,6 +1309,10 @@ class ContinuousStrategyExecutor:
                 # 超时抛 asyncio.TimeoutError → 被下方 except Exception 接住 →
                 # 走 HALT 分支干净退出本阶梯循环(而非无限挂死拖垮全部策略)。
                 # 退出后由重启自恢复/下次触发周期带新配置重新评估。
+                # 20260716: 截止时刻(exec_deadline)传入执行链 — 下单前预算护栏
+                # (order_executor_v2._budget_guard_result): 剩余预算不足一轮监控
+                # 就不再挂单干净返回, 避免"下单数秒后被本总超时cancel成孤儿挂单"。
+                _exec_deadline = asyncio.get_event_loop().time() + 25.0
                 exec_result = await asyncio.wait_for(
                     self._execute_order(
                         strategy_type,
@@ -882,13 +1322,36 @@ class ContinuousStrategyExecutor:
                         binance_price,
                         bybit_price,
                         spread_threshold,
+                        exec_deadline=_exec_deadline,
                     ),
                     timeout=25.0,
                 )
-            except Exception as e:
-                logger.error(f"[ladder={ladder_idx}] CRITICAL: Exception executing order: {e}", exc_info=True)
-                # SAFETY: Exception after A-side fill = unhedged position.
-                # Cancel any open orders, send emergency alert, and HALT (never continue).
+            except BaseException as e:
+                # 20260706: Exception→BaseException — HB看门狗强杀/停机发出的 CancelledError
+                # 也要走安全网(先告警后撤单), 否则在途挂单成孤儿且零提醒(cq002 0706 01:37
+                # 事故: 25s总超时cancel监控协程但币安挂单未撤→20 XAU无人对冲成交)。
+                # 处理完毕后 CancelledError 原样回抛, 保证强杀/停机最终落地。
+                if isinstance(e, GeneratorExit):
+                    raise
+                logger.error(f"[ladder={ladder_idx}] CRITICAL: Exception executing order: {e!r}", exc_info=True)
+                # SAFETY重排(20260706): ①先告警 — 分离task发送(走Redis纯内存不依赖代理),
+                # 即使本任务随后被强制cancel也带不走它。旧顺序先清理后告警:
+                # get_open_orders无超时卡死在阻塞代理上61s→看门狗强杀(CancelledError越过
+                # except Exception)→告警代码永远没执行→单腿零提醒。
+                try:
+                    asyncio.create_task(self._send_single_leg_alert(
+                        strategy_type=strategy_type,
+                        exec_result={"single_leg_details": {
+                            "binance_filled": order_qty, "bybit_filled": 0,
+                            "unfilled_qty": order_qty,
+                            "error": f"execution exception: {e!r}"
+                        }}
+                    ))
+                except Exception:
+                    pass
+                # ②再清理: 撤掉本策略在途挂单防孤儿成交。每个远程调用独立短超时(不再
+                # 裸奔在阻塞代理上); 若本任务正在被cancel, 首个await即抛CancelledError→
+                # 跳过清理回抛(孤儿风险由45s周期对账 GOLD_RECON 兜底)。
                 try:
                     sym_a_err, _, _ = _get_pair_config(self.pair_code)
                     from app.core.proxy_utils import build_proxy_url as _bpu_err
@@ -896,7 +1359,8 @@ class ContinuousStrategyExecutor:
                         from app.services.binance_client import BinanceFuturesClient as _BFC_err
                         _err_client = _BFC_err(binance_account.api_key, binance_account.api_secret,
                                                proxy_url=_bpu_err(binance_account.proxy_config))
-                        _err_open = await _err_client.get_open_orders(symbol=sym_a_err)
+                        _err_open = await asyncio.wait_for(
+                            _err_client.get_open_orders(symbol=sym_a_err), timeout=8.0)
                         # POST-CRASH SAFETY: even in panic cleanup, do NOT cancel manual
                         # emergency orders ("m-"). User considers them sacred — only
                         # explicit Cancel-All button may remove them.
@@ -905,27 +1369,21 @@ class ContinuousStrategyExecutor:
                             _err_kept = len(_err_open) - len(_err_own)
                             for _eo in _err_own:
                                 try:
-                                    await _err_client.cancel_order(sym_a_err, _eo["orderId"])
+                                    await asyncio.wait_for(
+                                        _err_client.cancel_order(sym_a_err, _eo["orderId"]), timeout=5.0)
                                 except Exception:
                                     pass
                             logger.warning(
                                 f"[ladder={ladder_idx}] Post-crash cleanup: cancelled {len(_err_own)} OWN strategy orders, "
                                 f"kept {_err_kept} manual orders"
                             )
-                        await _err_client.close()
-                except Exception as _cleanup_err:
-                    logger.error(f"[ladder={ladder_idx}] Crash cleanup failed: {_cleanup_err}")
-                try:
-                    await self._send_single_leg_alert(
-                        strategy_type=strategy_type,
-                        exec_result={"single_leg_details": {
-                            "binance_filled": order_qty, "bybit_filled": 0,
-                            "unfilled_qty": order_qty,
-                            "error": f"execution exception: {e}"
-                        }}
-                    )
-                except Exception:
-                    pass
+                        await asyncio.wait_for(_err_client.close(), timeout=3.0)
+                except BaseException as _cleanup_err:
+                    logger.error(f"[ladder={ladder_idx}] Crash cleanup failed: {_cleanup_err!r}")
+                    if isinstance(_cleanup_err, asyncio.CancelledError):
+                        raise
+                if isinstance(e, asyncio.CancelledError):
+                    raise
                 logger.error(f"[ladder={ladder_idx}] HALTING ladder loop after execution exception to prevent cascading single-leg")
                 return {
                     "success": False,
@@ -1725,7 +2183,8 @@ class ContinuousStrategyExecutor:
                 elif _mins <= _SOFT_MIN:
                     # 软停：仅当本策略在进入15分钟窗口前就已运行（启动时>15分钟）
                     # 启动时已在窗口内的（手动重启）不软停，继续运行至硬停
-                    if _start_mins is not None and _start_mins > _SOFT_MIN:
+                    # 20260708: 豁免线+2分钟宽限(与内层闸一致, 见0708 NG事故)
+                    if _start_mins is not None and _start_mins > _SOFT_MIN + 2.0:
                         logger.info(
                             f"[V2][MT5收盘] 距收盘 {_mins:.1f} 分钟 <= {_SOFT_MIN}，软停 {strategy_type}"
                             f"（启动时={_start_mins:.1f}分钟，可手动重启运行至收盘前{_HARD_MIN}分钟）"
@@ -1924,9 +2383,49 @@ class ContinuousStrategyExecutor:
                 await self._sleep_or_stop(2.0)
                 continue
 
+        # 20260708 退出即撤单: 一切温和退出路径(软停/硬停/休市/停按钮/目标达成)统一
+        # 先撤本策略A侧在途s-挂单再收尾 — 三次事故同根: 执行器死亡而挂单存活, 被行情
+        # 打成交时无人对冲(0706停按钮遗留/0706崩溃强杀/0708软停击杀重启实例)。
+        # 崩溃路径由 _execute_ladder 的 BaseException 安全网负责, 此处覆盖温和路径。
+        try:
+            await asyncio.wait_for(
+                self._cancel_own_orders_on_exit(binance_account, strategy_type), timeout=20.0)
+        except Exception as _coe:
+            logger.warning(f"[V2] exit-cancel own orders failed: {_coe}")
         logger.info(f"[V2] Execution loop ended: is_running={self.is_running} stop_req={self.stop_requested}")
         await self._push_stop_confirmed(strategy_type)
         return {'success': True, 'message': 'Execution completed'}
+
+    async def _cancel_own_orders_on_exit(self, binance_account, strategy_type):
+        """退出收尾: 撤掉A侧本策略(s-前缀)在途挂单; m-手动单神圣不动(既有约定)。
+        注: 同对另一方向策略若仍在跑, 其在途maker也可能被一并撤掉 — 其监控会读到
+        CANCELED(0成交)按"未成交重挂"正常续跑, 仅一次重挂的代价, 换孤儿单绝迹。"""
+        if getattr(binance_account, 'platform_id', None) != 1:
+            return
+        sym_a_x, _, _ = _get_pair_config(self.pair_code)
+        from app.services.binance_client import BinanceFuturesClient as _BFC_x
+        from app.core.proxy_utils import build_proxy_url as _bpu_x
+        _cli = _BFC_x(binance_account.api_key, binance_account.api_secret,
+                      proxy_url=_bpu_x(binance_account.proxy_config))
+        try:
+            _open = await asyncio.wait_for(_cli.get_open_orders(symbol=sym_a_x), timeout=8.0)
+            _own = [o for o in (_open or []) if str(o.get("clientOrderId", "")).startswith("s-")]
+            _ok = 0
+            for _od in _own:
+                try:
+                    await asyncio.wait_for(_cli.cancel_order(sym_a_x, _od["orderId"]), timeout=5.0)
+                    _ok += 1
+                except Exception:
+                    pass
+            if _own:
+                logger.warning(
+                    f"[V2] 退出撤单({strategy_type}/{self.pair_code}): 撤掉{_ok}/{len(_own)}笔"
+                    f"本策略在途挂单(防执行器退出后挂单被成交无人对冲)")
+        finally:
+            try:
+                await asyncio.wait_for(_cli.close(), timeout=3.0)
+            except Exception:
+                pass
 
     async def _reconcile_ledger_if_flat(self, binance_account, strategy_type, live_pos):
         # 实仓为0时自动对账: 清空陈旧开仓账本。force_fresh REST 复核防WS瞬时假0; 持续>=20s; 60s节流。
@@ -2253,6 +2752,7 @@ class ContinuousStrategyExecutor:
         binance_price: float,
         bybit_price: float,
         spread_threshold: float = None,
+        exec_deadline: float = None,
     ) -> Dict:
         """Execute order based on strategy type"""
         # ── GATEWAY GUARD ──
@@ -2280,6 +2780,7 @@ class ContinuousStrategyExecutor:
                 pair_code=self.pair_code,
                 hedge_multiplier=self.hedge_multiplier,
                 accumulated_unhedged_xau=getattr(self, '_unhedged_binance_xau', 0.0),
+                exec_deadline=exec_deadline,
             )
         elif strategy_type == 'reverse_closing':
             return await self.order_executor.execute_reverse_closing(
@@ -2291,6 +2792,7 @@ class ContinuousStrategyExecutor:
                 spread_threshold=spread_threshold,
                 pair_code=self.pair_code,
                 hedge_multiplier=self.hedge_multiplier,
+                exec_deadline=exec_deadline,
             )
         elif strategy_type == 'forward_opening':
             return await self.order_executor.execute_forward_opening(
@@ -2303,6 +2805,7 @@ class ContinuousStrategyExecutor:
                 pair_code=self.pair_code,
                 hedge_multiplier=self.hedge_multiplier,
                 accumulated_unhedged_xau=getattr(self, '_unhedged_binance_xau', 0.0),
+                exec_deadline=exec_deadline,
             )
         elif strategy_type == 'forward_closing':
             return await self.order_executor.execute_forward_closing(
@@ -2314,6 +2817,7 @@ class ContinuousStrategyExecutor:
                 spread_threshold=spread_threshold,
                 pair_code=self.pair_code,
                 hedge_multiplier=self.hedge_multiplier,
+                exec_deadline=exec_deadline,
             )
         else:
             raise ValueError(f"Unknown strategy type: {strategy_type}")
@@ -2678,8 +3182,11 @@ class ContinuousStrategyExecutor:
                 binance_positions = await asyncio.wait_for(
                     binance_account.binance_client.get_position_risk(symbol=sym_a), timeout=8.0)  # 代理卡住防挂死
                 post_binance_qty = sum(abs(float(pos.get('positionAmt', 0))) for pos in binance_positions)
+                post_binance_net = sum(float(pos.get('positionAmt', 0)) for pos in binance_positions)
 
                 bybit_qty_lot = 0.0
+                bybit_net_lot = 0.0
+                _mt5_ok = False
                 try:
                     from app.models.mt5_client import MT5Client as MT5ClientModel
                     from app.core.database import AsyncSessionLocal
@@ -2706,9 +3213,16 @@ class ContinuousStrategyExecutor:
                                     for p in _pos2
                                     if p.get("symbol", "") == sym_b
                                 )
+                                bybit_net_lot = sum(
+                                    (1.0 if int(p.get("type", 0)) == 0 else -1.0) * abs(float(p.get("volume", 0)))
+                                    for p in _pos2
+                                    if p.get("symbol", "") == sym_b
+                                )
+                                _mt5_ok = True
                 except Exception as _bridge_err2:
                     logger.warning(f"[SINGLE_LEG_CHECK] Phase2 bridge query failed: {_bridge_err2}")
                 post_bybit_qty_xau = bybit_qty_lot * conv_factor
+                post_bybit_net_xau = bybit_net_lot * conv_factor
 
                 position_gap = abs(post_binance_qty - post_bybit_qty_xau)
 
@@ -2728,7 +3242,43 @@ class ContinuousStrategyExecutor:
                 _sl_enabled = _sl_flt.get("enabled", True)
                 _min_gap = _sl_flt.get("min_gap_xau", 10.0) if _sl_enabled else 0.0
                 _gap_tol = max(binance_filled * 0.5, conv_factor * 0.02, _min_gap)
-                if position_gap <= _gap_tol:
+                # ── 黄金专属告警地板(2026-07-06) ────────────────────────────
+                # 需求: XAU品种 净敞口>gold_abs_gap_xau(0.6 XAU) 或 >两腿较大净仓×
+                # gold_pct_gap(5%) 即弹框+飞书(其它品种以后另调, 暂不启用)。
+                # 判定用【有向净敞口】=币安带号持仓+MT5带号持仓(多=+/空=−), 而非两腿
+                # abs之差: abs口径会把MT5同品种多空双计数成20~41 XAU虚假站立偏移
+                # (6/25完全成交误弹框的根子), 净口径下完全对冲≈0不误报、真裸敞口
+                # (如币安多29.8 vs MT5空31 → 净−1.2)如实暴露。触发时绕过通用min_gap
+                # 静默区与delta站立偏移抑制; 重复告警由发送层冷却/去重兜底。
+                # 护栏: 仅桥查询成功(_mt5_ok)且1:1对冲(hedge_multiplier==1)时判定,
+                # 防桥瞬断把对冲腿当0误报、防放大对冲模式天然净敞口误报。
+                _gold_trigger = None
+                # 20260708: 金族判定改看A或B品种(PAXG的A腿PAXGUSDT不含XAU但对冲XAUUSD)
+                if (_sl_enabled and ('XAU' in (sym_a or '').upper() or 'XAU' in (sym_b or '').upper()) and _mt5_ok
+                        and float(getattr(self, 'hedge_multiplier', 1.0) or 1.0) == 1.0):
+                    _gold_abs = float(_sl_flt.get("gold_abs_gap_xau", 0.6))
+                    _gold_pct = float(_sl_flt.get("gold_pct_gap", 0.05))
+                    # 20260708 共享B品种组口径: 并入同用户共享同一MT5品种的姊妹对A腿净,
+                    # 防把姊妹对(ICXAU↔PAXG共用XAUUSD)的对冲腿当成本对裸敞口(交叉误报)。
+                    _sib_net = 0.0
+                    try:
+                        _sib_net = await asyncio.wait_for(
+                            _sibling_binance_net(self.user_id, self.pair_code, sym_b), timeout=10.0)
+                    except Exception:
+                        _sib_net = 0.0
+                    _net_exposure = post_binance_net + _sib_net + post_bybit_net_xau
+                    _net_base = max(abs(post_binance_net + _sib_net), abs(post_bybit_net_xau))
+                    if _gold_abs > 0 and abs(_net_exposure) > _gold_abs:
+                        _gold_trigger = 'GOLD_ABS'
+                    elif _gold_pct > 0 and _net_base > 0 and abs(_net_exposure) > _net_base * _gold_pct:
+                        _gold_trigger = 'GOLD_PCT'
+                    if _gold_trigger:
+                        logger.warning(
+                            f"[SINGLE_LEG_CHECK] 黄金地板触发({_gold_trigger}): "
+                            f"净敞口={_net_exposure:+.4f} XAU (币安净={post_binance_net:+.4f}, "
+                            f"MT5净={post_bybit_net_xau:+.4f}; abs阈={_gold_abs}, pct阈={_gold_pct:.0%})"
+                        )
+                if _gold_trigger is None and position_gap <= _gap_tol:
                     logger.info(
                         f"[SINGLE_LEG_CHECK] Phase2 RESOLVED: gap={position_gap:.4f} "
                         f"<= threshold={_gap_tol:.4f} (min_gap_xau={_min_gap:.2f}), no alert"
@@ -2771,7 +3321,7 @@ class ContinuousStrategyExecutor:
                             await self._redis.set(_base_key, f"{signed_imb:.4f}", ex=86400)
                     except Exception:
                         pass
-                    if not (_is_hard or _is_new_naked):
+                    if _gold_trigger is None and not (_is_hard or _is_new_naked):
                         logger.info(
                             f"[SINGLE_LEG_CHECK] Phase2 SUPPRESSED(站立偏移非新敞口): "
                             f"gap={position_gap:.4f} signed_imb={signed_imb:.4f} "
@@ -2779,7 +3329,7 @@ class ContinuousStrategyExecutor:
                             f"(delta_gap={_delta_gap} hard_gap={_hard_gap}) — 不告警"
                         )
                         return
-                    _trigger = 'HARD' if _is_hard else 'DELTA'
+                    _trigger = _gold_trigger or ('HARD' if _is_hard else 'DELTA')
 
                 logger.error(
                     f"[SINGLE_LEG_CHECK] Phase2 CONFIRMED SINGLE-LEG: "
@@ -2796,6 +3346,8 @@ class ContinuousStrategyExecutor:
                     'position_gap': position_gap,
                     'post_binance': post_binance_qty,
                     'post_bybit': post_bybit_qty_xau,
+                    'trigger': _trigger,
+                    'net_exposure': (post_binance_net + post_bybit_net_xau) if _mt5_ok else None,
                     'verification_method': 'exec_result_phase2'
                 }
                 await self._send_single_leg_alert(
@@ -2933,6 +3485,15 @@ class ContinuousStrategyExecutor:
             # 多交易对(2026-07-04): 文案+payload 带品种, 前端去重键按 pair 隔离、用户一眼看清哪个品种
             _pair_label = _single_leg_pair_label(self.pair_code)
             msg = f"【{_pair_label}】{strategy_name} {action}: Binance成交 {details.get('binance_filled', 0)}, Bybit成交 {details.get('bybit_filled', 0)}, 未成交 {details.get('unfilled_qty', 0)}"
+            if details.get('position_gap') is not None:
+                try:
+                    msg += (f", 两腿实盘 币安{float(details.get('post_binance', 0)):.2f}"
+                            f"/MT5 {float(details.get('post_bybit', 0)):.2f}"
+                            f", 缺口{float(details.get('position_gap', 0)):.2f} XAU")
+                    if details.get('net_exposure') is not None:
+                        msg += f", 净敞口{float(details['net_exposure']):+.2f} XAU"
+                except Exception:
+                    pass
             evt = {
                 "user_id": self.user_id,
                 "type": "risk_alert",
@@ -3083,6 +3644,7 @@ class ContinuousStrategyExecutor:
         self.user_id = user_id
         self._bybit_account = bybit_account
         self._binance_account = binance_account
+        _recon_register(self)  # 黄金净敞口周期对账注册(独立协程, 不碰下单/对冲路径)
         await self._init_redis()
         self._active_key = self._make_active_key('forward_opening')
 
@@ -3155,6 +3717,7 @@ class ContinuousStrategyExecutor:
         self.user_id = user_id
         self._bybit_account = bybit_account
         self._binance_account = binance_account
+        _recon_register(self)  # 黄金净敞口周期对账注册(独立协程, 不碰下单/对冲路径)
 
         await self._init_redis()
         self._active_key = self._make_active_key('reverse_closing')
@@ -3229,6 +3792,7 @@ class ContinuousStrategyExecutor:
         self.user_id = user_id
         self._bybit_account = bybit_account
         self._binance_account = binance_account
+        _recon_register(self)  # 黄金净敞口周期对账注册(独立协程, 不碰下单/对冲路径)
 
         await self._init_redis()
         self._active_key = self._make_active_key('forward_closing')
