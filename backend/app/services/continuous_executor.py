@@ -1136,6 +1136,17 @@ class ContinuousStrategyExecutor:
                 await asyncio.sleep(30)
                 continue
 
+            # ── P0-0716 §3.4 平台路由一致性闸: B账户平台 ≠ 对B腿品种平台 → 拦开仓 ──
+            # (cq002/hcz987 BZ实证: 对B腿=IC XBRUSD而绑定B账户=Bybit — 账户绑定
+            # 隐式改路由。60s缓存; 校验失败=硬伤配置, 拦opening并每分钟告警一次)
+            if is_opening:
+                _pm_err = await self._pair_platform_check(bybit_account)
+                if _pm_err is not None:
+                    if loop_count % 12 == 1:
+                        logger.error(f"[ladder={ladder_idx}] PAIR_PLATFORM_MISMATCH 拦开仓: {_pm_err}")
+                    await asyncio.sleep(5)
+                    continue
+
             # ── 内层 MT5 收盘自动停闸(根因修复 2026-06-23) ──────────────────────
             # 收盘软/硬停闸原本只在外层 V2 主循环; 一旦本内层 ladder 持有 active 阶梯,
             # 控制权会 captive 在此反复挂撤 maker, 跨越收盘软停(15min)/硬停(5min)两个时刻
@@ -3054,6 +3065,34 @@ class ContinuousStrategyExecutor:
             else:
                 # Forward closing: Bybit LONG close, use ask for market buy
                 return market_data.bybit_quote.ask_price
+
+    async def _pair_platform_check(self, bybit_account):
+        """P0-0716 §3.4: B账户平台与对B腿品种平台一致性。返回None=通过。
+        60s实例缓存(配置错误不会自愈, 无需高频查)。查不到配置=放行(宁可
+        少拦也不误杀正常对; 真正硬校验由DB和绑定流程保证)。"""
+        import time as _t_pm
+        c = getattr(self, '_pm_cache', None)
+        now = _t_pm.time()
+        if c and now - c[0] < 60.0:
+            return c[1]
+        result = None
+        try:
+            from app.services.hedging_pair_service import hedging_pair_service as _hps_pm
+            _pair = None
+            for p in (_hps_pm.list_active_pairs() or []):
+                if getattr(p, 'pair_code', None) == self.pair_code:
+                    _pair = p
+                    break
+            if _pair is not None and bybit_account is not None:
+                _want = getattr(_pair.symbol_b, 'platform_id', None)
+                _have = getattr(bybit_account, 'platform_id', None)
+                if _want is not None and _have is not None and int(_want) != int(_have):
+                    result = (f"pair={self.pair_code} B腿品种平台={_want} "
+                              f"但绑定B账户平台={_have} (account={bybit_account.account_id})")
+        except Exception:
+            result = None  # 校验器故障不拦交易
+        self._pm_cache = (now, result)
+        return result
 
     async def _quote_gate_check(self):
         """20260716 M1续(V1.1 §10): 开仓前双腿行情新鲜度硬闸。

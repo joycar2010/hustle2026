@@ -124,6 +124,46 @@ def log_fill(execution_id, venue, venue_order_id, fill_qty, avg_price,
          "q": fill_qty, "p": avg_price, "u": qty_unit, "src": source}))
 
 
+_MARKOUT_HORIZONS_MS = (250, 1000, 5000, 30000)
+
+
+def sample_markout(execution_id, venue_order_id, symbol, side, fill_price, fill_qty):
+    """M1c(V1.1 §11.2): A腿成交后按4个时间窗采样mid漂移, 度量maker逆向选择成本。
+    fire-and-forget独立task, 读WS内存价(零REST成本); markout_bps符号约定:
+    正=价格向持仓不利方向移动(SELL后跌/BUY后涨为负收益方向的镜像) — 统一"正=成本"。"""
+    if not _enabled() or not fill_price or fill_price <= 0:
+        return
+
+    async def _sampler():
+        try:
+            from app.services.market_service import market_data_service as _mds
+            t0 = asyncio.get_event_loop().time()
+            for h_ms in _MARKOUT_HORIZONS_MS:
+                delay = h_ms / 1000.0 - (asyncio.get_event_loop().time() - t0)
+                if delay > 0:
+                    await asyncio.sleep(delay)
+                try:
+                    q = await _mds.get_binance_quote(symbol)
+                    mid = (q.bid_price + q.ask_price) / 2.0
+                    spread = q.ask_price - q.bid_price
+                except Exception:
+                    continue  # 行情不可得跳过该窗(不写假值)
+                # SELL: 成交后mid上涨=卖便宜了=成本为正; BUY: mid下跌=买贵了=成本为正
+                drift = (mid - float(fill_price)) / float(fill_price) * 10000.0
+                markout_bps = drift if str(side).upper() == "SELL" else -drift
+                await _exec_sql(
+                    "INSERT INTO fill_markouts (execution_id, venue_order_id, symbol, side,"
+                    " fill_price, fill_qty, horizon_ms, mid_at_horizon, markout_bps, spread_at_horizon)"
+                    " VALUES (:e, :oid, :sym, :sd, :fp, :fq, :h, :mid, :mo, :sp)",
+                    {"e": execution_id, "oid": str(venue_order_id)[:64] if venue_order_id else None,
+                     "sym": symbol, "sd": str(side).upper()[:8], "fp": fill_price, "fq": fill_qty,
+                     "h": h_ms, "mid": mid, "mo": round(markout_bps, 6), "sp": round(spread, 6)})
+        except Exception as e:
+            logger.debug(f"[LEDGER_V2] markout sampler failed: {e!r}")
+
+    _fire(_sampler())
+
+
 def log_event(execution_id, event, detail=None):
     if not _enabled():
         return

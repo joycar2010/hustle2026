@@ -278,6 +278,13 @@ async def lifespan(app: FastAPI):
     except Exception as _rwe:
         logger.error(f'[RECOVERY] failed to start: {_rwe}')
 
+    # P0-0716 §3.2 FeeResolver: 12h同步活动账户×A腿symbol真实费率(只读事实积累)
+    try:
+        from app.services.fee_resolver import ensure_started as _fee_start
+        _fee_start()
+    except Exception as _fee_e:
+        logger.error(f'[FEE_RESOLVER] failed to start: {_fee_e}')
+
     # OpenCLAW agent loop (Shadow mode by default)
     try:
         from app.services.agent import agent_loop as openclaw_loop
@@ -596,6 +603,8 @@ from app.api.v1 import manual_ledger as _mledger
 app.include_router(_mledger.router, prefix="/api/v1/manual-ledger", tags=["ManualLedger"])
 from app.api.v1 import ai_arb_analysis as _aiarb
 app.include_router(_aiarb.router, prefix="/api/v1/ai-arb", tags=["AIArbAnalysis"])
+from app.api.v1 import carry_pnl as _carry
+app.include_router(_carry.router, prefix="/api/v1/carry", tags=["CarryPnL"])
 app.include_router(users.router, prefix="/api/v1/users", tags=["Users"])
 app.include_router(accounts.router, prefix="/api/v1/accounts", tags=["Accounts"])
 app.include_router(strategies.router, prefix="/api/v1/strategies", tags=["Strategies"])

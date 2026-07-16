@@ -1842,10 +1842,14 @@ class OrderExecutorV2:
         st["final"] = final_filled
         st["stop"] = True
         if inflight is not None and final_filled and final_filled > 0:
-            try:  # M1 事实层: A腿最终成交落库(shadow)
+            try:  # M1 事实层: A腿最终成交落库(shadow) + M1c markout采样
                 from app.services import execution_ledger as _ledger_af
                 _ledger_af.log_fill(inflight.get("execution_id"), 'binance',
                                     binance_order_id, final_filled, binance_avg, 'A', 'monitor')
+                _side_mo = "SELL" if strategy_type in ("reverse_opening", "forward_closing") else "BUY"
+                if binance_avg and binance_avg > 0:
+                    _ledger_af.sample_markout(inflight.get("execution_id"), binance_order_id,
+                                              sym_a, _side_mo, binance_avg, final_filled)
             except Exception:
                 pass
         try:
