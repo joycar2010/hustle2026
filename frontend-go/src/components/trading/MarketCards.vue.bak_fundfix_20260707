@@ -655,9 +655,13 @@ let bybitSwapRateTimer = null
 // WS-pushed market rates (10s interval from MarketRateStreamer)
 watch(() => marketStore.marketRates, (rates) => {
   if (!rates) return
-  // 20260707: 不再消费 WS 广播的 funding — 后端 MarketRateStreamer 只推 XAUUSDT
-  // 单一品种, 在 ICXAG/CL/BZ/NG 页面每10s把按对REST取到的资金费覆盖成黄金的值。
-  // funding 唯一源 = fetchBinanceFundingRate(带pair_code, 60s轮询+切对即刷)。
+  if (rates.funding) {
+    binanceLongFundingRate.value = rates.funding.long_cost_per_lot ?? 0
+    binanceShortFundingRate.value = rates.funding.short_cost_per_lot ?? 0
+    binanceFundingRatePct.value = rates.funding.funding_rate_pct ?? 0
+    binanceNextFundingTime.value = rates.funding.next_funding_time ?? 0
+    binanceMarkPrice.value = rates.funding.mark_price ?? 0
+  }
   // 20260706: 不再消费 WS 广播的 swap — 它是全站单一值(后端硬编码8001桥XAUUSD+
   // = XAU对的broker), 在 ICXAU 等其它对上每10s把按对REST轮询到的正确过夜费覆盖成
   // 别家broker的值(显示-0.79/+0.27而非IC的-0.56/+0.39)。swap 唯一源 =
@@ -665,11 +669,9 @@ watch(() => marketStore.marketRates, (rates) => {
 }, { deep: true })
 
 // 主账户资金费 = 持仓量(XAU) / 100 * cost_per_lot
-// 资金费合计(20260707修): binanceXxxTotal单位=A腿单位(盎司/桶/MMBtu),
-// long_cost_per_lot实际=每1个A腿单位的费用(fr×mark) → 原公式÷100全品种小100倍。
 const mainFundingFee = computed(() => {
-  const longFee = binanceLongTotal.value * binanceLongFundingRate.value
-  const shortFee = binanceShortTotal.value * binanceShortFundingRate.value
+  const longFee = (binanceLongTotal.value / 100) * binanceLongFundingRate.value
+  const shortFee = (binanceShortTotal.value / 100) * binanceShortFundingRate.value
   return longFee + shortFee
 })
 

@@ -103,9 +103,9 @@
         <span class="text-[#9ca3af]">{{ rangeStats.startTime }} ~ {{ rangeStats.endTime }}</span>
         <span class="text-[#6b7280]">|</span>
         <span class="text-[#6b7280]">{{ dirLabel }}</span>
-        <span :style="{ color: dirColor }">高 {{ rangeStats.max.toFixed(spreadDecimals) }}</span>
-        <span :style="{ color: dirColor }">低 {{ rangeStats.min.toFixed(spreadDecimals) }}</span>
-        <span class="text-[#e5e7eb]">均 {{ rangeStats.avg.toFixed(spreadDecimals) }}</span>
+        <span :style="{ color: dirColor }">高 {{ rangeStats.max.toFixed(2) }}</span>
+        <span :style="{ color: dirColor }">低 {{ rangeStats.min.toFixed(2) }}</span>
+        <span class="text-[#e5e7eb]">均 {{ rangeStats.avg.toFixed(2) }}</span>
         <span class="text-[#6b7280]">| {{ rangeStats.count }} 点</span>
       </div>
 
@@ -217,11 +217,6 @@ import api from '@/services/api'
 
 // 20260706 多产品对联动: 图表/滑点事件跟随导航栏交易对(事件驱动, 无轮询)
 const { currentPair } = useTradingPair()
-// 点差走势精度按对(20260706): 天然气点差量级小(~0.0x), 3位小数; 其余维持2位。
-const spreadDecimals = computed(() => {
-  const pc = String(currentPair.value || '').toUpperCase()
-  return (pc.startsWith('NG') || pc.includes('XNG') || pc.includes('NATGAS')) ? 3 : 2
-})
 
 // ── 滑点保护事件审计 ───────────────────────────────
 const slipEvents = ref([])
@@ -390,7 +385,6 @@ function initChart() {
     title: dirLabel.value,
     priceLineVisible: false,
     lastValueVisible: true,
-    priceFormat: { type: 'price', precision: spreadDecimals.value, minMove: Math.pow(10, -spreadDecimals.value) },
     // 固定刻度网格：以 computeNiceBounds 的整齐边界作为 Y 轴范围
     autoscaleInfoProvider: () => (
       scaleBounds
@@ -411,7 +405,7 @@ function initChart() {
     }
 
     tooltip.time = bjSecToFull(param.time)
-    tooltip.val = pt.value.toFixed(spreadDecimals.value)
+    tooltip.val = pt.value.toFixed(2)
 
     const chartRect = chartContainer.value.getBoundingClientRect()
     const mouseX = param.point.x
@@ -551,8 +545,6 @@ async function fetchData() {
     fwdData.sort((a, b) => a.time - b.time)
     revData.sort((a, b) => a.time - b.time)
 
-    // 精度随当前对刷新(NG=3位, 其余2位); 图表实例只建一次, 须applyOptions更新
-    if (lineSeries) lineSeries.applyOptions({ priceFormat: { type: 'price', precision: spreadDecimals.value, minMove: Math.pow(10, -spreadDecimals.value) } })
     applyDirection()
   } catch (e) {
     console.error('Fetch spread chart failed:', e)

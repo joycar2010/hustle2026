@@ -376,18 +376,10 @@
                 {{ mt5Infra.bridges?.alive || 0 }}/{{ mt5Infra.bridges?.total || 0 }} 活跃
               </span>
             </div>
-            <div v-if="bootStatus.reachable && bootStatus.progress_pct < 100" class="flex justify-between">
-              <span>启动进度</span>
-              <span class="font-mono" :class="bootStatus.summary?.stuck ? 'text-red-400' : 'text-yellow-400'">{{ bootStatus.progress_pct }}%{{ bootStatus.summary?.stuck ? ' ⚠'+bootStatus.summary.stuck+'卡住' : '' }}</span>
-            </div>
             <div v-if="mt5Infra.bridges?.detail" class="grid grid-cols-2 gap-x-3 gap-y-0.5 mt-1">
               <div v-for="b in mt5Infra.bridges.detail" :key="b.service" class="flex items-center justify-between text-[10px]">
                 <span class="truncate text-text-tertiary" :title="b.service">:{{ b.port }}</span>
-                <div class="flex items-center gap-1">
-                  <span v-if="bootPhaseLabel(b.port)" :class="bootPhase(b.port)?.stuck ? 'text-red-400 font-semibold' : bootPhase(b.port)?.phase==='attaching' ? 'text-yellow-400' : 'text-sky-400'" class="text-[9px]">{{ bootPhaseLabel(b.port) }}</span>
-                  <span v-if="bootPhase(b.port)?.mt5" class="text-green-500 text-[9px]" title="MT5已挂载">✓</span>
-                  <div :class="['w-1.5 h-1.5 rounded-full', bootDotClass(b.port)]" :title="bootPhase(b.port)?.phase || b.state"></div>
-                </div>
+                <div :class="['w-1.5 h-1.5 rounded-full', b.state === 'running' || b.state === 'paused' ? 'bg-green-500' : 'bg-red-500']"></div>
               </div>
             </div>
           </div>
@@ -665,12 +657,6 @@ function fmtQuota(n) { if (n == null) return "--"; if (n >= 1000000) return (n/1
 const dbPool = ref({ active: 0, idle: 0, max: 0 })
 const mt5System = ref({ online: false })
 const mt5Infra = ref({ reachable: false, status: null, uptime_seconds: 0, instances: { running: 0, total: 0 }, bridges: { alive: 0, total: 0, detail: [] } })
-// 桥启动相位(2026-07-09): boot-status 给每桥 stopped/starting/attaching/healthy+stuck
-const bootStatus = ref({ reachable: false, progress_pct: 0, summary: {}, bridges: [] })
-const bootByPort = computed(() => { const m = {}; for (const b of (bootStatus.value.bridges || [])) m[b.port] = b; return m })
-function bootPhase(port) { return bootByPort.value[port] || null }
-function bootDotClass(port) { const b = bootByPort.value[port]; if (!b) return 'bg-gray-500'; if (b.stuck) return 'bg-red-500 animate-pulse'; return { healthy: 'bg-green-500', attaching: 'bg-yellow-500', starting: 'bg-sky-500', stopped: 'bg-red-500' }[b.phase] || 'bg-gray-500' }
-function bootPhaseLabel(port) { const b = bootByPort.value[port]; if (!b) return ''; if (b.stuck) return '卡住'; return { healthy: '', attaching: '挂载中', starting: '启动中', stopped: '停' }[b.phase] || '' }
 const stats = ref({ wsConnections: 0, totalUsers: 0, activeAccounts: 0, totalPositions: 0 })
 const allAccounts = ref([])
 const userFinancials = ref([])
@@ -977,13 +963,6 @@ async function fetchMT5Status() {
   } catch { mt5System.value = { online: false } }
 }
 
-async function fetchBootStatus() {
-  try {
-    const r = await api.get('/api/v1/mt5-infra/boot-status')
-    bootStatus.value = r.data || bootStatus.value
-  } catch { bootStatus.value = { ...bootStatus.value, reachable: false } }
-}
-
 async function fetchMT5Infra() {
   try {
     const r = await api.get('/api/v1/mt5-infra/status')
@@ -1165,7 +1144,7 @@ function getHedgePosition(pair, side) {
 
 async function refreshAll() {
   refreshing.value = true
-  await Promise.all([fetchMonitorStatus(), fetchStats(), fetchUserFinancials(), fetchMT5Status(), fetchMT5Infra(), fetchBootStatus(), fetchProxyAccounts(), fetchHedgingPairs(), fetchSparkline(), fetchPnlHistory(), fetchPlatformDist(), fetchAgentOverview()])
+  await Promise.all([fetchMonitorStatus(), fetchStats(), fetchUserFinancials(), fetchMT5Status(), fetchMT5Infra(), fetchProxyAccounts(), fetchHedgingPairs(), fetchSparkline(), fetchPnlHistory(), fetchPlatformDist(), fetchAgentOverview()])
   lastUpdate.value = dayjs().format('HH:mm:ss')
   lastUpdateTs.value = Date.now()
 

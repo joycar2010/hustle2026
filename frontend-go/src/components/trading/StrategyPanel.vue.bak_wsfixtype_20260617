@@ -34,12 +34,12 @@
       <!-- 实仓和点差信息 -->
       <div class="text-base font-bold text-center text-[#3b82f6]">
         <span v-if="type === 'reverse'">
-          对冲多仓: {{ (localBybitLong * bConv).toFixed(0) }} 主空仓: {{ localBinanceShort.toFixed(2) }}
-          <span v-if="avgOpenSpread !== null" class="text-sm text-[#f0b90b] ml-2">平均点差: {{ avgOpenSpread.toFixed(spreadDp) }}</span>
+          对冲多仓: {{ (localBybitLong * 100).toFixed(0) }} 主空仓: {{ localBinanceShort.toFixed(2) }}
+          <span v-if="avgOpenSpread !== null" class="text-sm text-[#f0b90b] ml-2">平均点差: {{ avgOpenSpread.toFixed(2) }}</span>
         </span>
         <span v-else>
-          <span v-if="avgOpenSpread !== null" class="text-sm text-[#f0b90b] mr-2">平均点差: {{ avgOpenSpread.toFixed(spreadDp) }}</span>
-          主多仓: {{ localBinanceLong.toFixed(2) }} 对冲空仓: {{ (localBybitShort * bConv).toFixed(0) }}
+          <span v-if="avgOpenSpread !== null" class="text-sm text-[#f0b90b] mr-2">平均点差: {{ avgOpenSpread.toFixed(2) }}</span>
+          主多仓: {{ localBinanceLong.toFixed(2) }} 对冲空仓: {{ (localBybitShort * 100).toFixed(0) }}
         </span>
       </div>
     </div>
@@ -71,11 +71,11 @@
             <div v-if="marketCardsRef" class="text-center">
               <div class="text-xs text-gray-400 mb-0.5">对冲 过夜费</div>
               <div class="flex gap-2 justify-center">
-                <span :class="hedgeSwapLongPerUnit <= 0 ? 'text-[#f6465d]' : 'text-[#0ecb81]'" class="text-xs font-mono">
-                  多: {{ hedgeSwapLongPerUnit <= 0 ? '-' : '+' }}{{ Math.abs(hedgeSwapLongPerUnit).toFixed(hedgeSwapDecimals) }}
+                <span :class="marketCardsRef.bybitLongSwapFee <= 0 ? 'text-[#f6465d]' : 'text-[#0ecb81]'" class="text-xs font-mono">
+                  多: {{ marketCardsRef.bybitLongSwapFee <= 0 ? '-' : '+' }}{{ Math.abs(marketCardsRef.bybitLongSwapFee ?? 0).toFixed(2) }}
                 </span>
-                <span :class="hedgeSwapShortPerUnit >= 0 ? 'text-[#0ecb81]' : 'text-[#f6465d]'" class="text-xs font-mono">
-                  空: {{ hedgeSwapShortPerUnit >= 0 ? '+' : '-' }}{{ Math.abs(hedgeSwapShortPerUnit).toFixed(hedgeSwapDecimals) }}
+                <span :class="marketCardsRef.bybitShortSwapFee >= 0 ? 'text-[#0ecb81]' : 'text-[#f6465d]'" class="text-xs font-mono">
+                  空: {{ marketCardsRef.bybitShortSwapFee >= 0 ? '+' : '-' }}{{ Math.abs(marketCardsRef.bybitShortSwapFee ?? 0).toFixed(2) }}
                 </span>
               </div>
             </div>
@@ -84,7 +84,7 @@
             <div class="text-center">
               <div class="text-xs text-gray-400 mb-0.5 whitespace-nowrap">做多对冲点差</div>
               <div class="text-lg font-mono font-bold whitespace-nowrap text-[#0ecb81]">
-                {{ currentSpread.toFixed(spreadDp) }} / {{ closingSpread.toFixed(spreadDp) }}
+                {{ currentSpread.toFixed(2) }} / {{ closingSpread.toFixed(2) }}
               </div>
             </div>
           </template>
@@ -95,7 +95,7 @@
             <div class="text-center">
               <div class="text-xs text-gray-400 mb-0.5 whitespace-nowrap">做多主账号点差</div>
               <div class="text-lg font-mono font-bold whitespace-nowrap text-[#f6465d]">
-                {{ currentSpread.toFixed(spreadDp) }} / {{ closingSpread.toFixed(spreadDp) }}
+                {{ currentSpread.toFixed(2) }} / {{ closingSpread.toFixed(2) }}
               </div>
             </div>
 
@@ -104,10 +104,10 @@
               <div class="text-xs text-gray-400 mb-0.5">主账号 资金费/手</div>
               <div class="flex gap-2 justify-center">
                 <span :class="marketCardsRef.binanceLongFundingRate >= 0 ? 'text-[#f6465d]' : 'text-[#0ecb81]'" class="text-xs font-mono">
-                  多: {{ marketCardsRef.binanceLongFundingRate >= 0 ? '-' : '+' }}{{ fundingPerUnit.toFixed(fundingDecimals) }}
+                  多: {{ marketCardsRef.binanceLongFundingRate >= 0 ? '-' : '+' }}{{ Math.abs((marketCardsRef.binanceFundingRatePct ?? 0) / 100 * (marketCardsRef.binanceMarkPrice ?? 0)).toFixed(2) }}
                 </span>
                 <span :class="marketCardsRef.binanceLongFundingRate >= 0 ? 'text-[#0ecb81]' : 'text-[#f6465d]'" class="text-xs font-mono">
-                  空: {{ marketCardsRef.binanceLongFundingRate >= 0 ? '+' : '-' }}{{ fundingPerUnit.toFixed(fundingDecimals) }}
+                  空: {{ marketCardsRef.binanceLongFundingRate >= 0 ? '+' : '-' }}{{ Math.abs((marketCardsRef.binanceFundingRatePct ?? 0) / 100 * (marketCardsRef.binanceMarkPrice ?? 0)).toFixed(2) }}
                 </span>
               </div>
               <div class="text-[10px] text-gray-500 mt-0.5">费率: {{ (marketCardsRef.binanceFundingRatePct ?? 0).toFixed(4) }}%</div>
@@ -155,17 +155,17 @@
             <label class="text-xs text-gray-400 mb-0.5 block">开仓控制</label>
             <button
               @click="toggleOpeningExecution"
-              :disabled="isStopping.opening || (strategyStore.isLocked(`${currentPair}::${type}_opening`) && strategyStore.isLocked(`${currentPair}::${type}`))"
+              :disabled="isStopping.opening || (strategyStore.isLocked(`${type}_opening`) && strategyStore.isLocked(type))"
               :class="[
                 'w-full px-2 py-1.5 rounded text-xs font-bold transition-all',
-                (strategyStore.isLocked(`${currentPair}::${type}_opening`) && strategyStore.isLocked(`${currentPair}::${type}`)) ? 'bg-gray-600 text-gray-400 cursor-not-allowed opacity-50' :
+                (strategyStore.isLocked(`${type}_opening`) && strategyStore.isLocked(type)) ? 'bg-gray-600 text-gray-400 cursor-not-allowed opacity-50' :
                 isStopping.opening
                   ? 'bg-[#F59E0B] text-white animate-pulse cursor-wait'
                   : continuousExecutionEnabled.opening
                     ? 'bg-[#F1C40F] text-white hover:bg-[#e1b40f]'
                     : 'bg-[#00C98B] text-white hover:bg-[#00b87a]'
               ]"
-              :title="(strategyStore.isLocked(`${currentPair}::${type}_opening`) && strategyStore.isLocked(`${currentPair}::${type}`)) ? `其他策略运行中（${strategyStore.activeStrategy}），请先停止` : ''"
+              :title="(strategyStore.isLocked(`${type}_opening`) && strategyStore.isLocked(type)) ? `其他策略运行中（${strategyStore.activeStrategy}），请先停止` : ''"
             >
               {{ isStopping.opening ? '停止中...' : (continuousExecutionEnabled.opening ? '停止执行' : (type === 'forward' ? '正向开仓' : '反向开仓')) }}
             </button>
@@ -176,17 +176,17 @@
             <label class="text-xs text-gray-400 mb-0.5 block">平仓控制</label>
             <button
               @click="toggleClosingExecution"
-              :disabled="isStopping.closing || (strategyStore.isLocked(`${currentPair}::${type}_closing`) && strategyStore.isLocked(`${currentPair}::${type}`))"
+              :disabled="isStopping.closing || (strategyStore.isLocked(`${type}_closing`) && strategyStore.isLocked(type))"
               :class="[
                 'w-full px-2 py-1.5 rounded text-xs font-bold transition-all',
-                (strategyStore.isLocked(`${currentPair}::${type}_closing`) && strategyStore.isLocked(`${currentPair}::${type}`)) ? 'bg-gray-600 text-gray-400 cursor-not-allowed opacity-50' :
+                (strategyStore.isLocked(`${type}_closing`) && strategyStore.isLocked(type)) ? 'bg-gray-600 text-gray-400 cursor-not-allowed opacity-50' :
                 isStopping.closing
                   ? 'bg-[#F59E0B] text-white animate-pulse cursor-wait'
                   : continuousExecutionEnabled.closing
                     ? 'bg-[#F1C40F] text-white hover:bg-[#e1b40f]'
                     : 'bg-[#FF2433] text-white hover:bg-[#e61f2f]'
               ]"
-              :title="(strategyStore.isLocked(`${currentPair}::${type}_closing`) && strategyStore.isLocked(`${currentPair}::${type}`)) ? `其他策略运行中（${strategyStore.activeStrategy}），请先停止` : ''"
+              :title="(strategyStore.isLocked(`${type}_closing`) && strategyStore.isLocked(type)) ? `其他策略运行中（${strategyStore.activeStrategy}），请先停止` : ''"
             >
               {{ isStopping.closing ? '停止中...' : (continuousExecutionEnabled.closing ? '停止执行' : (type === 'forward' ? '正向平仓' : '反向平仓')) }}
             </button>
@@ -632,8 +632,8 @@
                   :id="`openPrice-${type}-${index}`"
                   v-model.number="ladder.openPrice"
                   type="number"
-                  :step="ladderStep"
-                  :placeholder="(0).toFixed(ladderDecimals)"
+                  step="0.1"
+                  :placeholder="(0).toFixed(1)"
                   class="w-full bg-transparent border border-[#2b3139] rounded px-1.5 py-0.5 text-xs focus:border-[#f0b90b] focus:outline-none"
                 />
               </div>
@@ -646,8 +646,8 @@
                   :id="`threshold-${type}-${index}`"
                   v-model.number="ladder.threshold"
                   type="number"
-                  :step="ladderStep"
-                  :placeholder="(0).toFixed(ladderDecimals)"
+                  step="0.1"
+                  :placeholder="(0).toFixed(1)"
                   class="w-full bg-transparent border border-[#2b3139] rounded px-1.5 py-0.5 text-xs focus:border-[#f0b90b] focus:outline-none"
                 />
               </div>
@@ -767,34 +767,6 @@ const props = defineProps({
   }
 })
 
-// 对冲过夜费口径修正(20260706b): 后端fee=每0.01 MT5手(÷100黄金时代常数), 仅在
-// conv=100的对(黄金/美原油/布伦特)上恰等于每系统手; 白银(conv=1000)大10倍、
-// NG(conv=10000)大100倍(用户实证: NG显示0.055×100手≠MT5账单0.06, 因100系统手
-// 天然气=0.01 MT5手)。换算为真·每系统手 = fee×100÷conversionFactor, 满足
-// "显示值×持仓手数=实际日费用", 可与MT5账单直接对账; 小数位按量级自适应。
-// 主账号资金费/手 小数位自适应(20260707): 白银0.0012/NG 0.0002级别, 2位小数吞成0.00
-const fundingPerUnit = computed(() => Math.abs(
-  (Number(props.marketCardsRef?.binanceFundingRatePct ?? 0) / 100) *
-  Number(props.marketCardsRef?.binanceMarkPrice ?? 0)))
-const fundingDecimals = computed(() => {
-  const m = fundingPerUnit.value
-  if (m >= 0.1) return 2
-  if (m >= 0.01) return 3
-  if (m >= 0.001) return 4
-  return 5
-})
-const hedgeSwapLongPerUnit = computed(() =>
-  (Number(props.marketCardsRef?.bybitLongSwapFee ?? 0) * 100) / bConv.value)
-const hedgeSwapShortPerUnit = computed(() =>
-  (Number(props.marketCardsRef?.bybitShortSwapFee ?? 0) * 100) / bConv.value)
-const hedgeSwapDecimals = computed(() => {
-  const m = Math.max(Math.abs(hedgeSwapLongPerUnit.value), Math.abs(hedgeSwapShortPerUnit.value))
-  if (m >= 0.1) return 2
-  if (m >= 0.01) return 3
-  if (m >= 0.001) return 4
-  return 5
-})
-
 // Config section hide/show toggle (persisted per type)
 const configHidden = ref(localStorage.getItem(`configHidden_${props.type}`) === 'true')
 function saveConfigHidden() {
@@ -898,30 +870,10 @@ let _consecutiveZeroCount = 0
 const _ZERO_CONFIRM_THRESHOLD = 2  // accept after N consecutive zero snapshots
 const _FORCE_ZERO_WINDOW_MS = 8000  // accept zero snapshots within 8s after close
 
-const { currentPair, pairConfig } = useTradingPair()
-// B腿手数→A腿单位显示系数(20260706): 顶栏对冲多/空仓原硬编码*100只对黄金(1手=100oz)成立,
-// 白银1000/油100/气10000, 改按当前对 conversionFactor(与引擎/紧急手动交易同源=hedging_pairs表)
-const bConv = computed(() => Number(pairConfig.value?.conversionFactor) || 100)
-// 点差显示精度按对(20260706): NG族3位(点差量级~0.0x), 其余2位。与/spread-chart走势图同规则。
-const spreadDp = computed(() => {
-  const pc = String(currentPair.value || '').toUpperCase()
-  return (pc.startsWith('NG') || pc.includes('XNG') || pc.includes('NATGAS')) ? 3 : 2
-})
-// 阶梯开/平差值输入精度(20260706, 用户指定): 黄金族点差1位小数合适;
-// 白银/美原油/布伦特报价更细用2位; 天然气(~3美元量级)用3位。未列品种回退1位。
-const ladderDecimals = computed(() => {
-  const pc = String(currentPair.value || '').toUpperCase()
-  if (pc.startsWith('NG') || pc.includes('XNG') || pc.includes('NATGAS')) return 3
-  if (pc.includes('XAG') || pc.startsWith('CL') || pc.startsWith('BZ')
-      || pc.includes('XTI') || pc.includes('XBR') || pc.includes('USO') || pc.includes('UKO')) return 2
-  return 1
-})
-const ladderStep = computed(() => Math.pow(10, -ladderDecimals.value).toFixed(ladderDecimals.value))
+const { currentPair } = useTradingPair()
 const alertPairCode = currentPair  // computed alias — reactive ref from global store
 
-watch([() => marketStore.positionSnapshot, alertPairCode], ([snap, _pcNow], _old) => {
-  const _pcPrev = Array.isArray(_old) ? _old[1] : undefined
-  const pairSwitched = _pcPrev !== undefined && _pcNow !== _pcPrev
+watch([() => marketStore.positionSnapshot, alertPairCode], ([snap]) => {
   if (!snap) return
   const pairData = snap.pairs?.[alertPairCode.value]
   let ml, ms, bl, bs
@@ -935,20 +887,6 @@ watch([() => marketStore.positionSnapshot, alertPairCode], ([snap, _pcNow], _old
     ms = snap.bybit_short_lots ?? 0
     bl = snap.binance_long_xau ?? 0
     bs = snap.binance_short_xau ?? 0
-  }
-  // ── 20260706 跨对切换硬重置(事件驱动, 无轮询) ──────────────────────────
-  // 防抖只应作用于"同一交易对内连续快照"的桥读数闪烁; 切对后第一帧天然是
-  // (新对可能全零 + 本地还是旧对值), 旧逻辑误判为闪烁拒收清零, 把上一对的
-  // 对冲仓钉在新对页面(币安腿直收/MT5腿拒零 → "主多仓0.00/对冲空仓10"残影,
-  // WS推送稀疏时永不自愈)。切对帧无条件采纳当前快照中新对的数值并清零防抖
-  // 计数; 同对内的快照更新走下方原防抖逻辑不变。
-  if (pairSwitched) {
-    _consecutiveZeroCount = 0
-    localBinanceLong.value = bl
-    localBinanceShort.value = bs
-    localBybitLong.value = ml
-    localBybitShort.value = ms
-    return
   }
   const incomingAllZero = (ml === 0 && ms === 0 && bl === 0 && bs === 0)
   const currentHasPosition = (localBybitLong.value !== 0 || localBybitShort.value !== 0 ||
@@ -1035,13 +973,6 @@ async function setHedgeMultiplier(m) {
 
 const continuousExecutionEnabled = ref({ opening: false, closing: false })
 const continuousExecutionTaskId = ref({ opening: null, closing: null })
-// 多交易对(2026-07-04): 记录每个 action 启动时的 pair, 使 acquire/release 的锁 key 严格一致
-// (组件单实例跟随全局 currentPair, 若 release 时 currentPair 已切走会泄漏锁→按钮永久卡死)。
-const continuousExecutionPair = ref({ opening: null, closing: null })
-function _lockKey(action) {
-  const p = continuousExecutionPair.value[action] || currentPair.value
-  return `${p}::${props.type}_${action}`
-}
 const isStopping = ref({ opening: false, closing: false })
 const continuousExecutionStatus = ref({ opening: null, closing: null })
 const continuousExecutionTriggerProgress = ref({ opening: { current: 0, required: 0, triggerSpread: null, threshold: null, express: false }, closing: { current: 0, required: 0, triggerSpread: null, threshold: null, express: false } })
@@ -1415,8 +1346,8 @@ function handleTriggerProgress(data) {
   const isContinuousExecution = data.strategy_id && data.strategy_id.endsWith('_continuous')
 
   if (isContinuousExecution) {
-    // Filter by panel direction (forward/reverse) to prevent cross-panel WS pollution
-    if (!data.strategy_id?.includes(`_${currentPair.value}_${props.type}_`)) return
+    // For continuous execution, accept the message (it's already filtered by user_id on backend)
+    // continuous execution message accepted
   } else {
     // For regular execution, check strategy_id match
     if (data.strategy_id !== configId.value) {
@@ -1506,7 +1437,7 @@ function handlePositionChange(data) {
 
   if (isContinuous) {
     const strategyIdStr = String(data.strategy_id)
-    if (!strategyIdStr.includes(`_${currentPair.value}_${props.type}_`)) return
+    if (!strategyIdStr.includes(`_${props.type}_`)) return
 
     const action = strategyIdStr.includes('_opening_') ? 'opening' : 'closing'
     const idx = data.ladder_index ?? 0
@@ -1540,8 +1471,6 @@ function handleExecutionStarted(data) {
 
   // For continuous execution, extract action from strategy_id
   if (isContinuousExecution) {
-    // Filter by panel direction (forward/reverse) to prevent cross-panel WS pollution
-    if (!data.strategy_id?.includes(`_${currentPair.value}_${props.type}_`)) return
     const action = data.strategy_id.includes('_opening_') ? 'opening' : 'closing'
     console.log(`[WebSocket] Continuous execution started: ${action}`)
 
@@ -1579,8 +1508,6 @@ function handleExecutionCompleted(data) {
 
   // For continuous execution, extract action from strategy_id
   if (isContinuousExecution) {
-    // Filter by panel direction (forward/reverse) to prevent cross-panel WS pollution
-    if (!data.strategy_id?.includes(`_${currentPair.value}_${props.type}_`)) return
     const action = data.strategy_id.includes('_opening_') ? 'opening' : 'closing'
     console.log(`[WebSocket] Continuous execution completed: ${action}`)
     // 完成后刷新后端权威账本(平仓到 flat 时清零开仓均价)
@@ -1623,8 +1550,6 @@ function handleExecutionError(data) {
 
   // For continuous execution, extract action from strategy_id
   if (isContinuousExecution) {
-    // Filter by panel direction (forward/reverse) to prevent cross-panel WS pollution
-    if (!data.strategy_id?.includes(`_${currentPair.value}_${props.type}_`)) return
     const action = data.strategy_id.includes('_opening_') ? 'opening' : 'closing'
     console.log(`[WebSocket] Continuous execution error: ${action}, ${data.error_message}`)
 
@@ -1658,7 +1583,7 @@ function handleOrderExecuted(data) {
 
   if (isContinuous) {
     const strategyIdStr = String(data.strategy_id)
-    if (!strategyIdStr.includes(`_${currentPair.value}_${props.type}_`)) return
+    if (!strategyIdStr.includes(`_${props.type}_`)) return
 
     const action = strategyIdStr.includes('_opening_') ? 'opening' : 'closing'
     const idx = data.ladder_index ?? 0
@@ -1884,8 +1809,8 @@ async function saveConfig() {
       closing_trigger_check_interval: (config.value.closingTriggerCheckInterval || 200) / 1000, // Convert ms to seconds
       ladders: config.value.ladders.map(l => ({
         enabled: l.enabled,
-        openPrice: Number(Number(l.openPrice).toFixed(3)),  // 20260706: 1位→3位, NG阈值~0.018被1位舍入归零
-        threshold: Number(Number(l.threshold).toFixed(3)),
+        openPrice: Number(Number(l.openPrice).toFixed(1)),
+        threshold: Number(Number(l.threshold).toFixed(1)),
         qtyLimit: Number(l.qtyLimit)
       })),
       is_enabled: config.value.openingEnabled || config.value.closingEnabled
@@ -2257,9 +2182,8 @@ function formatNumber(num) {
 
 // Continuous execution methods
 async function startContinuousExecution(action) {
-  // ── 并发策略锁：同方向开平可共存，跨方向互斥; 多交易对(2026-07-04) 锁 key 带 pair, 跨 pair 独立 ──
-  continuousExecutionPair.value[action] = currentPair.value
-  const strategyKey = _lockKey(action)
+  // ── 并发策略锁：同方向开平可共存，跨方向互斥 ──
+  const strategyKey = `${props.type}_${action}`
   if (!strategyStore.acquire(strategyKey)) {
     const running = strategyStore.activeStrategy
     notificationStore.showStrategyNotification(
@@ -2406,7 +2330,7 @@ async function startContinuousExecution(action) {
 async function stopContinuousExecution(action) {
   try {
     if (!continuousExecutionTaskId.value[action]) {
-      strategyStore.release(_lockKey(action))
+      strategyStore.release(`${props.type}_${action}`)
       return
     }
 
@@ -2429,7 +2353,7 @@ async function stopContinuousExecution(action) {
         continuousExecutionStatus.value[action] = null
         continuousExecutionTriggerProgress.value[action] = { current: 0, required: 0, triggerSpread: null, threshold: null }
         stopStatusPolling(action)
-        strategyStore.release(_lockKey(action))
+        strategyStore.release(`${props.type}_${action}`)
         ladderExecutionDetails.value[action] = {}
         expandedLadders.value[action] = {}
         notificationStore.showStrategyNotification(`${action === 'opening' ? '开仓' : '平仓'}已超时停止`, 'warning')
@@ -2440,7 +2364,7 @@ async function stopContinuousExecution(action) {
     const errorMsg = error.response?.data?.detail || error.message || '未知错误'
     notificationStore.showStrategyNotification(`停止连续执行失败: ${errorMsg}`, 'error')
     isStopping.value[action] = false
-    strategyStore.release(_lockKey(action))
+    strategyStore.release(`${props.type}_${action}`)
   }
 }
 
@@ -2451,12 +2375,9 @@ async function syncContinuousRunningState() {
     const r = await api.get('/api/v1/strategies/execution/tasks')
     tasks = r.data?.tasks || []
   } catch { return }
-  // 多交易对(2026-07-04): 只认【当前 pair + 本 type】的 running task(strategy_id={user}_{pair}_{stype}_..._continuous),
-  // 否则别的 pair 的运行态会污染本面板按钮。并据后端真实态校准锁(切 pair 后 sync 重建当前 pair 的锁)。
-  const _pairTypeTag = `_${currentPair.value}_${props.type}_`
   const running = { opening: null, closing: null }
   for (const t of tasks) {
-    if (t.status === 'running' && t.strategy_id?.includes(_pairTypeTag)) {
+    if (t.status === 'running' && t.strategy_id?.includes(props.type)) {
       if (t.strategy_type?.includes('opening')) running.opening = t.task_id
       if (t.strategy_type?.includes('closing')) running.closing = t.task_id
     }
@@ -2468,8 +2389,6 @@ async function syncContinuousRunningState() {
       if (!continuousExecutionEnabled.value[action] || feTaskId !== beTaskId) {
         continuousExecutionEnabled.value[action] = true
         continuousExecutionTaskId.value[action] = beTaskId
-        continuousExecutionPair.value[action] = currentPair.value
-        strategyStore.acquire(_lockKey(action))  // 校准: 恢复/切换后重建当前 pair 的锁
         const cur = continuousExecutionStatus.value[action]
         if (!cur || cur.status !== 'running') continuousExecutionStatus.value[action] = { status: 'running' }
         startStatusPolling(action)
@@ -2477,10 +2396,8 @@ async function syncContinuousRunningState() {
     } else if (feTaskId) {
       const st = continuousExecutionStatus.value[action]?.status
       if (st !== 'completed' && st !== 'failed') continuousExecutionStatus.value[action] = null
-      strategyStore.release(_lockKey(action))
       continuousExecutionEnabled.value[action] = false
       continuousExecutionTaskId.value[action] = null
-      continuousExecutionPair.value[action] = null
       stopStatusPolling(action)
     }
   }
@@ -2527,7 +2444,7 @@ async function fetchExecutionStatus(action) {
       isStopping.value[action] = false
       continuousExecutionEnabled.value[action] = false
       stopStatusPolling(action)
-      strategyStore.release(_lockKey(action))
+      strategyStore.release(`${props.type}_${action}`)
 
       if (taskStatus.status === 'completed') {
         notificationStore.showStrategyNotification(`连续${action === 'opening' ? '开仓' : '平仓'}已完成`, 'success')
@@ -2552,8 +2469,8 @@ onUnmounted(() => {
   stopStatusPolling('opening')
   stopStatusPolling('closing')
   // 组件卸载时释放该 Panel 持有的策略锁（防止导航切换后锁残留）
-  strategyStore.release(_lockKey('opening'))
-  strategyStore.release(_lockKey('closing'))
+  strategyStore.release(`${props.type}_opening`)
+  strategyStore.release(`${props.type}_closing`)
 })
 </script>
 

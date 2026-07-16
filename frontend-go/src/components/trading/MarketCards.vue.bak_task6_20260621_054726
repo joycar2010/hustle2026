@@ -1,16 +1,18 @@
 <template>
   <div class="h-full flex flex-col max-lg:h-auto overflow-hidden w-full">
-    <!-- System Status Marquee (all notifications unified) — 仅状态滚动展示，不再点击弹出弹框（入口移至下方「系统状态」标签） -->
+    <!-- System Status Marquee (all notifications unified) -->
     <div class="p-1.5 lg:p-1.5 md:p-2 bg-[#252930] border-b border-[#2b3139] flex-shrink-0 w-full">
-      <div
-        :class="['w-full flex items-center px-3 py-2 rounded-lg transition-colors', marqueeButtonBg]"
+      <button
+        @click="showSystemStatusModal = true"
+        :class="['w-full flex items-center px-3 py-2 rounded-lg transition-colors cursor-pointer', marqueeButtonBg]"
+        :title="'点击查看详细系统状态'"
       >
         <div class="marquee-container w-full overflow-hidden">
           <div :class="['marquee-content text-xs whitespace-nowrap', marqueeColorClass]">
             {{ marqueeText }}
           </div>
         </div>
-      </div>
+      </button>
     </div>
 
     <!-- Total Profit Header -->
@@ -217,18 +219,15 @@
         </div>
       </div>
 
-      <!-- Market Bottom Tabs: K线图 + 系统状态（顶部跑马灯保留缩版摘要；此处内嵌完整系统状态监控面板）-->
+      <!-- Market Bottom Tabs: K线图 + 数据流 -->
       <div class="mt-1 bg-[#252930] rounded border border-[#2b3139]">
         <div class="flex border-b border-[#2b3139]">
           <button @click="bottomTab = 'kline'" :class="['flex-1 px-2 py-1 text-xs font-medium transition-colors', bottomTab === 'kline' ? 'text-[#f0b90b] border-b-2 border-[#f0b90b] bg-[#1e2329]' : 'text-gray-400 hover:text-white']">K线图</button>
-          <button @click="bottomTab = 'status'" :class="['flex-1 px-2 py-1 text-xs font-medium transition-colors flex items-center justify-center gap-1', bottomTab === 'status' ? 'text-[#f0b90b] border-b-2 border-[#f0b90b] bg-[#1e2329]' : 'text-gray-400 hover:text-white']" title="系统状态监控（自动策略进程 / 机制状态 / 服务 / 代理IP）">
-            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-            系统状态
-          </button>
+          <button @click="bottomTab = 'stream'" :class="['flex-1 px-2 py-1 text-xs font-medium transition-colors', bottomTab === 'stream' ? 'text-[#f0b90b] border-b-2 border-[#f0b90b] bg-[#1e2329]' : 'text-gray-400 hover:text-white']">数据流</button>
         </div>
         <MiniKlineChart v-show="bottomTab === 'kline'" :visible="bottomTab === 'kline'" />
-        <div v-show="bottomTab === 'status'">
-          <SystemStatusPanel :active="bottomTab === 'status'" :pairCode="currentPair" />
+        <div v-show="bottomTab === 'stream'">
+          <SpreadDataTable />
         </div>
       </div>
 
@@ -265,7 +264,7 @@
                       {{ order.side === 'buy' ? '买入' : '卖出' }}
                     </span>
                   </td>
-                  <td class="py-2 px-3 text-right text-white font-mono">{{ order.price != null ? formatPrice(order.price) : '-' }}</td>
+                  <td class="py-2 px-3 text-right text-white font-mono">{{ order.price?.toFixed(2) || '-' }}</td>
                   <td class="py-2 px-3 text-right text-white font-mono">{{ order.quantity?.toFixed(4) || '-' }}</td>
                   <td class="py-2 px-3 text-right text-white font-mono">{{ (order.executed_qty ?? order.cum_exec_qty)?.toFixed(4) || '0' }}</td>
                   <td class="py-2 px-3 text-white">{{ order.status || order.order_status }}</td>
@@ -279,6 +278,9 @@
 
       </div>
     </div>
+
+    <!-- System Status Modal -->
+    <SystemStatusModal :isOpen="showSystemStatusModal" @close="showSystemStatusModal = false" />
   </div>
 
     <!-- Liquidation Danger Notification Overlay (non-blocking) -->
@@ -305,25 +307,21 @@ import { useNotificationStore } from '@/stores/notification'
 import { useProxyStore } from '@/stores/proxy'
 import { PlatformId, isHedge } from '@/constants/platform'
 import { useStrategyStore } from '@/stores/strategy'
+import SystemStatusModal from '@/components/SystemStatusModal.vue'
 import api from '@/services/api'
+import SpreadDataTable from './SpreadDataTable.vue'
 import MiniKlineChart from './MiniKlineChart.vue'
-import SystemStatusPanel from '@/components/trading/SystemStatusPanel.vue'
 import { useTradingPair } from '@/composables/useTradingPair'
 
 const bottomTab = ref("kline")
 const marketStore = useMarketStore()
 const notificationStore = useNotificationStore()
 const { currentPair, pairConfig } = useTradingPair()
-// 行情/点差显示精度按对(20260706): 天然气价格量级~3.2(XNGUSD digits=4), 2位小数把
-// 第三位有效数字全部吞掉; NG族=3位, 其余维持2位。formatPrice 是全部行情位的中枢。
-const pxDecimals = computed(() => {
-  const pc = String(currentPair.value || '').toUpperCase()
-  return (pc.startsWith('NG') || pc.includes('XNG') || pc.includes('NATGAS')) ? 3 : 2
-})
 const proxyStore = useProxyStore()
 const strategyStore = useStrategyStore()
 
-// System Status (inline marquee — no modal, no toggles)
+// System Status Modal
+const showSystemStatusModal = ref(false)
 const systemStatusText = ref('系统正常运行')
 const systemHealthy = ref(true)
 const redisStatus = ref({ healthy: false, last_error: null })
@@ -461,22 +459,8 @@ watch(quoteDiverged, (now, prev) => {
   }
 })
 
-// 单腿交易警告 → 跑马灯（推送渠道由 testadmin 通知模板 single_leg_alert 的 enable_marquee 控制；
-// 后端在 WS risk_alert 事件 data.marquee 里下发开关）。单腿是持续风险但后端不发"已解除"事件，
-// 故跑马灯红闪保留 10 分钟后自动消（弹窗已做强确认，跑马灯为二次持续提醒）。
-const singleLegMarquee = ref('')
-let singleLegMarqueeTimer = null
-function handleSingleLegMarquee(data) {
-  if (!data || data.marquee !== true) return  // 仅当模板开启跑马灯渠道
-  const txt = data.message || data.title || '单腿交易警告'
-  singleLegMarquee.value = '⚠️ 单腿交易警告 — ' + txt
-  if (singleLegMarqueeTimer) clearTimeout(singleLegMarqueeTimer)
-  singleLegMarqueeTimer = setTimeout(() => { singleLegMarquee.value = '' }, 10 * 60 * 1000)
-}
-
 const marqueeText = computed(() => {
   const parts = []
-  if (singleLegMarquee.value) parts.push(singleLegMarquee.value)
   if (quoteDiverged.value) {
     const d = quoteDivergence.value
     parts.push(`⛔ 行情背离 ICMarkets ${d?.ic ?? '-'} vs Bybit ${d?.ref ?? '-'} 差价 ${(d?.diff ?? 0).toFixed(2)}（已暂停下单）`)
@@ -491,18 +475,16 @@ const marqueeText = computed(() => {
 })
 
 const marqueeColorClass = computed(() => {
-  if (singleLegMarquee.value) return 'text-[#ff0000] liq-flash font-bold'
   if (quoteDiverged.value) return 'text-[#ff0000] liq-flash font-bold'
   if (quoteRecoveredFlash.value) return 'text-[#0ecb81] font-bold'
   if (liqDangerActive.value) return 'text-[#ff0000] liq-flash font-bold'
   if (!marketOpen.value) return 'text-[#f6465d] font-bold'
   if (marketWarning.value) return 'text-[#f0b90b] font-bold'
-  if (!systemHealthy.value) return 'text-[#f6465d] liq-flash font-bold'
+  if (!systemHealthy.value) return 'text-[#f6465d]'
   return 'text-[#0ecb81]'
 })
 
 const marqueeButtonBg = computed(() => {
-  if (singleLegMarquee.value) return 'bg-[#ff0000]/20 hover:bg-[#ff0000]/30'
   if (quoteDiverged.value) return 'bg-[#ff0000]/20 hover:bg-[#ff0000]/30'
   if (quoteRecoveredFlash.value) return 'bg-[#0ecb81]/20 hover:bg-[#0ecb81]/30'
   if (liqDangerActive.value) return 'bg-[#ff0000]/20 hover:bg-[#ff0000]/30'
@@ -655,30 +637,30 @@ let bybitSwapRateTimer = null
 // WS-pushed market rates (10s interval from MarketRateStreamer)
 watch(() => marketStore.marketRates, (rates) => {
   if (!rates) return
-  // 20260707: 不再消费 WS 广播的 funding — 后端 MarketRateStreamer 只推 XAUUSDT
-  // 单一品种, 在 ICXAG/CL/BZ/NG 页面每10s把按对REST取到的资金费覆盖成黄金的值。
-  // funding 唯一源 = fetchBinanceFundingRate(带pair_code, 60s轮询+切对即刷)。
-  // 20260706: 不再消费 WS 广播的 swap — 它是全站单一值(后端硬编码8001桥XAUUSD+
-  // = XAU对的broker), 在 ICXAU 等其它对上每10s把按对REST轮询到的正确过夜费覆盖成
-  // 别家broker的值(显示-0.79/+0.27而非IC的-0.56/+0.39)。swap 唯一源 =
-  // fetchBybitSwapRate(带pair_code, 60s轮询+切对即刷)。funding 广播(币安全站同值)不受影响。
+  if (rates.funding) {
+    binanceLongFundingRate.value = rates.funding.long_cost_per_lot ?? 0
+    binanceShortFundingRate.value = rates.funding.short_cost_per_lot ?? 0
+    binanceFundingRatePct.value = rates.funding.funding_rate_pct ?? 0
+    binanceNextFundingTime.value = rates.funding.next_funding_time ?? 0
+    binanceMarkPrice.value = rates.funding.mark_price ?? 0
+  }
+  if (rates.swap) {
+    bybitLongSwapFee.value = rates.swap.long_swap_per_lot ?? 0
+    bybitShortSwapFee.value = rates.swap.short_swap_per_lot ?? 0
+  }
 }, { deep: true })
 
 // 主账户资金费 = 持仓量(XAU) / 100 * cost_per_lot
-// 资金费合计(20260707修): binanceXxxTotal单位=A腿单位(盎司/桶/MMBtu),
-// long_cost_per_lot实际=每1个A腿单位的费用(fr×mark) → 原公式÷100全品种小100倍。
 const mainFundingFee = computed(() => {
-  const longFee = binanceLongTotal.value * binanceLongFundingRate.value
-  const shortFee = binanceShortTotal.value * binanceShortFundingRate.value
+  const longFee = (binanceLongTotal.value / 100) * binanceLongFundingRate.value
+  const shortFee = (binanceShortTotal.value / 100) * binanceShortFundingRate.value
   return longFee + shortFee
 })
 
-// 对冲过夜费合计(20260706修): bybitXxxTotal 单位=MT5标准手, fee ref=每0.01手费用
-// → 原公式(手数×每0.01手费用)全品种小100倍(黄金1手真实38.7/天却显示0.39)。
-// 正确 = MT5手数 × 每标准手swap(=fee×100), 与MT5账单一致。
+// 对冲过夜费 = 持仓手数 * swap_per_lot
 const hedgeOvernightFee = computed(() => {
-  const longFee = bybitLongTotal.value * bybitLongSwapFee.value * 100
-  const shortFee = bybitShortTotal.value * bybitShortSwapFee.value * 100
+  const longFee = bybitLongTotal.value * bybitLongSwapFee.value
+  const shortFee = bybitShortTotal.value * bybitShortSwapFee.value
   return longFee + shortFee
 })
 // Binance real-time funding rate (per lot = 100 XAU)
@@ -895,8 +877,6 @@ watch(() => marketStore.lastMessage, (message) => {
     redisStatus.value = message.data
   } else if (message.type === 'pending_order_event') {
     handlePendingOrderEvent(message.data)
-  } else if (message.type === 'risk_alert' && message.data && message.data.alert_type === 'single_leg_alert') {
-    handleSingleLegMarquee(message.data)
   }
 }, { deep: false })
 
@@ -1107,7 +1087,6 @@ onMounted(() => {
 
 onUnmounted(() => {
   if (quoteRecoverTimer) clearTimeout(quoteRecoverTimer)
-  if (singleLegMarqueeTimer) clearTimeout(singleLegMarqueeTimer)
   if (lagTimer) clearInterval(lagTimer)
   if (orderFetchTimer) clearInterval(orderFetchTimer)
   // orderBookFetchTimer removed — orderbook now via WS
@@ -1118,8 +1097,7 @@ onUnmounted(() => {
 })
 
 function formatPrice(price) {
-  const d = pxDecimals.value
-  return price ? price.toFixed(d) : (0).toFixed(d)
+  return price ? price.toFixed(2) : '0.00'
 }
 
 function getPriceClass(current, previous) {
@@ -1380,84 +1358,113 @@ function formatVolume(volume) {
   return volume.toFixed(2)
 }
 
-// System Status Update - 整合所有系统状态;输出"自适应缩版"摘要:
-//   正常 → 极简一行(只列关键健康项的紧凑标记)
-//   异常 → 只列出现问题的项(配合 marqueeColorClass 在跑马灯里变红闪动)
-// 飞书告警由后端 system_health_monitor 单点带冷却发送,前端不再每浏览器发(避免刷爆)。
+// System Status Update - 整合所有系统状态和服务状态
 async function updateSystemStatus() {
   try {
     const response = await api.get('/api/v1/system/status')
     const data = response.data
 
-    // 逐项判定健康/异常,异常项收集到 bad[],健康关键项收集到 okBrief[]
-    const bad = []
-    const okBrief = []
+    const statuses = []
 
-    // WebSocket
-    if (marketStore.connected) okBrief.push('WS')
-    else bad.push('WS未连接')
+    // WebSocket状态
+    if (marketStore.connected) {
+      statuses.push('WS已连接')
+    } else {
+      statuses.push('WS未连接')
+    }
 
-    // DB 连接池
-    let dbUsage = 0
+    // 数据库连接池状态
     if (data.dbPool) {
-      dbUsage = data.dbPool.active / data.dbPool.max
-      const pct = Math.round(dbUsage * 100)
-      if (dbUsage >= 0.8) bad.push(`DB连接池${pct}%`)
-      else okBrief.push(`DB${pct}%`)
+      const usage = Math.round((data.dbPool.active / data.dbPool.max) * 100)
+      statuses.push(`DB连接池:${usage}%`)
     }
 
-    // 后端 API
-    if (!data.backend) bad.push('后端API异常')
+    // 后端服务状态
+    if (data.backend) {
+      statuses.push('后端API正常')
+    }
 
-    // 交易所/桥
-    if (data.binance === false) bad.push('Binance未连接')
-    if (data.mt5 === false) bad.push('MT5桥离线')
+    // 持仓监控状态
+    if (data.positionMonitor) {
+      statuses.push('持仓监控运行中')
+    }
 
-    // 飞书服务
-    if (!notificationStore.feishuServiceStatus) bad.push('飞书服务异常')
-    else okBrief.push('飞书')
+    // 策略管理状态
+    if (data.strategyManager) {
+      statuses.push('策略管理运行中')
+    }
 
-    // Redis
-    if (redisStatus.value.healthy) okBrief.push('Redis')
-    else bad.push('Redis异常')
+    // Binance连接状态
+    if (data.binance) {
+      statuses.push('Binance已连接')
+    }
 
-    // SSL 证书
+    // Bybit连接状态
+    if (data.bybit) {
+      statuses.push('Bybit已连接')
+    }
+
+    // MT5连接状态
+    if (data.mt5) {
+      statuses.push('MT5已连接')
+    }
+
+    // 飞书服务状态
+    if (notificationStore.feishuServiceStatus) {
+      statuses.push('飞书服务正常')
+    } else {
+      statuses.push('飞书服务异常')
+    }
+
+    // Redis状态
+    if (redisStatus.value.healthy) {
+      statuses.push('Redis正常')
+    } else {
+      statuses.push('Redis异常')
+    }
+
+    // SSL证书状态
     if (sslCertStatus.value.status === 'healthy') {
-      okBrief.push(`SSL ${sslCertStatus.value.days_remaining}d`)
+      statuses.push(`SSL证书正常(${sslCertStatus.value.days_remaining}天)`)
     } else if (sslCertStatus.value.status === 'warning') {
-      bad.push(`SSL证书将过期(${sslCertStatus.value.days_remaining}天)`)
+      statuses.push(`SSL证书即将过期(${sslCertStatus.value.days_remaining}天)`)
     } else if (sslCertStatus.value.status === 'critical' || sslCertStatus.value.status === 'expired') {
-      bad.push('SSL证书异常')
+      statuses.push('SSL证书异常')
     }
 
-    // 代理健康(无代理=直连=健康)
-    const proxyHealthy = proxyHealthStatus.value.total === 0 ||
-      (proxyHealthStatus.value.avgHealth >= 50 && proxyHealthStatus.value.failed === 0)
+    // 系统运行时间
+    if (data.uptime) {
+      statuses.push(`运行:${data.uptime}`)
+    }
+
+    // 代理健康状态
     if (proxyHealthStatus.value.total > 0) {
-      if (!proxyHealthy) {
-        bad.push(`代理异常(${proxyHealthStatus.value.active}/${proxyHealthStatus.value.total},健康${proxyHealthStatus.value.avgHealth})`)
+      const proxyStatus = `代理:${proxyHealthStatus.value.active}/${proxyHealthStatus.value.total}活跃`
+      if (proxyHealthStatus.value.avgHealth < 50) {
+        statuses.push(`⚠️${proxyStatus}(健康度:${proxyHealthStatus.value.avgHealth})`)
+      } else if (proxyHealthStatus.value.failed > 0) {
+        statuses.push(`${proxyStatus}(${proxyHealthStatus.value.failed}失败)`)
       } else {
-        okBrief.push(`代理${proxyHealthStatus.value.active}/${proxyHealthStatus.value.total}`)
+        statuses.push(proxyStatus)
       }
     }
 
-    const sslHealthy = ['healthy', 'warning'].includes(sslCertStatus.value.status)
-    const healthy = data.backend &&
-                    marketStore.connected &&
-                    dbUsage < 0.8 &&
-                    redisStatus.value.healthy &&
-                    sslHealthy &&
-                    proxyHealthy
-    systemHealthy.value = healthy
+    systemStatusText.value = statuses.join(' | ') || '系统正常运行'
 
-    // 自适应缩版文案:异常只显示问题项(短、醒目);正常显示极简健康摘要
-    if (!healthy && bad.length) {
-      systemStatusText.value = '⚠ 系统异常: ' + bad.join(' · ')
-    } else {
-      systemStatusText.value = '● 系统正常 ' + okBrief.join(' ')
-    }
+    // 判断系统健康状态
+    const dbUsage = data.dbPool ? (data.dbPool.active / data.dbPool.max) : 0
+    const sslHealthy = ['healthy', 'warning'].includes(sslCertStatus.value.status)
+    // Proxy: no proxies configured = direct-connect, considered healthy
+    const proxyHealthy = proxyHealthStatus.value.total === 0 ||
+                         (proxyHealthStatus.value.avgHealth >= 50 && proxyHealthStatus.value.failed === 0)
+    systemHealthy.value = data.backend &&
+                          marketStore.connected &&
+                          dbUsage < 0.8 &&
+                          redisStatus.value.healthy &&
+                          sslHealthy &&
+                          proxyHealthy
   } catch (error) {
-    systemStatusText.value = '⚠ 无法获取系统状态'
+    systemStatusText.value = '无法获取系统状态'
     systemHealthy.value = false
   }
 }

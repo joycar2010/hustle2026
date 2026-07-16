@@ -297,9 +297,6 @@ export const useMarketStore = defineStore('market', () => {
   // Re-subscribe to correct pair room when global pair selector changes
   const { currentPair } = useTradingPair()
   watch(currentPair, (newPair, oldPair) => {
-    // 20260707: 切对即清空行情快照 — 否则新对无数据流时(如新建对Rust未重启/休市)
-    // 页面会一直显示上一个对的残价(BTC页显示XAUUSDT金价实证), 错值比空值危险。
-    marketData.value = null
     if (ws && ws.readyState === WebSocket.OPEN) {
       if (oldPair) ws.send(JSON.stringify({ type: 'unsubscribe', pairs: [oldPair] }))
       ws.send(JSON.stringify({ type: 'subscribe', pairs: [newPair] }))

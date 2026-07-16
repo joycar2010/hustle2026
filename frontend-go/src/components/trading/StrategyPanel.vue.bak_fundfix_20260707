@@ -104,10 +104,10 @@
               <div class="text-xs text-gray-400 mb-0.5">主账号 资金费/手</div>
               <div class="flex gap-2 justify-center">
                 <span :class="marketCardsRef.binanceLongFundingRate >= 0 ? 'text-[#f6465d]' : 'text-[#0ecb81]'" class="text-xs font-mono">
-                  多: {{ marketCardsRef.binanceLongFundingRate >= 0 ? '-' : '+' }}{{ fundingPerUnit.toFixed(fundingDecimals) }}
+                  多: {{ marketCardsRef.binanceLongFundingRate >= 0 ? '-' : '+' }}{{ Math.abs((marketCardsRef.binanceFundingRatePct ?? 0) / 100 * (marketCardsRef.binanceMarkPrice ?? 0)).toFixed(2) }}
                 </span>
                 <span :class="marketCardsRef.binanceLongFundingRate >= 0 ? 'text-[#0ecb81]' : 'text-[#f6465d]'" class="text-xs font-mono">
-                  空: {{ marketCardsRef.binanceLongFundingRate >= 0 ? '+' : '-' }}{{ fundingPerUnit.toFixed(fundingDecimals) }}
+                  空: {{ marketCardsRef.binanceLongFundingRate >= 0 ? '+' : '-' }}{{ Math.abs((marketCardsRef.binanceFundingRatePct ?? 0) / 100 * (marketCardsRef.binanceMarkPrice ?? 0)).toFixed(2) }}
                 </span>
               </div>
               <div class="text-[10px] text-gray-500 mt-0.5">费率: {{ (marketCardsRef.binanceFundingRatePct ?? 0).toFixed(4) }}%</div>
@@ -772,17 +772,6 @@ const props = defineProps({
 // NG(conv=10000)大100倍(用户实证: NG显示0.055×100手≠MT5账单0.06, 因100系统手
 // 天然气=0.01 MT5手)。换算为真·每系统手 = fee×100÷conversionFactor, 满足
 // "显示值×持仓手数=实际日费用", 可与MT5账单直接对账; 小数位按量级自适应。
-// 主账号资金费/手 小数位自适应(20260707): 白银0.0012/NG 0.0002级别, 2位小数吞成0.00
-const fundingPerUnit = computed(() => Math.abs(
-  (Number(props.marketCardsRef?.binanceFundingRatePct ?? 0) / 100) *
-  Number(props.marketCardsRef?.binanceMarkPrice ?? 0)))
-const fundingDecimals = computed(() => {
-  const m = fundingPerUnit.value
-  if (m >= 0.1) return 2
-  if (m >= 0.01) return 3
-  if (m >= 0.001) return 4
-  return 5
-})
 const hedgeSwapLongPerUnit = computed(() =>
   (Number(props.marketCardsRef?.bybitLongSwapFee ?? 0) * 100) / bConv.value)
 const hedgeSwapShortPerUnit = computed(() =>

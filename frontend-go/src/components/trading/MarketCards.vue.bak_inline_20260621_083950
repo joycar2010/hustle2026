@@ -217,19 +217,12 @@
         </div>
       </div>
 
-      <!-- Market Bottom Tabs: K线图 + 系统状态（顶部跑马灯保留缩版摘要；此处内嵌完整系统状态监控面板）-->
+      <!-- Market Bottom Tabs: K线图（系统状态已并入顶部内联状态条，弹窗/开关移除）-->
       <div class="mt-1 bg-[#252930] rounded border border-[#2b3139]">
         <div class="flex border-b border-[#2b3139]">
           <button @click="bottomTab = 'kline'" :class="['flex-1 px-2 py-1 text-xs font-medium transition-colors', bottomTab === 'kline' ? 'text-[#f0b90b] border-b-2 border-[#f0b90b] bg-[#1e2329]' : 'text-gray-400 hover:text-white']">K线图</button>
-          <button @click="bottomTab = 'status'" :class="['flex-1 px-2 py-1 text-xs font-medium transition-colors flex items-center justify-center gap-1', bottomTab === 'status' ? 'text-[#f0b90b] border-b-2 border-[#f0b90b] bg-[#1e2329]' : 'text-gray-400 hover:text-white']" title="系统状态监控（自动策略进程 / 机制状态 / 服务 / 代理IP）">
-            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-            系统状态
-          </button>
         </div>
         <MiniKlineChart v-show="bottomTab === 'kline'" :visible="bottomTab === 'kline'" />
-        <div v-show="bottomTab === 'status'">
-          <SystemStatusPanel :active="bottomTab === 'status'" :pairCode="currentPair" />
-        </div>
       </div>
 
       <!-- Pending Orders Modal -->
@@ -265,7 +258,7 @@
                       {{ order.side === 'buy' ? '买入' : '卖出' }}
                     </span>
                   </td>
-                  <td class="py-2 px-3 text-right text-white font-mono">{{ order.price != null ? formatPrice(order.price) : '-' }}</td>
+                  <td class="py-2 px-3 text-right text-white font-mono">{{ order.price?.toFixed(2) || '-' }}</td>
                   <td class="py-2 px-3 text-right text-white font-mono">{{ order.quantity?.toFixed(4) || '-' }}</td>
                   <td class="py-2 px-3 text-right text-white font-mono">{{ (order.executed_qty ?? order.cum_exec_qty)?.toFixed(4) || '0' }}</td>
                   <td class="py-2 px-3 text-white">{{ order.status || order.order_status }}</td>
@@ -307,19 +300,12 @@ import { PlatformId, isHedge } from '@/constants/platform'
 import { useStrategyStore } from '@/stores/strategy'
 import api from '@/services/api'
 import MiniKlineChart from './MiniKlineChart.vue'
-import SystemStatusPanel from '@/components/trading/SystemStatusPanel.vue'
 import { useTradingPair } from '@/composables/useTradingPair'
 
 const bottomTab = ref("kline")
 const marketStore = useMarketStore()
 const notificationStore = useNotificationStore()
 const { currentPair, pairConfig } = useTradingPair()
-// 行情/点差显示精度按对(20260706): 天然气价格量级~3.2(XNGUSD digits=4), 2位小数把
-// 第三位有效数字全部吞掉; NG族=3位, 其余维持2位。formatPrice 是全部行情位的中枢。
-const pxDecimals = computed(() => {
-  const pc = String(currentPair.value || '').toUpperCase()
-  return (pc.startsWith('NG') || pc.includes('XNG') || pc.includes('NATGAS')) ? 3 : 2
-})
 const proxyStore = useProxyStore()
 const strategyStore = useStrategyStore()
 
@@ -461,22 +447,8 @@ watch(quoteDiverged, (now, prev) => {
   }
 })
 
-// 单腿交易警告 → 跑马灯（推送渠道由 testadmin 通知模板 single_leg_alert 的 enable_marquee 控制；
-// 后端在 WS risk_alert 事件 data.marquee 里下发开关）。单腿是持续风险但后端不发"已解除"事件，
-// 故跑马灯红闪保留 10 分钟后自动消（弹窗已做强确认，跑马灯为二次持续提醒）。
-const singleLegMarquee = ref('')
-let singleLegMarqueeTimer = null
-function handleSingleLegMarquee(data) {
-  if (!data || data.marquee !== true) return  // 仅当模板开启跑马灯渠道
-  const txt = data.message || data.title || '单腿交易警告'
-  singleLegMarquee.value = '⚠️ 单腿交易警告 — ' + txt
-  if (singleLegMarqueeTimer) clearTimeout(singleLegMarqueeTimer)
-  singleLegMarqueeTimer = setTimeout(() => { singleLegMarquee.value = '' }, 10 * 60 * 1000)
-}
-
 const marqueeText = computed(() => {
   const parts = []
-  if (singleLegMarquee.value) parts.push(singleLegMarquee.value)
   if (quoteDiverged.value) {
     const d = quoteDivergence.value
     parts.push(`⛔ 行情背离 ICMarkets ${d?.ic ?? '-'} vs Bybit ${d?.ref ?? '-'} 差价 ${(d?.diff ?? 0).toFixed(2)}（已暂停下单）`)
@@ -491,7 +463,6 @@ const marqueeText = computed(() => {
 })
 
 const marqueeColorClass = computed(() => {
-  if (singleLegMarquee.value) return 'text-[#ff0000] liq-flash font-bold'
   if (quoteDiverged.value) return 'text-[#ff0000] liq-flash font-bold'
   if (quoteRecoveredFlash.value) return 'text-[#0ecb81] font-bold'
   if (liqDangerActive.value) return 'text-[#ff0000] liq-flash font-bold'
@@ -502,7 +473,6 @@ const marqueeColorClass = computed(() => {
 })
 
 const marqueeButtonBg = computed(() => {
-  if (singleLegMarquee.value) return 'bg-[#ff0000]/20 hover:bg-[#ff0000]/30'
   if (quoteDiverged.value) return 'bg-[#ff0000]/20 hover:bg-[#ff0000]/30'
   if (quoteRecoveredFlash.value) return 'bg-[#0ecb81]/20 hover:bg-[#0ecb81]/30'
   if (liqDangerActive.value) return 'bg-[#ff0000]/20 hover:bg-[#ff0000]/30'
@@ -655,30 +625,30 @@ let bybitSwapRateTimer = null
 // WS-pushed market rates (10s interval from MarketRateStreamer)
 watch(() => marketStore.marketRates, (rates) => {
   if (!rates) return
-  // 20260707: 不再消费 WS 广播的 funding — 后端 MarketRateStreamer 只推 XAUUSDT
-  // 单一品种, 在 ICXAG/CL/BZ/NG 页面每10s把按对REST取到的资金费覆盖成黄金的值。
-  // funding 唯一源 = fetchBinanceFundingRate(带pair_code, 60s轮询+切对即刷)。
-  // 20260706: 不再消费 WS 广播的 swap — 它是全站单一值(后端硬编码8001桥XAUUSD+
-  // = XAU对的broker), 在 ICXAU 等其它对上每10s把按对REST轮询到的正确过夜费覆盖成
-  // 别家broker的值(显示-0.79/+0.27而非IC的-0.56/+0.39)。swap 唯一源 =
-  // fetchBybitSwapRate(带pair_code, 60s轮询+切对即刷)。funding 广播(币安全站同值)不受影响。
+  if (rates.funding) {
+    binanceLongFundingRate.value = rates.funding.long_cost_per_lot ?? 0
+    binanceShortFundingRate.value = rates.funding.short_cost_per_lot ?? 0
+    binanceFundingRatePct.value = rates.funding.funding_rate_pct ?? 0
+    binanceNextFundingTime.value = rates.funding.next_funding_time ?? 0
+    binanceMarkPrice.value = rates.funding.mark_price ?? 0
+  }
+  if (rates.swap) {
+    bybitLongSwapFee.value = rates.swap.long_swap_per_lot ?? 0
+    bybitShortSwapFee.value = rates.swap.short_swap_per_lot ?? 0
+  }
 }, { deep: true })
 
 // 主账户资金费 = 持仓量(XAU) / 100 * cost_per_lot
-// 资金费合计(20260707修): binanceXxxTotal单位=A腿单位(盎司/桶/MMBtu),
-// long_cost_per_lot实际=每1个A腿单位的费用(fr×mark) → 原公式÷100全品种小100倍。
 const mainFundingFee = computed(() => {
-  const longFee = binanceLongTotal.value * binanceLongFundingRate.value
-  const shortFee = binanceShortTotal.value * binanceShortFundingRate.value
+  const longFee = (binanceLongTotal.value / 100) * binanceLongFundingRate.value
+  const shortFee = (binanceShortTotal.value / 100) * binanceShortFundingRate.value
   return longFee + shortFee
 })
 
-// 对冲过夜费合计(20260706修): bybitXxxTotal 单位=MT5标准手, fee ref=每0.01手费用
-// → 原公式(手数×每0.01手费用)全品种小100倍(黄金1手真实38.7/天却显示0.39)。
-// 正确 = MT5手数 × 每标准手swap(=fee×100), 与MT5账单一致。
+// 对冲过夜费 = 持仓手数 * swap_per_lot
 const hedgeOvernightFee = computed(() => {
-  const longFee = bybitLongTotal.value * bybitLongSwapFee.value * 100
-  const shortFee = bybitShortTotal.value * bybitShortSwapFee.value * 100
+  const longFee = bybitLongTotal.value * bybitLongSwapFee.value
+  const shortFee = bybitShortTotal.value * bybitShortSwapFee.value
   return longFee + shortFee
 })
 // Binance real-time funding rate (per lot = 100 XAU)
@@ -895,8 +865,6 @@ watch(() => marketStore.lastMessage, (message) => {
     redisStatus.value = message.data
   } else if (message.type === 'pending_order_event') {
     handlePendingOrderEvent(message.data)
-  } else if (message.type === 'risk_alert' && message.data && message.data.alert_type === 'single_leg_alert') {
-    handleSingleLegMarquee(message.data)
   }
 }, { deep: false })
 
@@ -1107,7 +1075,6 @@ onMounted(() => {
 
 onUnmounted(() => {
   if (quoteRecoverTimer) clearTimeout(quoteRecoverTimer)
-  if (singleLegMarqueeTimer) clearTimeout(singleLegMarqueeTimer)
   if (lagTimer) clearInterval(lagTimer)
   if (orderFetchTimer) clearInterval(orderFetchTimer)
   // orderBookFetchTimer removed — orderbook now via WS
@@ -1118,8 +1085,7 @@ onUnmounted(() => {
 })
 
 function formatPrice(price) {
-  const d = pxDecimals.value
-  return price ? price.toFixed(d) : (0).toFixed(d)
+  return price ? price.toFixed(2) : '0.00'
 }
 
 function getPriceClass(current, previous) {

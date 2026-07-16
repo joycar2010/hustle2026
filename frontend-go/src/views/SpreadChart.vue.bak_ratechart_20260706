@@ -103,9 +103,9 @@
         <span class="text-[#9ca3af]">{{ rangeStats.startTime }} ~ {{ rangeStats.endTime }}</span>
         <span class="text-[#6b7280]">|</span>
         <span class="text-[#6b7280]">{{ dirLabel }}</span>
-        <span :style="{ color: dirColor }">高 {{ rangeStats.max.toFixed(spreadDecimals) }}</span>
-        <span :style="{ color: dirColor }">低 {{ rangeStats.min.toFixed(spreadDecimals) }}</span>
-        <span class="text-[#e5e7eb]">均 {{ rangeStats.avg.toFixed(spreadDecimals) }}</span>
+        <span :style="{ color: dirColor }">高 {{ rangeStats.max.toFixed(2) }}</span>
+        <span :style="{ color: dirColor }">低 {{ rangeStats.min.toFixed(2) }}</span>
+        <span class="text-[#e5e7eb]">均 {{ rangeStats.avg.toFixed(2) }}</span>
         <span class="text-[#6b7280]">| {{ rangeStats.count }} 点</span>
       </div>
 
@@ -131,22 +131,6 @@
       <div class="text-[10px] text-[#4b5563] text-center">
         拖拽平移 · 滚轮缩放 · 切换方向查看正向/反向单线 · Y轴固定刻度网格
       </div>
-    </div>
-
-    <!-- ── 资金费/过夜费走势 (20260706, 跟随导航栏交易对与上方时间范围) ── -->
-    <div class="mt-4 bg-[#0a0a12] rounded border border-[#2d2d3d] p-3">
-      <div class="flex items-center justify-between mb-2 flex-wrap gap-1">
-        <h3 class="text-sm font-semibold text-[#fcd535]">资金费 / 过夜费走势
-          <span class="ml-2 text-[10px] px-2 py-0.5 rounded border border-[#fcd535] text-[#fcd535] font-mono">{{ currentPair }}</span>
-        </h3>
-        <div class="text-[10px] text-[#6b7280]">
-          <span class="mr-3"><span class="inline-block w-2 h-2 rounded-full align-middle mr-1" style="background:#f0b90b"></span>资金费率%(右轴)</span>
-          <span class="mr-3"><span class="inline-block w-2 h-2 rounded-full align-middle mr-1" style="background:#ef4444"></span>过夜费·多/手(左轴)</span>
-          <span><span class="inline-block w-2 h-2 rounded-full align-middle mr-1" style="background:#0ecb81"></span>过夜费·空/手(左轴)</span>
-        </div>
-      </div>
-      <div ref="ratesContainer" class="w-full" style="height: 220px"></div>
-      <div v-if="ratesEmpty" class="text-center text-[10px] text-[#6b7280] mt-1">该产品对暂无费率采样(采样器约60秒记录一次, 新交易对稍候即有数据)</div>
     </div>
 
     <!-- ── 滑点保护事件审计 (审计专用, 不可操作) ───────────────────── -->
@@ -217,11 +201,6 @@ import api from '@/services/api'
 
 // 20260706 多产品对联动: 图表/滑点事件跟随导航栏交易对(事件驱动, 无轮询)
 const { currentPair } = useTradingPair()
-// 点差走势精度按对(20260706): 天然气点差量级小(~0.0x), 3位小数; 其余维持2位。
-const spreadDecimals = computed(() => {
-  const pc = String(currentPair.value || '').toUpperCase()
-  return (pc.startsWith('NG') || pc.includes('XNG') || pc.includes('NATGAS')) ? 3 : 2
-})
 
 // ── 滑点保护事件审计 ───────────────────────────────
 const slipEvents = ref([])
@@ -390,7 +369,6 @@ function initChart() {
     title: dirLabel.value,
     priceLineVisible: false,
     lastValueVisible: true,
-    priceFormat: { type: 'price', precision: spreadDecimals.value, minMove: Math.pow(10, -spreadDecimals.value) },
     // 固定刻度网格：以 computeNiceBounds 的整齐边界作为 Y 轴范围
     autoscaleInfoProvider: () => (
       scaleBounds
@@ -411,7 +389,7 @@ function initChart() {
     }
 
     tooltip.time = bjSecToFull(param.time)
-    tooltip.val = pt.value.toFixed(spreadDecimals.value)
+    tooltip.val = pt.value.toFixed(2)
 
     const chartRect = chartContainer.value.getBoundingClientRect()
     const mouseX = param.point.x
@@ -551,82 +529,11 @@ async function fetchData() {
     fwdData.sort((a, b) => a.time - b.time)
     revData.sort((a, b) => a.time - b.time)
 
-    // 精度随当前对刷新(NG=3位, 其余2位); 图表实例只建一次, 须applyOptions更新
-    if (lineSeries) lineSeries.applyOptions({ priceFormat: { type: 'price', precision: spreadDecimals.value, minMove: Math.pow(10, -spreadDecimals.value) } })
     applyDirection()
   } catch (e) {
     console.error('Fetch spread chart failed:', e)
   } finally {
     loading.value = false
-  }
-  fetchRates()  // 费率走势与点差图共用时间范围/交易对, 同一入口驱动(fire-and-forget)
-}
-
-// ── 资金费/过夜费走势(20260706): 数据源 /api/v1/market/rates/chart(采样器60s落库) ──
-const ratesContainer = ref(null)
-const ratesEmpty = ref(false)
-let ratesChart = null
-let frSeries = null
-let lsSeries = null
-let ssSeries = null
-
-function initRatesChart() {
-  if (!ratesContainer.value || ratesChart) return
-  ratesChart = createChart(ratesContainer.value, {
-    layout: { background: { type: ColorType.Solid, color: '#0a0a12' }, textColor: '#6b7280', fontSize: 10 },
-    grid: { vertLines: { color: '#16161f' }, horzLines: { color: '#16161f' } },
-    width: ratesContainer.value.clientWidth,
-    height: 220,
-    timeScale: { timeVisible: true, secondsVisible: false, borderColor: '#2d2d3d' },
-    rightPriceScale: { visible: true, borderColor: '#2d2d3d' },
-    leftPriceScale: { visible: true, borderColor: '#2d2d3d' },
-    crosshair: { mode: CrosshairMode.Normal },
-  })
-  frSeries = ratesChart.addSeries(LineSeries, { color: '#f0b90b', lineWidth: 1, priceScaleId: 'right', priceFormat: { type: 'price', precision: 4, minMove: 0.0001 } })
-  lsSeries = ratesChart.addSeries(LineSeries, { color: '#ef4444', lineWidth: 1, priceScaleId: 'left', priceFormat: { type: 'price', precision: 3, minMove: 0.001 } })
-  ssSeries = ratesChart.addSeries(LineSeries, { color: '#0ecb81', lineWidth: 1, priceScaleId: 'left', priceFormat: { type: 'price', precision: 3, minMove: 0.001 } })
-}
-
-async function fetchRates() {
-  try {
-    const startUTC = new Date(startInput.value + ':00+08:00')
-    const endUTC = new Date(endInput.value + ':00+08:00')
-    const params = new URLSearchParams({
-      start_time: startUTC.toISOString(),
-      end_time: endUTC.toISOString(),
-      interval: '60',
-      pair_code: currentPair.value || 'XAU',
-    })
-    const token = localStorage.getItem('token')
-    const resp = await fetch(`/api/v1/market/rates/chart?${params}`, {
-      headers: token ? { 'Authorization': `Bearer ${token}` } : {},
-    })
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
-    const data = await resp.json()
-    if (!ratesChart) { await nextTick(); initRatesChart() }
-    if (!ratesChart) return
-    const fr = []
-    const ls = []
-    const ss = []
-    for (const row of data) {
-      // row.t 为裸UTC; 与点差图同法强制UTC解析+东八区偏移
-      const _raw = row.t
-      const utcMs = new Date(/[zZ]|[+\-]\d\d:?\d\d$/.test(_raw) ? _raw : _raw + 'Z').getTime()
-      const bjSec = Math.floor((utcMs + 8 * 3600000) / 1000)
-      if (row.fr != null) fr.push({ time: bjSec, value: row.fr * 100 })
-      if (row.ls != null) ls.push({ time: bjSec, value: row.ls })
-      if (row.ss != null) ss.push({ time: bjSec, value: row.ss })
-    }
-    fr.sort((a, b) => a.time - b.time)
-    ls.sort((a, b) => a.time - b.time)
-    ss.sort((a, b) => a.time - b.time)
-    if (frSeries) frSeries.setData(fr)
-    if (lsSeries) lsSeries.setData(ls)
-    if (ssSeries) ssSeries.setData(ss)
-    ratesEmpty.value = (fr.length + ls.length + ss.length) === 0
-    ratesChart.timeScale().fitContent()
-  } catch (e) {
-    console.error('Fetch rates chart failed:', e)
   }
 }
 
@@ -634,9 +541,6 @@ function onResize() {
   isMobile.value = window.innerWidth < 768
   if (chart && chartContainer.value) {
     chart.applyOptions({ width: chartContainer.value.clientWidth, height: chartHeight.value })
-  }
-  if (ratesChart && ratesContainer.value) {
-    ratesChart.applyOptions({ width: ratesContainer.value.clientWidth })
   }
 }
 

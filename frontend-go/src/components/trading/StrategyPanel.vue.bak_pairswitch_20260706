@@ -35,10 +35,10 @@
       <div class="text-base font-bold text-center text-[#3b82f6]">
         <span v-if="type === 'reverse'">
           对冲多仓: {{ (localBybitLong * bConv).toFixed(0) }} 主空仓: {{ localBinanceShort.toFixed(2) }}
-          <span v-if="avgOpenSpread !== null" class="text-sm text-[#f0b90b] ml-2">平均点差: {{ avgOpenSpread.toFixed(spreadDp) }}</span>
+          <span v-if="avgOpenSpread !== null" class="text-sm text-[#f0b90b] ml-2">平均点差: {{ avgOpenSpread.toFixed(2) }}</span>
         </span>
         <span v-else>
-          <span v-if="avgOpenSpread !== null" class="text-sm text-[#f0b90b] mr-2">平均点差: {{ avgOpenSpread.toFixed(spreadDp) }}</span>
+          <span v-if="avgOpenSpread !== null" class="text-sm text-[#f0b90b] mr-2">平均点差: {{ avgOpenSpread.toFixed(2) }}</span>
           主多仓: {{ localBinanceLong.toFixed(2) }} 对冲空仓: {{ (localBybitShort * bConv).toFixed(0) }}
         </span>
       </div>
@@ -71,11 +71,11 @@
             <div v-if="marketCardsRef" class="text-center">
               <div class="text-xs text-gray-400 mb-0.5">对冲 过夜费</div>
               <div class="flex gap-2 justify-center">
-                <span :class="hedgeSwapLongPerUnit <= 0 ? 'text-[#f6465d]' : 'text-[#0ecb81]'" class="text-xs font-mono">
-                  多: {{ hedgeSwapLongPerUnit <= 0 ? '-' : '+' }}{{ Math.abs(hedgeSwapLongPerUnit).toFixed(hedgeSwapDecimals) }}
+                <span :class="marketCardsRef.bybitLongSwapFee <= 0 ? 'text-[#f6465d]' : 'text-[#0ecb81]'" class="text-xs font-mono">
+                  多: {{ marketCardsRef.bybitLongSwapFee <= 0 ? '-' : '+' }}{{ Math.abs(marketCardsRef.bybitLongSwapFee ?? 0).toFixed(hedgeSwapDecimals) }}
                 </span>
-                <span :class="hedgeSwapShortPerUnit >= 0 ? 'text-[#0ecb81]' : 'text-[#f6465d]'" class="text-xs font-mono">
-                  空: {{ hedgeSwapShortPerUnit >= 0 ? '+' : '-' }}{{ Math.abs(hedgeSwapShortPerUnit).toFixed(hedgeSwapDecimals) }}
+                <span :class="marketCardsRef.bybitShortSwapFee >= 0 ? 'text-[#0ecb81]' : 'text-[#f6465d]'" class="text-xs font-mono">
+                  空: {{ marketCardsRef.bybitShortSwapFee >= 0 ? '+' : '-' }}{{ Math.abs(marketCardsRef.bybitShortSwapFee ?? 0).toFixed(hedgeSwapDecimals) }}
                 </span>
               </div>
             </div>
@@ -84,7 +84,7 @@
             <div class="text-center">
               <div class="text-xs text-gray-400 mb-0.5 whitespace-nowrap">做多对冲点差</div>
               <div class="text-lg font-mono font-bold whitespace-nowrap text-[#0ecb81]">
-                {{ currentSpread.toFixed(spreadDp) }} / {{ closingSpread.toFixed(spreadDp) }}
+                {{ currentSpread.toFixed(2) }} / {{ closingSpread.toFixed(2) }}
               </div>
             </div>
           </template>
@@ -95,7 +95,7 @@
             <div class="text-center">
               <div class="text-xs text-gray-400 mb-0.5 whitespace-nowrap">做多主账号点差</div>
               <div class="text-lg font-mono font-bold whitespace-nowrap text-[#f6465d]">
-                {{ currentSpread.toFixed(spreadDp) }} / {{ closingSpread.toFixed(spreadDp) }}
+                {{ currentSpread.toFixed(2) }} / {{ closingSpread.toFixed(2) }}
               </div>
             </div>
 
@@ -104,10 +104,10 @@
               <div class="text-xs text-gray-400 mb-0.5">主账号 资金费/手</div>
               <div class="flex gap-2 justify-center">
                 <span :class="marketCardsRef.binanceLongFundingRate >= 0 ? 'text-[#f6465d]' : 'text-[#0ecb81]'" class="text-xs font-mono">
-                  多: {{ marketCardsRef.binanceLongFundingRate >= 0 ? '-' : '+' }}{{ fundingPerUnit.toFixed(fundingDecimals) }}
+                  多: {{ marketCardsRef.binanceLongFundingRate >= 0 ? '-' : '+' }}{{ Math.abs((marketCardsRef.binanceFundingRatePct ?? 0) / 100 * (marketCardsRef.binanceMarkPrice ?? 0)).toFixed(2) }}
                 </span>
                 <span :class="marketCardsRef.binanceLongFundingRate >= 0 ? 'text-[#0ecb81]' : 'text-[#f6465d]'" class="text-xs font-mono">
-                  空: {{ marketCardsRef.binanceLongFundingRate >= 0 ? '+' : '-' }}{{ fundingPerUnit.toFixed(fundingDecimals) }}
+                  空: {{ marketCardsRef.binanceLongFundingRate >= 0 ? '+' : '-' }}{{ Math.abs((marketCardsRef.binanceFundingRatePct ?? 0) / 100 * (marketCardsRef.binanceMarkPrice ?? 0)).toFixed(2) }}
                 </span>
               </div>
               <div class="text-[10px] text-gray-500 mt-0.5">费率: {{ (marketCardsRef.binanceFundingRatePct ?? 0).toFixed(4) }}%</div>
@@ -632,8 +632,8 @@
                   :id="`openPrice-${type}-${index}`"
                   v-model.number="ladder.openPrice"
                   type="number"
-                  :step="ladderStep"
-                  :placeholder="(0).toFixed(ladderDecimals)"
+                  step="0.1"
+                  :placeholder="(0).toFixed(1)"
                   class="w-full bg-transparent border border-[#2b3139] rounded px-1.5 py-0.5 text-xs focus:border-[#f0b90b] focus:outline-none"
                 />
               </div>
@@ -646,8 +646,8 @@
                   :id="`threshold-${type}-${index}`"
                   v-model.number="ladder.threshold"
                   type="number"
-                  :step="ladderStep"
-                  :placeholder="(0).toFixed(ladderDecimals)"
+                  step="0.1"
+                  :placeholder="(0).toFixed(1)"
                   class="w-full bg-transparent border border-[#2b3139] rounded px-1.5 py-0.5 text-xs focus:border-[#f0b90b] focus:outline-none"
                 />
               </div>
@@ -767,32 +767,13 @@ const props = defineProps({
   }
 })
 
-// 对冲过夜费口径修正(20260706b): 后端fee=每0.01 MT5手(÷100黄金时代常数), 仅在
-// conv=100的对(黄金/美原油/布伦特)上恰等于每系统手; 白银(conv=1000)大10倍、
-// NG(conv=10000)大100倍(用户实证: NG显示0.055×100手≠MT5账单0.06, 因100系统手
-// 天然气=0.01 MT5手)。换算为真·每系统手 = fee×100÷conversionFactor, 满足
-// "显示值×持仓手数=实际日费用", 可与MT5账单直接对账; 小数位按量级自适应。
-// 主账号资金费/手 小数位自适应(20260707): 白银0.0012/NG 0.0002级别, 2位小数吞成0.00
-const fundingPerUnit = computed(() => Math.abs(
-  (Number(props.marketCardsRef?.binanceFundingRatePct ?? 0) / 100) *
-  Number(props.marketCardsRef?.binanceMarkPrice ?? 0)))
-const fundingDecimals = computed(() => {
-  const m = fundingPerUnit.value
-  if (m >= 0.1) return 2
-  if (m >= 0.01) return 3
-  if (m >= 0.001) return 4
-  return 5
-})
-const hedgeSwapLongPerUnit = computed(() =>
-  (Number(props.marketCardsRef?.bybitLongSwapFee ?? 0) * 100) / bConv.value)
-const hedgeSwapShortPerUnit = computed(() =>
-  (Number(props.marketCardsRef?.bybitShortSwapFee ?? 0) * 100) / bConv.value)
+// 对冲过夜费显示位数(20260706): 天然气/白银/原油等 swap 绝对值小(<0.5), 两位小数
+// 会丢失精度(NG 真值-0.126两位只剩-0.13、旧路由bug时代甚至显示0.00), 整组值小时
+// 自动升为三位; 黄金(-0.56/+0.39)保持两位不变。
 const hedgeSwapDecimals = computed(() => {
-  const m = Math.max(Math.abs(hedgeSwapLongPerUnit.value), Math.abs(hedgeSwapShortPerUnit.value))
-  if (m >= 0.1) return 2
-  if (m >= 0.01) return 3
-  if (m >= 0.001) return 4
-  return 5
+  const l = Math.abs(props.marketCardsRef?.bybitLongSwapFee ?? 0)
+  const s = Math.abs(props.marketCardsRef?.bybitShortSwapFee ?? 0)
+  return Math.max(l, s) >= 0.5 ? 2 : 3
 })
 
 // Config section hide/show toggle (persisted per type)
@@ -902,26 +883,9 @@ const { currentPair, pairConfig } = useTradingPair()
 // B腿手数→A腿单位显示系数(20260706): 顶栏对冲多/空仓原硬编码*100只对黄金(1手=100oz)成立,
 // 白银1000/油100/气10000, 改按当前对 conversionFactor(与引擎/紧急手动交易同源=hedging_pairs表)
 const bConv = computed(() => Number(pairConfig.value?.conversionFactor) || 100)
-// 点差显示精度按对(20260706): NG族3位(点差量级~0.0x), 其余2位。与/spread-chart走势图同规则。
-const spreadDp = computed(() => {
-  const pc = String(currentPair.value || '').toUpperCase()
-  return (pc.startsWith('NG') || pc.includes('XNG') || pc.includes('NATGAS')) ? 3 : 2
-})
-// 阶梯开/平差值输入精度(20260706, 用户指定): 黄金族点差1位小数合适;
-// 白银/美原油/布伦特报价更细用2位; 天然气(~3美元量级)用3位。未列品种回退1位。
-const ladderDecimals = computed(() => {
-  const pc = String(currentPair.value || '').toUpperCase()
-  if (pc.startsWith('NG') || pc.includes('XNG') || pc.includes('NATGAS')) return 3
-  if (pc.includes('XAG') || pc.startsWith('CL') || pc.startsWith('BZ')
-      || pc.includes('XTI') || pc.includes('XBR') || pc.includes('USO') || pc.includes('UKO')) return 2
-  return 1
-})
-const ladderStep = computed(() => Math.pow(10, -ladderDecimals.value).toFixed(ladderDecimals.value))
 const alertPairCode = currentPair  // computed alias — reactive ref from global store
 
-watch([() => marketStore.positionSnapshot, alertPairCode], ([snap, _pcNow], _old) => {
-  const _pcPrev = Array.isArray(_old) ? _old[1] : undefined
-  const pairSwitched = _pcPrev !== undefined && _pcNow !== _pcPrev
+watch([() => marketStore.positionSnapshot, alertPairCode], ([snap]) => {
   if (!snap) return
   const pairData = snap.pairs?.[alertPairCode.value]
   let ml, ms, bl, bs
@@ -935,20 +899,6 @@ watch([() => marketStore.positionSnapshot, alertPairCode], ([snap, _pcNow], _old
     ms = snap.bybit_short_lots ?? 0
     bl = snap.binance_long_xau ?? 0
     bs = snap.binance_short_xau ?? 0
-  }
-  // ── 20260706 跨对切换硬重置(事件驱动, 无轮询) ──────────────────────────
-  // 防抖只应作用于"同一交易对内连续快照"的桥读数闪烁; 切对后第一帧天然是
-  // (新对可能全零 + 本地还是旧对值), 旧逻辑误判为闪烁拒收清零, 把上一对的
-  // 对冲仓钉在新对页面(币安腿直收/MT5腿拒零 → "主多仓0.00/对冲空仓10"残影,
-  // WS推送稀疏时永不自愈)。切对帧无条件采纳当前快照中新对的数值并清零防抖
-  // 计数; 同对内的快照更新走下方原防抖逻辑不变。
-  if (pairSwitched) {
-    _consecutiveZeroCount = 0
-    localBinanceLong.value = bl
-    localBinanceShort.value = bs
-    localBybitLong.value = ml
-    localBybitShort.value = ms
-    return
   }
   const incomingAllZero = (ml === 0 && ms === 0 && bl === 0 && bs === 0)
   const currentHasPosition = (localBybitLong.value !== 0 || localBybitShort.value !== 0 ||
@@ -1884,8 +1834,8 @@ async function saveConfig() {
       closing_trigger_check_interval: (config.value.closingTriggerCheckInterval || 200) / 1000, // Convert ms to seconds
       ladders: config.value.ladders.map(l => ({
         enabled: l.enabled,
-        openPrice: Number(Number(l.openPrice).toFixed(3)),  // 20260706: 1位→3位, NG阈值~0.018被1位舍入归零
-        threshold: Number(Number(l.threshold).toFixed(3)),
+        openPrice: Number(Number(l.openPrice).toFixed(1)),
+        threshold: Number(Number(l.threshold).toFixed(1)),
         qtyLimit: Number(l.qtyLimit)
       })),
       is_enabled: config.value.openingEnabled || config.value.closingEnabled
