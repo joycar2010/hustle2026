@@ -1,3 +1,4 @@
+import os
 """系统监控API路由"""
 from fastapi import APIRouter, Depends, HTTPException
 from typing import Optional, Dict, Any, List
@@ -61,7 +62,7 @@ def check_feishu_status() -> Dict[str, Any]:
         import psycopg2
         conn = psycopg2.connect(
             host="127.0.0.1", port=5432, dbname="postgres",
-            user="postgres", password="Lk106504"
+            user="postgres", password=os.getenv("DB_PASSWORD", "")
         )
         cur = conn.cursor()
         cur.execute("SELECT is_enabled, config_data FROM notification_configs WHERE service_type='feishu' LIMIT 1")
@@ -87,7 +88,7 @@ def check_mt5_clients() -> List[Dict[str, Any]]:
         import os, httpx
         conn = psycopg2.connect(
             host="127.0.0.1", port=5432, dbname="postgres",
-            user="postgres", password="Lk106504"
+            user="postgres", password=os.getenv("DB_PASSWORD", "")
         )
         cur = conn.cursor()
         cur.execute("""

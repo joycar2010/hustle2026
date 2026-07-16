@@ -274,7 +274,7 @@ async def _pull_mt5_deals_live(account, start_ms: int, end_ms: int) -> list:
     """实时从该 account 所有活跃 bridge 拉全量 deal(按 ticket 跨桥去重)。返回原始 deal dict 列表。
     days 用 (now-start)×3+7 冗余覆盖桥"最近N交易日"截断坑; 时间精确过滤交给调用方/DB读。"""
     bridge_host = os.getenv("MT5_BRIDGE_HOST", "http://172.31.14.113")
-    api_key = os.getenv("MT5_API_KEY", os.getenv("MT5_BRIDGE_API_KEY", "OQ6bUimHZDmXEZzJKE"))
+    api_key = os.getenv("MT5_API_KEY", os.getenv("MT5_BRIDGE_API_KEY", os.getenv("MT5_API_KEY", "")))
     headers = {"X-Api-Key": api_key} if api_key else {}
     try:
         async with AsyncSessionLocal() as _db:

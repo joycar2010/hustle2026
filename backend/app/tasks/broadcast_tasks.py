@@ -1,4 +1,5 @@
 """Background tasks for account balance and risk metrics streaming"""
+import os
 import asyncio
 from datetime import datetime
 from uuid import UUID
@@ -1980,7 +1981,7 @@ class MarketRateStreamer:
             if True:
                 resp = await client.get(
                     "http://172.31.14.113:8001/mt5/symbol_info/XAUUSD+",
-                    headers={"X-API-Key": "OQ6bUimHZDmXEZzJKE"},
+                    headers={"X-API-Key": os.getenv("MT5_API_KEY", "")},
                     timeout=5.0,
                 )
                 if resp.status_code != 200:
@@ -2032,7 +2033,7 @@ class QuoteDivergenceMonitor:
         "enabled": True,
         "ic_url": "http://172.31.14.113:8021", "ic_symbol": "XAUUSD",
         "ref_url": "http://172.31.14.113:8001", "ref_symbol": "XAUUSD+",
-        "api_key": "OQ6bUimHZDmXEZzJKE",
+        "api_key": os.getenv("MT5_API_KEY", ""),
         "trip": 0.7, "recover": 0.3,
         "poll_sec": 0.5, "stale_sec": 5, "heartbeat_sec": 3.0,
     }
@@ -2102,7 +2103,7 @@ class QuoteDivergenceMonitor:
             try:
                 trip = float(cfg.get("trip", 0.7))
                 recover = float(cfg.get("recover", 0.3))
-                api_key = cfg.get("api_key", "OQ6bUimHZDmXEZzJKE")
+                api_key = cfg.get("api_key", os.getenv("MT5_API_KEY", ""))
                 from app.core.shared_http import get_shared_async_client
                 client = get_shared_async_client()
                 if True:

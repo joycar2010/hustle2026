@@ -1,5 +1,6 @@
 from pydantic_settings import BaseSettings
 from typing import List
+import os
 import json
 
 
@@ -7,12 +8,12 @@ class Settings(BaseSettings):
     """Application settings loaded from environment variables"""
 
     # Database (从.env文件读取，以下为默认值)
-    DATABASE_URL: str = "postgresql://postgres:Lk106504@127.0.0.1:5432/postgres"
+    DATABASE_URL: str = os.getenv("DATABASE_URL", "")
     DB_HOST: str = "127.0.0.1"
     DB_PORT: int = 5432
     DB_NAME: str = "postgres"
     DB_USER: str = "postgres"
-    DB_PASSWORD: str = "Lk106504"
+    DB_PASSWORD: str = os.getenv("DB_PASSWORD", "")
 
     # Redis
     REDIS_HOST: str = "localhost"

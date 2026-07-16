@@ -2,6 +2,7 @@
 MT5 HTTP Client - 通过 HTTP 调用远程 MT5 Bridge 微服务
 替代直接使用 MetaTrader5 SDK，用于远程服务器（无MT5终端）场景
 """
+import os
 import httpx
 import logging
 from typing import Optional, List, Dict, Any
@@ -16,7 +17,7 @@ class MT5HttpClient:
     使上层 market_service / account_service / mt5_bridge 无需关心底层是 SDK 还是 HTTP。
     """
 
-    def __init__(self, base_url: str = "http://localhost:8001", api_key: str = "OQ6bUimHZDmXEZzJKE"):
+    def __init__(self, base_url: str = "http://localhost:8001", api_key: str = os.getenv("MT5_API_KEY", "")):
         self.base_url = base_url.rstrip('/')
         self.api_key = api_key
         self.client = httpx.AsyncClient(timeout=3.0)
@@ -405,6 +406,6 @@ def get_mt5_http_client() -> MT5HttpClient:
     if _mt5_http_client is None:
         import os
         base_url = os.getenv("MT5_BRIDGE_URL", "http://localhost:8001")
-        api_key = os.getenv("MT5_BRIDGE_API_KEY", "OQ6bUimHZDmXEZzJKE")
+        api_key = os.getenv("MT5_BRIDGE_API_KEY", os.getenv("MT5_API_KEY", ""))
         _mt5_http_client = MT5HttpClient(base_url=base_url, api_key=api_key)
     return _mt5_http_client
