@@ -6,7 +6,7 @@
       <el-tab-pane label="网站维护/全停" name="maint">
         <div class="card" style="max-width:640px">
           <div class="banner" :class="mt.enabled?'warn':'ok'">
-            {{ mt.enabled ? '⚠ 维护中（用户端已置顶维护公告）' : '✓ 系统正常运行中' }}
+            {{ mt.enabled ? '维护中（用户端已置顶维护公告）' : '系统正常运行中' }}
           </div>
           <el-form label-width="130">
             <el-form-item label="维护总开关">

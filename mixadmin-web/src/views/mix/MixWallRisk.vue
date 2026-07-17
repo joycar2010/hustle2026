@@ -52,7 +52,7 @@
             <span><b>{{ r.symbol }}</b></span>
             <span><i class="pbadge">{{ r.product }}</i></span>
             <span class="r">{{ r.net_delta_usdt ?? 'N/A' }}</span>
-            <span :class="r.recon==='ok' ? 'up' : 'bad'">{{ r.recon==='ok' ? '✓ 0差异' : '⚠ '+r.recon }}</span>
+            <span :class="r.recon==='ok' ? 'up' : 'bad'"><template v-if="r.recon==='ok'"><FIcon name="check" :size="11"/> 0差异</template><template v-else><FIcon name="warn" :size="11"/> {{ r.recon }}</template></span>
           </div>
           <div v-if="!pfRows.length" class="dimtxt pad">无在管组合</div>
         </div>
@@ -102,12 +102,14 @@
     </div>
   </div>
   <div v-else class="gate">屏3 · 风控与账务<br /><small>URL 需携带 ?token=(只读墙令牌,后端校验)</small></div>
+  <WallStatus v-if="authed" title="屏3 · 风控墙" @gen="load"/>
 </template>
 
 <script setup>
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import RiskStatusBar from '../../components/RiskStatusBar.vue'
+import WallStatus from '../../components/v62/WallStatus.vue'
 import { mixApi } from '../../api/mix'
 
 const route = useRoute()
@@ -146,7 +148,8 @@ async function load() {
     flows.value = (await mixApi.riskCashflows())?.rows || []
   } catch (e) { /* 状态条示 STALE */ }
 }
-onMounted(() => { load(); t1 = setInterval(load, 15000) })
+// §7/§18:WS generation 驱动刷新,REST 60s 兜底(消灭独立 15s 轮询)
+onMounted(() => { load(); t1 = setInterval(load, 60000); mixApi.uxPageview('wall') })
 onUnmounted(() => t1 && clearInterval(t1))
 </script>
 

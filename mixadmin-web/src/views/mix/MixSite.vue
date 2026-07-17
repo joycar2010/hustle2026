@@ -1,7 +1,7 @@
 <template>
   <div class="mixsite">
     <div class="card">
-      <div class="chd"><b>官网/品牌管理</b><span class="sub">mixadmin 侧栏与登录门实时消费；保存即热生效（刷新页面可见）</span></div>
+      <div class="chd"><b>官网/品牌管理</b><span class="sub">mix.hustle2026.xyz 管理端侧栏与登录门实时消费；保存即热生效（刷新页面可见）</span></div>
       <el-form label-width="110px" size="small">
         <el-form-item label="侧栏标题"><el-input v-model="b.title" placeholder="HustleCoin Mix" /></el-form-item>
         <el-form-item label="登录门大字"><el-input v-model="b.loginTitle" placeholder="HUSTLECOIN MIX" /></el-form-item>
@@ -25,7 +25,7 @@
       <el-button type="warning" @click="save">保存（需 SUPER_ADMIN）</el-button>
     </div>
     <div class="card">
-      <div class="chd"><b>用户端 · 登录框</b><span class="sub">mix.hustle2026.xyz /login 实时消费；留空字段=站点默认</span></div>
+      <div class="chd"><b>用户端 · 登录框</b><span class="sub">user.hustle2026.xyz 登录卡实时消费；留空字段=站点默认</span></div>
       <el-form label-width="110px" size="small">
         <el-form-item label="登录框LOGO">
           <div class="logobox">
@@ -38,14 +38,14 @@
           <el-input v-model="ul.logo" placeholder="/logo.png 或 https://…（也可点上方框上传）" style="margin-top:6px" />
         </el-form-item>
         <el-form-item label="标题"><el-input v-model="ul.title" placeholder="HustleCoin Mix" /></el-form-item>
-        <el-form-item label="副标题"><el-input v-model="ul.subtitle" placeholder="实时收益查看平台" /></el-form-item>
-        <el-form-item label="底部链接文字"><el-input v-model="ul.footText" placeholder="→ 交易操作面板" /></el-form-item>
-        <el-form-item label="底部链接URL"><el-input v-model="ul.footLink" placeholder="https://go.hustle2026.xyz（留空=不显示链接）" /></el-form-item>
+        <el-form-item label="副标题"><el-input v-model="ul.subtitle" placeholder="投资人收益查看中心 · 请登录以继续" /></el-form-item>
+        <el-form-item label="底部链接文字"><el-input v-model="ul.footText" placeholder="如:客服/帮助链接文字(留空=不显示)" /></el-form-item>
+        <el-form-item label="底部链接URL"><el-input v-model="ul.footLink" placeholder="https://…（留空=不显示链接）" /></el-form-item>
       </el-form>
       <el-button type="warning" @click="saveBlock('user_login', ul)">保存登录框（需 SUPER_ADMIN）</el-button>
     </div>
     <div class="card">
-      <div class="chd"><b>用户端 · 品牌头</b><span class="sub">用户端首页顶部品牌行（LOGO/名称/标语/胶囊）；留空=站点默认</span></div>
+      <div class="chd"><b>投资门户 · 顶部品牌头</b><span class="sub">user.hustle2026.xyz 顶栏品牌行（LOGO + 品牌名白 + 品牌名金）实时消费；留空=站点默认金标</span></div>
       <el-form label-width="110px" size="small">
         <el-form-item label="品牌LOGO">
           <div class="logobox">
@@ -55,12 +55,12 @@
             </div>
             <el-button v-if="ub.logo" link type="danger" size="small" @click="ub.logo=''">清除</el-button>
           </div>
-          <div class="hint">留空=默认 📈 金底图标。</div>
+          <el-input v-model="ub.logo" placeholder="/logo-white.png 或 https://…（也可点上方框上传）" style="margin-top:6px" />
+          <div class="hint">留空=默认金标；顶栏 26×26 小图，建议透明底浅色图。</div>
         </el-form-item>
         <el-form-item label="品牌名(白)"><el-input v-model="ub.name" placeholder="HustleCoin" /></el-form-item>
         <el-form-item label="品牌名(金)"><el-input v-model="ub.accent" placeholder="Mix" /></el-form-item>
-        <el-form-item label="标语"><el-input v-model="ub.slogan" placeholder="把复杂的事，交给系统；把结果，交给你" /></el-form-item>
-        <el-form-item label="右侧胶囊"><el-input v-model="ub.pill" placeholder="币安生态风格 · 透明 · 稳健 · 长期主义" /></el-form-item>
+        <div class="hint" style="padding-left:110px;margin-bottom:8px">门户顶栏显示为「品牌名白 品牌名金 · 投资人中心 / 专属资产账户」，账户类型后缀由系统按登录身份自动追加，不在此配置。</div>
       </el-form>
       <el-button type="warning" @click="saveBlock('user_brand', ub)">保存品牌头（需 SUPER_ADMIN）</el-button>
     </div>
@@ -70,8 +70,8 @@
     </div>
     <div class="card">
       <div class="chd"><b>两站资产索引（只读）</b></div>
-      <div class="kv"><span>管理端</span><b>mixadmin.hustle2026.xyz · /logo-white.png · /favicon.png · manifest</b></div>
-      <div class="kv"><span>用户端</span><b>mix.hustle2026.xyz · /logo.png · /favicon.png</b></div>
+      <div class="kv"><span>管理端</span><b>mix.hustle2026.xyz · /logo-white.png · /favicon.png · manifest</b></div>
+      <div class="kv"><span>投资门户</span><b>user.hustle2026.xyz · /logo-white.png · /favicon.png · manifest</b></div>
       <div class="fnote">LOGO 源=Pencil 画板矢量导出（mix-assets/）；更换资产走发布流程（构建→原子切换→公网 md5）。</div>
     </div>
   </div>

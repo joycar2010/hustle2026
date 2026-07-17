@@ -7,9 +7,10 @@
            :class="{on:scope===`strategy:${s.code}`}"
            :style="scope===`strategy:${s.code}`?{background:META[s.code].colorBg,color:META[s.code].color}:{}"
            @click="setScope(`strategy:${s.code}`)">
-        {{ s.code }} · {{ s.name }}
+        {{ META[s.code].ccode||s.code }} · {{ s.name }}
+        <i class="capchip" :class="'cc-'+capOf(s.code)">{{ CAP_CN[capOf(s.code)]||capOf(s.code) }}</i>
       </div>
-      <div class="note">保存=差分写(只发变更键)·热生效引擎回读校验；变更审计移驻 屏3·风控墙</div>
+      <div class="note">只显示当前真实能力(服务端能力注册表驱动);保存=差分写·热生效引擎回读校验</div>
     </div>
 
     <!-- 中：设定台（S3=共享面板,与中控台通用规则弹层同源;S2=人性化开关） -->
@@ -21,8 +22,15 @@
         <span class="ver" v-if="scope!=='strategy:S3' && version">v{{ version }}</span>
       </div>
 
+      <!-- V6.1 §3:能力注册表门禁——非 ACTIVE_WRITE 一律不渲染可编辑表单 -->
+      <div v-if="curCap!=='ACTIVE_WRITE' && curCap!=='UNKNOWN'" class="empty">
+        <b>{{ scopeLabel }}</b> 当前能力档位:<i class="capchip" :class="'cc-'+curCap">{{ CAP_CN[curCap]||curCap }}</i><br/>
+        {{ curCap==='ACTIVE_READ' ? '引擎参数只读展示,写路径未开放(armed 专场接入后自动放开)' :
+           curCap==='PLANNED' ? '该产品尚未启用——不显示空白可编辑表单' :
+           curCap==='BLOCKED' ? '被风险/维护阻断,恢复后自动放开' : '即将淘汰,只读' }}
+      </div>
       <!-- S3：S3RulePanel 共享组件（40 字段五分组 + 自动划转 + 账户资金参数表,与中控台弹层同一实现） -->
-      <div v-if="scope==='strategy:S3'">
+      <div v-else-if="scope==='strategy:S3'">
         <S3RulePanel ref="s3p" />
         <div class="acts">
           <el-button type="warning" @click="openPublish('strategy:S3')">发布(dry-run→预览→认证)</el-button>
@@ -102,6 +110,22 @@ import { mixApi } from '../../api/mix'
 
 const strategyList = Object.values(META)
 const scope = ref('strategy:S3')
+// V6.1 §3 能力注册表:S码→C码查注册表;取不到=UNKNOWN(不拦既有可写,防注册表故障误锁)
+const CAP_CN = { ACTIVE_WRITE: '可写', ACTIVE_READ: '只读', SHADOW: '影子', PLANNED: '未启用',
+                 BLOCKED: '已阻断', DEPRECATED: '淘汰中' }
+const caps = ref(null)
+function capOf(scode) {
+  if (!caps.value) return 'UNKNOWN'
+  const cc = META[scode]?.ccode || scode
+  return caps.value[cc] ?? caps.value[cc.split('.')[0]] ?? 'PLANNED'
+}
+const curCap = computed(() => capOf(scope.value.split(':')[1]))
+async function loadCaps() {
+  try {
+    const r = await mixApi.v6Capabilities()
+    caps.value = Object.fromEntries((r.rows || []).map(x => [x.product_code, x.capability]))
+  } catch (e) { caps.value = null }
+}
 const fields = ref([])
 const loading = ref(false)
 const saving = ref(false)
@@ -174,7 +198,7 @@ async function doPublish(){
     setTimeout(()=>{ pub.value.open=false }, 800)
   }catch(e){ ElMessage.error(e?.detail||'发布失败') }finally{ pub.value.busy=false }
 }
-onMounted(load)
+onMounted(() => { load(); loadCaps() })
 </script>
 
 <style scoped lang="scss">
@@ -185,6 +209,11 @@ onMounted(load)
     &:hover { background: var(--el-fill-color-light); }
     &.on { background: rgba(240,185,11,.14); color: #B8860B; font-weight: 700; } }
   .note { margin-top: 8px; font-size: 10px; color: var(--el-text-color-placeholder); padding: 6px 8px; border-top: 1px dashed var(--el-border-color); } }
+.capchip { font-style: normal; font-size: 9px; border-radius: 4px; padding: 1px 5px; margin-left: 6px;
+  background: var(--mix-card2,#20242C); color: var(--mix-t3,#5E6673);
+  &.cc-ACTIVE_WRITE { background: #0ECB8122; color: #0ECB81; }
+  &.cc-ACTIVE_READ { background: #4A9CFF22; color: #4A9CFF; }
+  &.cc-BLOCKED, &.cc-DEPRECATED { background: #F6465D22; color: #F6465D; } }
 
 /* 设定台整体收窄居中 */
 .stage { max-width: 980px; margin: 0 auto; width: 100%; border: 1px solid var(--el-border-color); border-radius: 10px; padding: 14px 20px; background: var(--mix-card, #181B21); }

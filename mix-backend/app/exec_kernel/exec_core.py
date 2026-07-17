@@ -160,6 +160,43 @@ class SagaExecutor:
         await self.store.set_state(saga_id, CLOSED)
         return CLOSED
 
+    async def _reduce_leg(self, saga_id, leg_idx, leg, fraction, ns):
+        """分片减一腿:reduce-only 反向平 fraction×|qty|(INV4 应急减险,不留裸单腿)。"""
+        base_qty = abs(float((leg or {}).get("qty") or (leg or {}).get("amt") or 0))
+        red_qty = base_qty * max(0.0, min(1.0, float(fraction)))
+        if red_qty <= 0:
+            return True
+        rl = {**(leg or {}), "reduce_only": True, "leg_idx": leg_idx, "qty": red_qty,
+              "side": ("BUY" if (leg or {}).get("side") == "SELL" else "SELL")}
+        cid = coid(saga_id, leg_idx, ns)
+        for _ in range(MAX_PLACE_RETRY):
+            q = await self.venue.query(cid, rl)
+            if q["status"] == FILLED:
+                await self.store.save_leg(saga_id, leg_idx, cid, PARTIAL, q.get("filled", red_qty))
+                return True
+            res = await self.venue.place(cid, rl)
+            if res["status"] == FILLED:
+                await self.store.save_leg(saga_id, leg_idx, cid, PARTIAL, res.get("filled", red_qty))
+                return True
+            if res["status"] in (ACK, PARTIAL, TIMEOUT):
+                for _ in range(PLACE_PROPAGATION_RETRY):
+                    if PLACE_PROPAGATION_SLEEP:
+                        await asyncio.sleep(PLACE_PROPAGATION_SLEEP)
+                    q2 = await self.venue.query(cid, rl)
+                    if q2["status"] == FILLED:
+                        await self.store.save_leg(saga_id, leg_idx, cid, PARTIAL, q2.get("filled", red_qty))
+                        return True
+        return False
+
+    async def reduce_pair(self, saga_id, legs, fraction, step_ns=None):
+        """分片减仓(§8.6 减险原语):所有腿同比例 reduce-only。任一腿减不掉 → QUARANTINED。"""
+        ns = step_ns or f"reduce-{int(fraction * 100)}"
+        for i, leg in enumerate(legs):
+            if not await self._reduce_leg(saga_id, i, leg, fraction, ns):
+                await self.store.set_state(saga_id, QUARANTINED)
+                return QUARANTINED
+        return OPEN
+
 
 # place/query 返回的 status 常量
 REJECT, TIMEOUT, NOTFOUND = "REJECT", "TIMEOUT", "NOTFOUND"

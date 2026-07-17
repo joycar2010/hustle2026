@@ -19,6 +19,62 @@ router = APIRouter(tags=["ops"])
 BACKUP_DIR = "/data/mix/backups"
 
 
+def _amt(x, dp: int = 2):
+    """定点小数字符串;None 保持 None(N/A),不用 0 冒充(与门户口径一致)。"""
+    return None if x is None else f"{float(x):.{dp}f}"
+
+
+async def investor_projection_loop():
+    """CORE_POOL 投资人数据打通:每 30min 从真实池权益拍 ESTIMATED 快照 + 重算投影,
+    投资人门户权益随真实池 P&L 实时跟踪(非手插假数,units 是真实 append-only 份额)。
+    大客户(SMA)不受影响——无 managed_account 即无投影,继续演示占位。
+    只在已有发行份额(total_units>0)时运行,防未发行时刷空快照。"""
+    await asyncio.sleep(90)
+    while True:
+        try:
+            pool = await ds.pg_main()
+            if pool is not None:
+                tu = await pool.fetchrow("SELECT coalesce(sum(units),0) tu FROM share_event")
+                total_units = float(tu["tu"]) if tu else 0.0
+                if total_units > 1e-9:   # 已发行份额才刷
+                    src = await _pool_nav_source()
+                    pool_nav = src.get("total_equity_usdt")
+                    if pool_nav is not None:
+                        pool_nav = float(pool_nav)
+                        npu = pool_nav / total_units
+                        now = dt.datetime.now(dt.timezone.utc)
+                        row = await pool.fetchrow(
+                            "INSERT INTO pool_nav_snapshot(nav_status,pool_nav,total_units,nav_per_unit,"
+                            "net_flow,as_of,source) VALUES('ESTIMATED',$1,$2,$3,0,$4,'auto:投资人实时投影') "
+                            "RETURNING id", pool_nav, total_units, npu, now)
+                        nid = row["id"]
+                        prev = await pool.fetchrow(
+                            "SELECT pool_nav FROM pool_nav_snapshot WHERE as_of<$1 ORDER BY as_of DESC LIMIT 1", now)
+                        pret = ((pool_nav - float(prev["pool_nav"])) / float(prev["pool_nav"])
+                                if prev and float(prev["pool_nav"]) > 1e-9 else None)
+                        accts = await pool.fetch(
+                            "SELECT sa.investor_id, coalesce(sum(se.units),0) units FROM share_account sa "
+                            "LEFT JOIN share_event se ON se.investor_id=sa.investor_id AND se.approved_at<=$1 "
+                            "GROUP BY sa.investor_id", now)
+                        for a in accts:
+                            u = float(a["units"])
+                            await pool.execute(
+                                "INSERT INTO investor_projection(investor_id,nav_id,units,nav_per_unit,"
+                                "investor_equity,pool_return_pct,as_of) VALUES($1,$2,$3,$4,$5,$6,$7)",
+                                a["investor_id"], nid, u, npu, round(u * npu, 8), pret, now)
+                        # 修剪:保留 FINALIZED + 最近 90 条 ESTIMATED;投影有 FK→先删投影再删快照
+                        old = [r["id"] for r in await pool.fetch(
+                            "SELECT id FROM pool_nav_snapshot WHERE nav_status='ESTIMATED' AND id NOT IN "
+                            "(SELECT id FROM pool_nav_snapshot WHERE nav_status='ESTIMATED' "
+                            "ORDER BY as_of DESC LIMIT 90)")]
+                        if old:
+                            await pool.execute("DELETE FROM investor_projection WHERE nav_id = ANY($1::bigint[])", old)
+                            await pool.execute("DELETE FROM pool_nav_snapshot WHERE id = ANY($1::bigint[])", old)
+        except Exception as e:  # noqa: BLE001
+            log.warning("investor projection loop: %s", e)
+        await asyncio.sleep(1800)
+
+
 # ---------------- 官网管理（品牌热配置,Layout loadBrand 消费） ----------------
 @router.get("/site/brand")
 async def site_brand():
@@ -35,12 +91,16 @@ async def site_brand_put(body: dict, admin=Depends(require_admin)):
     pool = await ds.pg_main()
     if pool is None:
         raise HTTPException(503, "mix_main 未配置")
-    allowed = {k: str(v)[:300] for k, v in body.items()
+    # logo 可为上传 data URL → 放宽 280KB(与 site_blocks 同口径);其余文案 300 字。
+    # 此前一刀切 [:300] 把 data URL 截成残缺 base64——保存"成功"刷新即裂图的根因。
+    allowed = {k: (str(v)[:280000] if k == "logo" else str(v)[:300]) for k, v in body.items()
                if k in ("title", "loginTitle", "slogan", "logo", "docTitle",
                         "footer", "contact", "icp") and v is not None}
     await pool.execute("UPDATE site_config SET brand=$1, updated_by=$2, updated_at=now() WHERE id=1",
                        json.dumps(allowed, ensure_ascii=False), admin["admin"])
-    await proxy.audit(admin["admin"], admin.get("role", ""), "site.brand", "site_config", allowed, "saved")
+    # 审计只记字段名+logo 长度,不把 data URL 本体灌进 admin_audit(site_blocks 同款口径)
+    await proxy.audit(admin["admin"], admin.get("role", ""), "site.brand", "site_config",
+                      {"keys": list(allowed), "logo_len": len(allowed.get("logo") or "")}, "saved")
     return {"saved": True, "brand": allowed}
 
 
@@ -302,6 +362,276 @@ async def nav_snapshot(body: dict, op=Depends(require_operator)):
                       {"status": status, "pool_nav": pool_nav, "nav_per_unit": nav_per_unit}, "written")
     return {"ok": True, "nav_id": row["id"], "pool_nav": pool_nav,
             "total_units": total_units, "nav_per_unit": nav_per_unit, "nav_status": status}
+
+
+# ---------------- REV2 §4A.5 申购赎回可审计闭环(capital_request 生命周期) ----------------
+_CR_DDL = """CREATE TABLE IF NOT EXISTS capital_request (
+    id BIGSERIAL PRIMARY KEY,
+    client_id BIGINT NOT NULL,
+    investor_id BIGINT NOT NULL,
+    request_type TEXT NOT NULL CHECK (request_type IN ('SUBSCRIBE','REDEEM')),
+    amount_usdt NUMERIC, units NUMERIC,
+    status TEXT NOT NULL DEFAULT 'CREATED'
+        CHECK (status IN ('CREATED','FUNDS_CONFIRMED','POSTED','REVERSED','CANCELLED')),
+    external_flow_id TEXT NOT NULL DEFAULT '',
+    nav_id BIGINT, posted_event_id BIGINT,
+    created_by TEXT NOT NULL DEFAULT '', created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    posted_at TIMESTAMPTZ, note TEXT NOT NULL DEFAULT '')"""
+
+
+@router.post("/system/capital-requests")
+async def cr_create(body: dict, op=Depends(require_operator)):
+    """发起申购/赎回申请(§4A.5 第1步)——只登记,不发份额。申购填 amount_usdt,赎回填 units。"""
+    pool = await ds.pg_main()
+    if pool is None:
+        raise HTTPException(503, "mix_main 未配置")
+    await pool.execute(_CR_DDL)
+    cid = body.get("client_id")
+    sa = await pool.fetchrow("SELECT investor_id FROM share_account WHERE client_id=$1 AND status<>'closed'", cid)
+    if not sa:
+        raise HTTPException(404, "该客户无有效份额账户")
+    rtype = str(body.get("request_type") or "")
+    if rtype not in ("SUBSCRIBE", "REDEEM"):
+        raise HTTPException(400, "request_type 须 SUBSCRIBE|REDEEM")
+    amt = body.get("amount_usdt")
+    units = body.get("units")
+    if rtype == "SUBSCRIBE" and not amt:
+        raise HTTPException(400, "申购须填 amount_usdt")
+    if rtype == "REDEEM" and not units:
+        raise HTTPException(400, "赎回须填 units")
+    row = await pool.fetchrow(
+        "INSERT INTO capital_request(client_id, investor_id, request_type, amount_usdt, units, "
+        "created_by, note) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id",
+        cid, sa["investor_id"], rtype,
+        float(amt) if amt else None, float(units) if units else None,
+        op["operator"], str(body.get("note") or ""))
+    await proxy.audit(op["operator"], op["role"], "capital.request", str(row["id"]),
+                      {"type": rtype, "client": cid}, "created")
+    return {"ok": True, "request_id": row["id"], "status": "CREATED"}
+
+
+@router.post("/system/capital-requests/{rid}/dry-run")
+async def cr_dryrun(rid: int, op=Depends(require_operator)):
+    """DRY_RUN(§4A.5):按最新 FINALIZED NAV 算操作前后 Units/占比/权益,不落库。
+    申购用资金确认后的 NAV;此处用当前最新 FINALIZED 预演(cutoff 规则=最新 FINALIZED)。"""
+    pool = await ds.pg_main()
+    if pool is None:
+        raise HTTPException(503, "mix_main 未配置")
+    cr = await pool.fetchrow("SELECT * FROM capital_request WHERE id=$1", rid)
+    if not cr:
+        raise HTTPException(404, "申请不存在")
+    nav = await pool.fetchrow("SELECT id, nav_per_unit, total_units, nav_status FROM pool_nav_snapshot "
+                              "WHERE nav_status='FINALIZED' ORDER BY as_of DESC LIMIT 1")
+    if not nav:
+        raise HTTPException(409, "无 FINALIZED NAV(先定版)")
+    npu = float(nav["nav_per_unit"])
+    total_u = float(nav["total_units"])
+    cur = await pool.fetchval("SELECT coalesce(sum(units),0) FROM share_event WHERE investor_id=$1", cr["investor_id"])
+    cur_units = float(cur or 0)
+    if cr["request_type"] == "SUBSCRIBE":
+        d_units = float(cr["amount_usdt"]) / npu if npu > 1e-9 else 0.0
+    else:
+        d_units = -min(float(cr["units"]), cur_units)   # 赎回不超持有
+    new_units = cur_units + d_units
+    new_total = total_u + d_units
+    return {
+        "request_id": rid, "request_type": cr["request_type"], "nav_id": nav["id"],
+        "nav_per_unit": _amt(npu, 4), "nav_status": nav["nav_status"],
+        "before": {"units": _amt(cur_units, 4), "equity": _amt(cur_units * npu),
+                   "ratio": _amt(cur_units / total_u * 100, 2) if total_u > 1e-9 else None},
+        "delta_units": _amt(d_units, 4),
+        "after": {"units": _amt(new_units, 4), "equity": _amt(new_units * npu),
+                  "ratio": _amt(new_units / new_total * 100, 2) if new_total > 1e-9 else None},
+        "note": "预览按最新 FINALIZED NAV;正式 post 须 Passkey 二次认证 + 关联真实资金流水",
+    }
+
+
+@router.post("/system/capital-requests/{rid}/post")
+async def cr_post(rid: int, body: dict, op=Depends(require_operator)):
+    """正式过账(§4A.5):Passkey 二次认证 + 关联外部资金流水 → 原子写 ShareEvent + 重建投影。
+    一人操作不伪造双人:外部资金 RECON + FINALIZED NAV + DRY_RUN + Passkey + 完整审计 = 系统性复核。"""
+    pool = await ds.pg_main()
+    if pool is None:
+        raise HTTPException(503, "mix_main 未配置")
+    from .webauthn_auth import check_reauth_ticket
+    if not await check_reauth_ticket(op["operator"], str(body.get("reauth_ticket") or "")):
+        raise HTTPException(401, "过账须 Passkey 二次认证(reauth_ticket);先 WebAuthn 认证")
+    cr = await pool.fetchrow("SELECT * FROM capital_request WHERE id=$1", rid)
+    if not cr:
+        raise HTTPException(404, "申请不存在")
+    if cr["status"] not in ("CREATED", "FUNDS_CONFIRMED"):
+        raise HTTPException(409, f"申请状态 {cr['status']} 不可过账")
+    flow = str(body.get("external_flow_id") or "").strip()
+    if not flow:
+        raise HTTPException(400, "过账须关联 external_flow_id(真实入金/出金流水凭证)")
+    nav = await pool.fetchrow("SELECT id, nav_per_unit, total_units FROM pool_nav_snapshot "
+                              "WHERE nav_status='FINALIZED' ORDER BY as_of DESC LIMIT 1")
+    if not nav:
+        raise HTTPException(409, "无 FINALIZED NAV")
+    npu = float(nav["nav_per_unit"])
+    cur = float(await pool.fetchval("SELECT coalesce(sum(units),0) FROM share_event WHERE investor_id=$1",
+                                    cr["investor_id"]) or 0)
+    if cr["request_type"] == "SUBSCRIBE":
+        etype, units = "ISSUE", float(cr["amount_usdt"]) / npu if npu > 1e-9 else 0.0
+    else:
+        etype, units = "REDEEM", -min(float(cr["units"]), cur)
+    idem = f"cr-{rid}-{etype}"
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            try:
+                ev = await conn.fetchrow(
+                    "INSERT INTO share_event(investor_id, event_type, units, effective_nav_id, "
+                    "external_flow_id, idempotency_key, approved_by, note) "
+                    "VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id",
+                    cr["investor_id"], etype, units, nav["id"], flow, idem, op["operator"],
+                    f"capital_request#{rid}")
+            except Exception as e:  # noqa: BLE001
+                if "idempotency" in str(e).lower() or "unique" in str(e).lower():
+                    raise HTTPException(409, "该申请已过账(幂等)")
+                raise HTTPException(400, f"过账失败:{e}")
+            await conn.execute(
+                "UPDATE capital_request SET status='POSTED', external_flow_id=$2, nav_id=$3, "
+                "posted_event_id=$4, posted_at=now() WHERE id=$1", rid, flow, nav["id"], ev["id"])
+    # 事务外重建投影(按最新 FINALIZED)
+    try:
+        await share_project({"nav_id": nav["id"]}, op)
+    except Exception:  # noqa: BLE001
+        pass
+    await proxy.audit(op["operator"], op["role"], f"capital.post.{etype}", str(rid),
+                      {"units": units, "flow": flow, "nav_id": nav["id"]}, f"event {ev['id']}")
+    return {"ok": True, "event_id": ev["id"], "event_type": etype, "units": _amt(units, 4),
+            "note": "已过账并重建投影;门户即时反映"}
+
+
+@router.post("/system/share-events/{eid}/reverse")
+async def share_event_reverse(eid: int, body: dict, op=Depends(require_operator)):
+    """更正=新增 REVERSAL 事实(§4A.5:禁覆盖/删除历史)。Passkey 二次认证;
+    冲正一条 ISSUE/REDEEM=写反向 units 的 ADJUST 事件挂 reverses_id,重建投影。"""
+    pool = await ds.pg_main()
+    if pool is None:
+        raise HTTPException(503, "mix_main 未配置")
+    from .webauthn_auth import check_reauth_ticket
+    if not await check_reauth_ticket(op["operator"], str(body.get("reauth_ticket") or "")):
+        raise HTTPException(401, "更正须 Passkey 二次认证(reauth_ticket)")
+    ev = await pool.fetchrow("SELECT investor_id, units, effective_nav_id, event_type FROM share_event WHERE id=$1", eid)
+    if not ev:
+        raise HTTPException(404, "事件不存在")
+    already = await pool.fetchval("SELECT id FROM share_event WHERE reverses_id=$1", eid)
+    if already:
+        raise HTTPException(409, f"该事件已被冲正(事件 #{already})")
+    idem = f"reverse-{eid}"
+    row = await pool.fetchrow(
+        "INSERT INTO share_event(investor_id, event_type, units, effective_nav_id, external_flow_id, "
+        "idempotency_key, reverses_id, approved_by, note) "
+        "VALUES($1,'ADJUST',$2,$3,'REVERSAL',$4,$5,$6,$7) RETURNING id",
+        ev["investor_id"], -float(ev["units"]), ev["effective_nav_id"], idem, eid, op["operator"],
+        f"冲正事件#{eid}:{str(body.get('reason') or '')[:120]}")
+    nav = await pool.fetchrow("SELECT id FROM pool_nav_snapshot WHERE nav_status='FINALIZED' ORDER BY as_of DESC LIMIT 1")
+    if nav:
+        try:
+            await share_project({"nav_id": nav["id"]}, op)
+        except Exception:  # noqa: BLE001
+            pass
+    await proxy.audit(op["operator"], op["role"], "share.reverse", str(eid),
+                      {"reversal_event": row["id"]}, "reversed")
+    return {"ok": True, "reversal_event_id": row["id"], "note": "已新增 REVERSAL 冲正(历史不删),投影已重建"}
+
+
+@router.get("/system/capital-requests")
+async def cr_list(client_id: int = 0, _who=Depends(require_viewer)):
+    pool = await ds.pg_main()
+    if pool is None:
+        return []
+    await pool.execute(_CR_DDL)
+    q = ("SELECT id, client_id, request_type, amount_usdt::float8, units::float8, status, "
+         "external_flow_id, created_by, created_at::text, posted_at::text FROM capital_request ")
+    rows = await (pool.fetch(q + "WHERE client_id=$1 ORDER BY id DESC LIMIT 100", client_id)
+                  if client_id else pool.fetch(q + "ORDER BY id DESC LIMIT 100"))
+    return [dict(r) for r in rows]
+
+
+# ---------------- REV2 §4A.6 客户与份额(身份/份额与操作员管理分域) ----------------
+@router.get("/system/clients")
+async def clients_list(_who=Depends(require_viewer)):
+    """客户与份额:client_party(受益主体)+ 份额/授权/权益投影。
+    与操作员管理彻底分域——此处只有客户资金权益,不含操作角色/权限。"""
+    pool = await ds.pg_main()
+    if pool is None:
+        return {"clients": [], "pool": {}}
+    # 事实带:CORE_POOL 最新净值/总Units
+    nav = await pool.fetchrow("SELECT nav_status, pool_nav, total_units, nav_per_unit, as_of "
+                              "FROM pool_nav_snapshot ORDER BY as_of DESC LIMIT 1")
+    rows = await pool.fetch("""
+        SELECT cp.client_id, cp.client_type, cp.display_name, cp.status,
+               sa.investor_id, sa.status AS sa_status,
+               coalesce((SELECT sum(units) FROM share_event se WHERE se.investor_id=sa.investor_id),0) AS units,
+               (SELECT count(*) FROM portfolio_access_grant g
+                WHERE g.client_id=cp.client_id AND g.status='active') AS grants,
+               (SELECT p.investor_equity FROM investor_projection p
+                WHERE p.investor_id=sa.investor_id ORDER BY p.as_of DESC LIMIT 1) AS equity,
+               (SELECT p.nav_per_unit FROM investor_projection p
+                WHERE p.investor_id=sa.investor_id ORDER BY p.as_of DESC LIMIT 1) AS npu
+        FROM client_party cp
+        LEFT JOIN share_account sa ON sa.client_id=cp.client_id AND sa.status<>'closed'
+        WHERE cp.status<>'closed'
+        ORDER BY cp.client_type, cp.client_id""")
+    total_u = float(nav["total_units"]) if nav and nav["total_units"] else 0.0
+    clients = []
+    for r in rows:
+        units = float(r["units"] or 0)
+        clients.append({
+            "client_id": r["client_id"], "client_type": r["client_type"],
+            "name": r["display_name"], "status": r["status"],
+            "units": units, "share_ratio": (units / total_u if total_u > 1e-9 else None),
+            "nav_per_unit": float(r["npu"]) if r["npu"] is not None else None,
+            "equity_usdt": float(r["equity"]) if r["equity"] is not None else None,
+            "access_grants": int(r["grants"] or 0),
+            "portal_bound": int(r["grants"] or 0) > 0,
+            "share_account_ready": r["investor_id"] is not None,
+        })
+    return {
+        "clients": clients,
+        "pool": {
+            "nav_status": nav["nav_status"] if nav else None,
+            "pool_nav": float(nav["pool_nav"]) if nav and nav["pool_nav"] else None,
+            "total_units": total_u,
+            "nav_per_unit": float(nav["nav_per_unit"]) if nav and nav["nav_per_unit"] else None,
+            "as_of": nav["as_of"].isoformat() if nav and nav["as_of"] else None,
+            "allocated_equity": round(sum(c["equity_usdt"] or 0 for c in clients if c["client_type"] == "CORE_POOL"), 2),
+        },
+        "note": "客户份额权威=mix_main 份额账本(未搬 dcm_main);权益=Units×单位净值,不可直接编辑",
+    }
+
+
+@router.post("/system/clients/{client_id}/access-grant")
+async def client_access_grant(client_id: int, body: dict, admin=Depends(require_admin)):
+    """给登录账号授予/撤销组合查看权限(§4A.6):auth_subject_id=mix_users.id。
+    授权≠操作权限:被授权账号只能只读本客户组合,不获得任何操作能力。"""
+    pool = await ds.pg_main()
+    if pool is None:
+        raise HTTPException(503, "mix_main 未配置")
+    action = str(body.get("action") or "grant")
+    subj = body.get("auth_subject_id")
+    if action == "revoke":
+        gid = body.get("grant_id")
+        await pool.execute("UPDATE portfolio_access_grant SET status='revoked' WHERE id=$1 AND client_id=$2",
+                           gid, client_id)
+        await proxy.audit(admin["admin"], admin.get("role", ""), "client.grant.revoke", str(client_id),
+                          {"grant_id": gid}, "revoked")
+        return {"ok": True, "action": "revoked"}
+    if not subj:
+        raise HTTPException(400, "auth_subject_id 必填(mix_users.id)")
+    cp = await pool.fetchrow("SELECT client_type FROM client_party WHERE client_id=$1", client_id)
+    if not cp:
+        raise HTTPException(404, "客户不存在")
+    await pool.execute(
+        "INSERT INTO portfolio_access_grant(auth_subject_id, client_id, portfolio_id, permissions, granted_by) "
+        "VALUES($1,$2,$3,$4,$5) ON CONFLICT (auth_subject_id, client_id, portfolio_id) "
+        "DO UPDATE SET status='active', permissions=$4",
+        int(subj), client_id, cp["client_type"], str(body.get("permissions") or "read+confirm"), admin["admin"])
+    await proxy.audit(admin["admin"], admin.get("role", ""), "client.grant", str(client_id),
+                      {"auth_subject_id": subj}, "granted")
+    return {"ok": True, "action": "granted"}
 
 
 @router.get("/system/share/accounts")
@@ -1184,6 +1514,68 @@ async def operators_audit(_who=Depends(require_viewer)):
         "SELECT ts, operator, role, action, target, result FROM admin_audit ORDER BY ts DESC LIMIT 80")
     return [{"at": r["ts"].strftime("%m-%d %H:%M:%S"), "operator": r["operator"], "role": r["role"],
              "action": r["action"], "target": r["target"], "result": str(r["result"])[:120]} for r in rows]
+
+
+# ---------------- 用户登录访问令牌(投资人「访问令牌」登录;生成/重置/删除,可撤销) ----------------
+async def _ensure_tokcol(pool):
+    # 列由 postgres 迁移建(mix 角色非 owner 不能 ALTER);缺失则跳过(向后兼容,撤销校验不生效)
+    try:
+        exists = await pool.fetchval(
+            "SELECT 1 FROM information_schema.columns WHERE table_name='mix_users' "
+            "AND column_name='access_token_jti'")
+        if not exists:
+            await pool.execute("ALTER TABLE mix_users ADD COLUMN IF NOT EXISTS access_token_jti TEXT")
+    except Exception:  # noqa: BLE001  非 owner=列须迁移预建
+        pass
+
+
+@router.post("/operators/users/{uid}/token")
+async def user_token_issue(uid: int, body: dict | None = None, admin=Depends(require_admin)):
+    """为用户签发长期访问令牌(投资人「访问令牌」tab 粘贴登录)。jti 存 mix_users,可撤销;
+    仅返回一次——关闭后无法再取(须重置生成新的)。默认 90 天。"""
+    from .. import config as _cfg
+    import jwt as _jwt
+    import uuid
+    pool = await ds.pg_main()
+    if pool is None or not _cfg.JWT_SECRET:
+        raise HTTPException(503, "用户体系未配置")
+    await _ensure_tokcol(pool)
+    u = await pool.fetchrow("SELECT username, role FROM mix_users WHERE id=$1", uid)
+    if not u:
+        raise HTTPException(404, "用户不存在")
+    jti = uuid.uuid4().hex
+    days = int((body or {}).get("days") or 90)
+    now = dt.datetime.now(dt.timezone.utc)
+    token = _jwt.encode({"uid": uid, "username": u["username"], "role": u["role"], "jti": jti,
+                         "iat": now, "exp": now + dt.timedelta(days=days)},
+                        _cfg.JWT_SECRET, algorithm="HS256")
+    await pool.execute("UPDATE mix_users SET access_token_jti=$2 WHERE id=$1", uid, jti)
+    await proxy.audit(admin["admin"], admin.get("role", ""), "user.token.issue", f"uid:{uid}",
+                      {"days": days}, "issued")
+    return {"ok": True, "access_token": token, "expires_days": days,
+            "note": "仅显示一次;交给该用户在 user.hustle2026.xyz「访问令牌」登录。重置将使旧令牌失效。"}
+
+
+@router.delete("/operators/users/{uid}/token")
+async def user_token_revoke(uid: int, admin=Depends(require_admin)):
+    """撤销用户访问令牌(jti 置空);已发出的旧令牌立即失效(require_investor 校验 jti)。"""
+    pool = await ds.pg_main()
+    if pool is None:
+        raise HTTPException(503, "mix_main 未配置")
+    await _ensure_tokcol(pool)
+    await pool.execute("UPDATE mix_users SET access_token_jti=NULL WHERE id=$1", uid)
+    await proxy.audit(admin["admin"], admin.get("role", ""), "user.token.revoke", f"uid:{uid}", {}, "revoked")
+    return {"ok": True, "revoked": True}
+
+
+@router.get("/operators/users/{uid}/token")
+async def user_token_status(uid: int, _who=Depends(require_admin)):
+    pool = await ds.pg_main()
+    if pool is None:
+        return {"has_token": False}
+    await _ensure_tokcol(pool)
+    jti = await pool.fetchval("SELECT access_token_jti FROM mix_users WHERE id=$1", uid)
+    return {"has_token": bool(jti)}
 
 
 @router.put("/operators/users/{uid}")

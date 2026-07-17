@@ -62,7 +62,7 @@
         <el-input v-model="recCode" placeholder="TOTP" maxlength="6" size="small" style="width:120px" />
         <el-button type="success" plain :loading="busy" @click="recover">恢复(健康检查)</el-button>
       </div>
-      <div v-if="prog.request.state==='DRAIN_BLOCKED'" class="blocked">⚠ 排空受阻:有残留仓位/坑位/提案。EXIT_ONLY 是能力集合不是自动平仓;须人工减仓还币或提交 DrainPlan,不会因截止砍仓,有仓不显示"完成"。</div>
+      <div v-if="prog.request.state==='DRAIN_BLOCKED'" class="blocked"><FIcon name="warn" :size="12"/> 排空受阻:有残留仓位/坑位/提案。EXIT_ONLY 是能力集合不是自动平仓;须人工减仓还币或提交 DrainPlan,不会因截止砍仓,有仓不显示"完成"。</div>
       <div v-if="recFail" class="blocked">恢复未过:{{ recFail }}</div>
       <!-- DrainPlan 历史 -->
       <div v-if="(prog.drain_plans||[]).length" class="chd2" style="margin-top:8px"><b>DrainPlan 决策</b></div>

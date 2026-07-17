@@ -4,17 +4,18 @@
     <!-- 主表:严重度降序(QUARANTINED→…→NORMAL),正常折叠异常上浮(V5 §14.2) -->
     <div class="card">
       <div class="chd">平台与账户风险工作台
-        <span class="legend">七模式:<i class="lg quar">QUARANTINED 资金/交易访问受限</i><i class="lg red">EXIT_ONLY 按计划退出</i>
-          <i class="lg red">REDUCE_ONLY 仅减仓</i><i class="lg nonew">NO_NEW_RISK 禁止新增</i>
-          <i class="lg watch">WATCH 弱信号</i><i class="lg recov">RECOVERY 阶梯恢复</i><i class="lg ok">NORMAL 已核验</i></span>
+        <span class="legend">七档限制:<i class="lg quar">资金/交易访问受限</i><i class="lg red">只允许清仓退出</i>
+          <i class="lg red">只允许减仓和还币</i><i class="lg nonew">暂停开新仓</i>
+          <i class="lg watch">观察中</i><i class="lg recov">恢复观察期</i><i class="lg ok">正常</i></span>
+        <el-checkbox v-model="expertView" size="small">专家视图(原始代码)</el-checkbox>
         <el-checkbox v-model="showNormal" size="small">显示正常平台</el-checkbox>
       </div>
       <el-table :data="rowsShown" size="small" :row-class-name="rowCls">
         <el-table-column label="Venue" width="96"><template #default="{row}"><b class="vn link" @click="$router.push('/mix/venue/'+row.venue)">{{ row.venue }}</b>
           <i class="tier" v-if="row.tier">Tier {{ row.tier }}</i></template></el-table-column>
-        <el-table-column label="有效模式" width="130"><template #default="{row}">
-          <span class="mch" :class="modeCls(row.mode)">{{ row.mode }}</span></template></el-table-column>
-        <el-table-column label="Incident态" width="86"><template #default="{row}">{{ row.incident_state || 'N/A' }}</template></el-table-column>
+        <el-table-column label="当前限制" width="150"><template #default="{row}">
+          <span class="mch" :class="modeCls(row.mode)" :title="expertView?'':row.mode">{{ expertView ? row.mode : term(row.mode) }}</span></template></el-table-column>
+        <el-table-column label="风险事件态" width="86"><template #default="{row}">{{ row.incident_state || '—' }}</template></el-table-column>
         <el-table-column label="恢复阶梯" width="96"><template #default="{row}">
           {{ row.recovery ? `阶段${row.recovery.stage}·${Math.round(row.recovery.allow_pct*100)}%` : '—' }}</template></el-table-column>
         <el-table-column label="权益U" width="86" align="right"><template #default="{row}">{{ n(row.equity) }}</template></el-table-column>
@@ -23,12 +24,12 @@
         <el-table-column label="折价/受限U" width="96" align="right"><template #default="{row}">
           <span :class="{bad: row.trapped_usdt>0}">{{ row.haircut_pct ? (row.haircut_pct*100)+'% / '+n(row.trapped_usdt) : '—' }}</span></template></el-table-column>
         <el-table-column label="提现健康" min-width="150"><template #default="{row}">
-          <template v-if="row.withdrawal">pending {{ row.withdrawal.pending_count }}
-            · p95 {{ row.withdrawal.p95_sec ? Math.round(row.withdrawal.p95_sec/60)+'m' : 'N/A' }}
+          <template v-if="row.withdrawal">在途 {{ row.withdrawal.pending_count }} 笔
+            · <span :title="explain('p95')">较慢耗时 {{ row.withdrawal.p95_sec ? Math.round(row.withdrawal.p95_sec/60)+'分' : '无样本' }}</span>
             <span v-if="row.withdrawal.recent_failures" class="bad">· 失败{{ row.withdrawal.recent_failures }}</span></template>
-          <template v-else><span class="dim">N/A(未接/键过期)</span></template></template></el-table-column>
-        <el-table-column label="原因(命中作用域)" min-width="220"><template #default="{row}">
-          <span class="rsn" :title="row.reason">{{ hitText(row) }}</span></template></el-table-column>
+          <template v-else><span class="dim">未接入</span></template></template></el-table-column>
+        <el-table-column label="限制原因" min-width="220"><template #default="{row}">
+          <span class="rsn" :title="row.reason">{{ expertView ? hitText(row) : plainReason(row) }}</span></template></el-table-column>
         <el-table-column label="动作" width="120" fixed="right"><template #default="{row}">
           <el-link type="warning" @click="freezeVenue(row.venue)" v-if="!SEV[row.mode]">冻结新增</el-link>
           <span v-else class="dim">已受限</span>
@@ -56,8 +57,8 @@
         <div v-if="!transitions.length" class="dim pad">无记录</div>
         <div v-for="(t, i) in transitions" :key="i" class="tr">
           <b>{{ t.venue }}</b>
-          <span class="mch sm" :class="modeCls(t.before_mode)">{{ t.before_mode }}</span>→
-          <span class="mch sm" :class="modeCls(t.after_mode)">{{ t.after_mode }}</span>
+          <span class="mch sm" :class="modeCls(t.before_mode)" :title="t.before_mode">{{ expertView ? t.before_mode : term(t.before_mode) }}</span>→
+          <span class="mch sm" :class="modeCls(t.after_mode)" :title="t.after_mode">{{ expertView ? t.after_mode : term(t.after_mode) }}</span>
           <span class="dim">{{ String(t.reason||'').split('|')[0].slice(0,36) }} · {{ (t.recorded_at||'').slice(5,16) }}</span>
         </div>
       </div>
@@ -70,9 +71,21 @@ import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import RiskStatusBar from '../../components/RiskStatusBar.vue'
 import { mixApi } from '../../api/mix'
+import { useDict } from '../../composables/useDict'
 
+const { term, explain } = useDict()
 const d = ref({})
 const showNormal = ref(false)
+const expertView = ref(false)   // V6.1 §6:默认业务标签,专家视图才显示原始枚举
+// 运营口径的限制原因:命中作用域翻成人话(作用域来源→限制档)
+const SCOPE_CN = { VENUE_CAP: '敞口超上限', ACCOUNT_FACT: '账户异常信号', WITHDRAWAL: '提现异常',
+  VENUE_POLICY: '平台条款风险', OVERRIDE: '人工指令', OVERRIDE_VENUE: '人工指令', RECOVERY: '恢复观察期',
+  GLOBAL: '全局指令' }
+const plainReason = row => {
+  const hs = row.modes_hit || []
+  if (!hs.length) return row.mode === 'NORMAL' ? '无限制' : '见专家视图'
+  return hs.map(h => `${SCOPE_CN[h.scope] || h.scope}→${term(h.mode)}`).join(' · ')
+}
 let timer = null
 const SEV = { FROZEN: 1, QUARANTINED: 1, EXIT_ONLY: 1, REDUCE_ONLY: 1, NO_NEW_RISK: 1 }
 // 正常平台可折叠,异常永远上浮;全绿时不给空表(全部显示)

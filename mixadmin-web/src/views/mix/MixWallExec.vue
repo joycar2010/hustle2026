@@ -5,16 +5,20 @@
     <MixDashboard />
   </div>
   <div v-else class="gate">屏2 · 持仓与执行<br /><small>URL 需携带 ?token=(只读墙令牌,后端校验)</small></div>
+  <WallStatus v-if="authed" title="屏2 · 持仓墙"/>
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import MixDashboard from './MixDashboard.vue'
+import WallStatus from '../../components/v62/WallStatus.vue'
+import { mixApi } from '../../api/mix'
 
 const route = useRoute()
 const authed = ref(!!route.query.token || !!localStorage.getItem('mix_token'))
 if (route.query.token) localStorage.setItem('mix_token', String(route.query.token))
+onMounted(() => mixApi.uxPageview('wall'))
 </script>
 
 <style scoped>

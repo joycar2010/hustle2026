@@ -2,7 +2,7 @@
   <div class="mob" v-if="authed">
     <!-- STALE 数据中断态(kLzzi):fail-closed 全屏遮罩,不缓存命令 -->
     <div v-if="rs.stale" class="stale">
-      <div class="sicon">⛔</div>
+      <div class="sicon"><FIcon name="block" :size="40" :sw="1.6"/></div>
       <b>数据中断 · fail-closed</b>
       <p>风险快照超龄或不可达。平板切只读;<br/>不缓存任何命令等待网络恢复后自动执行。</p>
       <p class="dim2">最后策略版本 e{{ rs.policy_epoch ?? '—' }}·v{{ rs.policy_version ?? '—' }}</p>
@@ -17,6 +17,7 @@
     <div class="vr" :class="{hot: p0>0}">
       P0/P1 {{ p0 }}/{{ p1 }} · 受限权益 {{ n(rs.restricted_equity_usdt) }}U · 最老提现 {{ rs.oldest_pending?.age_sec ? fmtAge(rs.oldest_pending.age_sec) : '无' }}
       · 受影响持仓 {{ badRows.length }} · 模式 {{ rs.worst_mode || 'N/A' }}
+      <template v-if="protHotN"> · <b class="protx"><FIcon name="shield" :size="11"/> 点差保护 {{ protHotN }} 越线</b></template>
     </div>
 
     <!-- ① 待办(i85Td2 值守主页) -->
@@ -32,7 +33,7 @@
     <div class="body" v-show="tab==='pos'">
       <div class="mcard col" v-for="(r,i) in pf.rows || []" :key="i" @click="exp = exp===i ? -1 : i">
         <div class="row1"><b>{{ r.symbol }}</b><i class="pb">{{ r.product }}</i>
-          <span class="grow" /><span :class="r.recon==='ok' ? 'ok2' : 'bad2'">{{ r.recon==='ok' ? '✓' : '⚠' }}</span></div>
+          <span class="grow" /><span :class="r.recon==='ok' ? 'ok2' : 'bad2'"><FIcon :name="r.recon==='ok' ? 'check' : 'warn'" :size="12"/></span></div>
         <div class="dim2">{{ r.route }} · {{ r.saga_state }} · Δ {{ r.net_delta_usdt ?? 'N/A' }}U · 缓冲 {{ r.margin_buffer != null ? r.margin_buffer + '%' : 'N/A' }}</div>
         <div v-if="exp===i" class="det">
           <div v-for="(lg,j) in r.legs" :key="j" class="dim2">{{ lg.venue }} {{ (lg.amt||0)>=0?'多':'空' }} {{ lg.amt }} · upnl {{ lg.upnl ?? 'N/A' }}</div>
@@ -58,16 +59,16 @@
       <button class="mbtn danger w" @click="freeze">冻结新增风险(减险 · 立即)</button>
     </div>
 
-    <!-- ④ 审批(fk5UB:只审桌面 DRY_RUN 通过的 Intent;长按3s→Passkey) -->
-    <div class="body" v-show="tab==='appr'">
-      <div v-if="!props2.length" class="empty">无待审提案<br/><span class="dim2">桌面生成 DRY_RUN 后在此审批;审批=TOTP 二次认证,平板不能发起新增风险</span></div>
+    <!-- 审批已并入待办(V6.1 §8.2:不单独占常态空页签);Passkey 优先,TOTP 回退 -->
+    <div class="body approval-inline" v-show="tab==='todo' && props2.length">
       <div class="mcard col" v-for="p in props2" :key="p.id">
         <div class="row1"><b>{{ p.symbol }}</b><i class="pb">{{ p.product }}</i>
-          <span class="grow" /><span class="dim2">{{ p.state }}</span></div>
+          <span class="grow" /><span class="dim2">{{ p.state==='COOLDOWN'?'冷却中':'待审批' }}</span></div>
         <div class="dim2">名义 {{ p.target_notional }}U · {{ p.state==='COOLDOWN' ? '冷静期剩 '+Math.max(0,Math.ceil((p.cooldown_left||0)/60))+'min' : p.venue_long+'⟶'+p.venue_short }}</div>
         <div class="two" v-if="p.state==='PENDING_APPROVAL'">
-          <el-input v-model="apprCode[p.id]" placeholder="TOTP 6位" maxlength="6" size="small" style="max-width:140px" />
-          <button class="mbtn" @click="approve(p.id)">批准(shadow)</button>
+          <button class="mbtn primary" :disabled="!pkOk" @click="approvePasskey(p.id)"><FIcon name="lock" :size="12"/> Passkey 批准</button>
+          <el-input v-model="apprCode[p.id]" placeholder="TOTP 回退" maxlength="6" size="small" style="max-width:110px" />
+          <button class="mbtn" @click="approve(p.id)">批准</button>
         </div>
       </div>
     </div>
@@ -75,19 +76,21 @@
     <!-- ⑤ 更多(Q4Bonj 角色与安全) -->
     <div class="body" v-show="tab==='more'">
       <div class="mcard col"><b>角色 operator_mobile</b>
-        <div class="dim2" style="margin-top:6px">✅ 允许:查看限制原因与账户事实 / 确认 Incident / 冻结新增风险 / 审批已 DRY_RUN 的减仓与 RescueHedge / 查看客服记录与证据包状态</div>
-        <div class="dim2" style="margin-top:6px">⛔ 禁止:恢复 NORMAL / 改 venue 上限·条款·mandate / 新建 API·换 IP·调拨·提现 / 在受限平台创建任何增加风险的订单</div>
+        <div class="dim2" style="margin-top:6px">允许:查看限制原因与账户事实 / 确认 Incident / 冻结新增风险 / 审批已 DRY_RUN 的减仓与 RescueHedge / 查看客服记录与证据包状态</div>
+        <div class="dim2" style="margin-top:6px">禁止:恢复 NORMAL / 改 venue 上限·条款·mandate / 新建 API·换 IP·调拨·提现 / 在受限平台创建任何增加风险的订单</div>
       </div>
       <div class="mcard col"><b>安全</b>
-        <div class="dim2" style="margin-top:6px">审批与平仓确认=Passkey(WebAuthn);数据 stale 或 C 不可达时全端只读;命令绝不离线缓存。</div>
+        <div class="dim2" style="margin-top:6px">审批与平仓确认=Passkey(WebAuthn),TOTP 仅回退;数据 stale 或 C 不可达时全端只读;命令绝不离线缓存。</div>
+        <button class="mbtn w" style="margin-top:8px" :disabled="!pkOk" @click="registerPasskey">
+          <template v-if="pkOk"><FIcon name="lock" :size="12"/> 注册本设备 Passkey(指纹/面容)</template><template v-else>本设备不支持 Passkey</template></button>
       </div>
-      <a class="mbtn w" href="/mix/dashboard" style="text-align:center;text-decoration:none">→ 桌面主控台</a>
+      <a class="mbtn w" href="/mix/work?view=overview" style="text-align:center;text-decoration:none">桌面主控台</a>
     </div>
 
     <!-- 底部五页签 -->
     <div class="tabs">
       <div v-for="t in TABS" :key="t.k" class="tb" :class="{on: tab===t.k}" @click="tab=t.k">
-        <span class="ti">{{ t.i }}</span>{{ t.t }}
+        <span class="ti"><FIcon :name="t.i" :size="18"/></span>{{ t.t }}
         <i v-if="t.k==='todo' && todoAll.length" class="dot">{{ todoAll.length }}</i>
       </div>
     </div>
@@ -102,13 +105,19 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRoute } from 'vue-router'
 import ClosePreviewDialog from '../../components/ClosePreviewDialog.vue'
 import { mixApi } from '../../api/mix'
+import { useV6Snapshot } from '../../composables/useV6'
+import { passkeySupported, passkeyRegister, passkeyTicket } from '../../api/passkey'
+
+const { snap } = useV6Snapshot()
+const protHotN = computed(() => { const c = snap.value?.risk_exit_summary?.counts || {}; return (c.NO_ADD||0)+(c.REDUCE_REQUIRED||0)+(c.EXIT_REQUIRED||0) })
 
 const route = useRoute()
 const authed = ref(!!route.query.token || !!localStorage.getItem('mix_token'))
 if (route.query.token) localStorage.setItem('mix_token', String(route.query.token))
 
-const TABS = [{ k: 'todo', t: '待办', i: '◉' }, { k: 'pos', t: '持仓', i: '▤' },
-  { k: 'risk', t: '风控', i: '⛨' }, { k: 'appr', t: '审批', i: '✓' }, { k: 'more', t: '更多', i: '⋯' }]
+// V6.1 §8.2 四页签:审批并入待办,不单独占常态空页签
+const TABS = [{ k: 'todo', t: '待办', i: 'inbox' }, { k: 'pos', t: '持仓', i: 'list' },
+  { k: 'risk', t: '风控', i: 'shield' }, { k: 'more', t: '更多', i: 'more' }]
 const tab = ref('todo'); const rs = ref({ stale: true }); const pf = ref({}); const opps = ref([])
 const exp = ref(-1); const clock = ref(''); const props2 = ref([])
 const closeDlg = ref({ open: false, symbol: '' }); const apprCode = ref({})
@@ -117,6 +126,19 @@ function openClose(sym) { closeDlg.value = { open: true, symbol: sym } }
 async function approve(id) {
   try { const r = await mixApi.proposalApprove(id, apprCode.value[id]); ElMessage.success(r.note || '已批准'); load() }
   catch (e) { ElMessage.error(e?.detail || 'TOTP 失败') }
+}
+// Passkey 优先(P0 接线):认证→一次性票据→审批;失败回落 TOTP 输入
+const pkOk = passkeySupported()
+async function approvePasskey(id) {
+  try {
+    const ticket = await passkeyTicket()
+    const r = await mixApi.proposalApprove(id, '', ticket)
+    ElMessage.success(r.note || '已批准(Passkey)'); load()
+  } catch (e) { ElMessage.error(e?.detail || e?.message || 'Passkey 认证失败,可用 TOTP 回退') }
+}
+async function registerPasskey() {
+  try { await passkeyRegister('tablet'); ElMessage.success('Passkey 已注册,本设备可指纹/面容审批') }
+  catch (e) { ElMessage.error(e?.detail || e?.message || '注册失败(需 HTTPS+平台认证器)') }
 }
 const p0 = computed(() => (rs.value.incidents || []).filter(i => i.severity === 'fatal').length + badRows.value.length)
 const p1 = computed(() => (rs.value.incidents || []).filter(i => i.severity !== 'fatal').length)
@@ -175,7 +197,8 @@ onUnmounted(() => { t1 && clearInterval(t1); t2 && clearInterval(t2) })
 .dim2 { color: var(--mix-t3, #5E6673); font-size: 11px; }
 .vr { margin: 0 16px 8px; padding: 8px 12px; border-radius: 8px; font-size: 11.5px;
   background: var(--mix-card, #181B21); border: 1px solid var(--mix-border, #262B33);
-  &.hot { border-color: rgba(246,70,93,.45); color: #F6465D; } }
+  &.hot { border-color: rgba(246,70,93,.45); color: #F6465D; }
+  .protx { color: #FF8A3D; font-weight: 800; } }
 .body { flex: 1; overflow-y: auto; padding: 4px 16px 84px; display: flex; flex-direction: column; gap: 8px; }
 .mcard { background: var(--mix-card, #181B21); border: 1px solid var(--mix-border, #262B33); border-radius: 10px;
   padding: 11px 13px; display: flex; gap: 10px; align-items: flex-start;

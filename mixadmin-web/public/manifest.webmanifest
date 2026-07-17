@@ -1,8 +1,8 @@
 {
   "name": "HustleCoin Mix 管理后台",
-  "short_name": "Mix Admin",
+  "short_name": "Mix 管理",
   "description": "HustleCoin Mix 多策略持股公司驾驶舱",
-  "start_url": "/",
+  "start_url": "/mix/work?view=overview",
   "scope": "/",
   "display": "standalone",
   "orientation": "any",

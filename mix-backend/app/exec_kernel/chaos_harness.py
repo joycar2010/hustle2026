@@ -34,10 +34,14 @@ class SimVenue:
 
     async def place(self, cid, leg):
         self.place_calls[cid] = self.place_calls.get(cid, 0) + 1
-        # rollback 单:总是成功平掉(reduce-only 应急)
-        if cid.endswith(":rollback"):
-            self.orders[cid] = {"state": E.FILLED, "filled": 0}
-            return {"status": E.FILLED, "filled": 0}
+        # rollback / reduce 单(reduce-only 应急):按注入脚本,默认成功平掉
+        ns = cid.split(":")[3] if len(cid.split(":")) > 3 else ""
+        if ns == "rollback" or ns.startswith("reduce"):
+            outcome = self._next(self._leg_of(cid)) if leg and leg.get("_chaos_reduce") else E.FILLED
+            if outcome in ("TIMEOUT_NOFILL",):
+                return {"status": E.TIMEOUT, "filled": 0}
+            self.orders[cid] = {"state": E.FILLED, "filled": (leg or {}).get("qty", 0)}
+            return {"status": E.FILLED, "filled": (leg or {}).get("qty", 0)}
         if cid in self.orders and self.orders[cid]["state"] == E.FILLED:
             # 已成交,幂等:不重复建仓
             return {"status": E.FILLED, "filled": self.orders[cid]["filled"]}

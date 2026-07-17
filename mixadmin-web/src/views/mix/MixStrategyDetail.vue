@@ -1,7 +1,9 @@
 <template>
   <div class="sdetail" v-if="detail">
     <div class="hd">
-      <span class="code" :style="{background:META[code].colorBg,color:META[code].color}">{{ code }}</span>
+      <!-- V6 规约:产品编号用 C1-C6(ccode),悬停保留系统码 -->
+      <span class="code" :style="{background:META[code].colorBg,color:META[code].color}"
+            :title="'系统码 '+code">{{ META[code].ccode || code }}</span>
       <span class="name">{{ detail.layer }} · {{ detail.name }}</span>
       <span class="kpi"><em>坑位</em><b>{{ detail.slots || '—' }}</b></span>
       <span class="kpi"><em>今日</em><b class="up">+{{ detail.pnlToday }}</b></span>

@@ -25,6 +25,9 @@ body{font-family:"Microsoft YaHei",system-ui,sans-serif}
 .sidebar .grp-head:hover{color:#8fa8dc}
 .sidebar .grp-head .grp-arrow{font-size:12px;transition:transform .18s}
 .sidebar .grp-head .grp-arrow.closed{transform:rotate(-90deg)}
+/* V6.2 训练进度徽标(未通过时挂在「训练模式」菜单项上) */
+.sidebar .tr-badge{font-style:normal;font-size:9px;font-weight:700;color:#F0B90B;
+  border:1px solid rgba(240,185,11,.45);border-radius:8px;padding:0 6px;margin-left:8px;line-height:14px}
 .main-wrap{flex:1;display:flex;flex-direction:column;min-width:0;background:#E9ECF3}
 .topbar{height:50px;background:#fff;border-bottom:1px solid #dde2ee;display:flex;align-items:center;padding:0 14px;gap:12px}
 .topbar .sp{flex:1}
@@ -74,6 +77,14 @@ html.dark .el-table{--el-table-bg-color:#101a33;--el-table-tr-bg-color:#101a33;-
   .topbar{gap:8px;padding:0 10px}
   .topbar .layout-sel,.topbar .clock-txt{display:none}
   .topbar .el-select{display:none}
+  /* 顶栏横向溢出根治(手机整页被撑宽/徽章竖排的根因):
+     三个墙按钮=window.open桌面墙窗口,手机无意义→隐藏;系统管理在el-dropdown内保留 */
+  .topbar>.wall-btn{display:none}
+  .topbar .tb-clock,.topbar .dotok{display:none}
+  .topbar .tb-marquee{flex:1 1 0;min-width:0;overflow:hidden}
+  .op-chip{white-space:nowrap;max-width:52vw;overflow:hidden;text-overflow:ellipsis}
+  /* 登录门是手写div非el-dialog,吃不到上面94vw规则 */
+  .login-card{width:min(92vw,380px)!important}
   .tabs-bar{padding:3px 6px}
   .crumb{padding:6px 12px;font-size:11px}
   .page{padding:8px}

@@ -33,7 +33,8 @@ def _jwt_decode(token: str | None) -> dict | None:
         import jwt
         p = jwt.decode(token, config.JWT_SECRET, algorithms=["HS256"])
         return {"operator": f"user:{p.get('username')}", "role": "VIEWER",
-                "uid": p.get("uid"), "urole": p.get("role", "user"), "kind": "mix_user"}
+                "uid": p.get("uid"), "urole": p.get("role", "user"), "kind": "mix_user",
+                "jti": p.get("jti")}
     except Exception:  # noqa: BLE001
         return None
 
@@ -58,10 +59,20 @@ async def require_viewer(
     return who
 
 
+def _insufficient(token: str | None, need: str):
+    """区分「没登录」与「登录了但权限不够」——前端拦截器把 401 当会话失效清令牌弹登录门,
+    有效 mix 用户 JWT 必须抛 403,否则 VIEWER 点任何写操作都被踢出登录(2026-07-16 事故)。"""
+    juser = _jwt_decode(token)
+    if juser:
+        raise HTTPException(
+            403, f"当前账号({juser.get('operator')})为只读用户,无{need}权限;需操作员令牌")
+    raise HTTPException(401, f"missing {need} token")
+
+
 async def require_operator(x_op_token: str | None = Header(default=None)) -> dict:
     who = await _resolve(x_op_token)
     if not who:
-        raise HTTPException(401, "missing operator token")
+        _insufficient(x_op_token, "operator")
     if _ROLE_RANK.get(who["role"], 0) < _ROLE_RANK["OPERATOR"]:
         raise HTTPException(403, f"需要 OPERATOR 权限（当前 {who['role']}）")
     return {**who, "token": x_op_token}   # token 供写代理透传(gateway 审计留操作者身份)
@@ -70,7 +81,7 @@ async def require_operator(x_op_token: str | None = Header(default=None)) -> dic
 async def require_admin(x_op_token: str | None = Header(default=None)) -> dict:
     who = await _resolve(x_op_token)
     if not who:
-        raise HTTPException(401, "missing admin token")
+        _insufficient(x_op_token, "admin")
     if _ROLE_RANK.get(who["role"], 0) < _ROLE_RANK["SUPER_ADMIN"]:
         raise HTTPException(403, f"需要 SUPER_ADMIN 权限（当前 {who['role']}）")
     return {"admin": who["operator"], **who}

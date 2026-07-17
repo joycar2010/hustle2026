@@ -84,6 +84,8 @@ class AccountNode(BaseModel):
     domain: str  # 域 A/B/C / 链上
     apiStatus: Literal["ok", "restricted", "healing"]
     metrics: dict[str, str]
+    # 余额七维(资金/现货/合约/理财/杠杆可用/借入/风险值);None=未接入,前端显 —(§6.2 缺值契约)
+    bal: Optional[dict] = None
     approvalState: Optional[str] = None  # KMS 审批流状态
     children: list["AccountNode"] = Field(default_factory=list)
 

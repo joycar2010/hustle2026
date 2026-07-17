@@ -1,6 +1,40 @@
 <template>
   <div class="mixhist">
     <el-tabs v-model="htab" @tab-change="onTab">
+    <!-- V6.1 §7 TradeLifecycleProjection:经济组合一行(默认),原始流水进专家事实页签 -->
+    <el-tab-pane label="组合视图(一组合一行)" name="combos">
+      <div v-if="symFocus" class="focusbar">已按工作项深链聚焦 <b>{{ symFocus }}</b>
+        <a @click="symFocus=''">查看全部 <FIcon name="x" :size="11"/></a></div>
+      <div class="combos">
+        <div class="crow chead">
+          <span class="c-sym">币种</span><span class="c-n">平仓笔数</span><span class="c-v">合计规模</span>
+          <span class="c-v">资金费</span><span class="c-v">手续费</span><span class="c-v">利润</span>
+          <span class="c-t">最近平仓</span><span class="c-a">展开</span>
+        </div>
+        <template v-for="c in combos" :key="c.symbol">
+          <div class="crow" @click="comboOpen = comboOpen===c.symbol ? '' : c.symbol">
+            <span class="c-sym"><b>{{ comboOpen===c.symbol?'▾':'▸' }} {{ c.symbol }}</b></span>
+            <span class="c-n">{{ c.count }}</span>
+            <span class="c-v">{{ fmt(c.notional) }} U</span>
+            <span class="c-v" :class="tone(c.funding)">{{ fmtS(c.funding) }}</span>
+            <span class="c-v" :class="tone(c.fee)">{{ fmtS(c.fee) }}</span>
+            <span class="c-v" :class="tone(c.profit)"><b>{{ fmtS(c.profit) }}</b></span>
+            <span class="c-t">{{ c.last }}</span>
+            <span class="c-a dim2">逐笔 {{ comboOpen===c.symbol?'收起':'展开' }}</span>
+          </div>
+          <div v-if="comboOpen===c.symbol" class="cdetail">
+            <div v-for="r in c.rows" :key="r.source + r.source_id" class="cdr">
+              <span>{{ (r.closed_at||'').slice(5,16) }}</span><span>{{ r.strategy }}</span>
+              <span>{{ fmt(r.notional) }} U</span>
+              <span :class="tone(r.profit)">{{ fmtS(r.profit) }}</span>
+              <span class="dim2">{{ r.source }}</span>
+            </div>
+          </div>
+        </template>
+        <div v-if="!combos.length" class="empty">该范围无已平仓组合</div>
+        <div class="fnote">一行=一个经济组合的全部平仓汇总;点击展开逐笔;原始订单/账单/对账流水见「专家事实」各页签</div>
+      </div>
+    </el-tab-pane>
     <el-tab-pane label="平仓成交(逐笔)" name="fills">
     <div class="bar">
       <!-- 自定义时间窗（选定后覆盖天数按钮） -->
@@ -103,14 +137,34 @@ async function load() {
   } catch (e) { ElMessage.error(e?.detail || '加载失败') }
   finally { loading.value = false }
 }
-const htab = ref('fills')
-const FACTS = [{v:'orders',t:'订单/成交'},{v:'bills',t:'账单(交易所)'},{v:'ledger',t:'账本(归一)'},
-  {v:'proposals',t:'PositionIntent(提案)'},{v:'maintenance',t:'维护事件'},{v:'recon',t:'RECON断点'}]
+const htab = ref('combos')
+// V6.2 N3 深链:从工作项进入(?symbol=XXX)自动聚焦该组合
+import { useRoute } from 'vue-router'
+const _route = useRoute()
+const symFocus = ref(String(_route.query.symbol || '').toUpperCase())
+// 组合视图:逐笔 rows 按币种聚合(一行=一个经济组合;客户端聚合,不造第二财务口径——数字与逐笔完全同源)
+const comboOpen = ref(symFocus.value || '')
+const combos = computed(() => {
+  const m = {}
+  for (const r of rows.value) {
+    if (symFocus.value && String(r.symbol || '').toUpperCase() !== symFocus.value) continue
+    const s = r.symbol || '?'
+    const c = (m[s] = m[s] || { symbol: s, count: 0, notional: 0, funding: 0, fee: 0, profit: 0, last: '', rows: [] })
+    c.count++; c.notional += Number(r.notional) || 0
+    c.funding += Number(r.funding) || 0; c.fee += Number(r.fee) || 0; c.profit += Number(r.profit) || 0
+    const t = (r.closed_at || '').slice(5, 16)
+    if (t > c.last) c.last = t
+    c.rows.push(r)
+  }
+  return Object.values(m).sort((a, b) => (b.last > a.last ? 1 : -1))
+})
+const FACTS = [{v:'orders',t:'专家·订单/成交'},{v:'bills',t:'专家·交易所账单'},{v:'ledger',t:'专家·归一账本'},
+  {v:'proposals',t:'专家·交易意图(提案)'},{v:'maintenance',t:'专家·维护事件'},{v:'recon',t:'专家·账目核对断点'}]
 const facts = ref([]); const fsym = ref('')
 const factCols = computed(() => facts.value.length ? Object.keys(facts.value[0]) : [])
 const fmtCell = v => (v == null ? 'N/A' : typeof v === 'number' ? (Math.abs(v) < 1000 ? v.toFixed(4) : v.toFixed(2)) : String(v))
 const numCls = v => (typeof v === 'number' ? (v >= 0 ? 'up' : 'down') : '')
-async function loadFacts(){ if(htab.value==='fills')return; try{ facts.value=(await mixApi.auditFacts(htab.value, fsym.value, 30))?.rows||[] }catch(e){ facts.value=[] } }
+async function loadFacts(){ if(htab.value==='fills'||htab.value==='combos')return; try{ facts.value=(await mixApi.auditFacts(htab.value, fsym.value, 30))?.rows||[] }catch(e){ facts.value=[] } }
 function onTab(){ if(htab.value!=='fills') loadFacts() }
 onMounted(load)
 </script>
@@ -144,6 +198,20 @@ onMounted(load)
   &.ok { background: rgba(14,203,129,.15); color: #0ECB81; }
   &.bad { background: rgba(246,70,93,.15); color: #F6465D; } }
 .empty { padding: 24px; text-align: center; color: var(--mix-t3, #5E6673); font-size: 12px; }
+.combos{display:flex;flex-direction:column}
+.crow{display:flex;align-items:center;height:34px;border-bottom:1px solid var(--mix-border,#2B3139);cursor:pointer;gap:4px;min-width:720px}
+.crow.chead{height:26px;cursor:default;font-size:10px;color:var(--mix-t3,#5E6673);font-weight:700;background:var(--mix-panel,#12151A)}
+.crow span{padding:0 8px;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.c-sym{width:130px}.c-n{width:80px}.c-v{width:110px;text-align:right}.c-t{width:110px}.c-a{flex:1;text-align:right}
+.cdetail{background:#00000022;border-bottom:1px solid var(--mix-border,#2B3139);padding:4px 0}
+.cdr{display:flex;gap:8px;font-size:11px;color:var(--mix-t2,#848E9C);padding:3px 16px}
+.cdr span{min-width:90px}
+.dim2{color:var(--mix-t3,#5E6673)}
+.fnote{font-size:10px;color:var(--mix-t3,#5E6673);padding:8px 4px}
+.focusbar{font-size:11px;color:var(--mix-t2,#848E9C);background:#F0B90B14;border:1px solid #F0B90B4D;
+  border-radius:6px;padding:6px 12px;margin-bottom:8px}
+.focusbar b{color:#F0B90B}
+.focusbar a{color:var(--mix-t3,#5E6673);cursor:pointer;margin-left:10px}
 .foot { font-size: 10.5px; color: var(--mix-t3, #5E6673); }
 .fbar { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; flex-wrap: wrap; }
 .dimtxt { color: var(--el-text-color-secondary); font-size: 10.5px; }

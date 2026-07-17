@@ -15,9 +15,74 @@ from .. import datasources as ds
 log = logging.getLogger("mix.investor")
 router = APIRouter(tags=["investor"])
 
+# §4A.7 门户错误状态(认证成功后才返回;认证前 /auth/login 统一普通失败防枚举)
+# 内部操作员角色——误登门户给 OPERATOR_PORTAL_MISMATCH(指路管理端),不给 NO_PORTFOLIO_GRANT
+_OPERATOR_ROLES = {"operator", "admin", "owner", "super_admin", "OPERATOR_MOBILE_LIMITED",
+                   "OPERATOR_TABLET", "operator_mobile_trusted"}
+
+_seeded_clients = False
+
+
+async def ensure_client_seed():
+    """§4A 最小切分幂等种子:为存量 share_account 建 client_party 并回填 client_id;
+    为已有 login_user_id 绑定建 portfolio_access_grant。份额权威留 mix_main(不搬 dcm_main)。"""
+    global _seeded_clients
+    if _seeded_clients:
+        return
+    pool = await ds.pg_main()
+    if pool is None:
+        return
+    # DDL 仅在表缺失时运行(表由 0012 迁移以 postgres 建,mix 角色非 owner 不能 ALTER/CREATE INDEX;
+    # 已存在则跳过,避免 InsufficientPrivilege 冒泡到 require_investor)
+    exists = await pool.fetchval("SELECT to_regclass('public.client_party')")
+    if not exists:
+        try:
+            await pool.execute("""
+                CREATE TABLE IF NOT EXISTS client_party (
+                    client_id BIGSERIAL PRIMARY KEY,
+                    client_type TEXT NOT NULL DEFAULT 'CORE_POOL'
+                        CHECK (client_type IN ('CORE_POOL','SMA','HOUSE_RND')),
+                    display_name TEXT NOT NULL DEFAULT '',
+                    status TEXT NOT NULL DEFAULT 'active'
+                        CHECK (status IN ('active','frozen','closed')),
+                    note TEXT NOT NULL DEFAULT '', created_at TIMESTAMPTZ NOT NULL DEFAULT now());
+                CREATE TABLE IF NOT EXISTS portfolio_access_grant (
+                    id BIGSERIAL PRIMARY KEY, auth_subject_id BIGINT NOT NULL,
+                    client_id BIGINT NOT NULL REFERENCES client_party(client_id),
+                    portfolio_id TEXT NOT NULL DEFAULT 'CORE_POOL',
+                    permissions TEXT NOT NULL DEFAULT 'read',
+                    status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','revoked')),
+                    expires_at TIMESTAMPTZ, granted_by TEXT NOT NULL DEFAULT '',
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    UNIQUE(auth_subject_id, client_id, portfolio_id));
+                CREATE INDEX IF NOT EXISTS idx_pag_subject ON portfolio_access_grant (auth_subject_id) WHERE status='active';
+                ALTER TABLE share_account ADD COLUMN IF NOT EXISTS client_id BIGINT REFERENCES client_party(client_id);
+                CREATE INDEX IF NOT EXISTS idx_sa_client ON share_account (client_id)""")
+        except Exception as e:  # noqa: BLE001  表由迁移建=正常,DDL 竞态忽略
+            log.warning("client identity DDL (may pre-exist): %s", e)
+            _seeded_clients = True
+            return
+    # 存量 share_account → client_party(一户一主体),回填 client_id(mix_app 有 INSERT/UPDATE GRANT)
+    for r in await pool.fetch("SELECT investor_id, display_name, login_user_id, is_house FROM share_account WHERE client_id IS NULL"):
+        ctype = "HOUSE_RND" if r["is_house"] else "CORE_POOL"
+        cid = await pool.fetchval(
+            "INSERT INTO client_party(client_type, display_name, note) VALUES($1,$2,'seed:from share_account') "
+            "RETURNING client_id", ctype, r["display_name"])
+        await pool.execute("UPDATE share_account SET client_id=$1 WHERE investor_id=$2", cid, r["investor_id"])
+        # 已有 login_user_id 绑定 → 建授权(投资份额查看权,非操作权限)
+        if r["login_user_id"] is not None:
+            await pool.execute(
+                "INSERT INTO portfolio_access_grant(auth_subject_id, client_id, portfolio_id, permissions, "
+                "granted_by) VALUES($1,$2,$3,'read+confirm','seed-migration') ON CONFLICT DO NOTHING",
+                int(r["login_user_id"]), cid, ctype)
+    _seeded_clients = True
+    log.info("client identity seed done")
+
 
 async def require_investor(authorization: str | None = Header(default=None)) -> dict:
-    """登录 JWT → uid → share_account.investor_id。无绑定=403(fail-closed,不泄漏池)。"""
+    """登录 JWT → uid → portfolio_access_grant → client → share_account(§4A)。
+    份额归属客户主体(client_party),授权走 grant——操作员角色本身不产生投资权益。
+    错误分级(§4A.7,认证后才返回):OPERATOR_PORTAL_MISMATCH/NO_PORTFOLIO_GRANT/SHARE_ACCOUNT_NOT_READY。"""
     from ..deps import _jwt_decode
     if not (authorization and authorization.lower().startswith("bearer ")):
         raise HTTPException(401, "需要投资者登录(Authorization: Bearer)")
@@ -27,14 +92,42 @@ async def require_investor(authorization: str | None = Header(default=None)) -> 
     pool = await ds.pg_main()
     if pool is None:
         raise HTTPException(503, "mix_main 未配置")
-    # 只按 token 的 uid 反查——前端即便传 investor_id 也一律忽略
+    uid = int(who["uid"])
+    # 访问令牌撤销校验:JWT 带 jti(签发的长期访问令牌)→ 须与 mix_users.access_token_jti 一致;
+    # 无 jti(账号密码登录的短期 JWT)= 正常放行。撤销/重置令牌即让旧 jti 失效。
+    jti = who.get("jti")
+    if jti:
+        try:
+            cur = await pool.fetchval("SELECT access_token_jti FROM mix_users WHERE id=$1", uid)
+            if cur != jti:
+                raise HTTPException(401, "访问令牌已失效(被重置或撤销),请向管理员索取新令牌")
+        except HTTPException:
+            raise
+        except Exception:  # noqa: BLE001  列未建=无撤销记录,放行(向后兼容)
+            pass
+    await ensure_client_seed()
+    # 1) 授权解析(权威路径):auth_subject → active grant → client → share_account
     row = await pool.fetchrow(
-        "SELECT investor_id, display_name, status FROM share_account "
-        "WHERE login_user_id=$1 AND status<>'closed'", int(who["uid"]))
-    if not row:
-        raise HTTPException(403, "该账号未绑定投资份额(如属误配请联系管理员)")
-    return {"investor_id": int(row["investor_id"]), "display_name": row["display_name"],
-            "uid": int(who["uid"]), "username": who.get("operator", "")}
+        "SELECT sa.investor_id, sa.display_name, sa.status, g.client_id, g.permissions, cp.client_type "
+        "FROM portfolio_access_grant g JOIN client_party cp ON cp.client_id=g.client_id "
+        "LEFT JOIN share_account sa ON sa.client_id=g.client_id AND sa.status<>'closed' "
+        "WHERE g.auth_subject_id=$1 AND g.status='active' "
+        "AND (g.expires_at IS NULL OR g.expires_at>now()) "
+        "AND cp.status<>'closed' ORDER BY g.id LIMIT 1", uid)
+    if row and row["investor_id"] is not None:
+        return {"investor_id": int(row["investor_id"]), "display_name": row["display_name"],
+                "client_id": int(row["client_id"]), "client_type": row["client_type"],
+                "permissions": row["permissions"], "uid": uid, "username": who.get("operator", "")}
+    if row and row["investor_id"] is None:
+        raise HTTPException(403, {"code": "SHARE_ACCOUNT_NOT_READY",
+                                  "message": "投资账户正在配置中,请稍后再试或联系管理员"})
+    # 2) 无授权:操作员误登门户 vs 尚未开通
+    urole = str(who.get("urole") or "").lower()
+    if urole in {r.lower() for r in _OPERATOR_ROLES}:
+        raise HTTPException(403, {"code": "OPERATOR_PORTAL_MISMATCH",
+                                  "message": "操作员账号请前往管理后台 mix.hustle2026.xyz,投资门户仅供投资人查看"})
+    raise HTTPException(403, {"code": "NO_PORTFOLIO_GRANT",
+                             "message": "尚未开通组合查看权限,请联系管理员开通"})
 
 
 async def _audit(pool, inv, action, detail="", ip=""):

@@ -1,14 +1,24 @@
 <template>
   <div class="mixreport">
+    <!-- V6.1 §7 运营首屏三问:我有多少钱/钱从哪来/账是否对上(专家口径在下方页签不变) -->
+    <div class="ops3q">
+      <div class="q3"><i>我有多少钱</i><b>{{ n(nav.nav?.accounting_nav_usdt) }} U</b>
+        <em>其中可立即动用 {{ n(nav.nav?.available_equity_usdt) }} U<template v-if="(nav.nav?.trapped_usdt||0)>0"> · 暂时取不出 {{ n(nav.nav?.trapped_usdt) }} U</template></em></div>
+      <div class="q3"><i>钱从哪来</i><b :class="attrTopCls">{{ attrTopText }}</b>
+        <em>近14天各来源合计,明细见「收益归因」</em></div>
+      <div class="q3"><i>账是否对上</i>
+        <b :class="bridge.identity_ok?'up':'warn2'">{{ bridge.identity_ok ? '已对上' : (bridge.unmapped_count ? '有未归类账目' : '待建核对基线') }}</b>
+        <em>系统自动核对『净值变化-出入金=各收益之和』</em></div>
+    </div>
     <el-tabs v-model="rtab">
-    <el-tab-pane label="NAV 总览" name="nav">
+    <el-tab-pane label="净值总览" name="nav">
       <div class="navcards">
-        <div class="nc"><span>Accounting NAV</span><b>{{ n(nav.nav?.accounting_nav_usdt) }} U</b><i>交易所+账本事实口径</i></div>
-        <div class="nc"><span>Risk-adjusted NAV</span><b>{{ n(nav.nav?.risk_adjusted_nav_usdt) }} U</b><i>扣受限/冻结/退出折价</i></div>
-        <div class="nc"><span>Available Equity</span><b class="hl">{{ n(nav.nav?.available_equity_usdt) }} U</b><i>可立即部署</i></div>
-        <div class="nc"><span>Trapped Capital</span><b :class="{bad:(nav.nav?.trapped_usdt||0)>0}">{{ n(nav.nav?.trapped_usdt) }} U</b><i>受限venue折价</i></div>
+        <div class="nc"><span>账面净值 <u :title="'Accounting NAV'">?</u></span><b>{{ n(nav.nav?.accounting_nav_usdt) }} U</b><i>交易所+账本事实口径</i></div>
+        <div class="nc"><span>风险调整净值</span><b>{{ n(nav.nav?.risk_adjusted_nav_usdt) }} U</b><i>扣受限/冻结/退出折价</i></div>
+        <div class="nc"><span>可用权益</span><b class="hl">{{ n(nav.nav?.available_equity_usdt) }} U</b><i>可立即部署</i></div>
+        <div class="nc"><span>暂时取不出的资金</span><b :class="{bad:(nav.nav?.trapped_usdt||0)>0}">{{ n(nav.nav?.trapped_usdt) }} U</b><i>受限平台按风险折价</i></div>
       </div>
-      <div class="hd" style="margin-top:12px"><b>NAV bridge 恒等式</b><span class="sub">Δ(Accounting NAV) − 外部流 =?= 类目和(V2 §9.2 验收)</span>
+      <div class="hd" style="margin-top:12px"><b>净值恒等式检查</b><span class="sub">净值变化 − 出入金 =?= 各收益类目之和(账记错会在这里暴露)</span>
         <el-button size="small" @click="loadBridge" style="margin-left:auto">刷新</el-button></div>
       <div class="bridge">
         <div class="bcat" v-for="(v,k) in bridge.categories||{}" :key="k"><span>{{ k }}</span><b :class="v>=0?'up':'down'">{{ fmt(v) }}</b></div>
@@ -19,7 +29,7 @@
         <span>ΔNAV <b>{{ bridge.delta_nav==null?'N/A(快照不足2点)':fmt(bridge.delta_nav) }}</b></span>
         <span>残差 <b :class="resCls">{{ bridge.residual==null?'N/A':fmt(bridge.residual) }}</b></span>
         <span class="um">UNMAPPED <b :class="bridge.unmapped_count?'bad':'ok'">{{ bridge.unmapped_count ?? '—' }}</b></span>
-        <span class="verdict" :class="bridge.identity_ok?'ok':'warn'">{{ bridge.identity_ok ? '恒等式通过 ✓' : (bridge.unmapped_count?'UNMAPPED>0':'待建NAV基线') }}</span>
+        <span class="verdict" :class="bridge.identity_ok?'ok':'warn'">{{ bridge.identity_ok ? '恒等式通过' : (bridge.unmapped_count?'UNMAPPED>0':'待建NAV基线') }}</span>
       </div>
       <div class="fnote">{{ bridge.note }}</div>
     </el-tab-pane>
@@ -105,6 +115,19 @@ const gran = ref('day')
 const range = ref('30d')
 const rtab = ref('nav')
 const nav = ref({}); const bridge = ref({}); const flows = ref([]); const ledger = ref([]); const recon = ref({}); const lcat = ref('')
+// 运营三问·钱从哪来:归因合计+最大来源一句话
+const attrTopText = computed(() => {
+  const rows = attribution.value || []
+  if (!rows.length) return '待产生'
+  const total = rows.reduce((s, a) => s + (a.total || 0), 0)
+  const top = rows.slice().sort((a, b) => (b.total || 0) - (a.total || 0))[0]
+  return `${total >= 0 ? '+' : ''}${total.toFixed(1)} U（主要来自 ${top.name || top.code}）`
+})
+const attrTopCls = computed(() => {
+  const rows = attribution.value || []
+  const total = rows.reduce((s, a) => s + (a.total || 0), 0)
+  return rows.length ? (total >= 0 ? 'up' : 'down') : ''
+})
 const n = v => (v == null ? 'N/A' : Number(v).toLocaleString())
 const fmt = v => (v == null ? 'N/A' : (v >= 0 ? '+' : '') + Number(v).toFixed(4))
 const resCls = computed(() => { const r = bridge.value.residual; return r == null ? '' : Math.abs(r) < 1 ? 'ok' : 'bad' })
@@ -191,6 +214,12 @@ onUnmounted(() => { window.removeEventListener('resize', onResize); chart?.dispo
     .subjects { width: 100%; display: flex; gap: 18px; padding: 4px 0 2px 46px;
       .sj { display: inline-flex; gap: 5px; align-items: baseline; em { font-style: normal; color: var(--el-text-color-secondary); font-size: 10.5px; } } } }
   .up { color: #0ECB81; } .dn { color: #F6465D; } }
+.ops3q{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px;margin-bottom:10px}
+.q3{background:var(--mix-card,#181B21);border:1px solid var(--mix-border,#2B3139);border-radius:8px;padding:12px 16px;display:flex;flex-direction:column;gap:3px}
+.q3 i{font-size:11px;color:var(--mix-t3,#5E6673);font-style:normal;font-weight:700}
+.q3 b{font-size:18px;color:var(--mix-t1,#EAECEF)}
+.q3 b.up{color:#0ECB81}.q3 b.down{color:#F6465D}.q3 b.warn2{color:#F0B90B}
+.q3 em{font-size:10px;color:var(--mix-t3,#5E6673);font-style:normal}
 .navcards { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px,1fr)); gap: 10px; }
 .nc { background: var(--mix-card2,#1E2329); border: 1px solid var(--mix-border,#262B33); border-radius: 8px; padding: 10px 13px; display: flex; flex-direction: column; gap: 2px;
   span { font-size: 11px; color: var(--mix-t3,#5E6673); } b { font-size: 18px; color: var(--mix-t1,#EAECEF); &.hl { color: #F0B90B; } &.bad { color: #F6465D; } } i { font-size: 9.5px; color: var(--mix-t3,#5E6673); font-style: normal; } }

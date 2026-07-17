@@ -9,10 +9,12 @@ import i18n from './locales'
 import './styles/theme.scss'
 import './styles/mix-tokens.css'
 import longpress from './directives/longpress'
+import FIcon from './components/FIcon.vue'
 import { installTips } from './tips'
 
 const app = createApp(App)
 for (const [k, v] of Object.entries(Icons)) app.component(k, v)
+app.component('FIcon', FIcon)            // 扁平功能图标(去 emoji,currentColor 自适应)
 app.directive('longpress', longpress)   // L2 长按交互指令(全局)
 app.use(createPinia()).use(router).use(ElementPlus).use(i18n)
 app.mount('#app')

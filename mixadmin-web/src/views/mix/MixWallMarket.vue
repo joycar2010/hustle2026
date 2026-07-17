@@ -15,7 +15,7 @@
             <span class="c3" :class="(o.risk_adjusted_e_bps??0)>0?'up':'down'">{{ bps(o) }}</span>
             <span class="c4">{{ o.target_notional_usdt ?? 'N/A' }}</span>
             <span class="c5">{{ o.venue_long }}⟶{{ o.venue_short }}</span>
-            <span class="c6">{{ o.blocked ? '⛔' : '✓' }}</span>
+            <span class="c6"><FIcon :name="o.blocked?'block':'check'" :size="12"/></span>
           </div>
           <div class="fold" v-if="skipped">未过硬闸 {{ skipped }} 项(容量/E/新鲜度/policy 不达标)</div>
         </div>
@@ -56,7 +56,7 @@
             <span class="r" :class="(r.funding_daily_pct||0)>=0?'up':'down'">{{ r.funding_daily_pct ?? 'N/A' }}</span>
             <span class="r">{{ r.interval_h ?? 'N/A' }}</span>
             <span class="r">N/A</span>
-            <span>{{ r.fresh ? '✓' : 'STALE' }}</span>
+            <span><template v-if="r.fresh"><FIcon name="check" :size="11"/></template><template v-else>STALE</template></span>
           </div>
         </div>
       </div>
@@ -88,12 +88,14 @@
     </div>
   </div>
   <div v-else class="gate">屏1 · 机会与LAB<br /><small>URL 需携带 ?token=(只读墙令牌,后端校验)</small></div>
+  <WallStatus v-if="authed" title="屏1 · 机会墙" @gen="load"/>
 </template>
 
 <script setup>
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import RiskStatusBar from '../../components/RiskStatusBar.vue'
+import WallStatus from '../../components/v62/WallStatus.vue'
 import { mixApi } from '../../api/mix'
 
 const route = useRoute()
@@ -124,7 +126,9 @@ async function load() {
     labRows.value = ((await mixApi.riskLab())?.would_hold) || []
   } catch (e) { /* 状态条示 STALE */ }
 }
-onMounted(() => { load(); t1 = setInterval(load, 15000) })
+// PATCH-02 §7/§18:WS generation 变化驱动刷新(WallStatus @gen),REST 只留 60s 兜底——
+// 消灭每墙 15s 独立轮询;墙与主控台同一 generation。
+onMounted(() => { load(); t1 = setInterval(load, 60000); mixApi.uxPageview('wall') })
 onUnmounted(() => t1 && clearInterval(t1))
 </script>
 

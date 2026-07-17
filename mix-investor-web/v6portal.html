@@ -1,0 +1,255 @@
+<!doctype html><html lang="zh"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>HustleCoin Mix · 投资人中心</title>
+<!-- V6.1 投资门户 · 币安暗色(用户拍板沿用 mix 域币安风;设计帧 h246SX 桌面/JYMLu 手机)。
+     同一前端+同一契约:数据范围由服务端 uid 决定;CORE_POOL/SMA 同组件按账户类型切换。
+     色板=V6.1 §14 tokens;移动优先:≤760px 底部导航+安全区。 -->
+<style>
+:root{--bg:#0B0E11;--panel:#12151A;--card:#181A20;--card2:#20242C;--border:#2B3139;
+  --t1:#EAECEF;--t2:#B7BDC6;--t3:#5E6673;--gold:#F0B90B;--green:#0ECB81;--red:#F6465D;
+  --num:'Roboto Mono',ui-monospace,monospace}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+body{font-family:"Noto Sans SC","Inter",system-ui,sans-serif;background:var(--bg);color:var(--t1);font-size:14px}
+.hide{display:none!important}
+a{color:var(--gold)}
+.top{height:56px;background:var(--panel);border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;padding:0 22px;position:sticky;top:0;z-index:9}
+.logo{display:flex;align-items:center;gap:8px}
+.logo .h{width:26px;height:26px;border-radius:6px;background:var(--gold);color:#0B0E11;font-family:var(--num);font-weight:700;display:flex;align-items:center;justify-content:center;font-size:14px}
+.logo .n{font-size:14px;font-weight:700;white-space:nowrap}
+.nav{display:flex;gap:2px;margin-left:14px}
+.nav a{font-size:12.5px;color:var(--t2);padding:6px 13px;border-radius:6px;cursor:pointer;text-decoration:none}
+.nav a.on{background:#F0B90B1F;color:var(--gold);font-weight:700}
+.user{font-size:11.5px;color:var(--t2);white-space:nowrap}
+.wrap{padding:16px 24px;display:flex;flex-direction:column;gap:12px;max-width:1480px;margin:0 auto;
+  padding-bottom:calc(24px + env(safe-area-inset-bottom))}
+.statusrow{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
+.tag{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:700;padding:4px 10px;border-radius:6px}
+.tag.g{background:#0ECB8114;color:var(--green);border:1px solid #0ECB8166}
+.tag.a{background:#F0B90B1F;color:var(--gold);border:1px solid #F0B90B4D}
+.note{font-size:10.5px;color:var(--t3)}
+.cards{display:flex;gap:12px;flex-wrap:wrap}
+.card{flex:1;min-width:200px;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:12px 16px;display:flex;flex-direction:column;gap:3px;justify-content:center}
+.card .k{font-size:11.5px;color:var(--t2)}
+.card .v{font-family:var(--num);font-size:20px;font-weight:700}
+.card .v.big{font-size:17px}
+.card .s{font-size:10px;color:var(--t3)}
+.v.green{color:var(--green)}.v.amber{color:var(--gold)}.v.red{color:var(--red)}
+.mid{display:flex;gap:12px;flex-wrap:wrap}
+.panel{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:12px 16px}
+.panel.grow{flex:1;min-width:320px}
+.panel h3{font-size:13px;margin-bottom:8px;color:var(--t1)}
+.bars{display:flex;align-items:flex-end;gap:2px;height:120px;margin:6px 0;overflow-x:auto;position:relative;touch-action:pan-x}
+.bars i{flex:1;min-width:5px;background:var(--gold);opacity:.7;border-radius:1px;min-height:2px}
+.bars i.on{opacity:1;outline:1px solid var(--t1)}
+.bartip{position:absolute;top:0;left:0;background:var(--card2);border:1px solid var(--border);border-radius:6px;
+  padding:5px 10px;font-size:11px;color:var(--t1);pointer-events:none;white-space:nowrap;z-index:5;
+  font-family:var(--num);display:none}
+.attr{font-size:10.5px;color:var(--t3);margin-top:4px;line-height:1.5}
+.side{width:440px}
+.flowrow{display:flex;justify-content:space-between;align-items:center;height:38px;border-top:1px solid var(--border);padding:0 4px;font-size:12px}
+.flowrow .k{color:var(--t2)}.flowrow .v{font-weight:700;font-family:var(--num)}
+.flowrow .v.pos{color:var(--green)}
+.empty{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;padding:30px;color:var(--t2)}
+.empty .em{font-size:12.5px;font-weight:700}.empty .es{font-size:10.5px;color:var(--t3);text-align:center}
+.foot{font-size:10.5px;color:var(--t3);margin-top:4px;line-height:1.5}
+.login{max-width:400px;margin:80px auto;background:var(--card);border:1px solid var(--border);border-radius:10px;padding:28px}
+.login h2{font-size:18px;margin-bottom:4px}.login p{font-size:12px;color:var(--t3);margin-bottom:16px}
+.login input{width:100%;height:44px;border:1px solid var(--border);border-radius:8px;padding:0 12px;font-size:14px;margin-bottom:10px;background:var(--panel);color:var(--t1)}
+.login button{width:100%;height:44px;border:none;border-radius:8px;background:var(--gold);color:#0B0E11;font-size:14px;font-weight:700;cursor:pointer}
+.err{color:var(--red);font-size:12px;margin-top:8px;min-height:16px}
+table{width:100%;border-collapse:collapse;font-size:12px}
+th,td{text-align:left;padding:10px 6px;border-bottom:1px solid var(--border)}
+th{font-size:10.5px;color:var(--t3);font-weight:700}
+.pos{color:var(--green)}.neg{color:var(--red)}
+.mono{font-family:var(--num)}
+.confirmlink{color:var(--gold);cursor:pointer;font-weight:700}
+/* 手机(设计帧 JYMLu):底部导航+安全区+卡片纵排 */
+.mnav{display:none}
+@media (max-width:760px){
+  .top{height:48px;padding:0 14px}
+  .logo .n{font-size:13px}
+  .nav,.user{display:none}
+  .wrap{padding:12px 14px calc(76px + env(safe-area-inset-bottom))}
+  .cards{flex-direction:column}
+  .card .v{font-size:22px}
+  .side{width:100%}
+  .mid{flex-direction:column}
+  .mnav{display:flex;position:fixed;left:0;right:0;bottom:0;height:calc(64px + env(safe-area-inset-bottom));
+    padding-bottom:env(safe-area-inset-bottom);background:var(--panel);border-top:1px solid var(--border);z-index:10}
+  .mnav a{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;
+    font-size:11px;color:var(--t3);text-decoration:none}
+  .mnav a span{font-size:16px}
+  .mnav a.on{color:var(--gold);font-weight:700}
+  th,td{padding:8px 4px;font-size:11px}
+}
+</style></head>
+<body>
+<div id="login" class="login hide">
+  <h2>HustleCoin Mix · 投资人中心</h2><p>请输入您的登录令牌（由管理员提供）</p>
+  <input id="tok" type="password" placeholder="访问令牌" onkeydown="if(event.key==='Enter')doLogin()">
+  <button onclick="doLogin()">进入</button>
+  <div id="loginErr" class="err"></div>
+</div>
+<div id="app" class="hide">
+  <div class="top">
+    <div style="display:flex;align-items:center;min-width:0">
+      <div class="logo"><span class="h">H</span><span class="n" id="brandName">HustleCoin Mix · 投资人中心</span></div>
+      <div class="nav" id="nav"></div>
+    </div>
+    <div style="display:flex;align-items:center;gap:10px">
+      <span class="user" id="userName">—</span><span style="cursor:pointer" title="退出" onclick="logout()">⏻</span>
+    </div>
+  </div>
+  <div class="wrap" id="viewOverview">
+    <div class="statusrow">
+      <span class="tag g" id="statusTag">✓ 正常运行</span>
+      <span class="note" id="statusNote">部分数据正在核对时，以最近正式结算为准</span>
+    </div>
+    <div class="cards" id="metricCards"></div>
+    <div class="mid">
+      <div class="panel grow">
+        <h3 id="chartTitle">收益趋势（30日）与收益来源汇总</h3>
+        <div class="bars" id="bars"><span class="bartip" id="barTip"></span></div>
+        <div class="attr" id="attr">收益来源：加载中…</div>
+      </div>
+      <div class="panel side" id="sidePanel"></div>
+    </div>
+    <div class="foot" id="footNote">「账目确认」为只读核对：您可以确认收到对账单，但不能录入金额或修改账本 ｜ 不展示交易所、策略参数、其他用户或内部告警</div>
+  </div>
+  <div class="wrap hide" id="viewFlows">
+    <div class="panel"><h3>资金流水（认购/赎回/分配 · 内部调拨不在此表）</h3>
+      <div style="overflow-x:auto">
+      <table><thead><tr><th>时间</th><th>类型</th><th>份额</th><th>金额(USDT)</th><th>状态</th><th>流水号</th></tr></thead>
+        <tbody id="flowBody"></tbody></table></div>
+      <div id="flowEmpty" class="empty hide"><div class="em">近 30 天暂无已确认流水</div>
+        <div class="es">有新的入金、结算或分配时会在这里显示</div></div>
+    </div>
+  </div>
+  <div class="wrap hide" id="viewStatements">
+    <div class="panel"><h3>对账单确认（只读核对）</h3>
+      <div style="overflow-x:auto">
+      <table><thead><tr><th>期间</th><th>版本</th><th>发布时间</th><th>状态</th><th>操作</th></tr></thead>
+        <tbody id="stmtBody"></tbody></table></div>
+      <div id="stmtEmpty" class="empty hide"><div class="em">暂无正式对账单</div>
+        <div class="es">发布后可在此确认收到（确认不改账本，只记录知悉）</div></div>
+    </div>
+  </div>
+  <!-- 手机底部导航(帧 JYMLu) -->
+  <div class="mnav" id="mnav"></div>
+</div>
+<script>
+const API='/api/v6/portal'
+function tok(){return localStorage.getItem('inv_token')||''}
+function hdr(){return {'Authorization':'Bearer '+tok()}}
+async function get(p){const r=await fetch(API+p,{headers:hdr()});if(r.status===401){logout();throw 0}return r.json()}
+async function post(p){const r=await fetch(API+p,{method:'POST',headers:hdr()});return r.json()}
+function logout(){localStorage.removeItem('inv_token');show('login')}
+function show(w){document.getElementById('login').classList.toggle('hide',w!=='login');document.getElementById('app').classList.toggle('hide',w==='login')}
+async function doLogin(){
+  const t=document.getElementById('tok').value.trim()
+  if(!t){document.getElementById('loginErr').textContent='请输入令牌';return}
+  localStorage.setItem('inv_token',t)
+  try{const me=await get('/me');if(me&&me.display_name){boot(me)}else{document.getElementById('loginErr').textContent='令牌无效'}}
+  catch(e){document.getElementById('loginErr').textContent='令牌无效或已过期'}
+}
+let ACCT='CORE_POOL',CURV='Overview'
+// 缺值口径(§6.2):未接入/待产生/真0 视觉可区分,绝不用 0 冒充
+function fmt(v,suf){return v==null?'—':v+(suf||'')}
+async function boot(me){
+  show('app'); ACCT=me.account_type||'CORE_POOL'
+  const sma=ACCT==='SMA'
+  document.getElementById('brandName').textContent=sma?'HustleCoin Mix · 专属资产账户':'HustleCoin Mix · 投资人中心'
+  document.getElementById('userName').textContent=me.display_name+(sma?' · 专属资产账户':' · 已登录')
+  const nav=sma?[['收益总览','Overview','◎'],['资金流水','Flows','↕'],['账户与授权','Stmt','🛡']]
+              :[['收益总览','Overview','◎'],['资金流水','Flows','↕'],['账目确认','Stmt','✓']]
+  document.getElementById('nav').innerHTML=nav.map((n,i)=>`<a class="${i===0?'on':''}" data-v="${n[1]}" onclick="switchView('${n[1]}')">${n[0]}</a>`).join('')
+  document.getElementById('mnav').innerHTML=nav.map((n,i)=>`<a class="${i===0?'on':''}" data-v="${n[1]}" onclick="switchView('${n[1]}')"><span>${n[2]}</span>${n[0]}</a>`).join('')
+  loadOverview()
+  try{const ss=await (await fetch(API+'/service-status')).json()
+    const t=document.getElementById('statusTag'),n=document.getElementById('statusNote')
+    if(ss.service_state!=='NORMAL'){t.className='tag a';t.textContent='🛠 系统维护中'}
+    n.textContent=ss.notice||n.textContent}catch(e){}
+}
+async function loadOverview(){
+  const ov=await get('/overview')
+  const sma=ACCT==='SMA'
+  const cards=sma?[
+    ['总资产',fmt(ov.equity_usdt,' USDT'),'big','含持仓估值'],
+    ['期间净收益',fmt(ov.cumulative_pnl_usdt,' USDT'),'big green',fmt(ov.cumulative_pnl_pct,'% · 开户至今')],
+    ['当前净值',fmt(ov.nav_per_unit),'big','单位净值'],
+    ['数据状态',ov.data_status||'—','big',''],
+  ]:[
+    ['我的当前权益',fmt(ov.equity_usdt,' USDT'),'','按最近正式结算'],
+    ['累计收益',fmt(ov.cumulative_pnl_usdt,' USDT'),ov.cumulative_pnl_usdt!=null&&parseFloat(ov.cumulative_pnl_usdt)<0?'red':'green',fmt(ov.cumulative_pnl_pct,'% · 开户至今')],
+    ['今日收益',fmt(ov.today_pnl_usdt,' USDT'),ov.today_pnl_usdt!=null&&parseFloat(ov.today_pnl_usdt)<0?'red':'green','组合统一收益率'],
+    ['单位净值 × 份额',fmt(ov.nav_per_unit)+' × '+fmt(ov.units)+' 份','','正式净值'],
+  ]
+  document.getElementById('metricCards').innerHTML=cards.map(c=>
+    `<div class="card"><span class="k">${c[0]}</span><span class="v ${c[2]}">${c[1]}</span><span class="s">${c[3]||''}</span></div>`).join('')
+  const tr=ov.trend||[]
+  const vals=tr.map(x=>parseFloat(x.equity)||0)
+  const mx=Math.max(...vals,1),mn=Math.min(...vals.filter(v=>v>0),0)
+  const barsEl=document.getElementById('bars')
+  barsEl.innerHTML='<span class="bartip" id="barTip"></span>'+(vals.length?vals:new Array(30).fill(0)).map((v,i)=>
+    `<i data-i="${i}" style="height:${vals.length?Math.max(4,(v-mn)/(mx-mn+1e-9)*100):4}%"></i>`).join('')
+  // 触控/悬停数据点(V6.2 §九 投资人手机):点/滑到柱→显示日期+权益,不跳转
+  const showTip=(ev)=>{
+    const t=(ev.touches?document.elementFromPoint(ev.touches[0].clientX,ev.touches[0].clientY):ev.target)
+    if(!t||t.tagName!=='I'||!tr.length)return
+    const i=+t.dataset.i, d=tr[i]; if(!d)return
+    barsEl.querySelectorAll('i.on').forEach(x=>x.classList.remove('on')); t.classList.add('on')
+    const tip=document.getElementById('barTip')
+    tip.style.display='block'
+    tip.textContent=`${(d.as_of||'').slice(5,10)} · ${d.equity} USDT${d.nav_status==='ESTIMATED'?'(盘中)':''}`
+    const r=t.getBoundingClientRect(), pr=barsEl.getBoundingClientRect()
+    tip.style.left=Math.min(Math.max(r.left-pr.left-40,0),pr.width-130)+'px'
+  }
+  barsEl.onmousemove=showTip; barsEl.ontouchstart=showTip; barsEl.ontouchmove=showTip
+  barsEl.onmouseleave=()=>{document.getElementById('barTip').style.display='none'
+    barsEl.querySelectorAll('i.on').forEach(x=>x.classList.remove('on'))}
+  document.getElementById('attr').textContent=ov.attribution
+    ? '收益来源：'+Object.entries(ov.attribution).map(([k,v])=>`${k} ${v}`).join(' · ')+'（脱敏汇总，不显示策略与平台明细）'
+    : '收益来源：暂无已确认账本数据（份额发行后自动生效）'
+  const sp=document.getElementById('sidePanel')
+  if(sma){
+    sp.innerHTML='<h3>账户保护状态</h3>'+[
+      ['资金托管','您本人托管',''],['提现 / 划转','仅您本人可发起','pos'],
+      ['受托交易范围','按您签署的授权书',''],['账户防护','在线 ✓ · 实时监控','pos'],
+      ['暂停开关','未触发 · 您可随时暂停','']
+    ].map(r=>`<div class="flowrow"><span class="k">${r[0]}</span><span class="v ${r[2]}">${r[1]}</span></div>`).join('')
+  }else{
+    sp.innerHTML='<h3>最近资金变化</h3><div id="miniFlow"></div>'
+    const fl=await get('/cashflows')
+    document.getElementById('miniFlow').innerHTML=fl.length
+      ? fl.slice(0,6).map(f=>`<div class="flowrow"><span class="k">${f.type} · ${(f.at||'').slice(0,10)}</span><span class="v ${parseFloat(f.amount_usdt||0)>=0?'pos':''}">${fmt(f.amount_usdt,' U')}</span></div>`).join('')
+      : '<div class="empty"><div class="em">近 30 天暂无已确认流水</div><div class="es">有新的入金、结算或分配时会在这里显示</div></div>'
+  }
+}
+async function loadFlows(){
+  const fl=await get('/cashflows')
+  document.getElementById('flowEmpty').classList.toggle('hide',fl.length>0)
+  document.getElementById('flowBody').innerHTML=fl.map(f=>
+    `<tr><td class="mono">${(f.at||'').slice(0,10)}</td><td>${f.type}</td><td class="mono">${fmt(f.units)}</td>
+     <td class="mono ${parseFloat(f.amount_usdt||0)>=0?'pos':'neg'}">${fmt(f.amount_usdt)}</td><td>${f.status}</td><td class="mono">${f.flow_id||'—'}</td></tr>`).join('')
+}
+async function loadStmts(){
+  const st=await get('/statements')
+  document.getElementById('stmtEmpty').classList.toggle('hide',st.length>0)
+  document.getElementById('stmtBody').innerHTML=st.map(s=>
+    `<tr><td>${s.period}</td><td>v${s.version}</td><td class="mono">${(s.published_at||'').slice(0,10)}</td>
+     <td>${s.confirmed?'✓ 已确认':'待确认'}</td>
+     <td>${s.confirmed?'—':`<a class="confirmlink" onclick="confirmStmt(${s.id})">确认收到</a>`}</td></tr>`).join('')
+}
+async function confirmStmt(id){await post('/statements/'+id+'/confirm');loadStmts()}
+function switchView(v){
+  CURV=v
+  document.getElementById('viewOverview').classList.toggle('hide',v!=='Overview')
+  document.getElementById('viewFlows').classList.toggle('hide',v!=='Flows')
+  document.getElementById('viewStatements').classList.toggle('hide',v!=='Stmt')
+  document.querySelectorAll('#nav a,#mnav a').forEach(a=>a.classList.toggle('on',a.dataset.v===v))
+  if(v==='Overview')loadOverview();else if(v==='Flows')loadFlows();else loadStmts()
+}
+if(tok()){get('/me').then(me=>{if(me&&me.display_name)boot(me);else show('login')}).catch(()=>show('login'))}
+else show('login')
+</script>
+</body></html>

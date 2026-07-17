@@ -5,7 +5,7 @@
  *   - /api/**、/ws/**、非 GET、跨域 一律 network-only 不拦(数据永远走网络最新)。
  * 版本号变更即失效旧缓存(activate 清理)。**每次发布若改了缓存语义务必升 VERSION。**
  */
-const VERSION = 'qhadmin-v2';
+const VERSION = 'mixadmin-v3';
 const SHELL = VERSION + '-shell';
 // 仅预缓存长期稳定的入口壳(带 hash 的 assets 运行时按需缓存)
 const PRECACHE = ['/', '/index.html', '/logo-white.png', '/favicon.ico', '/manifest.webmanifest'];

@@ -21,6 +21,27 @@ http.interceptors.response.use(r => r.data, e => {
   return Promise.reject(e?.response?.data || e)
 })
 
+// V6 契约实例(/api/v6):同域同鉴权,只有前缀不同
+const http6 = axios.create({
+  baseURL: (import.meta.env.VITE_MIX_API || 'http://localhost:8100/api/v1').replace(/\/api\/v1\/?$/, '/api/v6'),
+  timeout: 15000,
+})
+http6.interceptors.request.use(cfg => {
+  const t = localStorage.getItem('mix_token')
+  if (t) cfg.headers['X-Op-Token'] = t
+  // REV2 §9:移动端受信设备会话——命令闸据此判受信+额度(桌面无此值=隐式受信)
+  const dev = localStorage.getItem('mix_device_session')
+  if (dev) cfg.headers['X-Device-Session'] = dev
+  return cfg
+})
+http6.interceptors.response.use(r => r.data, e => {
+  if (e?.response?.status === 401 && !location.pathname.startsWith('/wall/')) {
+    localStorage.removeItem('mix_token')
+    window.dispatchEvent(new Event('mix-auth-required'))
+  }
+  return Promise.reject(e?.response?.data || e)
+})
+
 export const mixApi = {
   enums: () => http.get('/meta/enums'),
   riskSummary: () => http.get('/risk/summary'),
@@ -36,7 +57,7 @@ export const mixApi = {
   closePreview: (symbol) => http.get('/close-preview', { params: { symbol } }),
   proposalCreate: (b) => http.post('/proposal/create', b),
   proposals: () => http.get('/proposals'),
-  proposalApprove: (id, code) => http.post(`/proposal/${id}/approve`, { code }),
+  proposalApprove: (id, code, ticket) => http.post(`/proposal/${id}/approve`, ticket ? { reauth_ticket: ticket } : { code }),
   proposalReject: (id) => http.post(`/proposal/${id}/reject`),
   totpStatus: () => http.get('/totp/status'),
   totpProvision: () => http.post('/totp/provision'),
@@ -104,6 +125,17 @@ export const mixApi = {
   ledgerEntries: (p={}) => http.get('/ledger/entries', { params: p }),
   reconBreaks: () => http.get('/ledger/recon-breaks'),
   navCurrent: () => http.get('/system/nav/current'),
+  clientsList: () => http.get('/system/clients'),
+  clientGrant: (id, b) => http.post(`/system/clients/${id}/access-grant`, b),
+  crCreate: (b) => http.post('/system/capital-requests', b),
+  crDryRun: (id) => http.post(`/system/capital-requests/${id}/dry-run`),
+  crPost: (id, b) => http.post(`/system/capital-requests/${id}/post`, b),
+  crList: (clientId = 0) => http.get('/system/capital-requests', { params: clientId ? { client_id: clientId } : {} }),
+  shareEventReverse: (eid, b) => http.post(`/system/share-events/${eid}/reverse`, b),
+  shareLedger: () => http.get('/system/share/accounts'),
+  userTokenStatus: (uid) => http.get(`/operators/users/${uid}/token`),
+  userTokenIssue: (uid, days) => http.post(`/operators/users/${uid}/token`, { days }),
+  userTokenRevoke: (uid) => http.delete(`/operators/users/${uid}/token`),
   healthV2: () => http.get('/system/health-v2'),
   accountsCustody: () => http.get('/accounts/custody'),
   auditFacts: (kind, symbol='', days=30) => http.get('/audit/facts', { params: { kind, symbol, days } }),
@@ -200,9 +232,56 @@ export const mixApi = {
   setAccountMaster: (ak, master_key) => http.put(`/accounts/${encodeURIComponent(ak)}/master`, { master_key }),
   setAccountMode: (ak, account_mode) => http.put(`/accounts/${encodeURIComponent(ak)}/mode`, { account_mode }),
   eligibility: () => http.get('/risk/eligibility'),
+  eligibilityPut: (b) => http.put('/risk/eligibility', b),
   accountsBatch: (b) => http.put('/accounts/batch', b),
   coins: () => http.get('/coins'),
   alerts: (strategy = '') => http.get('/alerts', { params: strategy ? { strategy } : {} }),
   reportPnl: (range = '30d') => http.get('/report/pnl', { params: { range } }),
   attribution: () => http.get('/report/attribution'),
+  // ── V6 契约(/api/v6):统一快照/工作项/typed命令/写入租约/旧C3.S对比/LAB ──
+  // V6.2 PATCH-01:canonical 搜索 / 研判上下文 / 研判案件 / C2.P 人工计划(挂 /api/v6,不开第三前缀)
+  instrumentsSearch: (q) => http6.get('/instruments/search', { params: { q } }),
+  researchContext: (symbol, product = 'C2.P') => http6.get('/research/context', { params: { symbol, product } }),
+  researchCases: (symbol = '') => http6.get('/research/cases', { params: symbol ? { symbol } : {} }),
+  researchCaseCreate: (b) => http6.post('/research/cases', b),
+  researchCaseComplete: (id, b = {}) => http6.post(`/research/cases/${id}/complete`, b),
+  planCreate: (b) => http6.post('/work-items/create-manual-plan', b),
+  planPreview: (p) => http6.get('/work-items/plan-preview', { params: p }),
+  uxPageview: (page) => http6.post('/ux/pageview', { page }).catch(() => {}),
+  uxPageviews: () => http6.get('/ux/pageviews'),
+  // REV2 §9 受信设备(M5):桌面注册/列表/撤销/额度
+  v6Bootstrap: (surface = 'desktop') => http6.get('/operator/bootstrap', { params: { surface } }),
+  devRegister: (b) => http6.post('/operator/devices/register', b),
+  devList: () => http6.get('/operator/devices'),
+  devRevoke: (sid) => http6.post(`/operator/devices/${encodeURIComponent(sid)}/revoke`),
+  devLimits: (sid, b) => http6.post(`/operator/devices/${encodeURIComponent(sid)}/limits`, b),
+  v6Snapshot: () => http6.get('/operator/control/snapshot'),
+  v6WorkItems: (p = {}) => http6.get('/operator/workitems', { params: p }),
+  v6Command: (b) => http6.post('/operator/commands', b),
+  v6CommandLog: () => http6.get('/operator/commands/log'),
+  v6LeaseList: () => http6.get('/operator/lease'),
+  v6LeaseAcquire: (b) => http6.post('/operator/lease/acquire', b),
+  v6LeaseRelease: (b) => http6.post('/operator/lease/release', b),
+  v6LegacyCompare: () => http6.get('/operator/legacy/compare'),
+  v6LegacyRuns: () => http6.get('/operator/legacy/runs'),
+  v6LabHealth: () => http6.get('/lab/health'),
+  v6LabProjects: () => http6.get('/lab/projects'),
+  v6LabLifecycle: (pid) => http6.get(`/lab/projects/${pid}/lifecycle`),
+  v6LabRuns: (project = '') => http6.get('/lab/runs', { params: project ? { project } : {} }),
+  v6LabEvidence: (p = {}) => http6.get('/lab/evidence', { params: p }),
+  v6LabVerdicts: () => http6.get('/lab/verdicts'),
+  v6LabOutbox: () => http6.get('/lab/outbox'),
+  v6LabSignals: (p = {}) => http6.get('/lab/signals', { params: p }),
+  v6LabCommand: (b) => http6.post('/lab/commands', b),
+  v6Training: () => http6.get('/training/courses'),
+  v6TrainingStart: (c) => http6.post(`/training/${c}/start`),
+  v6TrainingAct: (c, action) => http6.post(`/training/${c}/action`, { action }),
+  v6Dictionary: () => http6.get('/meta/dictionary'),
+  v6Capabilities: () => http6.get('/meta/capabilities'),
+  v6CapabilityPut: (pc, b) => http6.put(`/meta/capabilities/${pc}`, b),
+  webauthnRegOptions: () => http.post('/webauthn/register/options'),
+  webauthnRegVerify: (b) => http.post('/webauthn/register/verify', b),
+  webauthnAuthOptions: () => http.post('/webauthn/auth/options'),
+  webauthnAuthVerify: (b) => http.post('/webauthn/auth/verify', b),
+  webauthnCreds: () => http.get('/webauthn/credentials'),
 }

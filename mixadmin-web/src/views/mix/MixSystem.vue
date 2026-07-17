@@ -24,7 +24,7 @@
         <div v-for="(info, dom) in (st.ssl?.domains || {})" :key="dom" class="kv">
           <span>{{ dom }}</span>
           <b :style="{color: info.san_covers ? '#0ECB81' : '#F6465D'}">
-            {{ info.san_covers ? 'SAN✓' : 'SAN✗' }} · {{ info.expiry }}</b>
+            {{ info.san_covers ? 'SAN 覆盖' : 'SAN 缺失' }} · {{ info.expiry }}</b>
         </div>
         <el-button size="small" type="warning" :loading="busy==='ssl'" @click="run('ssl')">手动触发续期检查</el-button>
         <div class="fnote">certbot renew：未到期=no-op，安全</div>
@@ -45,7 +45,7 @@
     <el-tab-pane label="二次认证(TOTP)" name="totp" lazy>
       <div class="card" style="max-width:460px">
         <div class="chd"><b>操作员 TOTP 绑定</b></div>
-        <div class="fnote" style="margin-bottom:10px">提案审批(DRY_RUN→ACTIVE)第二因子。规约允许 WebAuthn/TOTP,本实现为 TOTP。当前:<b>{{ totpBound ? '已绑定 ✓' : '未绑定' }}</b></div>
+        <div class="fnote" style="margin-bottom:10px">提案审批(DRY_RUN→ACTIVE)第二因子。规约允许 WebAuthn/TOTP,本实现为 TOTP。当前:<b>{{ totpBound ? '已绑定' : '未绑定' }}</b></div>
         <div v-if="!totpUri">
           <el-button size="small" type="warning" @click="totpProvision">{{ totpBound ? '重新绑定' : '开始绑定' }}</el-button>
         </div>
@@ -115,8 +115,8 @@ async function acSave() {
 }
 async function acTest() {
   acBusy.value = 'test'; acMsg.value = ''
-  try { const r = await mixApi.aicoinConfigTest(ac.value); acMsg.value = r.ok ? '✓ 连接成功(quota 可读)' : '✗ ' + (r.error || '失败') }
-  catch (e) { acMsg.value = '✗ ' + (e?.detail || e?.error || '失败') } finally { acBusy.value = '' }
+  try { const r = await mixApi.aicoinConfigTest(ac.value); acMsg.value = r.ok ? '连接成功(quota 可读)' : '失败: ' + (r.error || '失败') }
+  catch (e) { acMsg.value = '失败: ' + (e?.detail || e?.error || '失败') } finally { acBusy.value = '' }
 }
 const totpBound = ref(false); const totpUri = ref(''); const totpSecret = ref(''); const totpCode = ref('')
 async function totpLoad() { try { totpBound.value = (await mixApi.totpStatus())?.bound } catch (e) { /* */ } }

@@ -1117,6 +1117,27 @@ async def account_nodes() -> list[dict]:
             if v:
                 reg_subs[v].append((ak, meta))
 
+    def _bal(funding=None, spot=None, futures=None, earn=None, margin_free=None,
+             borrowed=None, risk=None):
+        """余额七维(资金/现货/合约/理财/杠杆可用/借入/风险值)。None=未接入(前端显 —),
+        绝不用 0 冒充(§6.2)。数据源=account-snapshot 的 wallets 全类别估值(B 机扩采)。"""
+        return {"funding": funding, "spot": spot, "futures": futures, "earn": earn,
+                "margin_free": margin_free, "borrowed": borrowed, "risk": risk}
+
+    def _bal_from_snap(snap: dict) -> dict:
+        """快照 wallets(资金/现货/合约/交割/杠杆/理财)→ bal 七维。
+        合约列=合约+交割(交割类别并入);杠杆钱包总值进 metrics 悬停,不占列。
+        无 wallets(旧快照/采集失败)→ 回落 equity 进合约列(与扩采前口径一致)。"""
+        w = snap.get("wallets") or {}
+        if any(w.get(k) is not None for k in ("funding", "spot", "futures", "delivery", "earn")):
+            fut = w.get("futures")
+            if w.get("delivery") is not None:
+                fut = (fut or 0.0) + float(w["delivery"])
+            return _bal(funding=w.get("funding"), spot=w.get("spot"),
+                        futures=fut, earn=w.get("earn"))
+        eq = float(snap.get("equity_usdt") or 0)
+        return _bal(futures=eq) if snap else _bal()
+
     def _reg_sub_node(ak, meta, venue):
         cst = cred.get(ak) or {}
         sub_snap = snaps.get(f"{venue}:{ak}") or {}
@@ -1124,12 +1145,17 @@ async def account_nodes() -> list[dict]:
         m = {"账户": _acct_name(ak), "Book": meta.get("book") or "—", "模式": _mode_cn(ak),
              "凭证": cred_state, "Key掩码": cst.get("key_mask") or "—"}
         eq = 0.0
+        bal = _bal()
         if sub_snap:
             eq = float(sub_snap.get("equity_usdt") or 0)
             m["净值"] = f"{eq:,.2f} U"
             m["快照"] = _age_text(sub_snap.get("ts"))
+            bal = _bal_from_snap(sub_snap)
+            mgw = (sub_snap.get("wallets") or {}).get("margin")
+            if mgw is not None:
+                m["杠杆钱包"] = f"{mgw:,.2f} U"
         return eq, {"id": ak, "kind": "sub", "platformType": "cex", "venue": venue,
-                    "domain": meta.get("book") or "TEST",
+                    "domain": meta.get("book") or "TEST", "bal": bal,
                     "apiStatus": "ok" if cred_state == "active" else ("healing" if cred_state == "pending" else "restricted"),
                     "metrics": m, "approvalState": None, "children": []}
 
@@ -1154,6 +1180,7 @@ async def account_nodes() -> list[dict]:
                            "凭证": (cst.get("state") or "env-key"), "快照": _age_text(s.get("ts"))}
             ch.append({"id": venue, "kind": "wallet" if is_dex else "sub", "platformType": pt, "venue": venue,
                        "domain": pm.get("book") or ("DEX·HL" if is_dex else "B·exec"),
+                       "bal": _bal_from_snap(s),
                        "apiStatus": "ok" if s.get("ok") else "restricted",
                        "metrics": metrics, "approvalState": None, "children": []})
             seen.add(venue)
@@ -1166,6 +1193,9 @@ async def account_nodes() -> list[dict]:
                 teq += float(acct.get("margin_net_usdt") or 0)
                 ch.append({"id": note, "kind": "sub", "platformType": "cex", "venue": "binance",
                            "domain": "coin·3shard", "apiStatus": "ok",
+                           "bal": _bal(margin_free=float(acct.get("margin_usdt_free") or 0),
+                                       borrowed=float(acct.get("margin_usdt_borrowed") or 0),
+                                       risk=acct.get("margin_level")),
                            "metrics": {"账户": _acct_name(note), "模式": _mode_cn(note),
                                        "杠杆净资产": f"{float(acct.get('margin_net_usdt') or 0):,.2f} U",
                                        "可用USDT": f"{float(acct.get('margin_usdt_free') or 0):,.2f}",
@@ -1209,6 +1239,7 @@ async def account_nodes() -> list[dict]:
                 out.append({
                     "id": mak, "kind": "master", "platformType": pt, "venue": venue,
                     "domain": mmeta.get("book") or ("DEX·HL" if is_dex else "B·exec"),
+                    "bal": _agg_bal(children, extra=(_bal_from_snap(msnap) if msnap else None)),
                     "apiStatus": "ok" if (msnap.get("ok") or (s is not None and s.get("ok"))) else "restricted",
                     "metrics": {"账户": _acct_name(mak), "Book": mmeta.get("book") or "—",
                                 "模式": _mode_cn(mak), "本账户": f"{meq:,.2f} U",
@@ -1220,12 +1251,32 @@ async def account_nodes() -> list[dict]:
             out.append({
                 "id": f"{venue}-master", "kind": "master", "platformType": pt, "venue": venue,
                 "domain": "DEX·HL" if is_dex else "B·exec",
+                "bal": _agg_bal(children),
                 "apiStatus": "ok" if (s is not None and s.get("ok")) else "restricted",
                 "metrics": {("链上" if is_dex else "交易所"): venue,
                             ("钱包" if is_dex else "子账户"): str(len(children)),
                             "合计净值": f"{teq:,.2f} U"},
                 "approvalState": None, "children": children,
             })
+    return out
+
+
+def _agg_bal(children: list, extra: dict | None = None) -> dict:
+    """主账户行=子账户余额七维逐列求和 + 主账户自身钱包(extra)。
+    全 None 列保持 None=未接入;风险值不聚合(逐账户语义)。"""
+    keys = ("funding", "spot", "futures", "earn", "margin_free", "borrowed")
+    out = {k: None for k in keys}
+    out["risk"] = None
+    for c in children:
+        b = c.get("bal") or {}
+        for k in keys:
+            v = b.get(k)
+            if v is not None:
+                out[k] = (out[k] or 0.0) + float(v)
+    for k in keys:
+        v = (extra or {}).get(k)
+        if v is not None:
+            out[k] = (out[k] or 0.0) + float(v)
     return out
 
 

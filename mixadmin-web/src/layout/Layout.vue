@@ -16,7 +16,7 @@
           <template v-if="grp.standalone">
             <el-menu-item v-for="r in grp.items" :key="r.path" :index="'/'+r.path">
               <el-icon><component :is="r.meta.icon"/></el-icon>
-              <template #title>{{ t(r.meta.title) }}</template>
+              <template #title>{{ t(r.meta.title) }}<i v-if="r.name==='mix-training' && trainBadge" class="tr-badge">{{ trainBadge }}</i></template>
             </el-menu-item>
           </template>
           <!-- 其它: 可点击收缩的组头 -->
@@ -48,6 +48,19 @@
         <el-button size="small" class="wall-btn" @click="openWall('market')">屏1·机会墙</el-button>
         <el-button size="small" class="wall-btn" @click="openWall('exec')">屏2·持仓墙</el-button>
         <el-button size="small" class="wall-btn" @click="openWall('risk')">屏3·风控墙</el-button>
+        <!-- V6.2 §三:低频功能进右上系统管理,不占日常左侧菜单 -->
+        <el-dropdown trigger="click" @command="p=>$router.push(p)">
+          <el-button size="small" class="wall-btn"><el-icon><Setting/></el-icon>&nbsp;系统管理</el-button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item command="/system"><el-icon><Monitor/></el-icon>系统状态</el-dropdown-item>
+              <el-dropdown-item command="/mix/notify"><el-icon><Bell/></el-icon>通知模块(含维护排空)</el-dropdown-item>
+              <el-dropdown-item command="/mix/operators"><el-icon><Avatar/></el-icon>操作员管理</el-dropdown-item>
+              <el-dropdown-item command="/mix/system"><el-icon><Coin/></el-icon>系统配置</el-dropdown-item>
+              <el-dropdown-item divided command="/mix/legacy"><el-icon><Switch/></el-icon>旧C3.S对比(迁移期)</el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
         <el-popover trigger="click" width="320" :teleported="false" popper-class="op-panel-pop" @show="loadPanelHealth">
           <template #reference>
             <span class="op-chip"><el-icon><Avatar/></el-icon>{{op.operator||'超级管理员'}}（{{roleCn(op.role)}}）<el-icon><ArrowDown/></el-icon></span>
@@ -122,8 +135,8 @@
       <div class="ai-hd">
         <span class="ai-tabs">
           <b :class="{on:aiTab==='chat'}" @click="aiTab='chat'"><el-icon><Service/></el-icon> 运维助手</b>
-          <b :class="{on:aiTab==='fav'}" @click="aiTab='fav'">⭐ 收藏<i v-if="favs.length" class="tabdot">{{ favs.length }}</i></b>
-          <b :class="{on:aiTab==='adv'}" @click="aiTab='adv'; advUnread=0">💬 顾问播报<i v-if="advUnread" class="tabdot">{{ advUnread }}</i></b>
+          <b :class="{on:aiTab==='fav'}" @click="aiTab='fav'"><FIcon name="star" :size="12"/> 收藏<i v-if="favs.length" class="tabdot">{{ favs.length }}</i></b>
+          <b :class="{on:aiTab==='adv'}" @click="aiTab='adv'; advUnread=0"><FIcon name="chat" :size="12"/> 顾问播报<i v-if="advUnread" class="tabdot">{{ advUnread }}</i></b>
         </span>
         <span class="ai-hd-acts">
           <el-icon class="x" :class="{muted:advDnd}" @click="toggleDnd" :title="advDnd?'免打扰已开(点击关闭)':'开启免打扰'"><MuteNotification v-if="advDnd"/><Bell v-else/></el-icon>
@@ -138,7 +151,7 @@
           {{m.txt}}
           <span class="ab-acts">
             <i v-if="m.who==='me'" class="ab-act" title="重新问这个问题" @click="reAsk(m.txt)">↻</i>
-            <i v-if="m.who==='ai' && aiMsgs[i-1]" class="ab-act" title="收藏这组问答" @click="favAdd(aiMsgs[i-1]?.txt, m.txt)">☆</i>
+            <i v-if="m.who==='ai' && aiMsgs[i-1]" class="ab-act" title="收藏这组问答" @click="favAdd(aiMsgs[i-1]?.txt, m.txt)"><FIcon name="star" :size="12"/></i>
           </span>
           <span class="ai-del" @click="aiDel(m.id)" title="删除">×</span>
         </div>
@@ -157,7 +170,7 @@
             <option v-for="c in favCats" :key="c" :value="c">{{ c }}</option>
           </select>
         </div>
-        <div v-if="!favView.length" class="ai-empty">{{ favs.length ? '无匹配收藏' : '还没有收藏——在对话里点 AI 回答旁的 ☆ 收藏问答' }}</div>
+        <div v-if="!favView.length" class="ai-empty">{{ favs.length ? '无匹配收藏' : '还没有收藏——在对话里点 AI 回答旁的收藏按钮' }}</div>
         <div v-for="f in favView" :key="f.id" class="fav-item">
           <div class="fav-top">
             <span class="fav-cat" @click="editFavCat(f)" title="点击改分类">{{ f.cat || '未分类' }}</span>
@@ -261,7 +274,7 @@ async function gateOpLogin(){
   try{ const r=await mixApi.login(opForm.value.username,opForm.value.password)
     localStorage.setItem('mix_token', r.access_token)
     op.value={operator:r.username,role:'USER',perms:'*'}
-    opForm.value={username:'',password:''}; computeAuthed(); ElMessage.success('登录成功: '+r.username) }
+    opForm.value={username:'',password:''}; computeAuthed(); loadTrainState(); ElMessage.success('登录成功: '+r.username) }
   catch(e){ ElMessage.error(e?.detail||e?.error||'登录失败') }
 }
 async function gateAdminLogin(){
@@ -270,26 +283,33 @@ async function gateAdminLogin(){
     const w=await mixApi.whoamiWith(gateToken.value.trim())
     localStorage.setItem('mix_token', gateToken.value.trim())
     op.value={operator:w.operator,role:w.role,perms:'*'}
-    computeAuthed(); ElMessage.success(`进入: ${w.operator} (${w.role})`)
+    computeAuthed(); loadTrainState(); ElMessage.success(`进入: ${w.operator} (${w.role})`)
   }catch(e){ ElMessage.error('令牌无效（operator 令牌 / 只读令牌均可）') }
 }
 function canSee(name){ const p=op.value.perms||''; if(!op.value.operator)return true; if(p==='*')return true; return p.split(',').map(x=>x.trim()).includes(name) }
 // 分组: 总控(置顶不收缩) → 分析 → 经营 → 运维; 隐藏 meta.hidden; 组内按 ord 排序
-const groups=computed(()=>{ const order=['日常运行','风险与账本','账户与资产','系统设置','分析','经营','运维']; const m={}
-  menus.forEach(r=>{ if(!canSee(r.name))return; if(r.meta&&r.meta.hidden)return; const g=(r.meta&&r.meta.group)||'其它'; (m[g]=m[g]||[]).push(r) })
+// V6.2 PATCH-01 §9.2 训练状态驱动导航:未通过=菜单+进度徽标;通过=菜单隐藏,入口迁今日工作按钮。
+// 隐藏≠权限——门禁在服务端 /operator/commands(is_certified),菜单只是展示收敛。
+const trainState=ref({loaded:false,certified:false,passed:0,total:0})
+async function loadTrainState(){ try{ const r=await mixApi.v6Training(); trainState.value={loaded:true,certified:!!r.certified,passed:r.passed||0,total:r.total||0} }catch(e){ /* 未登录/不可达=保持默认显示,fail-open 于展示层 */ } }
+const trainBadge=computed(()=>{ const s=trainState.value; return (s.loaded&&!s.certified)?`${s.passed}/${s.total}`:'' })
+const groups=computed(()=>{ const order=['今日工作','风险与账务','管理设置','LAB','研究与测试','风险与资金','系统','今日运行','日常运行','风险与账本','账户与资产','系统设置','分析','经营','运维']; const m={}
+  menus.forEach(r=>{ if(!canSee(r.name))return; if(r.meta&&r.meta.hidden)return
+    if(r.name==='mix-training' && trainState.value.certified) return   // 通过后自动收敛(无需重登,WS/重拉即生效)
+    const g=(r.meta&&r.meta.group)||'其它'; (m[g]=m[g]||[]).push(r) })
   // 注意 ord:0 是合法值——不能用 ||99(falsy 坑,曾把主控台 ord:0 排到组尾)
   const ordOf=r=>(r.meta&&r.meta.ord!=null)?r.meta.ord:99
-  return order.filter(g=>m[g]).map(g=>({name:g, standalone:(g==='日常运行'),
+  return order.filter(g=>m[g]).map(g=>({name:g, standalone:(g==='今日工作'||g==='LAB'),
     items:m[g].slice().sort((a,b)=>ordOf(a)-ordOf(b))})) })
-// 组收缩状态(localStorage 记忆; 默认全展开)
-const closedGroups=ref((()=>{ try{ return JSON.parse(localStorage.getItem('qh_admin_closed_grps')||'[]') }catch(e){ return [] } })())
+// 组收缩状态(localStorage 记忆; 管理设置/系统 默认折叠——V6 入口减法设计 dlmwr)
+const closedGroups=ref((()=>{ try{ const s=localStorage.getItem('qh_admin_closed_grps_v6'); return s?JSON.parse(s):['管理设置','系统'] }catch(e){ return ['管理设置','系统'] } })())
 function isGroupClosed(name){ return closedGroups.value.includes(name) }
 function toggleGroup(name){ const i=closedGroups.value.indexOf(name); if(i>=0)closedGroups.value.splice(i,1); else closedGroups.value.push(name)
-  try{ localStorage.setItem('qh_admin_closed_grps', JSON.stringify(closedGroups.value)) }catch(e){} }
+  try{ localStorage.setItem('qh_admin_closed_grps_v6', JSON.stringify(closedGroups.value)) }catch(e){} }
 // 退出/更换: 清操作员会话 + 超管令牌, 门控重新弹出可换账号/令牌
 async function opLogout(){ localStorage.removeItem('mix_token'); localStorage.removeItem('qh_op_token'); localStorage.removeItem('qh_admin_token'); op.value={operator:'',role:'',perms:''}; computeAuthed(); ElMessage.success('已退出,请重新登录') }
-async function restoreOp(){ if(localStorage.getItem('mix_token')){ try{ const w=await mixApi.whoami(); op.value={operator:w.operator,role:w.role,perms:'*'} }catch(e){ localStorage.removeItem('mix_token') } } computeAuthed() }
-const tabs=ref([{path:'/mix/dashboard',title:'中控台·Mix'}])
+async function restoreOp(){ if(localStorage.getItem('mix_token')){ try{ const w=await mixApi.whoami(); op.value={operator:w.operator,role:w.role,perms:'*'}; loadTrainState() }catch(e){ localStorage.removeItem('mix_token') } } computeAuthed() }
+const tabs=ref([{path:'/mix/dashboard',title:'中控台（三分屏）'}])
 const activeTab=ref('/mix/dashboard')
 function addTab(){
   const m=route.meta.title; if(!m)return
@@ -370,7 +390,7 @@ async function onAlertMarquee(d){
     const title=String(d.title||'系统告警').replace(EMOJI_RE,'').trim()
     const body=String(d.content||d.text||'').replace(EMOJI_RE,'').replace(/\s+/g,' ').trim()
     // ① 保底角标通知(即使浮球逻辑出问题也一定可见)
-    try{ ElNotification({ title:(level==='fatal'?'🔴 ':'⚠️ ')+title, message:body, type:(level==='fatal'?'error':'warning'),
+    try{ ElNotification({ title:(level==='fatal'?'● ':'▲ ')+title, message:body, type:(level==='fatal'?'error':'warning'),
       duration:level==='fatal'?0:8000, position:'bottom-right' }) }catch(e){}
     // ② 立即弹 AI 浮球并推入告警气泡(不等 aiChat/tts)
     const mid=aiId()
@@ -381,7 +401,7 @@ async function onAlertMarquee(d){
     if(conf.interpret){
       mixApi.aiChat({conversation_id:aiConvId.value,message:`系统刚触发一条告警，请用一两句话向运维口语化解释它意味着什么、要不要处理、怎么处理（不要复述原文）：标题「${title}」内容「${body}」`})
         .then(rr=>{ if(rr.conversation_id)aiConvId.value=rr.conversation_id
-          if(rr.reply){ const m=aiMsgs.value.find(x=>x.id===mid); if(m){ m.txt=`⚠️ ${title}\n${rr.reply}`; aiSave() } } })
+          if(rr.reply){ const m=aiMsgs.value.find(x=>x.id===mid); if(m){ m.txt=`【${title}】\n${rr.reply}`; aiSave() } } })
         .catch(()=>{})
     }
     // ④ 异步语音播报(edge-tts 人声念标题;失败静默回落浏览器 TTS)
@@ -464,7 +484,8 @@ async function aiSend(){
   }
   finally{ if(aiTimer){clearInterval(aiTimer);aiTimer=null} aiBusy.value=false; await nextTick(()=>{ if(aiBodyEl.value)aiBodyEl.value.scrollTop=aiBodyEl.value.scrollHeight }) }
 }
-onMounted(()=>{ setInterval(()=>{ clock.value=new Date().toTimeString().slice(0,8) },1000); restoreOp(); loadBrand(); startMarquee(); loadAdvisors(); setInterval(loadAdvisors, 30000); loadAiModels(); setInterval(loadAiModels, 60000); loadAiPushConf(); setInterval(loadAiPushConf, 120000) })
+onMounted(()=>{ setInterval(()=>{ clock.value=new Date().toTimeString().slice(0,8) },1000); restoreOp(); loadBrand(); startMarquee(); loadAdvisors(); setInterval(loadAdvisors, 30000); loadAiModels(); setInterval(loadAiModels, 60000); loadAiPushConf(); setInterval(loadAiPushConf, 120000)
+  window.addEventListener('mix-training-cert', loadTrainState) })   // 课目全过→签发认证→菜单即时收敛(无需重登)
 </script>
 <style scoped>
 .ai-fab{position:fixed;right:24px;bottom:24px;width:52px;height:52px;border-radius:50%;background:var(--el-color-primary);color:#fff;

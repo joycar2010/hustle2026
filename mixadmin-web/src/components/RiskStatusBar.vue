@@ -22,7 +22,7 @@
       <span class="wtab" :class="{on: tab==='exec'}" @click="$router.push('/mix/dashboard')">持仓与执行</span>
       <span class="wtab" :class="{on: tab==='risk'}" @click="$router.push('/mix/venuerisk')">风控与账务</span>
       <span class="grow" />
-      <span class="kv">⚙ <b>{{ opName }}</b></span>
+      <span class="kv"><FIcon name="gear" :size="12"/> <b>{{ opName }}</b></span>
       <span class="kv clock"><b>{{ clock }}</b></span>
       <el-button size="small" type="danger" plain @click="freezeAll">冻结新增风险</el-button>
     </div>
@@ -42,7 +42,6 @@
         {{ notice.venue }} · {{ notice.mode }} — {{ short(notice.reason) }} · 暴露 {{ n(notice.equity) }}U · 新开仓已禁止
       </span>
       <span class="grow" />
-      <el-link class="more" @click="$router.push('/mix/venuerisk')">平台风险详情 →</el-link>
     </div>
   </div>
 </template>

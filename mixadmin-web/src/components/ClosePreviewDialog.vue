@@ -17,7 +17,7 @@
           <span class="net">最终净收益 <b :class="pv.final_net_usdt>=0?'up':'down'">{{ pv.final_net_usdt }} U</b></span>
         </div>
         <div class="dimtxt fn">{{ pv.forfeit_funding_note }}</div>
-        <div v-if="!pv.all_fresh" class="warn">⚠ 部分腿行情 STALE,报价不可靠——刷新或稍后再试</div>
+        <div v-if="!pv.all_fresh" class="warn"><FIcon name="warn" :size="12"/> 部分腿行情 STALE,报价不可靠——刷新或稍后再试</div>
       </div>
       <div v-else class="dimtxt pad">{{ err || '加载报价中…' }}</div>
     </div>

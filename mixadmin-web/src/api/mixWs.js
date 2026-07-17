@@ -37,6 +37,22 @@ export function connectStream(onMessage) {
     }
   }, 15000)
 
+  // 前台自愈:移动端切回前台/网络恢复时,若连接非 OPEN 立即重连(不等退避周期)——
+  // 手机锁屏/切后台会冻结 WS,回来时退避可能还在长 sleep,用户盯着过期数据。
+  const heal = () => {
+    if (closed) return
+    if (document.visibilityState === 'visible' && (!ws || ws.readyState > WebSocket.OPEN)) {
+      clearTimeout(timer); backoff = 1000; open()
+    }
+  }
+  document.addEventListener('visibilitychange', heal)
+  window.addEventListener('online', heal)
+
   open()
-  return () => { closed = true; clearTimeout(timer); clearInterval(watchdog); try { ws && ws.close() } catch { /* noop */ } }
+  return () => {
+    closed = true; clearTimeout(timer); clearInterval(watchdog)
+    document.removeEventListener('visibilitychange', heal)
+    window.removeEventListener('online', heal)
+    try { ws && ws.close() } catch { /* noop */ }
+  }
 }

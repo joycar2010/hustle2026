@@ -2,30 +2,49 @@ import { createRouter, createWebHistory } from 'vue-router'
 import Layout from '../layout/Layout.vue'
 // 菜单分组顺序: 总控 → 分析(可收缩) → 经营(可收缩) → 运维(可收缩)。ord 控制组内顺序。
 const routes = [
-  { path:'/', component:Layout, redirect:'/mix/dashboard', children:[
-    // ===== Mix 主控(置顶, 不收缩) —— HustleCoin Mix 多策略持股公司 =====
-    { path:'mix/dashboard', name:'mix-dashboard', meta:{title:'中控台',icon:'Odometer',group:'日常运行',ord:0}, component:()=>import('../views/mix/MixDashboard.vue') },
-    { path:'mix/strategies', name:'mix-strategies', meta:{title:'持仓与执行',icon:'Share',group:'日常运行',ord:0.1}, component:()=>import('../views/mix/MixStrategies.vue') },
+  // PATCH-02 §3.1:默认入口=今日工作总览(中控台退役中,路由保留可直达)
+  { path:'/', component:Layout, redirect:{ path:'/mix/work', query:{ view:'overview' } }, children:[
+    // ===== V6.1 最终菜单(§2):今日工作/研究与测试/风险与资金/管理设置(折叠)/系统(折叠) =====
+    // ═══ V6.2 §三 四入口(N3):今日工作/风险与账务/管理设置/LAB;低频进右上系统管理;旧URL全保留 ═══
+    // ① 今日工作(合体页=唯一日常入口)
+    { path:'mix/today', name:'mix-today', meta:{title:'今日工作',icon:'Calendar',group:'今日工作',ord:-1}, component:()=>import('../views/mix/MixToday.vue') },
+    { path:'mix/training', name:'mix-training', meta:{title:'训练模式',icon:'Reading',group:'今日工作',ord:-0.5}, component:()=>import('../views/mix/MixTraining.vue') },
+    { path:'mix/dashboard', name:'mix-dashboard', meta:{hidden:true,title:'中控台（三分屏·迁移期）',icon:'Grid',group:'今日工作',ord:0}, component:()=>import('../views/mix/MixV6Console.vue') },
+    // N3 收敛曾把下面两项 hidden——用户 07-16 反馈「AiCoin工作台/人工双合约(新建手动计划)不见了」,恢复常驻菜单
+    { path:'mix/workbench', name:'mix-workbench', meta:{title:'策略工作台（手动开仓）',icon:'Operation',group:'今日工作',ord:0.1}, component:()=>import('../views/mix/MixV6Workbench.vue') },
+    { path:'mix/aicoin', name:'mix-aicoin', meta:{title:'AiCoin 研判工作台',icon:'DataAnalysis',group:'今日工作',ord:0.2}, component:()=>import('../views/mix/MixAiCoin.vue') },
+    // ② 风险与账务
+    { path:'mix/venuerisk', name:'mix-venuerisk', meta:{title:'风险事件',icon:'Warning',group:'风险与账务',ord:2.0}, component:()=>import('../views/mix/MixRiskCenter.vue') },
+    { path:'mix/report', name:'mix-report', meta:{title:'资产收益',icon:'TrendCharts',group:'风险与账务',ord:2.1}, component:()=>import('../views/mix/MixReport.vue') },
+    { path:'mix/history', name:'mix-history', meta:{title:'交易与核对',icon:'History',group:'风险与账务',ord:2.2}, component:()=>import('../views/mix/MixHistory.vue') },
+    // REV2 §4A.6:客户与份额(从操作员管理切开——客户资金权益≠操作权限)
+    { path:'mix/clients', name:'mix-clients', meta:{title:'客户与份额',icon:'User',group:'风险与账务',ord:2.3}, component:()=>import('../views/mix/MixClients.vue') },
+    // ③ 管理设置(默认折叠):两项
+    { path:'mix/rules', name:'mix-rules', meta:{title:'策略与额度',icon:'Setting',group:'管理设置',ord:3.0}, component:()=>import('../views/mix/MixRules.vue') },
+    { path:'mix/accounts', name:'mix-accounts', meta:{title:'账户、币种与路由',icon:'CreditCard',group:'管理设置',ord:3.1}, component:()=>import('../views/mix/MixAccountsPlatform.vue') },
+    { path:'mix/blacklist', name:'mix-blacklist', meta:{hidden:true,title:'准入与隔离',icon:'CircleClose',group:'管理设置',ord:3.2}, component:()=>import('../views/mix/MixBlacklist.vue') },
+    { path:'mix/coins', name:'mix-coins', meta:{hidden:true,title:'标的与路由',icon:'Coin',group:'管理设置',ord:3.3}, component:()=>import('../views/mix/MixCoins.vue') },
+    { path:'mix/slots', name:'mix-slots', meta:{title:'C3.S 坑位工作台（旧·迁移中）',icon:'Grid',group:'管理设置',ord:3.4}, component:()=>import('../views/mix/MixSlots.vue') },
+    { path:'mix/c3', name:'mix-c3', meta:{hidden:true,title:'C3 策略工作台(并入工作台筛选)',icon:'Operation',group:'管理设置',ord:3.5}, component:()=>import('../views/mix/MixC3.vue') },
+    { path:'mix/legacy', name:'mix-legacy', meta:{hidden:true,title:'旧 C3.S 对比与淘汰(右上系统管理)',icon:'Switch',group:'管理设置',ord:3.6}, component:()=>import('../views/mix/MixV6Legacy.vue') },
+    { path:'mix/maintenance', name:'mix-maintenance', meta:{hidden:true,title:'网站维护排空(并入通知模块)',icon:'Tools',group:'管理设置',ord:3.7}, component:()=>import('../views/mix/MixMaintenance.vue') },
+    { path:'mix/strategies', name:'mix-strategies', meta:{hidden:true,title:'持仓与执行(旧)',icon:'Share',group:'管理设置',ord:3.8}, component:()=>import('../views/mix/MixStrategies.vue') },
+    // ④ LAB(独立入口)
+    { path:'mix/lab', name:'mix-lab', meta:{title:'DEX/Onchain LAB',icon:'Cpu',group:'LAB',ord:4.0}, component:()=>import('../views/mix/MixV6Lab.vue') },
+    // V6.2 PATCH-01 §6.1 统一权威路由别名:/mix/work(query 透传;今日工作=唯一日常外壳)
+    { path:'mix/work', redirect: to => ({ path:'/mix/today', query: to.query }) },
+    // V6.1 §5 唯一生产写路由别名 + 旧C3.S只读对比路由
+    { path:'v6.1/strategy-workbench', redirect:'/mix/workbench' },
+    { path:'v6.1/strategy-workbench/slots', redirect:'/mix/slots' },
+    { path:'legacy/c3s', redirect:'/mix/legacy' },
     { path:'mix/strategy/:code', name:'mix-strategy-detail', meta:{title:'策略明细',icon:'Share',group:'总控',hidden:true}, component:()=>import('../views/mix/MixStrategyDetail.vue') },
-    { path:'mix/rules', name:'mix-rules', meta:{title:'策略与风险规则',icon:'Setting',group:'风险与账本',ord:1.1}, component:()=>import('../views/mix/MixRules.vue') },
-    { path:'mix/history', name:'mix-history', meta:{title:'交易与审计历史',icon:'Files',group:'风险与账本',ord:1.4}, component:()=>import('../views/mix/MixHistory.vue') },
-    { path:'mix/accounts', name:'mix-accounts', meta:{title:'账户与托管',icon:'CreditCard',group:'账户与资产',ord:2.0}, component:()=>import('../views/mix/MixAccounts.vue') },
-    // 监控中心已移除(用户拍板):职能已分散到 屏1机会墙/屏3风控墙/主控台底排/系统设置·运维面板
-    { path:'mix/blacklist', name:'mix-blacklist', meta:{title:'准入与隔离',icon:'CircleClose',group:'风险与账本',ord:1.2}, component:()=>import('../views/mix/MixBlacklist.vue') },
-    { path:'mix/coins', name:'mix-coins', meta:{title:'标的与路由',icon:'Coin',group:'账户与资产',ord:2.1}, component:()=>import('../views/mix/MixCoins.vue') },
     { path:'mix/venue/:venue', name:'mix-venue-detail', meta:{title:'平台详情',icon:'Warning',group:'总控',hidden:true}, component:()=>import('../views/mix/MixVenueDetail.vue') },
-    { path:'mix/slots', name:'mix-slots', meta:{title:'C3.S 坑位工作台',icon:'Grid',group:'日常运行',ord:0.4}, component:()=>import('../views/mix/MixSlots.vue') },
-    { path:'mix/c3', name:'mix-c3', meta:{title:'C3 策略工作台',icon:'Operation',group:'日常运行',ord:0.3}, component:()=>import('../views/mix/MixC3.vue') },
-    { path:'mix/aicoin', name:'mix-aicoin', meta:{title:'机会与研判',icon:'DataAnalysis',group:'日常运行',ord:0.2}, component:()=>import('../views/mix/MixAiCoin.vue') },
-    { path:'mix/maintenance', name:'mix-maintenance', meta:{title:'网站维护排空',icon:'Tools',group:'系统设置',ord:3.0}, component:()=>import('../views/mix/MixMaintenance.vue') },
-    { path:'mix/venuerisk', name:'mix-venuerisk', meta:{title:'平台与账户风险',icon:'Warning',group:'风险与账本',ord:1.0}, component:()=>import('../views/mix/MixVenueRisk.vue') },
-    { path:'mix/report', name:'mix-report', meta:{title:'账本与资金',icon:'TrendCharts',group:'风险与账本',ord:1.3}, component:()=>import('../views/mix/MixReport.vue') },
-    // ===== 系统设置(Mix 版:qh 同名模块已由下列页面替代) =====
-    { path:'mix/notify', name:'mix-notify', meta:{title:'通知模块',icon:'Bell',group:'系统设置',ord:3.2}, component:()=>import('../views/mix/MixNotify.vue') },
-    { path:'mix/site', name:'mix-site', meta:{hidden:true,title:'网站设置',icon:'Link',group:'系统设置',ord:2.5}, component:()=>import('../views/mix/MixSite.vue') },
-    { path:'mix/operators', name:'mix-operators', meta:{title:'操作员管理',icon:'Avatar',group:'系统设置',ord:3.3}, component:()=>import('../views/mix/MixOperators.vue') },
-    { path:'mix/system', name:'mix-system', meta:{title:'系统配置',icon:'Coin',group:'系统设置',ord:3.4}, component:()=>import('../views/mix/MixSystem.vue') },
-    { path:'mix/llm', name:'mix-llm', meta:{hidden:true,title:'LLM设置',icon:'Service',group:'系统设置',ord:5}, component:()=>import('../views/mix/MixLLM.vue') },
+    // ⑤ 系统(默认折叠)
+    { path:'mix/notify', name:'mix-notify', meta:{hidden:true,title:'通知模块',icon:'Bell',group:'系统',ord:4.2}, component:()=>import('../views/mix/MixNotifyCenter.vue') },
+    { path:'mix/site', name:'mix-site', meta:{hidden:true,title:'网站设置',icon:'Link',group:'系统',ord:4.5}, component:()=>import('../views/mix/MixSite.vue') },
+    { path:'mix/operators', name:'mix-operators', meta:{hidden:true,title:'操作员管理',icon:'Avatar',group:'系统',ord:4.3}, component:()=>import('../views/mix/MixOperators.vue') },
+    { path:'mix/system', name:'mix-system', meta:{hidden:true,title:'系统配置',icon:'Coin',group:'系统',ord:4.4}, component:()=>import('../views/mix/MixSystem.vue') },
+    { path:'mix/llm', name:'mix-llm', meta:{hidden:true,title:'LLM设置',icon:'Service',group:'系统',ord:5}, component:()=>import('../views/mix/MixLLM.vue') },
     // ===== 总控(qh 原有, 待 M3+ 逐模块替换) =====
     { path:'dashboard', name:'dashboard', meta:{hidden:true,title:'总控面板',icon:'Odometer',group:'总控',ord:0.5}, component:()=>import('../views/Dashboard.vue') },
     // ===== 分析 =====
@@ -48,7 +67,7 @@ const routes = [
     // 全渠道看板: 已并入「经营分析」页, 菜单隐藏(路由保留可直达)
     { path:'overview', name:'overview', meta:{title:'全渠道看板',icon:'DataAnalysis',group:'分析',hidden:true}, component:()=>import('../views/Overview.vue') },
     // ===== 系统设置（运维面板/通知模块/操作员管理/系统配置：版本·数据库·SSL/LLM 设置） =====
-    { path:'system', name:'system', meta:{title:'系统运行状态',icon:'Monitor',group:'系统设置',ord:3.1}, component:()=>import('../views/mix/MixOps.vue') },
+    { path:'system', name:'system', meta:{hidden:true,title:'系统状态',icon:'Monitor',group:'系统',ord:4.1}, component:()=>import('../views/mix/MixOps.vue') },
     { path:'params', name:'params', meta:{hidden:true,title:'参数下发',icon:'Setting',group:'系统设置',ord:1.5}, component:()=>import('../views/Params.vue') },
     { path:'notify', name:'notify', meta:{hidden:true,title:'通知模块',icon:'Bell',group:'系统设置',ord:2}, component:()=>import('../views/Notify.vue') },
     { path:'sitemgr', name:'sitemgr', meta:{hidden:true,title:'官网管理',icon:'Link',group:'系统设置',ord:2.5}, component:()=>import('../views/SiteMgr.vue') },
@@ -65,6 +84,25 @@ const routes = [
   { path:'/wall/market', name:'wall-market', component:()=>import('../views/mix/MixWallMarket.vue') },
   { path:'/wall/risk', name:'wall-risk', component:()=>import('../views/mix/MixWallRisk.vue') },
   { path:'/wall/exec', name:'wall-exec', component:()=>import('../views/mix/MixWallExec.vue') },
+  // PATCH-02 §3.2 语义别名(query 透传:?token= 墙令牌)
+  { path:'/wall/opportunity', redirect: to => ({ path:'/wall/market', query: to.query }) },
+  { path:'/wall/position', redirect: to => ({ path:'/wall/exec', query: to.query }) },
   { path:'/mobile', name:'mobile', component:()=>import('../views/mix/MixMobile.vue') },
+  // V6.1 §8.3 手机操作员专属壳(OPERATOR_MOBILE_LIMITED,底部五页签,服务端白名单动作)
+  { path:'/m', name:'phone', component:()=>import('../views/mix/MixPhone.vue') },
 ]
-export default createRouter({ history:createWebHistory(), routes })
+const router = createRouter({ history:createWebHistory(), routes })
+// V6.2 移动端强制跳 /m(2026-07-17 用户拍板):手机访问桌面壳一律进手机专属壳。
+// 逃生口: 任意路由带 ?desktop=1 → 本次会话(sessionStorage)留在桌面版;墙/平板壳(/wall,/mobile)不拦。
+const PHONE_EXEMPT = /^\/(m|mobile|wall)(\/|$)/
+router.beforeEach((to) => {
+  try {
+    if (to.query.desktop === '1') { sessionStorage.setItem('mix_force_desktop', '1'); return true }
+    if (sessionStorage.getItem('mix_force_desktop') === '1') return true
+    const phoneUa = /Android.*Mobile|iPhone|iPod/i.test(navigator.userAgent)
+    const narrow = Math.min(window.innerWidth, window.innerHeight) < 820
+    if (phoneUa && narrow && !PHONE_EXEMPT.test(to.path)) return { path: '/m', replace: true }
+  } catch (e) { /* 检测失败不拦路由 */ }
+  return true
+})
+export default router

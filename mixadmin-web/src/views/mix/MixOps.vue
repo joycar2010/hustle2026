@@ -1,5 +1,11 @@
 <template>
   <div class="mixops-panel">
+    <!-- V6.1 §7 业务健康首屏六项:行情/执行/风险/账本/网站/通知——技术诊断(三机点阵等)在下方 -->
+    <div class="bizrow">
+      <div v-for="b in bizHealth" :key="b.k" class="bh" :class="b.cls">
+        <b class="bdot"></b><span class="bk">{{ b.k }}</span><span class="bv">{{ b.v }}</span>
+      </div>
+    </div>
     <!-- 三机服务心跳分组点阵 -->
     <div class="card">
       <div class="chd"><b>服务健康 · 三机拓扑</b>
@@ -92,6 +98,23 @@ const ds = ref({})
 const busy = ref('')
 const okN = computed(() => hbs.value.filter(h => h.ok).length)
 const allN = computed(() => hbs.value.length)
+// 业务健康六项(从心跳/风险快照推导;心跳绿≠业务健康,但缺心跳一定不健康)
+const v6snap = ref(null)
+const bizHealth = computed(() => {
+  const has = (kw) => hbs.value.some(h => h.ok && String(h.proc || '').includes(kw))
+  const cap = v6snap.value?.effective_capabilities
+  const lh = v6snap.value?.ledger_health || {}
+  const maint = v6snap.value?.site_maintenance_state
+  const mk = (k, ok, v) => ({ k, v, cls: ok ? 'g' : 'y' })
+  return [
+    mk('行情', has('feed') || has('depth'), (has('feed') || has('depth')) ? '正常' : '心跳缺失'),
+    mk('执行', has('exec-manager'), has('exec-manager') ? '正常' : '心跳缺失'),
+    mk('风险', cap ? cap.risk_capability === 'NORMAL' : false, cap ? (cap.can_open ? '正常' : cap.risk_capability) : '未知'),
+    mk('账本', lh.status === '正常', lh.status || '未知'),
+    mk('网站', !maint || maint === 'NORMAL' || maint === 'CLOSED', (!maint || maint === 'NORMAL' || maint === 'CLOSED') ? '正常' : maint),
+    mk('通知', has('risk-ledger') || has('gateway'), '正常'),
+  ]
+})
 const machines = computed(() => {
   const byProc = Object.fromEntries(hbs.value.map(h => [h.proc, h]))
   return Object.entries(MACHINE_OF).map(([key, m]) => ({
@@ -116,7 +139,8 @@ async function run(kind) {
     load()
   } catch (e) { ElMessage.error(e?.detail || e?.error || '操作失败') } finally { busy.value = '' }
 }
-onMounted(() => { load(); loadHv() })
+async function loadSnap(){ try{ v6snap.value = await mixApi.v6Snapshot() }catch(e){} }
+onMounted(() => { load(); loadHv(); loadSnap() })
 </script>
 
 <style scoped lang="scss">
@@ -153,4 +177,12 @@ onMounted(() => { load(); loadHv() })
 .vgk { font-size: 10.5px; color: var(--mix-t3,#5E6673); margin-top: 3px; }
 .m-NORMAL { color: #35b57c; } .m-WATCH { color: #F0B90B; } .m-NO_NEW_RISK { color: #FF8A3D; }
 .m-REDUCE_ONLY, .m-EXIT_ONLY { color: #F6465D; } .m-FROZEN { color: #8B1E2D; }
+.bizrow { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px,1fr)); gap: 8px; margin-bottom: 4px; }
+.bh { display: flex; align-items: center; gap: 6px; height: 40px; border-radius: 8px; padding: 0 12px;
+  border: 1px solid var(--mix-border,#2B3139);
+  .bdot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+  .bk { font-size: 12px; font-weight: 700; color: var(--mix-t1,#EAECEF); }
+  .bv { font-size: 11px; margin-left: auto; }
+  &.g { background: #0ECB810F; .bdot { background: #0ECB81; } .bv { color: #0ECB81; } }
+  &.y { background: #F0B90B14; .bdot { background: #F0B90B; } .bv { color: #F0B90B; } } }
 </style>

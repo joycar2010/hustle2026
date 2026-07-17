@@ -188,11 +188,14 @@ async def proposal_approve(pid: int, body: dict, op=Depends(require_operator)):
     if pool is None:
         raise HTTPException(503, "mix_main 不可达")
     operator = str(op.get("operator") or op.get("username") or "op")
-    trow = await pool.fetchrow("SELECT secret, confirmed FROM operator_totp WHERE operator=$1", operator)
-    if not trow or not trow["confirmed"]:
-        raise HTTPException(403, "未绑定/未确认 TOTP:先在 系统配置 → 二次认证 绑定 Authenticator")
-    if not _totp_verify(trow["secret"], str(body.get("code") or "")):
-        raise HTTPException(403, "TOTP 验证码错误或过期")
+    # 二次认证:WebAuthn reauth ticket 与 TOTP 二选一(V6 §7,Passkey 真实现后优先)
+    from .webauthn_auth import check_reauth_ticket
+    if not await check_reauth_ticket(operator, str(body.get("reauth_ticket") or "")):
+        trow = await pool.fetchrow("SELECT secret, confirmed FROM operator_totp WHERE operator=$1", operator)
+        if not trow or not trow["confirmed"]:
+            raise HTTPException(403, "未绑定/未确认 TOTP:先在 系统配置 → 二次认证 绑定 Authenticator(或注册 Passkey)")
+        if not _totp_verify(trow["secret"], str(body.get("code") or "")):
+            raise HTTPException(403, "TOTP 验证码错误或过期")
     row = await pool.fetchrow("SELECT state FROM dry_run_proposal WHERE id=$1", pid)
     if not row:
         raise HTTPException(404, "提案不存在")
