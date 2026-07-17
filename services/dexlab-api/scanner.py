@@ -20,6 +20,7 @@ import sqlite3
 import statistics
 import time
 import urllib.request
+from datetime import datetime, timezone
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("dexlab-scanner")
@@ -41,37 +42,106 @@ def _get(url: str, timeout=15):
         return json.loads(r.read().decode())
 
 
-# ── D1:LST/可赎回稳定币折价(DefiLlama prices,免key) ─────────────────────
+# ── D1:LST/可赎回稳定币折价(DefiLlama prices + 链上 exchange rate,免key) ──
 _D1_SET = {
     # llama coin id → (名称, 参考资产 llama id, 类型)
-    "coingecko:staked-ether": ("stETH", "coingecko:ethereum", "LST"),
-    "coingecko:rocket-pool-eth": ("rETH", "coingecko:ethereum", "LST-带息(折价须对比exchangeRate,此处记比价)"),
-    "coingecko:wrapped-beacon-eth": ("wBETH", "coingecko:ethereum", "LST-带息"),
-    "coingecko:ethena-usde": ("USDe", None, "yield-stable"),
-    "coingecko:first-digital-usd": ("FDUSD", None, "stable"),
-    "coingecko:paypal-usd": ("PYUSD", None, "stable"),
+    "coingecko:staked-ether": ("stETH", "coingecko:ethereum", "LST(Lido提款队列1:1)"),
+    "coingecko:rocket-pool-eth": ("rETH", "coingecko:ethereum", "LST-带息(赎回价=getExchangeRate)"),
+    "coingecko:wrapped-beacon-eth": ("wBETH", "coingecko:ethereum", "LST-带息(赎回价=exchangeRate)"),
+    "coingecko:ethena-usde": ("USDe", None, "yield-stable(合成美元,非1:1法币赎回)"),
+    "coingecko:first-digital-usd": ("FDUSD", None, "stable(法币储备,赎回需KYC)"),
+    "coingecko:paypal-usd": ("PYUSD", None, "stable(法币储备,赎回需KYC)"),
 }
 
+# 主网 canonical 合约(人工核对;V6.2 §5 instrument registry 最小版)+ 只读 eth_call selector
+_D1_CONTRACTS = {
+    "rETH": ("0xae78736Cd615f374D3085123A210448E74Fc6393", "0xe6aa216c", "getExchangeRate()→ETH/rETH"),
+    "wBETH": ("0xa2E3356610840701BDf5611a53974510Ae27E2e1", "0x3ba0b9a9", "exchangeRate()→ETH/wBETH"),
+}
+_RPC_URLS = ["https://ethereum-rpc.publicnode.com", "https://eth.llamarpc.com",
+             "https://cloudflare-eth.com"]
 
-def scan_d1() -> list[dict]:
+
+def _rpc(method: str, params: list):
+    body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": method, "params": params}).encode()
+    last = None
+    for u in _RPC_URLS:
+        try:
+            req = urllib.request.Request(u, data=body, headers={
+                "Content-Type": "application/json", "User-Agent": "dexlab-scanner/1.0"})
+            with urllib.request.urlopen(req, timeout=10) as r:
+                out = json.loads(r.read().decode())
+            if "result" in out:
+                return out["result"], u
+        except Exception as e:  # noqa: BLE001
+            last = e
+    raise RuntimeError(f"all RPC failed: {last!r}")
+
+
+def _d1_exchange_rates():
+    """链上赎回参考价(公共 RPC 只读 eth_call)。任一标的失败=缺该标的,绝不猜。"""
+    blk_hex, rpc_used = _rpc("eth_blockNumber", [])
+    blk = int(blk_hex, 16)
+    rates = {}
+    for name, (addr, sel, _note) in _D1_CONTRACTS.items():
+        try:
+            res, _ = _rpc("eth_call", [{"to": addr, "data": sel}, "latest"])
+            rates[name] = int(res, 16) / 1e18
+        except Exception as e:  # noqa: BLE001
+            log.warning("D1 rate %s failed: %r", name, e)
+    return rates, blk, rpc_used
+
+
+def scan_d1():
+    """返回 {signals, evidence}:折价口径=市场比价 vs 链上赎回价(V6.2 §8——
+    带息 LST 比价>1 是正常计息,naive 1-ratio 会把计息记成溢价)。"""
     ids = list(_D1_SET) + ["coingecko:ethereum"]
     data = _get("https://coins.llama.fi/prices/current/" + ",".join(ids))
     px = {k: v.get("price") for k, v in (data.get("coins") or {}).items()}
     eth = px.get("coingecko:ethereum")
+    rates, blk, rpc_used = {}, None, ""
+    try:
+        rates, blk, rpc_used = _d1_exchange_rates()
+    except Exception as e:  # noqa: BLE001
+        log.warning("D1 onchain rates unavailable: %r", e)
     out = []
     for cid, (name, ref, kind) in _D1_SET.items():
         p = px.get(cid)
         if p is None:
             continue
-        if ref:   # LST:对 ETH 比价偏离(带息 LST 比价>1 正常,折价看负偏离)
+        if ref:   # LST:市场比价 vs 赎回参考价
             if not eth:
                 continue
             ratio = p / eth
-            disc_bps = round((1 - ratio) * 10000, 1)
-        else:     # 稳定币:对 1 美元偏离
-            disc_bps = round((1 - p) * 10000, 1)
-        out.append({"asset": name, "kind": kind, "price": p, "discount_bps": disc_bps})
-    return out
+            if name == "stETH":
+                redemption = 1.0   # Lido 提款队列 1:1(排队时长另计,进 REDEEM_STATUS 证据)
+            else:
+                redemption = rates.get(name)
+            row = {"asset": name, "kind": kind, "price": p, "market_ratio": round(ratio, 6)}
+            if redemption:
+                row["redemption_rate"] = round(redemption, 6)
+                row["rate_source"] = "onchain" if name in rates else "protocol_1to1"
+                row["discount_bps"] = round((1 - ratio / redemption) * 10000, 1)
+            else:
+                # 无链上赎回价→只记比价不给折价(缺证据就缺,不用错口径凑数)
+                row["rate_source"] = "MISSING_ONCHAIN_RATE"
+            out.append(row)
+        else:     # 稳定币:对 1 美元偏离(仅 peg 观察;赎回资格/额度是另一回事)
+            out.append({"asset": name, "kind": kind, "price": p,
+                        "discount_bps": round((1 - p) * 10000, 1)})
+    evidence = []
+    if rates:
+        evidence.append({
+            "etype": "EXCHANGE_RATE", "ttl": 24 * 3600, "source": rpc_used,
+            "title": f"链上兑换率快照 block {blk}",
+            "body": json.dumps({"block_number": blk, "rates_eth": {k: round(v, 6) for k, v in rates.items()},
+                                "stETH": "1.0(Lido提款队列1:1)", "rpc": rpc_used}, ensure_ascii=False)})
+        evidence.append({
+            "etype": "CONTRACT_IDENTITY", "ttl": None, "source": "static-registry(人工核对 2026-07-17)",
+            "title": "D1 标的主网 canonical 合约登记",
+            "body": json.dumps({k: {"contract": v[0], "method": v[2]} for k, v in _D1_CONTRACTS.items()},
+                               ensure_ascii=False)})
+    return {"signals": out, "evidence": evidence}
 
 
 # ── D2:Pendle PT 固定收益贴水(公共 API) ─────────────────────────────────
@@ -84,11 +154,19 @@ def scan_d2() -> list[dict]:
             imp = float(m.get("impliedApy") or 0) * 100
             und = float((m.get("underlyingApy") or 0)) * 100
             name = ((m.get("pt") or {}).get("symbol")) or m.get("symbol") or "?"
-            # 固定收益溢价=implied-underlying(百分点);正=买PT锁固定收益优于浮动
+            expiry = m.get("expiry")
+            days = None
+            if expiry:
+                try:
+                    dt = datetime.fromisoformat(str(expiry).replace("Z", "+00:00"))
+                    days = max(0.0, round((dt - datetime.now(timezone.utc)).total_seconds() / 86400, 1))
+                except Exception:  # noqa: BLE001
+                    pass
+            # 隐含收益率差=implied-underlying(年化;§9.3 非本笔套利利润,到期毛折价待PT价格+兑付模型)
             out.append({"asset": name, "implied_apy_pct": round(imp, 3),
                         "underlying_apy_pct": round(und, 3),
                         "spread_bps": round((imp - und) * 100, 1),
-                        "expiry": m.get("expiry")})
+                        "expiry": expiry, "days_to_maturity": days})
         except Exception:  # noqa: BLE001
             continue
     return out
@@ -123,6 +201,25 @@ def scan_d4() -> list[dict]:
 _SCANNERS = {"D1": scan_d1, "D2": scan_d2, "D4": scan_d4}
 
 
+def _register_evidence(c, pid: str, ev: dict, now: int):
+    """typed 证据自动登记(真实链上/来源数据才登记;去重=同类型6h内有效证据不重复)。"""
+    etype = ev["etype"]
+    row = c.execute("SELECT created_at, expires_at FROM lab_evidence WHERE project_id=? "
+                    "AND evidence_type=? ORDER BY id DESC LIMIT 1", (pid, etype)).fetchone()
+    if row:
+        created, expires = row[0] or 0, row[1]
+        if ev.get("ttl") is None:
+            return   # 永久型(合约身份)只登记一次
+        if now - created < 6 * 3600 and (expires is None or expires > now):
+            return
+    c.execute("INSERT INTO lab_evidence(project_id,run_id,kind,title,body,created_at,"
+              "evidence_type,source,observed_at,expires_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
+              (pid, None, "typed", ev["title"][:120], ev["body"][:2000], now,
+               etype, ev.get("source", "")[:120], now,
+               (now + ev["ttl"]) if ev.get("ttl") else None))
+    log.info("%s evidence registered: %s", pid, etype)
+
+
 def loop_once(c: sqlite3.Connection):
     now = int(time.time())
     runs = list(c.execute(
@@ -132,12 +229,17 @@ def loop_once(c: sqlite3.Connection):
         if fn is None:
             continue   # R1 由 xv 采样器负责,其余项目无扫描器=如实不动
         try:
-            sigs = fn()
+            res = fn()
+            sigs = res["signals"] if isinstance(res, dict) else res
             if not sigs:
                 raise RuntimeError("empty result")
+            for ev in (res.get("evidence") or []) if isinstance(res, dict) else []:
+                _register_evidence(c, pid, ev, now)
             cost = COST_MODEL.get(pid, {}).get("round_trip_bps", 0)
-            # 机会口径:D1 取『折价』正向(折价>0 才是买入赎回机会);D2/D4 取 spread
-            vals = [s.get("discount_bps", s.get("spread_bps", 0)) for s in sigs]
+            # 机会口径:D1 取『折价』正向(vs 赎回价);D2/D4 取 spread;无口径的行(缺链上rate)不进统计
+            vals = [v for v in (s.get("discount_bps", s.get("spread_bps")) for s in sigs) if v is not None]
+            if not vals:
+                raise RuntimeError("no measurable rows (missing onchain rates?)")
             med = round(statistics.median(vals), 1)
             best = round(max(vals), 1)
             net_best = round(best - cost, 1)
