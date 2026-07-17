@@ -22,7 +22,9 @@
         <span class="labx" @click="dismissLab">✕</span></div>
       <!-- 深表格视图:与轻列表同一快照同一抽屉,队列过滤共用流程条 -->
       <WorkTable v-if="viewMode==='table'" :items="tableItems" :row-state="rowState" :sel-id="selId"
-                 @open="openItem" @run="runAct"/>
+                 :preset="wtPreset" :product="wtProduct" :expanded="expRows"
+                 @open="openItem" @run="runAct" @toggle="toggleExp"
+                 @update:preset="setWtPreset" @update:product="setWtProduct"/>
       <!-- 窄屏页签(≥1360 自动隐藏,三栏并排) -->
       <div v-if="viewMode==='list'" class="vtabs">
         <span v-for="v in ['机会','持仓','风险']" :key="v" class="vt" :class="{on:vtab===v}" @click="vtab=v">{{ v }}</span>
@@ -382,6 +384,16 @@ const expRows = ref({ ...(selst.sess.value.expanded || {}) })
 function toggleExp(id) {
   expRows.value = { ...expRows.value, [id]: !expRows.value[id] }
   selst.remember({ expanded: expRows.value })
+}
+// 批B §6A.2:父子表双预设(任务精简/策略完整)+单一产品专业列——进 URL 可深链
+// /mix/work?view=workflow&preset=strategy&product=C3.S
+const wtPreset = ref(String(route.query.preset || 'today'))
+const wtProduct = ref(String(route.query.product || ''))
+function setWtPreset(p) { wtPreset.value = p; router.replace({ query: { ...route.query, preset: p } }) }
+function setWtProduct(p) {
+  wtProduct.value = p
+  const q = { ...route.query }; p ? (q.product = p) : delete q.product
+  router.replace({ query: q })
 }
 // 无 P0/P1 时的账户风险概览(§6A.5B:右栏不留空白;与持仓行 group_econ 同源不造第二口径)
 const acctOverview = computed(() => {

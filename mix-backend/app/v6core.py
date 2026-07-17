@@ -380,9 +380,11 @@ async def _attach_account_legs(items: list[dict]) -> None:
     mgr_pairs = {str(p.get("symbol") or p.get("pair")): p for p in (mgr.get("pairs") or [])}
     panel = None   # C3 惰性取(24KB,无 C3 持仓不拉)
 
+    spreads_rt = None   # C3 实时点差(惰性)
     for it in pos_items:
         sym = str(it.get("symbol") or "")
         legs: list[dict] = []
+        extra_econ: dict = {}
         src = it.get("source")
         try:
             if src == "manager" and sym in mgr_syms:      # C1 现货多+永续空(binance)
@@ -423,6 +425,18 @@ async def _attach_account_legs(items: list[dict]) -> None:
                                            "interest_daily_pct": (sm or {}).get("daily_interest_rate"),
                                            "free": (sm or {}).get("free"),
                                            "data_state": "PRESENT" if sm else "NOT_CONNECTED"}))
+                # C3 组合经济面(批B §6A.8):借币/利率/实时点差——桥 panel+spreads_rt 真相源
+                if sm:
+                    extra_econ["borrowed_qty"] = sm.get("borrowed")
+                    extra_econ["interest_daily_pct"] = sm.get("daily_interest_rate")
+                if spreads_rt is None:
+                    spreads_rt = await ds.get_json("dcm:coin:spreads_rt") or {}
+                sp = _match_pos(spreads_rt, sym)
+                if isinstance(sp, (list, tuple)) and len(sp) >= 2:
+                    extra_econ["spread_open_pct"], extra_econ["spread_close_pct"] = sp[0], sp[1]
+                elif isinstance(sp, dict):
+                    extra_econ["spread_open_pct"] = sp.get("open") or sp.get("open_spread")
+                    extra_econ["spread_close_pct"] = sp.get("close") or sp.get("close_spread")
                 mfp = (panel.get("master_futures_positions") or {})
                 hedge_amt = mfp.get(sym) or mfp.get(base)
                 legs.append(_mk_leg("binance", "PERP_LONG_HEDGE", "LONG", hedge_amt,
@@ -436,8 +450,22 @@ async def _attach_account_legs(items: list[dict]) -> None:
         e = rexit.get(sym) or rexit.get(_norm_sym(sym)) or {}
         marg = e.get("margin") or {}
         gross = round(sum(l["notional_usdt"] for l in legs if l.get("notional_usdt")), 2) or None
+        # 批B §6A.7:双腿名义差+逐侧费率(服务端算,前端不得用可见行重算——§6A.13)
+        ln = sum(l["notional_usdt"] for l in legs if l.get("side") == "LONG" and l.get("notional_usdt"))
+        sn = sum(l["notional_usdt"] for l in legs if l.get("side") == "SHORT" and l.get("notional_usdt"))
+        if ln and sn:
+            extra_econ["notional_gap_usdt"] = round(abs(ln - sn), 2)
+        fl = next((l["funding_daily_pct"] for l in legs
+                   if l.get("side") == "LONG" and l.get("funding_daily_pct") is not None), None)
+        fs = next((l["funding_daily_pct"] for l in legs
+                   if l.get("side") == "SHORT" and l.get("funding_daily_pct") is not None), None)
+        if fl is not None:
+            extra_econ["funding_long_daily_pct"] = fl
+        if fs is not None:
+            extra_econ["funding_short_daily_pct"] = fs
         it["account_legs"] = legs
         it["group_econ"] = {
+            **extra_econ,
             "agg_version": _LEG_AGG_VERSION,
             "closeout_pnl_net": e.get("closeout_pnl_net"),      # 真实退出盈亏(保守口径)
             "gap_now_pct": e.get("gap_now"),                    # 当前费差/点差(%/d 或 %)
