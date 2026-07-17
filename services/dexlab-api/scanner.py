@@ -62,6 +62,68 @@ _RPC_URLS = ["https://ethereum-rpc.publicnode.com", "https://eth.llamarpc.com",
              "https://cloudflare-eth.com"]
 
 
+# ── 纯 Python keccak256:运行时派生 eth_call 选择器(自检失败=禁用派生调用,fail-loud) ──
+def _keccak256(data: bytes) -> bytes:
+    RC = [0x0000000000000001, 0x0000000000008082, 0x800000000000808A, 0x8000000080008000,
+          0x000000000000808B, 0x0000000080000001, 0x8000000080008081, 0x8000000000008009,
+          0x000000000000008A, 0x0000000000000088, 0x0000000080008009, 0x000000008000000A,
+          0x000000008000808B, 0x800000000000008B, 0x8000000000008089, 0x8000000000008003,
+          0x8000000000008002, 0x8000000000000080, 0x000000000000800A, 0x800000008000000A,
+          0x8000000080008081, 0x8000000000008080, 0x0000000080000001, 0x8000000080008008]
+    ROT = [[0, 36, 3, 41, 18], [1, 44, 10, 45, 2], [62, 6, 43, 15, 61],
+           [28, 55, 25, 21, 56], [27, 20, 39, 8, 14]]
+    M = 0xFFFFFFFFFFFFFFFF
+
+    def rol(x, n):
+        n %= 64
+        return ((x << n) | (x >> (64 - n))) & M if n else x
+    st = [[0] * 5 for _ in range(5)]
+    rate = 136
+    p = bytearray(data)
+    p.append(0x01)
+    while len(p) % rate:
+        p.append(0)
+    p[-1] ^= 0x80
+    for off in range(0, len(p), rate):
+        blk = p[off:off + rate]
+        for i in range(rate // 8):
+            st[i % 5][i // 5] ^= int.from_bytes(blk[i * 8:i * 8 + 8], 'little')
+        for rnd in range(24):
+            C = [st[x][0] ^ st[x][1] ^ st[x][2] ^ st[x][3] ^ st[x][4] for x in range(5)]
+            D = [C[(x - 1) % 5] ^ rol(C[(x + 1) % 5], 1) for x in range(5)]
+            for x in range(5):
+                for y in range(5):
+                    st[x][y] ^= D[x]
+            B = [[0] * 5 for _ in range(5)]
+            for x in range(5):
+                for y in range(5):
+                    B[y][(2 * x + 3 * y) % 5] = rol(st[x][y], ROT[x][y])
+            for x in range(5):
+                for y in range(5):
+                    st[x][y] = B[x][y] ^ ((~B[(x + 1) % 5][y]) & B[(x + 2) % 5][y])
+            st[0][0] ^= RC[rnd]
+    out = b''
+    for i in range(rate // 8):
+        out += st[i % 5][i // 5].to_bytes(8, 'little')
+        if len(out) >= 32:
+            break
+    return out[:32]
+
+
+def _sel(sig: str) -> str:
+    return "0x" + _keccak256(sig.encode()).hex()[:8]
+
+
+# 自检:空串已知向量 + 两个生产已验证选择器交叉核对;失败=派生调用全禁用
+try:
+    _KECCAK_OK = (_keccak256(b"").hex() == "c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"
+                  and _sel("getExchangeRate()") == "0xe6aa216c" and _sel("exchangeRate()") == "0x3ba0b9a9")
+except Exception:  # noqa: BLE001
+    _KECCAK_OK = False
+if not _KECCAK_OK:
+    log.error("keccak self-test FAILED — derived-selector reads disabled (REDEEM_STATUS unavailable)")
+
+
 def _rpc(method: str, params: list):
     body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": method, "params": params}).encode()
     last = None
@@ -92,8 +154,71 @@ def _d1_exchange_rates():
     return rates, blk, rpc_used
 
 
+# ── D1 REDEEM_STATUS:赎回可行性链上直读(证据类型 REDEEM_STATUS 的数据源) ──
+_LIDO_WQ = "0x889edC2eDab5f40e902b864aD4d7AdE8E412F9B1"   # Lido WithdrawalQueue(主网 canonical)
+
+
+def _d1_redeem_status() -> dict:
+    if not _KECCAK_OK:
+        raise RuntimeError("keccak self-test failed, derived selectors disabled")
+
+    def call_u(addr, sig):
+        res, _ = _rpc("eth_call", [{"to": addr, "data": _sel(sig)}, "latest"])
+        return int(res, 16)
+    st = {"lido_wq_paused": bool(call_u(_LIDO_WQ, "isPaused()")),
+          "lido_bunker_mode": bool(call_u(_LIDO_WQ, "isBunkerModeActive()"))}
+    unf = call_u(_LIDO_WQ, "unfinalizedStETH()") / 1e18
+    col = call_u(_D1_CONTRACTS["rETH"][0], "getTotalCollateral()") / 1e18
+    if unf > 1e8 or col > 1e8:
+        raise RuntimeError(f"implausible values unf={unf} col={col} (selector/ABI 疑似不对,拒绝采信)")
+    st["lido_unfinalized_steth"] = round(unf, 1)
+    st["reth_instant_burn_capacity_eth"] = round(col, 1)
+    st["wbeth_note"] = "wBETH 赎回走 Binance 渠道,链上无公开赎回队列——该标的赎回状态=受限(按 CEX 路径评估)"
+    return st
+
+
+# ── D1 TARGET_QUOTE:目标金额真实报价(Kyber 聚合器,免key;§6.3 size ladder 最小版) ──
+_D1_TOKENS = {"stETH": "0xae7ab96520DE3A18E5e111B5EaAb095312D7fE84",
+              "rETH": "0xae78736Cd615f374D3085123A210448E74Fc6393",
+              "wBETH": "0xa2E3356610840701BDf5611a53974510Ae27E2e1"}
+_WETH = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
+_QUOTE_SIZES_ETH = (10, 100)
+
+
+def _kyber_out_wei(token_in: str, token_out: str, amount_in_wei: int) -> int:
+    d = _get("https://aggregator-api.kyberswap.com/ethereum/api/v1/routes"
+             f"?tokenIn={token_in}&tokenOut={token_out}&amountIn={amount_in_wei}")
+    out = int(((d.get("data") or {}).get("routeSummary") or {}).get("amountOut") or 0)
+    if out <= 0:
+        raise RuntimeError("no route / empty amountOut")
+    return out
+
+
+def _d1_quotes(redemptions: dict) -> dict:
+    """买入侧真报价:WETH→LST 按 size ladder;可执行折价=1-(实付ETH/枚 ÷ 赎回价)。
+    正=能以低于赎回价值的成本买入(毛边际,未扣gas/排队资金成本)。"""
+    quotes = {}
+    for name, addr in _D1_TOKENS.items():
+        red = redemptions.get(name)
+        if not red:
+            continue
+        rows = []
+        for sz in _QUOTE_SIZES_ETH:
+            try:
+                lst_out = _kyber_out_wei(_WETH, addr, sz * 10 ** 18) / 1e18
+                eth_per_lst = sz / lst_out
+                rows.append({"size_eth": sz, "lst_out": round(lst_out, 6),
+                             "eth_per_lst": round(eth_per_lst, 6),
+                             "exec_discount_bps": round((1 - eth_per_lst / red) * 10000, 1)})
+            except Exception as e:  # noqa: BLE001
+                rows.append({"size_eth": sz, "error": repr(e)[:80]})
+            time.sleep(0.4)
+        quotes[name] = rows
+    return quotes
+
+
 def scan_d1():
-    """返回 {signals, evidence}:折价口径=市场比价 vs 链上赎回价(V6.2 §8——
+    """返回 {signals, evidence, extra}:折价口径=市场比价 vs 链上赎回价(V6.2 §8——
     带息 LST 比价>1 是正常计息,naive 1-ratio 会把计息记成溢价)。"""
     ids = list(_D1_SET) + ["coingecko:ethereum"]
     data = _get("https://coins.llama.fi/prices/current/" + ",".join(ids))
@@ -129,6 +254,20 @@ def scan_d1():
         else:     # 稳定币:对 1 美元偏离(仅 peg 观察;赎回资格/额度是另一回事)
             out.append({"asset": name, "kind": kind, "price": p,
                         "discount_bps": round((1 - p) * 10000, 1)})
+    # ── 赎回状态 + 目标金额真报价(证据闸后两块;逐块失败隔离,缺=闸如实缺) ──
+    redeem, quotes = None, {}
+    try:
+        redeem = _d1_redeem_status()
+    except Exception as e:  # noqa: BLE001
+        log.warning("D1 redeem status unavailable: %r", e)
+    try:
+        quotes = _d1_quotes({"stETH": 1.0, **rates})
+    except Exception as e:  # noqa: BLE001
+        log.warning("D1 quotes unavailable: %r", e)
+    for row in out:
+        q = quotes.get(row["asset"])
+        if q:
+            row["quotes"] = q
     evidence = []
     if rates:
         evidence.append({
@@ -141,7 +280,23 @@ def scan_d1():
             "title": "D1 标的主网 canonical 合约登记",
             "body": json.dumps({k: {"contract": v[0], "method": v[2]} for k, v in _D1_CONTRACTS.items()},
                                ensure_ascii=False)})
-    return {"signals": out, "evidence": evidence}
+    if redeem:
+        evidence.append({
+            "etype": "REDEEM_STATUS", "ttl": 24 * 3600, "source": rpc_used or "eth_call",
+            "title": f"赎回可行性链上快照 block {blk or '?'}",
+            "body": json.dumps(redeem, ensure_ascii=False)})
+    ok_quotes = {k: [r for r in v if "error" not in r] for k, v in quotes.items()}
+    ok_quotes = {k: v for k, v in ok_quotes.items() if v}
+    if ok_quotes:
+        evidence.append({
+            "etype": "TARGET_QUOTE", "ttl": 4 * 3600, "dedupe": 3600,
+            "source": "kyberswap-aggregator(真路由报价)",
+            "title": f"目标金额买入报价({'/'.join(str(s) for s in _QUOTE_SIZES_ETH)} ETH)",
+            "body": json.dumps(ok_quotes, ensure_ascii=False)})
+    extra = {}
+    if redeem:
+        extra["redeem_status"] = redeem
+    return {"signals": out, "evidence": evidence, "extra": extra}
 
 
 # ── D2:Pendle PT 固定收益贴水(公共 API) ─────────────────────────────────
@@ -210,7 +365,7 @@ def _register_evidence(c, pid: str, ev: dict, now: int):
         created, expires = row[0] or 0, row[1]
         if ev.get("ttl") is None:
             return   # 永久型(合约身份)只登记一次
-        if now - created < 6 * 3600 and (expires is None or expires > now):
+        if now - created < ev.get("dedupe", 6 * 3600) and (expires is None or expires > now):
             return
     c.execute("INSERT INTO lab_evidence(project_id,run_id,kind,title,body,created_at,"
               "evidence_type,source,observed_at,expires_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
@@ -247,11 +402,13 @@ def loop_once(c: sqlite3.Connection):
             # 不得再把 best-cost 标成『净最优』;可执行净收益=待计算(需目标金额真实报价)
             kind = {"D1": "RAW_DISCOUNT", "D2": "IMPLIED_YIELD_SPREAD",
                     "D4": "VARIABLE_RATE_MONITOR"}.get(pid, "RAW_SIGNAL")
+            payload = {"signal_kind": kind, "signals": sigs, "median_bps": med,
+                       "best_bps": best, "cost_bps": cost, "net_best_bps": net_best,
+                       "net_state": "PENDING_CALCULATION"}
+            if isinstance(res, dict) and res.get("extra"):
+                payload.update(res["extra"])
             c.execute("INSERT INTO lab_signal(project_id, ts, payload) VALUES(?,?,?)",
-                      (pid, now, json.dumps({"signal_kind": kind, "signals": sigs,
-                                             "median_bps": med, "best_bps": best,
-                                             "cost_bps": cost, "net_best_bps": net_best,
-                                             "net_state": "PENDING_CALCULATION"}, ensure_ascii=False)))
+                      (pid, now, json.dumps(payload, ensure_ascii=False)))
             c.execute("UPDATE lab_run SET samples=samples+?, result_bps=?, note=? WHERE run_id=?",
                       (len(sigs), best,
                        f"初步信号最优={best}bps 中位={med}(参考成本{cost}bps;可执行净收益待计算)", run_id))
