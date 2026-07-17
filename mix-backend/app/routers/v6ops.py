@@ -135,6 +135,14 @@ async def control_snapshot(_who=Depends(require_viewer)):
     return snap
 
 
+@router.get("/operator/risk-control")
+async def risk_control_snapshot(_who=Depends(require_viewer)):
+    """REV4 批C §6B:P3 账户与保证金汇总——平台父行+账户风险子行+全局事实带。
+    交互式(/mix/venuerisk)与外接墙(/wall/risk)读同一快照;venue 原始风险口径与
+    canonical 统一口径并列(公式注册表说明各所分子/分母/安全方向);未接入指标=null 不冒充。"""
+    return await v6core.build_risk_control_snapshot()
+
+
 @router.get("/operator/workitems")
 async def workitems(stage: str = "", strategy: str = "", _who=Depends(require_viewer)):
     """工作项投影(V6.1 §4 全字段+服务端 allowed_actions)。

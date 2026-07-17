@@ -5,16 +5,25 @@
       <!-- 列1·保证金与ADL(JyEvC,w560) -->
       <div class="col c1">
         <div class="card">
-          <div class="chd2"><b>保证金压力</b><span class="grow" /><span class="dimtxt">逐venue账户</span></div>
-          <div class="mhead"><span>账户</span><span class="r">权益U</span><span class="r">敞口U</span><span class="r">距强平%</span><span>模式</span></div>
-          <div v-for="v in venues" :key="v.venue" class="mrow" :class="{bad: (minLiq(v.venue) ?? 999) < 25}">
-            <span><b>{{ v.venue }}</b> <i class="dimtxt">Tier {{ v.tier || '—' }}</i></span>
-            <span class="r">{{ n(v.equity) }}</span>
-            <span class="r">{{ n(v.exposure_notional) }}</span>
-            <span class="r">{{ minLiq(v.venue) ?? 'N/A' }}</span>
-            <span :class="'m-'+v.mode">{{ v.mode }}</span>
-          </div>
-          <div class="cfoot">距强平=该所持仓腿 dist_liq 最小值 · 告警线 25%</div>
+          <div class="chd2"><b>保证金压力</b><span class="grow" /><span class="dimtxt">平台父行+账户子行 · riskctl-v1</span></div>
+          <div class="mhead"><span>平台/账户</span><span class="r">权益U</span><span class="r">名义U</span><span class="r">距强平%</span><span>模式</span></div>
+          <template v-for="v in rcVenues" :key="v.venue">
+            <div class="mrow" :class="{bad: (v.min_dist_liq_pct ?? 999) < 25}">
+              <span><b>{{ v.venue }}</b><i class="dimtxt" v-if="v.cap_usdt"> 帽{{ n(v.cap_usdt) }}</i></span>
+              <span class="r">{{ n(v.equity_usdt) }}</span>
+              <span class="r">{{ n(v.gross_notional) }}</span>
+              <span class="r">{{ v.min_dist_liq_pct!=null ? Math.round(v.min_dist_liq_pct) : 'N/A' }}</span>
+              <span :class="'m-'+v.mode">{{ v.mode }}</span>
+            </div>
+            <div v-for="a in v.accounts" :key="v.venue+a.account" class="mrow subacct" :class="{bad:(a.min_dist_liq_pct??999)<25, stale:a.data_state==='STALE'}">
+              <span class="dimtxt">└ {{ a.account }}</span>
+              <span class="r">{{ n(a.equity_usdt) }}</span>
+              <span class="r">{{ n(a.gross_notional) }}</span>
+              <span class="r">{{ a.min_dist_liq_pct!=null ? Math.round(a.min_dist_liq_pct)+'·'+(a.worst_symbol||'') : (a.position_count?'—':'无仓') }}</span>
+              <span class="dimtxt">{{ a.data_state==='STALE' ? '过期' : (a.age_sec!=null? a.age_sec+'s':'') }}</span>
+            </div>
+          </template>
+          <div class="cfoot">与交互式P3同一RiskControlSnapshot;距强平=账户内最差腿 · 告警线25% · 过期账户fail-closed</div>
         </div>
         <div class="card">
           <div class="chd2"><b>ADL 面板</b><span class="grow" /><span class="dimtxt">≥4 档预警</span></div>
@@ -117,6 +126,8 @@ const authed = ref(!!route.query.token || !!localStorage.getItem('mix_token'))
 if (route.query.token) localStorage.setItem('mix_token', String(route.query.token))
 
 const rs = ref({}); const pf = ref({}); const flows = ref([])
+const rc = ref({})   // REV4 批C:RiskControlSnapshot(与交互式P3同一快照)
+const rcVenues = computed(() => rc.value.venues || [])
 let t1 = null
 const venues = computed(() => rs.value.venues || [])
 const nav = computed(() => rs.value.nav || {})
@@ -146,6 +157,7 @@ async function load() {
     rs.value = await mixApi.riskSummary()
     pf.value = await mixApi.riskPortfolio()
     flows.value = (await mixApi.riskCashflows())?.rows || []
+    rc.value = await mixApi.v6RiskControl()
   } catch (e) { /* 状态条示 STALE */ }
 }
 // §7/§18:WS generation 驱动刷新,REST 60s 兜底(消灭独立 15s 轮询)
@@ -180,7 +192,9 @@ onUnmounted(() => t1 && clearInterval(t1))
   border-top: 1px solid var(--mix-border, #262B33); border-bottom: 1px solid var(--mix-border, #262B33); }
 .mrow { height: 30px; border-bottom: 1px solid var(--mix-border, #262B33); color: var(--mix-t2, #848E9C);
   b { color: var(--mix-t1, #EAECEF); }
-  &.bad { background: rgba(246,70,93,.05); } }
+  &.bad { background: rgba(246,70,93,.05); }
+  &.subacct { height: 26px; font-size: 10px; }
+  &.stale { opacity: .5; } }
 .r { text-align: right; padding-right: 10px; font-variant-numeric: tabular-nums; }
 .m-NORMAL { color: #35b57c; } .m-WATCH { color: #F0B90B; } .m-NO_NEW_RISK { color: #FF8A3D; }
 .m-REDUCE_ONLY, .m-EXIT_ONLY { color: #F6465D; } .m-FROZEN { color: #8B1E2D; }

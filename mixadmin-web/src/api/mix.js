@@ -263,6 +263,7 @@ export const mixApi = {
   v6LeaseAcquire: (b) => http6.post('/operator/lease/acquire', b),
   v6LeaseRelease: (b) => http6.post('/operator/lease/release', b),
   v6LegacyCompare: () => http6.get('/operator/legacy/compare'),
+  v6RiskControl: () => http6.get('/operator/risk-control'),
   v6LegacyRuns: () => http6.get('/operator/legacy/runs'),
   v6LabHealth: () => http6.get('/lab/health'),
   v6LabProjects: () => http6.get('/lab/projects'),

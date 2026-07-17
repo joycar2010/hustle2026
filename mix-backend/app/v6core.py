@@ -647,6 +647,150 @@ async def _enrich_v61(items: list[dict], pol: dict) -> None:
                                  "confirmed_pnl", "control_epoch")], default=str).encode()).hexdigest()[:8]
 
 
+# ══ V6.2 REV4 批C §6B:P3 账户与保证金汇总(RiskControlSnapshot) ═══════════════
+# 铁律:同时保留 venue 原始风险口径与系统统一口径(§6B.3——六所风险率分子/分母/方向不同,
+# 只信一个归一数字=testgo换算系数审计的老坑);未接入的指标=null+注册表说明,绝不冒充。
+_RISK_VENUES = ["binance", "bybit", "okx", "gate", "bitget", "hyperliquid"]
+_MARGIN_FORMULA = {
+    "binance": {"version": "bn-v1", "direction": "higher_safer",
+                "raw": "margin_level(杠杆账户:总资产/总负债,≥100安全·999=无负债哨兵)"
+                       "+dist_liq_pct(合约逐仓:标记价距强平)"},
+    "bybit": {"version": "by-v1", "direction": "higher_safer",
+              "raw": "dist_liq_pct(逐仓);统一账户MMR未接入(PLANNED)"},
+    "okx": {"version": "ok-v1", "direction": "higher_safer",
+            "raw": "dist_liq_pct(逐仓);账户级mgnRatio未接入(PLANNED)"},
+    "gate": {"version": "gt-v1", "direction": "higher_safer", "raw": "dist_liq_pct(逐仓)"},
+    "bitget": {"version": "bg-v1", "direction": "higher_safer", "raw": "dist_liq_pct(逐仓)"},
+    "hyperliquid": {"version": "hl-v1", "direction": "higher_safer",
+                    "raw": "dist_liq_pct(跨仓清算价推导)"},
+}
+
+
+def _acct_row(key_label: str, venue: str, d: dict, now_ts: float) -> dict:
+    pd = d.get("pos_detail") or {}
+    gross = net = upnl = 0.0
+    min_dist, worst_sym, adl_max, npos = None, None, None, 0
+    for s, p in pd.items():
+        q, m = float(p.get("qty") or 0), float(p.get("mark") or 0)
+        if abs(q) < 1e-12:
+            continue
+        npos += 1
+        gross += abs(q) * m
+        net += q * m
+        upnl += float(p.get("upnl") or 0)
+        dl = p.get("dist_liq_pct")
+        if dl is not None and (min_dist is None or dl < min_dist):
+            min_dist, worst_sym = dl, s
+        if p.get("adl") is not None:
+            adl_max = max(adl_max or 0, p["adl"])
+    eq = d.get("equity_usdt")
+    age = int(now_ts - float(d.get("ts") or 0)) if d.get("ts") else None
+    stale = (age is None) or age > 180 or (d.get("ok") is False)
+    return {"account": key_label, "venue": venue,
+            "equity_usdt": eq, "upnl_usdt": round(upnl, 2) if npos else None,
+            "gross_notional": round(gross, 2) if npos else 0.0,
+            "net_delta_usdt": round(net, 2) if npos else 0.0,
+            "position_count": npos,
+            "min_dist_liq_pct": min_dist, "worst_symbol": worst_sym, "adl_max": adl_max,
+            "effective_leverage": (round(gross / eq, 2) if eq and gross else None),
+            "age_sec": age, "data_state": ("STALE" if stale else "PRESENT")}
+
+
+async def build_risk_control_snapshot() -> dict:
+    now = dt.datetime.now(dt.timezone.utc)
+    now_ts = time.time()
+    pol = await ds.get_json("dcm:risk:policy") or {}
+    pvenues = pol.get("venues") or {}
+    rexit = ((await ds.get_json("dcm:risk:exit")) or {}).get("items") or {}
+    prot_hot = sum(1 for v in rexit.values() if v.get("state") not in (None, "NORMAL"))
+    r = ds.rds()
+    venues_out = []
+    tot_eq = tot_gross = tot_net = 0.0
+    restricted_cap = 0.0
+    stale_accts = 0
+    worst = None   # 全局最差强平
+    for v in _RISK_VENUES:
+        rows = []
+        main = await ds.get_json(f"dcm:account:{v}")
+        if main:
+            rows.append(_acct_row("主(env)", v, main, now_ts))
+        if r is not None:
+            try:
+                async for k in r.scan_iter(match=f"dcm:account:{v}:*", count=50):
+                    d = await ds.get_json(k)
+                    if d:
+                        rows.append(_acct_row(str(k).rsplit(":", 1)[-1], v, d, now_ts))
+            except Exception:  # noqa: BLE001
+                pass
+        if not rows:
+            continue
+        mode = _venue_mode(pvenues, v)
+        eq = sum(x["equity_usdt"] for x in rows if x["equity_usdt"])
+        gross = sum(x["gross_notional"] for x in rows if x["gross_notional"])
+        net = sum(x["net_delta_usdt"] for x in rows if x["net_delta_usdt"])
+        vmin = None
+        for x in rows:
+            if x["min_dist_liq_pct"] is not None and (vmin is None or x["min_dist_liq_pct"] < vmin["d"]):
+                vmin = {"d": x["min_dist_liq_pct"], "account": x["account"], "symbol": x["worst_symbol"]}
+            if x["data_state"] == "STALE":
+                stale_accts += 1
+        if vmin and (worst is None or vmin["d"] < worst["d"]):
+            worst = {**vmin, "venue": v}
+        pv = pvenues.get(v) or {}
+        cap = pv.get("cap_usdt")   # 风险权威(policy)已带帽/tier,不二次查表
+        tot_eq += eq
+        tot_gross += gross
+        tot_net += net
+        if mode not in ("NORMAL", "WATCH"):
+            restricted_cap += eq
+        venues_out.append({
+            "venue": v, "mode": mode, "mode_reason": "; ".join(
+                f"{m.get('scope')}:{m.get('mode')}{('(' + m.get('why') + ')') if m.get('why') else ''}"
+                for m in (pv.get("modes_hit") or [])) or None,
+            "tier": pv.get("tier"), "cap_usdt": cap,
+            "cap_utilization_pct": (round(100 * gross / cap, 1) if cap else None),
+            "equity_usdt": round(eq, 2), "gross_notional": round(gross, 2),
+            "net_delta_usdt": round(net, 2),
+            "min_dist_liq_pct": (vmin or {}).get("d"), "min_dist_account": (vmin or {}).get("account"),
+            "min_dist_symbol": (vmin or {}).get("symbol"),
+            "accounts": rows, "formula": _MARGIN_FORMULA.get(v, {})})
+    # binance 杠杆账户 raw 风险率(coin panel margin_level;§6B.3 原始口径并列展示)
+    try:
+        panel = await ds.get_json("dcm:coin:panel") or {}
+        raws = []
+        for name, bal in (panel.get("balances") or {}).items():
+            ml = (bal or {}).get("margin_level")
+            if ml is not None:
+                raws.append({"account": f"margin:{name}", "margin_level": ml})
+        mliq = panel.get("master_futures_liq_pct")
+        for vo in venues_out:
+            if vo["venue"] == "binance":
+                vo["raw_margin"] = {"margin_accounts": raws,
+                                    "master_futures_liq_pct": mliq}
+    except Exception:  # noqa: BLE001
+        pass
+    return {
+        "as_of": now.isoformat(),
+        "schema_version": "riskctl-v1",
+        "global": {
+            "portfolio_equity_usdt": round(tot_eq, 2),
+            "gross_notional_usdt": round(tot_gross, 2),
+            "net_delta_usdt": round(tot_net, 2),
+            "effective_leverage": (round(tot_gross / tot_eq, 2) if tot_eq else None),
+            # IM/MM 保证金占用率:六所快照未带初始/维持保证金——如实 null(PLANNED),绝不用杠杆冒充
+            "margin_utilization_pct": None,
+            "margin_utilization_note": "IM/MM 未接入(PLANNED);先看有效杠杆+最差强平距离",
+            "worst_liquidation": worst,
+            "restricted_capital_usdt": round(restricted_cap, 2),
+            "stale_accounts": stale_accts,
+            "protection_hot": prot_hot,
+            "policy_nav": (pol.get("nav") or {}),
+        },
+        "venues": venues_out,
+        "formula_registry": _MARGIN_FORMULA,
+    }
+
+
 async def build_control_snapshot(generation: int | None = None) -> dict:
     """control_snapshot(§4)——三屏共享单一事实。"""
     now = dt.datetime.now(dt.timezone.utc)
