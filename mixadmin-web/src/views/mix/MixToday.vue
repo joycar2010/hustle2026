@@ -16,6 +16,10 @@
         <!-- §9.2:训练通过后菜单收敛,入口迁到这里(仍可主动进入演练) -->
         <button v-if="trainOk" class="trainbtn" @click="$router.push('/mix/training')"><FIcon name="cap" :size="12"/> 训练/演练</button>
       </div>
+      <!-- LAB 提醒落点(V6.2:outbox 新 artifact→提醒;此前只在退役中控台,唯一日常入口反而看不见) -->
+      <div class="labbar" v-if="labNote"><FIcon name="flask" :size="12"/> {{ labNote }} →
+        <a @click="$router.push({path:'/mix/lab',query:{focus:'outbox'}})">实验室·结果与判决</a>
+        <span class="labx" @click="dismissLab">✕</span></div>
       <!-- 深表格视图:与轻列表同一快照同一抽屉,队列过滤共用流程条 -->
       <WorkTable v-if="viewMode==='table'" :items="tableItems" :row-state="rowState" :sel-id="selId"
                  @open="openItem" @run="runAct"/>
@@ -31,14 +35,27 @@
         <div class="col c-opp">
           <div class="chd"><b>机会</b><i>候选 {{ snap?.counts?.candidates_raw ?? '—' }} → 过闸 {{ opps.length }}</i></div>
           <div class="list" ref="oppList">
-            <div v-for="w in opps" :key="w.work_item_id" class="row" :class="{sel:selId===w.work_item_id, submitting:rowState[w.work_item_id]==='loading'}"
+            <!-- 批A §6A.5B 机会紧凑行三行式:身份/路线容量/时间新鲜度 -->
+            <div v-for="w in opps" :key="w.work_item_id" class="row tall opp3" :class="{sel:selId===w.work_item_id, submitting:rowState[w.work_item_id]==='loading'}"
                  @click="openItem(w)">
-              <b class="sym">{{ w.symbol }} · {{ w.strategy_code }}</b>
-              <span class="ev" :class="(w.expected_net_return||0)>=0?'up':'dn'">{{ evT(w) }}</span>
-              <span class="fill"></span>
-              <PrimaryAction v-if="primaryOf(w)" :a="primaryOf(w)" sz="sm"
-                             :still-allowed="w.still_allowed" :blocking-reason="w.blocking_reason"
-                             :state="rowState[w.work_item_id]||''" @run="(a)=>runAct(w,a)"/>
+              <div class="r1">
+                <b class="sym">{{ w.symbol }} · {{ w.strategy_code }}</b>
+                <span v-if="w.research_status && w.research_status!=='NOT_REQUIRED'" class="rs" :class="w.research_status">
+                  研判{{ {PENDING:'待做',COMPLETED:'完成',EXPIRED:'过期'}[w.research_status]||'' }}</span>
+                <span class="fill"></span>
+                <PrimaryAction v-if="primaryOf(w)" :a="primaryOf(w)" sz="sm"
+                               :still-allowed="w.still_allowed" :blocking-reason="w.blocking_reason"
+                               :state="rowState[w.work_item_id]||''" @run="(a)=>runAct(w,a)"/>
+              </div>
+              <div class="band">
+                <span class="bc"><i>路线</i><b>{{ w.route || '—' }}</b></span>
+                <span class="bc"><i>目标</i><b>{{ w.capital_reserved!=null ? fmtU(w.capital_reserved)+' U' : '—' }}</b></span>
+                <span class="bc"><i>净期望</i><b class="ev" :class="(w.expected_net_return||0)>=0?'up':'dn'">{{ w.expected_net_return!=null ? evT(w) : '待计算' }}</b></span>
+              </div>
+              <div class="band dim">
+                <span class="bc"><i>下一结算</i><b>{{ (w.next_deadline||'—').slice(5,16) || '—' }}</b></span>
+                <span class="bc"><i>风险</i><b>{{ w.risk_status?.level==='NORMAL' ? '正常' : (w.risk_status?.level||'—') }}</b></span>
+              </div>
             </div>
             <EmptyState v-if="!opps.length" kind="none" title="暂无过闸候选" hint="顾问与 LAB 持续扫描中"/>
           </div>
@@ -47,9 +64,13 @@
         <div class="col c-pos">
           <div class="chd"><b>持仓 · 一行=一个经济组合</b><i>{{ queueNote }}</i></div>
           <div class="list">
-            <div v-for="w in posShown" :key="w.work_item_id" class="row tall" :class="{sel:selId===w.work_item_id, bad:w.workflow_stage==='RECONCILING'}"
+            <!-- 批A §6A.5B 持仓紧凑行=四数据带(身份/仓位/经济/风险时间)+按需展开账户腿;
+                 数据=服务端 legagg 聚合(group_econ 与点差保护同源),缺数显'—'绝不冒充0 -->
+            <div v-for="w in posShown" :key="w.work_item_id" class="row tall pos4" :class="{sel:selId===w.work_item_id, bad:w.workflow_stage==='RECONCILING'}"
                  @click="openItem(w)">
               <div class="r1">
+                <span v-if="w.account_legs?.length" class="expbtn" :class="{on:!!expRows[w.work_item_id]}"
+                      @click.stop="toggleExp(w.work_item_id)">{{ expRows[w.work_item_id] ? '▾' : '▸' }}</span>
                 <b class="sym">{{ w.symbol }} · {{ w.strategy_code }}</b>
                 <span class="st" :class="stCls(w)">{{ w.stage_detail || w.workflow_stage }}</span>
                 <!-- §6.3 点差保护=一等状态,不藏详情;shadow 评估,退出决策仍人工 -->
@@ -63,7 +84,34 @@
                                :still-allowed="w.still_allowed" :blocking-reason="w.blocking_reason"
                                :state="rowState[w.work_item_id]||''" @run="(a)=>runAct(w,a)"/>
               </div>
-              <div class="r2">{{ w.what_happened }}</div>
+              <div class="band">
+                <span class="bc"><i>规模</i><b>{{ w.capital_reserved!=null ? fmtU(w.capital_reserved)+' U' : '—' }}</b></span>
+                <span class="bc"><i>净Δ</i><b>{{ ge(w).net_delta!=null ? fmtU(ge(w).net_delta) : '—' }}</b></span>
+                <span class="bc"><i>费差/日</i><b :class="(ge(w).gap_now_pct||0)>0?'up':''">{{ ge(w).gap_now_pct!=null ? fmt2(ge(w).gap_now_pct)+'%' : '—' }}</b></span>
+                <span class="bc"><i>退出盈亏</i><b :class="cls0(ge(w).closeout_pnl_net)">{{ ge(w).closeout_pnl_net!=null ? fmt2(ge(w).closeout_pnl_net)+' U' : '—' }}</b></span>
+                <span class="bc"><i>已确认</i><b :class="cls0(w.confirmed_pnl)">{{ w.confirmed_pnl!=null ? fmt2(w.confirmed_pnl)+' U' : '—' }}</b></span>
+              </div>
+              <div class="band dim">
+                <span class="bc"><i>预算余</i><b>{{ ge(w).budget_remaining!=null ? fmt2(ge(w).budget_remaining)+' U' : '—' }}</b></span>
+                <span class="bc"><i>最差强平</i><b :class="liqCls(ge(w).margin_min_dist_liq_pct)">{{ ge(w).margin_min_dist_liq_pct!=null ? fmtU(ge(w).margin_min_dist_liq_pct)+'%('+(ge(w).margin_worst_venue||'?')+')' : '—' }}</b></span>
+                <span class="bc grow"><i></i><b class="wh">{{ w.what_happened }}</b></span>
+              </div>
+              <!-- 展开=账户腿明细(§6A.5B:不跳页;venue符号/方向/数量/标记/浮盈/费率/强平/ADL) -->
+              <div v-if="expRows[w.work_item_id] && w.account_legs?.length" class="legs" @click.stop>
+                <div class="leghd"><span>账户/腿</span><span>方向</span><span class="num">数量</span><span class="num">名义U</span><span class="num">标记价</span><span class="num">浮盈U</span><span class="num">费率%/d</span><span class="num">强平距%</span><span class="num">ADL</span></div>
+                <div v-for="l in w.account_legs" :key="l.leg_id" class="legrow" :class="{ghost:l.data_state!=='PRESENT'}">
+                  <span :title="l.note||''">{{ l.account }} · {{ legCn(l.role) }}</span>
+                  <span :class="l.side==='LONG'?'up':'dn'">{{ l.side==='LONG'?'多':'空' }}</span>
+                  <span class="num">{{ l.qty!=null ? fmtU(l.qty) : '—' }}</span>
+                  <span class="num">{{ l.notional_usdt!=null ? fmtU(l.notional_usdt) : '—' }}</span>
+                  <span class="num">{{ l.mark!=null ? l.mark : '—' }}</span>
+                  <span class="num" :class="cls0(l.upnl)">{{ l.upnl!=null ? fmt2(l.upnl) : '—' }}</span>
+                  <span class="num">{{ l.funding_daily_pct!=null ? fmt2(l.funding_daily_pct) : (l.interest_daily_pct!=null ? '息'+fmt2(l.interest_daily_pct) : '—') }}</span>
+                  <span class="num" :class="liqCls(l.dist_liq_pct ?? l.liq_pct)">{{ (l.dist_liq_pct ?? l.liq_pct)!=null ? fmtU(l.dist_liq_pct ?? l.liq_pct) : '—' }}</span>
+                  <span class="num">{{ l.adl!=null ? l.adl : '—' }}</span>
+                </div>
+                <div class="legft">腿事实=交易所直拉快照;组合聚合=服务端 {{ ge(w).agg_version||'legagg' }}(最差腿口径);子行无独立开平仓入口</div>
+              </div>
             </div>
             <EmptyState v-if="!posShown.length" kind="none" :title="`「${queueLabel}」队列为空`" hint="点流程条其它分段查看"/>
           </div>
@@ -84,6 +132,15 @@
               <div class="qa"><i>处置</i><span><a @click="deepRisk">进风险与账务·风险事件 →</a></span></div>
             </div>
             <div v-else class="okline"><FIcon name="check" :size="12"/> 当前无必须处理事件</div>
+            <!-- 批A §6A.5B:无 P0/P1 也不留空白——账户风险概览(与持仓行 group_econ 同源) -->
+            <div v-if="acctOverview" class="aro">
+              <div class="rrow"><b>最差强平距离</b>
+                <span :class="liqCls(acctOverview.worst?.d)">{{ acctOverview.worst ? fmtU(acctOverview.worst.d)+'%('+(acctOverview.worst.v||'?')+'·'+acctOverview.worst.sym+')' : '—' }}</span></div>
+              <div class="rrow"><b>硬亏预算余最小</b>
+                <span>{{ acctOverview.minBud ? fmt2(acctOverview.minBud.b)+' U('+acctOverview.minBud.sym+')' : '—' }}</span></div>
+              <div class="rrow"><b>真实退出盈亏合计</b>
+                <span :class="cls0(acctOverview.closeoutSum)">{{ acctOverview.closeoutSum!=null ? fmt2(acctOverview.closeoutSum)+' U' : '—' }}</span></div>
+            </div>
             <div class="rrow"><b>平台/账户限制 · {{ restrictedN }}</b><span>{{ restrictedN? '已停新增·详情见风险事件' : '全部平台正常' }}</span></div>
             <div class="rrow" :class="{warn:protHotN>0}"><b>点差保护 · {{ protHotN? protHotN+' 项越线' : '全部正常' }}</b>
               <span>{{ protNote }}</span></div>
@@ -312,11 +369,58 @@ onMounted(() => {
   else if (vw === 'position') { focusCol.value = '持仓'; vtab.value = '持仓' }
   else if (vw === 'risk') { focusCol.value = '风险'; vtab.value = '风险' }
   mixApi.uxPageview('today')   // M5 收敛门槛数据:今日工作 vs 工作台使用量
+  loadLabNote()
 })
+// ── 批A §6A:持仓紧凑行数据带 + 账户腿展开(展开态进 selection 会话层) ──
+function ge(w) { return w.group_econ || {} }
+function fmtU(v) { const n = Number(v); return Math.abs(n) >= 1000 ? n.toLocaleString('en-US', { maximumFractionDigits: 0 }) : String(Math.round(n * 100) / 100) }
+function fmt2(v) { return Number(v).toFixed(2) }
+function cls0(v) { return v == null ? '' : (Number(v) >= 0 ? 'up' : 'dn') }
+function liqCls(d) { if (d == null) return ''; return d < 50 ? 'dn' : (d < 80 ? 'warn' : '') }
+function legCn(r) { return ({ PERP_SHORT: '永续空', PERP_LONG: '永续多', SPOT_LONG: '现货多', BORROW_SPOT_SHORT: '借币空', PERP_LONG_HEDGE: '对冲多(主)' })[r] || r }
+const expRows = ref({ ...(selst.sess.value.expanded || {}) })
+function toggleExp(id) {
+  expRows.value = { ...expRows.value, [id]: !expRows.value[id] }
+  selst.remember({ expanded: expRows.value })
+}
+// 无 P0/P1 时的账户风险概览(§6A.5B:右栏不留空白;与持仓行 group_econ 同源不造第二口径)
+const acctOverview = computed(() => {
+  const rows = posShown.value.map(w => ({ sym: w.symbol, e: ge(w) })).filter(x => x.e.agg_version)
+  if (!rows.length) return null
+  let worst = null, minBud = null, closeoutSum = null
+  for (const x of rows) {
+    const d = x.e.margin_min_dist_liq_pct
+    if (d != null && (!worst || d < worst.d)) worst = { d, v: x.e.margin_worst_venue, sym: x.sym }
+    const b = x.e.budget_remaining
+    if (b != null && (!minBud || b < minBud.b)) minBud = { b, sym: x.sym }
+    if (x.e.closeout_pnl_net != null) closeoutSum = (closeoutSum || 0) + Number(x.e.closeout_pnl_net)
+  }
+  return { worst, minBud, closeoutSum }
+})
+// LAB 提醒(与旧中控台同一已读键 mix_lab_read_id:同一 artifact 两处不重复打扰)
+const labNote = ref(''); const labLatestId = ref(0)
+async function loadLabNote() {
+  try {
+    const ob = await mixApi.v6LabOutbox()
+    const rows = ob?.data || []
+    if (rows.length && Number(localStorage.getItem('mix_lab_read_id') || 0) < rows[0].id) {
+      labLatestId.value = rows[0].id
+      labNote.value = `LAB 有新结果（${rows[0].project_id} · ${rows[0].title}）`
+    }
+  } catch { /* LAB 不可达不影响生产 */ }
+}
+function dismissLab() {
+  localStorage.setItem('mix_lab_read_id', String(labLatestId.value || 0))
+  labNote.value = ''
+}
 </script>
 <style scoped>
 .today{height:100%;display:flex;flex-direction:column;background:var(--mix-bg);min-height:0}
 .body{flex:1;display:flex;flex-direction:column;gap:8px;padding:8px 12px;min-height:0}
+.labbar{font-size:10.5px;color:var(--mix-blue);background:#4A9CFF14;border:1px solid #4A9CFF44;border-radius:6px;padding:5px 12px;display:flex;align-items:center;gap:6px}
+.labbar a{color:var(--mix-blue);cursor:pointer;text-decoration:underline}
+.labx{margin-left:auto;cursor:pointer;color:var(--mix-t3);padding:0 4px}
+.labx:hover{color:var(--mix-t1)}
 .vtabs{display:none;gap:2px;background:var(--mix-panel);border-radius:6px;padding:2px;align-items:center}
 .vt{font-size:11.5px;color:var(--mix-t2);padding:5px 16px;border-radius:5px;cursor:pointer}
 .vt.on{background:var(--mix-card2);color:var(--mix-t1);font-weight:700}
@@ -332,6 +436,32 @@ onMounted(() => {
 .list.pad{padding:2px 10px 8px;display:flex;flex-direction:column;gap:6px}
 .row{display:flex;align-items:center;gap:8px;padding:0 12px;height:44px;border-bottom:1px solid var(--mix-border);cursor:pointer}
 .row.tall{flex-direction:column;align-items:stretch;justify-content:center;gap:2px;height:52px}
+/* 批A:四数据带持仓行/三行机会行——固定行高保稳定布局(§6.1),数字变化不跳版 */
+.row.pos4{height:auto;min-height:78px;padding:6px 12px}
+.row.opp3{height:auto;min-height:64px;padding:5px 12px}
+.band{display:flex;gap:12px;align-items:baseline;min-width:0}
+.band.dim .bc b{color:var(--mix-t2)}
+.bc{display:inline-flex;gap:4px;align-items:baseline;min-width:0;white-space:nowrap}
+.bc.grow{flex:1;min-width:0;overflow:hidden}
+.bc i{font-style:normal;font-size:8.5px;color:var(--mix-t3);flex:none}
+.bc b{font-size:10.5px;color:var(--mix-t1);font-weight:600;font-variant-numeric:tabular-nums;overflow:hidden;text-overflow:ellipsis}
+.bc b.wh{font-weight:400;color:var(--mix-t3);font-size:9.5px}
+.expbtn{flex:none;width:16px;text-align:center;color:var(--mix-t3);cursor:pointer;font-size:10px;border-radius:3px}
+.expbtn:hover,.expbtn.on{color:var(--mix-accent);background:var(--mix-card2)}
+.legs{margin-top:4px;border:1px solid var(--mix-border);border-radius:6px;background:var(--mix-panel);overflow:hidden;cursor:default}
+.leghd,.legrow{display:grid;grid-template-columns:minmax(110px,1.4fr) 34px repeat(7,minmax(52px,1fr));gap:4px;padding:3px 8px;align-items:center}
+.leghd{font-size:8.5px;color:var(--mix-t3);border-bottom:1px solid var(--mix-border);background:var(--mix-card2)}
+.legrow{font-size:9.5px;color:var(--mix-t1);border-bottom:1px solid var(--mix-border)}
+.legrow:last-of-type{border-bottom:none}
+.legrow.ghost{opacity:.55}
+.legrow span,.leghd span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.leghd .num,.legrow .num{text-align:right;font-variant-numeric:tabular-nums}
+.legft{font-size:8px;color:var(--mix-t3);padding:3px 8px;border-top:1px dashed var(--mix-border)}
+.aro{display:flex;flex-direction:column;gap:0;border:1px solid var(--mix-border);border-radius:6px;background:var(--mix-panel);padding:2px 0;margin-top:2px}
+.rs{font-size:8.5px;padding:1px 5px;border-radius:3px;border:1px solid var(--mix-border);color:var(--mix-t2)}
+.rs.COMPLETED{color:var(--mix-green);border-color:#0ECB8155}
+.rs.PENDING{color:var(--mix-accent);border-color:#F0B90B55}
+.up{color:var(--mix-green)}.dn{color:var(--mix-red)}.warn{color:#FF8A3D}
 .row .r1{display:flex;align-items:center;gap:10px}
 .row .r2{font-size:9.5px;color:var(--mix-t3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .row.sel{background:var(--mix-card2);border-left:2px solid var(--mix-blue)}

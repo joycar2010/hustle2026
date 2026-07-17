@@ -295,7 +295,162 @@ async def build_work_items() -> list[dict]:
         log.warning("wi repair: %s", e)
 
     await _enrich_v61(items, pol)
+    try:
+        await _attach_account_legs(items)
+    except Exception as e:  # noqa: BLE001
+        log.warning("wi account_legs: %s", e)   # 腿投影失败=行降级无腿,绝不拖垮快照
     return items
+
+
+# ══ V6.2 PATCH-02-REV4 批A:GroupRow 经济字段 + AccountLegRow 投影(§6A) ══════════
+# 铁律:聚合只在服务端算(版本化);父行保证金=最差腿;缺数=None 前端显'—',绝不冒充 0。
+_LEG_AGG_VERSION = "legagg-v1"
+_POS_STAGES = {"RESERVED", "EXECUTING", "HOLDING", "EXITING", "RECONCILING"}
+
+
+def _norm_sym(s: str) -> str:
+    return str(s or "").upper().replace("-", "").replace("_", "").replace("SWAP", "")
+
+
+def _match_pos(pd: dict, sym: str) -> dict | None:
+    """按归一化符号在 pos_detail 里找该币(各所符号格式不同:XVGUSDT/VANRY_USDT/BTC-USDT-SWAP/HL币名)。"""
+    ns = _norm_sym(sym)
+    base = ns[:-4] if ns.endswith("USDT") else ns
+    for k, v in (pd or {}).items():
+        nk = _norm_sym(k)
+        if nk == ns or nk == base:
+            return v
+    return None
+
+
+async def _fund_daily(venue: str, sym: str):
+    """dcm:feed:funding:{venue} 是 Redis hash(field=币,value=json{daily_pct,interval_h,...})。"""
+    try:
+        r = ds.rds()
+        if r is None:
+            return None, None
+        v = await r.hget(f"dcm:feed:funding:{venue}", sym)
+        if not v:   # gate 等下划线符号变体
+            v = await r.hget(f"dcm:feed:funding:{venue}",
+                             sym.replace("USDT", "_USDT") if "USDT" in sym else sym)
+        if not v:
+            return None, None
+        e = json.loads(v)
+        d = e.get("daily_pct")
+        return (round(float(d), 4) if d is not None else None), e.get("interval_h")
+    except Exception:  # noqa: BLE001
+        return None, None
+
+
+def _mk_leg(venue: str, role: str, side: str, qty, acct=None, pos=None, fund=None,
+            extra: dict | None = None) -> dict:
+    mark = (pos or {}).get("mark")
+    leg = {"leg_id": f"{venue}:{role}", "venue": venue, "account": acct or venue,
+           "role": role, "side": side, "qty": qty,
+           "mark": mark,
+           "notional_usdt": (round(abs(float(qty)) * float(mark), 2)
+                             if qty is not None and mark else None),
+           "upnl": (pos or {}).get("upnl"),
+           "dist_liq_pct": (pos or {}).get("dist_liq_pct"),
+           "adl": (pos or {}).get("adl"),
+           "funding_daily_pct": fund,
+           "data_state": ("PRESENT" if pos or qty is not None else "NOT_CONNECTED")}
+    if extra:
+        leg.update(extra)
+    return leg
+
+
+async def _attach_account_legs(items: list[dict]) -> None:
+    """给持仓类工作项挂 account_legs[](账户腿直拉事实)+group_econ(风险退出评估器同源经济面)。
+    源:dcm:exec:manager legs + dcm:account:{venue}.pos_detail + dcm:feed:funding:{venue}
+      + dcm:risk:exit(closeout/预算/费差/最差强平——与点差保护同一权威,不二次发明口径)
+      + dcm:coin:panel(C3 借币腿)。任一源缺=该字段 None,行不失败。"""
+    pos_items = [it for it in items if it.get("workflow_stage") in _POS_STAGES]
+    if not pos_items:
+        return
+    venues: set = set()
+    for it in pos_items:
+        for a in (it.get("physical_accounts") or []):
+            if a and not str(a).startswith("sub:"):
+                venues.add(str(a))
+    accounts = {v: (await ds.get_json(f"dcm:account:{v}") or {}) for v in venues}
+    rexit = ((await ds.get_json("dcm:risk:exit")) or {}).get("items") or {}
+    mgr = await ds.get_json("dcm:exec:manager") or {}
+    mgr_syms = {str(s.get("symbol")): s for s in (mgr.get("symbols") or [])}
+    mgr_pairs = {str(p.get("symbol") or p.get("pair")): p for p in (mgr.get("pairs") or [])}
+    panel = None   # C3 惰性取(24KB,无 C3 持仓不拉)
+
+    for it in pos_items:
+        sym = str(it.get("symbol") or "")
+        legs: list[dict] = []
+        src = it.get("source")
+        try:
+            if src == "manager" and sym in mgr_syms:      # C1 现货多+永续空(binance)
+                ss = mgr_syms[sym]
+                pd = (accounts.get("binance") or {}).get("pos_detail") or {}
+                pos = _match_pos(pd, sym)
+                fd, fiv = await _fund_daily("binance", sym)
+                legs.append(_mk_leg("binance", "PERP_SHORT", "SHORT", ss.get("perp_amt"),
+                                    pos=pos, fund=fd, extra={"funding_interval_h": fiv}))
+                spot_qty = ss.get("spot")
+                legs.append(_mk_leg("binance", "SPOT_LONG", "LONG", spot_qty,
+                                    pos={"mark": (pos or {}).get("mark")} if pos else None,
+                                    extra={"note": "现货腿(含理财LD份额)"}))
+            elif src == "manager" and sym in mgr_pairs:   # C2 双永续跨所
+                for lg in (mgr_pairs[sym].get("legs") or []):
+                    v = str(lg.get("venue") or "")
+                    amt = lg.get("amt")
+                    pd = (accounts.get(v) or {}).get("pos_detail") or {}
+                    pos = _match_pos(pd, sym)
+                    side = "LONG" if (amt or 0) > 0 else "SHORT"
+                    fd, fiv = await _fund_daily(v, sym)
+                    legs.append(_mk_leg(v, f"PERP_{side}", side, amt, pos=pos, fund=fd,
+                                        extra={"funding_interval_h": fiv}))
+            elif src == "coin":                            # C3 借币空+主账户永续多
+                if panel is None:
+                    panel = await ds.get_json("dcm:coin:panel") or {}
+                base = sym[:-4] if sym.upper().endswith("USDT") else sym
+                sm = None
+                for bal in (panel.get("balances") or {}).values():
+                    cand = _match_pos((bal or {}).get("symbol_margin") or {}, base)
+                    if cand and (cand.get("borrowed") or cand.get("free")):
+                        sm = cand
+                        break
+                legs.append(_mk_leg("binance-margin", "BORROW_SPOT_SHORT", "SHORT",
+                                    (sm or {}).get("borrowed"),
+                                    acct=(it.get("physical_accounts") or ["sub:?"])[0],
+                                    extra={"debt": (sm or {}).get("borrowed"),
+                                           "interest_daily_pct": (sm or {}).get("daily_interest_rate"),
+                                           "free": (sm or {}).get("free"),
+                                           "data_state": "PRESENT" if sm else "NOT_CONNECTED"}))
+                mfp = (panel.get("master_futures_positions") or {})
+                hedge_amt = mfp.get(sym) or mfp.get(base)
+                legs.append(_mk_leg("binance", "PERP_LONG_HEDGE", "LONG", hedge_amt,
+                                    acct="master",
+                                    extra={"liq_pct": panel.get("master_futures_liq_pct"),
+                                           "note": "hedge_via_master",
+                                           "data_state": "PRESENT" if hedge_amt is not None else "NOT_CONNECTED"}))
+        except Exception as e:  # noqa: BLE001
+            log.warning("legs %s: %s", sym, e)
+        # group_econ:与点差保护评估器同源(dcm:risk:exit)——同一权威绝不二次发明口径
+        e = rexit.get(sym) or rexit.get(_norm_sym(sym)) or {}
+        marg = e.get("margin") or {}
+        gross = round(sum(l["notional_usdt"] for l in legs if l.get("notional_usdt")), 2) or None
+        it["account_legs"] = legs
+        it["group_econ"] = {
+            "agg_version": _LEG_AGG_VERSION,
+            "closeout_pnl_net": e.get("closeout_pnl_net"),      # 真实退出盈亏(保守口径)
+            "gap_now_pct": e.get("gap_now"),                    # 当前费差/点差(%/d 或 %)
+            "carry_per_window": e.get("carry_per_window"),
+            "hard_budget": e.get("hard_budget"),
+            "budget_remaining": e.get("budget_remaining"),
+            "margin_min_dist_liq_pct": marg.get("min_dist_liq_pct"),   # 最差腿口径
+            "margin_worst_venue": marg.get("worst_venue"),
+            "protection_state": e.get("state"),
+            "gross_notional": gross,
+            "net_delta": (mgr_syms.get(sym) or {}).get("delta"),
+            "leg_count": len(legs),
+        }
 
 
 async def _maintenance_active() -> bool:
@@ -570,7 +725,10 @@ async def build_control_snapshot(generation: int | None = None) -> dict:
 
 _VOLATILE = {"as_of", "snapshot_id", "generation", "seq", "age_sec",
              "last_income_age_sec", "next_deadline", "valid_until",
-             "next_critical_time", "next_risk_review_at"}
+             "next_critical_time", "next_risk_review_at",
+             # 批A:腿事实与经济面含行情级波动(mark/upnl/dist_liq逐tick变),
+             # 不进 generation 签名——状态级变化(阶段/风险/保护态)已由其他字段承载
+             "account_legs", "group_econ"}
 
 
 def _strip_volatile(x):

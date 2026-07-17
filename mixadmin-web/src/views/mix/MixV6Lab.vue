@@ -84,6 +84,12 @@
                 <span class="t3note">中位 {{ fmt1(s.payload?.median_bps) }} · 参考成本 {{ s.payload?.cost_bps }}bps · 净收益:待计算 · {{ (s.payload?.signals||[]).length }} 标的</span>
                 <i class="obtime">{{ ts(s.ts) }} · 点击展开</i></div>
               <div v-if="sigOpen===s.id" class="sigdetail">
+                <div v-if="s.payload?.redeem_status" class="sigline redeemline">
+                  <b>赎回状态</b>
+                  <span :class="s.payload.redeem_status.lido_wq_paused||s.payload.redeem_status.lido_bunker_mode?'redtxt':'green'">
+                    Lido队列 {{ s.payload.redeem_status.lido_wq_paused?'暂停':'正常' }}{{ s.payload.redeem_status.lido_bunker_mode?'·bunker模式':'' }}</span>
+                  <span class="t3note">队列积压 {{ s.payload.redeem_status.lido_unfinalized_steth }} stETH · rETH即时赎回容量 {{ s.payload.redeem_status.reth_instant_burn_capacity_eth }} ETH · wBETH=CEX渠道受限</span>
+                </div>
                 <div v-for="(g,i) in (s.payload?.signals||[])" :key="i" class="sigline">
                   <b>{{ g.asset }}</b>
                   <span v-if="g.discount_bps!=null" :class="g.discount_bps>0?'amber':'t3'">{{ g.discount_bps>=0 ? '折价 '+fmt1(g.discount_bps) : '溢价 '+fmt1(-g.discount_bps) }} bps</span>
@@ -93,6 +99,21 @@
                     : g.implied_apy_pct!=null ? '隐含 '+g.implied_apy_pct+'% / 底层 '+g.underlying_apy_pct+'%'+(g.days_to_maturity!=null?' · 距到期 '+g.days_to_maturity+'d':'')
                     : g.redemption_rate!=null ? '赎回价 '+g.redemption_rate+'('+(g.rate_source==='onchain'?'链上':'协议1:1')+') · 市价比 '+g.market_ratio
                     : (g.kind||'') }}</span>
+                  <span v-if="g.quotes" class="qchips">
+                    <i v-for="q in g.quotes" :key="q.size_eth" class="qchip" :class="q.error?'qerr':(q.exec_discount_bps>0?'qok':'')">
+                      {{ q.error ? q.size_eth+'E 报价失败' : q.size_eth+'E 可执行'+(q.exec_discount_bps>=0?'折价 ':'溢价 ')+fmt1(Math.abs(q.exec_discount_bps))+'bps' }}</i>
+                  </span>
+                  <span v-if="g.pt_quotes" class="qchips">
+                    <i v-for="q in g.pt_quotes" :key="q.size" class="qchip" :class="q.error?'qerr':(q.quote_model_divergent_bps!=null?'qerr':'qok')"
+                       :title="q.quote_model_divergent_bps!=null?('与API口径分歧'+fmt1(q.quote_model_divergent_bps)+'bps:兑付假设可能不适用该市场,待人工复核'):''">
+                      {{ q.error ? q.size+' 报价失败' : q.size+' 可执行折价 '+fmt1(q.exec_maturity_discount_bps)+'bps'+(q.quote_model_divergent_bps!=null?'·待复核':'') }}</i>
+                  </span>
+                  <span v-if="g.maturity_gross_discount_bps!=null" class="qchips">
+                    <i class="qchip">到期毛折价 {{ fmt1(g.maturity_gross_discount_bps) }}bps</i>
+                    <i class="qchip">窗口毛收益 {{ g.maturity_window_return_pct }}%·{{ g.accounting_asset||'资产' }}本位·未扣成本</i>
+                    <i v-if="g.discount_source_divergent" class="qchip qerr">口径分歧 {{ fmt1(g.discount_source_divergent) }}bps</i>
+                    <i v-if="g.expiry_onchain_verified" class="qchip qok">到期已链上核验</i>
+                  </span>
                 </div>
               </div>
             </div>
@@ -100,8 +121,31 @@
           </div>
         </div>
       </div>
+      <!-- 回放与成本:REPLAY 轮次统计(重放已采样历史;结果人工评审不自动晋级) -->
+      <div class="main" v-else-if="tab==='回放与成本'">
+        <div class="tablewrap obwrap">
+          <div class="obhd"><b>历史回放</b>
+            <span class="sigchips">
+              <i v-for="p in ['D1','D2','D4']" :key="p" class="sigchip" :class="{on:rpSel===p}" @click="rpSel=p">{{ p }}</i>
+            </span>
+            <button class="ob" @click="startReplay">对 {{ rpSel }} 开始回放(30天)</button>
+            <span class="t3note">口径=重放已采样 lab_signal 历史(5分钟粒度),非链上区块重演;假阳性以瞬时信号率近似</span></div>
+          <div class="oblist">
+            <div v-for="r in replayRuns" :key="r.run_id" class="obrow">
+              <div class="obr1"><b>#{{ r.run_id }} · {{ r.project_id }}</b>
+                <span class="obt" :class="r.state==='DONE'?'green':(r.state==='FAILED'?'redtxt':'amber')">{{ r.state }}</span>
+                <i class="obtime">{{ ts(r.started_at) }}</i></div>
+              <div class="obsum">{{ r.note || '执行器将在下一轮(≤5分钟)完成统计' }}</div>
+              <div v-if="rstats(r)" class="rpgrid">
+                <span v-for="(v,k) in rpCells(rstats(r))" :key="k" class="rpcell"><i>{{ k }}</i><b>{{ v }}</b></span>
+              </div>
+            </div>
+            <div v-if="!replayRuns.length" class="empty">暂无回放轮次——选产品点「开始回放」;须先积累 ≥12 轮测量样本</div>
+          </div>
+        </div>
+      </div>
       <div class="main" v-else-if="tab!=='实验总览'">
-        <div class="tablewrap obwrap"><div class="empty">「{{ tab }}」明细面板待接 D-lab 数据流——当前请在 实验总览/扫描与观察/结果与判决/运行记录 查看;该页签不显示假数据</div></div>
+        <div class="tablewrap obwrap"><div class="empty">「{{ tab }}」明细面板待接 D-lab 数据流——当前请在 实验总览/扫描与观察/回放与成本/结果与判决/运行记录 查看;该页签不显示假数据</div></div>
       </div>
       <div class="main" v-else>
         <div class="tablewrap">
@@ -362,6 +406,23 @@ async function report(p) {
     load()
   } catch (e) { ElMessage.error(e?.detail || 'LAB 不可达') }
 }
+// 回放与成本页签:REPLAY 轮次 + 统计(stats 存 run.params.stats)
+const rpSel = ref('D1')
+const replayRuns = computed(() => labRuns.value.filter(r => r.kind === 'REPLAY' && (!rpSel.value || r.project_id === rpSel.value)))
+function rstats(r) { try { return (JSON.parse(r.params || '{}') || {}).stats || null } catch (e) { return null } }
+function rpCells(s) {
+  return { '窗口': s.window_days + '天', '轮数': s.rounds, '成本假设': s.cost_bps + 'bps',
+    '最优p50': fmt1(s.best_p50_bps) + 'bps', '最优p90': fmt1(s.best_p90_bps) + 'bps',
+    '超成本占比': s.pct_rounds_above_cost + '%', '最长连续': s.longest_streak_rounds + '轮',
+    '瞬时信号率': (s.transient_signal_rate_pct ?? '—') + '%', '净p50': fmt1(s.net_p50_bps) + 'bps' }
+}
+async function startReplay() {
+  try {
+    await mixApi.v6LabCommand({ command: 'replay', project_id: rpSel.value, environment: 'DEX_LAB', params: { days: 30 } })
+    ElMessage.success(`${rpSel.value} 回放已登记——执行器下一轮(≤5分钟)完成统计`)
+    setTimeout(load, 1500)
+  } catch (e) { ElMessage.error(typeof e?.detail === 'string' ? e.detail : JSON.stringify(e?.detail || '失败')) }
+}
 // 证据登记入口(annotate 带 evidence_type;typed 证据计入闸,operator 权限)
 const ET_CN = { CONTRACT_IDENTITY: '合约身份', EXCHANGE_RATE: '链上兑换率', REDEEM_STATUS: '赎回状态',
   TARGET_QUOTE: '目标金额真实报价', MATURITY_ONCHAIN: '链上到期', REDEMPTION_MODEL: '兑付模型',
@@ -459,6 +520,15 @@ onMounted(async () => {
 .jrow.superseded{opacity:.55}
 .amber{color:var(--mix-accent)}
 .sigkind{font-size:9px;color:var(--mix-blue);border:1px solid #4A9CFF66;border-radius:3px;padding:0 5px}
+.redeemline{border-bottom:1px dashed var(--mix-border);padding-bottom:4px;margin-bottom:2px}
+.qchips{display:flex;gap:4px;margin-left:auto}
+.qchip{font-style:normal;font-size:9px;padding:0 6px;border-radius:3px;border:1px solid var(--mix-border);color:var(--mix-t2)}
+.qchip.qok{color:var(--mix-accent);border-color:#F0B90B4D;background:#F0B90B14}
+.qchip.qerr{color:var(--mix-red);border-color:#F6465D66}
+.rpgrid{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;border-top:1px dashed var(--mix-border);padding-top:6px}
+.rpcell{display:flex;flex-direction:column;gap:1px;background:var(--mix-card2);border:1px solid var(--mix-border);border-radius:5px;padding:4px 10px;min-width:72px}
+.rpcell i{font-style:normal;font-size:8.5px;color:var(--mix-t3)}
+.rpcell b{font-size:11px;color:var(--mix-t1)}
 .main{flex:1;display:flex;gap:8px;min-height:0;min-width:0}
 .tablewrap{flex:1;min-width:0;background:var(--mix-card);border:1px solid var(--mix-border);border-radius:8px;display:flex;flex-direction:column;overflow:hidden}
 .thead{display:flex;height:24px;background:var(--mix-panel);border-bottom:1px solid var(--mix-border);flex:none;min-width:0}
