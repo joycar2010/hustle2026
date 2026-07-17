@@ -299,11 +299,17 @@ def scan_d1():
     return {"signals": out, "evidence": evidence, "extra": extra}
 
 
-# ── D2:Pendle PT 固定收益贴水(公共 API) ─────────────────────────────────
-def scan_d2() -> list[dict]:
-    # Pendle v2 公共 markets(以太坊主网 chainId=1);取活跃市场 impliedApy vs underlyingApy
+# ── D2:Pendle PT 固定收益贴水(公共 API + 链上 expiry() 核验) ─────────────
+def scan_d2():
+    """返回 {signals, evidence}。口径(§9.2):
+    - spread_bps=隐含-底层收益率差(年化,非本笔利润);
+    - maturity_gross_discount_bps=到期毛折价(API ptDiscount,与 (1+imp)^-T 派生值交叉核对,
+      偏差>50bps 标 DISCOUNT_SOURCE_DIVERGENT);
+    - maturity_window_return_pct=持有到期窗口毛收益(**计价=accountingAsset 资产本位,未扣
+      swap/gas/兑付/资金成本**,净收益仍待计算)。"""
     data = _get("https://api-v2.pendle.finance/core/v1/1/markets?limit=20&is_active=true")
     out = []
+    now_utc = datetime.now(timezone.utc)
     for m in (data.get("results") or [])[:20]:
         try:
             imp = float(m.get("impliedApy") or 0) * 100
@@ -311,20 +317,67 @@ def scan_d2() -> list[dict]:
             name = ((m.get("pt") or {}).get("symbol")) or m.get("symbol") or "?"
             expiry = m.get("expiry")
             days = None
+            expiry_ts = None
             if expiry:
                 try:
                     dt = datetime.fromisoformat(str(expiry).replace("Z", "+00:00"))
-                    days = max(0.0, round((dt - datetime.now(timezone.utc)).total_seconds() / 86400, 1))
+                    expiry_ts = int(dt.timestamp())
+                    days = max(0.0, round((dt - now_utc).total_seconds() / 86400, 1))
                 except Exception:  # noqa: BLE001
                     pass
-            # 隐含收益率差=implied-underlying(年化;§9.3 非本笔套利利润,到期毛折价待PT价格+兑付模型)
-            out.append({"asset": name, "implied_apy_pct": round(imp, 3),
-                        "underlying_apy_pct": round(und, 3),
-                        "spread_bps": round((imp - und) * 100, 1),
-                        "expiry": expiry, "days_to_maturity": days})
+            row = {"asset": name, "implied_apy_pct": round(imp, 3),
+                   "underlying_apy_pct": round(und, 3),
+                   "spread_bps": round((imp - und) * 100, 1),
+                   "expiry": expiry, "days_to_maturity": days,
+                   "accounting_asset": ((m.get("accountingAsset") or {}).get("symbol")) or "",
+                   "pt_address": ((m.get("pt") or {}).get("address")) or "",
+                   "_expiry_ts": expiry_ts}
+            ptd = m.get("ptDiscount")
+            if days and days > 0:
+                t_years = days / 365.0
+                derived_bps = (1 - (1 + imp / 100) ** (-t_years)) * 10000
+                row["maturity_window_return_pct"] = round(((1 + imp / 100) ** t_years - 1) * 100, 2)
+                if ptd is not None:
+                    api_bps = float(ptd) * 10000
+                    row["maturity_gross_discount_bps"] = round(api_bps, 1)
+                    if abs(api_bps - derived_bps) > 50:
+                        row["discount_source_divergent"] = round(api_bps - derived_bps, 1)
+                else:
+                    row["maturity_gross_discount_bps"] = round(derived_bps, 1)
+            out.append(row)
         except Exception:  # noqa: BLE001
             continue
-    return out
+    # ── 链上核验:利差前3的市场 PT.expiry() 对照 API(证据=真链上读) ──
+    evidence = []
+    verified = []
+    if _KECCAK_OK:
+        for row in sorted([r for r in out if r.get("pt_address") and r.get("_expiry_ts")],
+                          key=lambda r: -r["spread_bps"])[:3]:
+            try:
+                res, rpc_used = _rpc("eth_call", [{"to": row["pt_address"], "data": _sel("expiry()")}, "latest"])
+                chain_ts = int(res, 16)
+                ok = abs(chain_ts - row["_expiry_ts"]) < 86400
+                row["expiry_onchain_verified"] = ok
+                if ok:
+                    verified.append({"pt": row["asset"], "address": row["pt_address"],
+                                     "chain_expiry_ts": chain_ts, "api_expiry": row["expiry"], "rpc": rpc_used})
+                else:
+                    log.warning("D2 expiry mismatch %s chain=%s api=%s", row["asset"], chain_ts, row["_expiry_ts"])
+            except Exception as e:  # noqa: BLE001
+                log.warning("D2 expiry() check failed %s: %r", row["asset"], e)
+            time.sleep(0.3)
+    for r in out:
+        r.pop("_expiry_ts", None)
+    if verified:
+        evidence.append({"etype": "MATURITY_ONCHAIN", "ttl": 7 * 24 * 3600, "source": "eth_call expiry()",
+                         "title": f"PT 到期链上核验({len(verified)} 市场,chain==API)",
+                         "body": json.dumps(verified, ensure_ascii=False)})
+        evidence.append({"etype": "CONTRACT_IDENTITY", "ttl": None,
+                         "source": "pendle-api + onchain expiry() 交叉核验",
+                         "title": "D2 PT 合约身份登记(链上到期核验通过的市场)",
+                         "body": json.dumps([{"pt": v["pt"], "address": v["address"]} for v in verified],
+                                            ensure_ascii=False)})
+    return {"signals": out, "evidence": evidence}
 
 
 # ── D4:同币种跨协议借贷利差(DefiLlama yields,免key) ─────────────────────
