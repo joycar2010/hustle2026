@@ -325,13 +325,17 @@ def scan_d2():
                     days = max(0.0, round((dt - now_utc).total_seconds() / 86400, 1))
                 except Exception:  # noqa: BLE001
                     pass
+            acct = m.get("accountingAsset") or {}
             row = {"asset": name, "implied_apy_pct": round(imp, 3),
                    "underlying_apy_pct": round(und, 3),
                    "spread_bps": round((imp - und) * 100, 1),
                    "expiry": expiry, "days_to_maturity": days,
-                   "accounting_asset": ((m.get("accountingAsset") or {}).get("symbol")) or "",
+                   "accounting_asset": acct.get("symbol") or "",
                    "pt_address": ((m.get("pt") or {}).get("address")) or "",
-                   "_expiry_ts": expiry_ts}
+                   "_expiry_ts": expiry_ts, "_market": m.get("address") or "",
+                   "_acct_addr": acct.get("address") or "",
+                   "_acct_dec": int(acct.get("decimals") or 18),
+                   "_pt_dec": int(((m.get("pt") or {}).get("decimals")) or 18)}
             ptd = m.get("ptDiscount")
             if days and days > 0:
                 t_years = days / 365.0
@@ -350,9 +354,10 @@ def scan_d2():
     # ── 链上核验:利差前3的市场 PT.expiry() 对照 API(证据=真链上读) ──
     evidence = []
     verified = []
+    top3 = sorted([r for r in out if r.get("pt_address") and r.get("_expiry_ts")],
+                  key=lambda r: -r["spread_bps"])[:3]
     if _KECCAK_OK:
-        for row in sorted([r for r in out if r.get("pt_address") and r.get("_expiry_ts")],
-                          key=lambda r: -r["spread_bps"])[:3]:
+        for row in top3:
             try:
                 res, rpc_used = _rpc("eth_call", [{"to": row["pt_address"], "data": _sel("expiry()")}, "latest"])
                 chain_ts = int(res, 16)
@@ -366,8 +371,45 @@ def scan_d2():
             except Exception as e:  # noqa: BLE001
                 log.warning("D2 expiry() check failed %s: %r", row["asset"], e)
             time.sleep(0.3)
+    # ── TARGET_QUOTE:前3市场 Pendle v2 SDK 真报价(买入侧,accounting asset→PT) ──
+    quote_rows = []
+    for row in top3:
+        if not (row.get("_market") and row.get("_acct_addr") and row.get("pt_address")):
+            continue
+        qs = []
+        for size in (1_000, 10_000):   # accounting asset 单位(稳定计价≈USD;非稳定资产本位)
+            try:
+                amt_in = size * 10 ** row["_acct_dec"]
+                d = _get("https://api-v2.pendle.finance/core/v2/sdk/1/markets/"
+                         f"{row['_market']}/swap?receiver=0x000000000000000000000000000000000000dEaD"
+                         f"&slippage=0.01&enableAggregator=true&tokenIn={row['_acct_addr']}"
+                         f"&tokenOut={row['pt_address']}&amountIn={amt_in}")
+                dd = d.get("data") or {}
+                pt_out = int(dd.get("amountOut") or 0) / 10 ** row["_pt_dec"]
+                if pt_out <= 0:
+                    raise RuntimeError("empty amountOut")
+                # 1 PT 到期兑付 1 accounting asset → 可执行到期折价=1-(实付/枚)
+                q = {"size": size, "pt_out": round(pt_out, 4),
+                     "asset_per_pt": round(size / pt_out, 6),
+                     "exec_maturity_discount_bps": round((1 - size / pt_out) * 10000, 1),
+                     "price_impact_pct": round(float(dd.get("priceImpact") or 0) * 100, 4)}
+                # 交叉核对:可执行折价 vs API ptDiscount 口径;分歧>200bps=兑付假设可能
+                # 不适用该市场(1PT≠1acct)或计价资产/路由异常——标记待人工复核,绝不硬显示
+                api_disc = row.get("maturity_gross_discount_bps")
+                if api_disc is not None and abs(q["exec_maturity_discount_bps"] - api_disc) > 200:
+                    q["quote_model_divergent_bps"] = round(q["exec_maturity_discount_bps"] - api_disc, 1)
+                qs.append(q)
+            except Exception as e:  # noqa: BLE001
+                qs.append({"size": size, "error": repr(e)[:80]})
+            time.sleep(0.4)
+        if qs:
+            row["pt_quotes"] = qs
+            if any("error" not in q for q in qs):
+                quote_rows.append({"pt": row["asset"], "market": row["_market"],
+                                   "accounting_asset": row["accounting_asset"], "quotes": qs})
     for r in out:
-        r.pop("_expiry_ts", None)
+        for k in ("_expiry_ts", "_market", "_acct_addr", "_acct_dec", "_pt_dec"):
+            r.pop(k, None)
     if verified:
         evidence.append({"etype": "MATURITY_ONCHAIN", "ttl": 7 * 24 * 3600, "source": "eth_call expiry()",
                          "title": f"PT 到期链上核验({len(verified)} 市场,chain==API)",
@@ -377,6 +419,25 @@ def scan_d2():
                          "title": "D2 PT 合约身份登记(链上到期核验通过的市场)",
                          "body": json.dumps([{"pt": v["pt"], "address": v["address"]} for v in verified],
                                             ensure_ascii=False)})
+        # 兑付模型:Pendle 协议级事实(到期 1 PT = 1 accounting asset,经 Router redeemPy)
+        # + 逐市场计价资产映射;非稳定计价=资产本位(settlement_class 按 accounting asset 归类)
+        evidence.append({"etype": "REDEMPTION_MODEL", "ttl": 7 * 24 * 3600, "dedupe": 24 * 3600,
+                         "source": "pendle 协议通用兑付模型 + API accountingAsset 映射",
+                         "title": "D2 兑付模型登记(链上核验市场)",
+                         "body": json.dumps([{
+                             "pt": v["pt"],
+                             "model": "到期 1 PT = 1 accounting asset;赎回路径=expiry 后经 Pendle Router redeemPy",
+                             "accounting_asset": next((r["accounting_asset"] for r in top3
+                                                       if r["asset"] == v["pt"]), ""),
+                             "settlement_class": ("HARD_STABLE" if any(
+                                 s in next((r["accounting_asset"] for r in top3 if r["asset"] == v["pt"]), "").upper()
+                                 for s in ("USD", "DAI", "FRAX")) else "ASSET_UNIT_HARD_USD_FLOATING")}
+                             for v in verified], ensure_ascii=False)})
+    if quote_rows:
+        evidence.append({"etype": "TARGET_QUOTE", "ttl": 4 * 3600, "dedupe": 3600,
+                         "source": "pendle-v2-sdk swap 真报价",
+                         "title": "PT 目标金额买入报价(1k/10k accounting asset)",
+                         "body": json.dumps(quote_rows, ensure_ascii=False)})
     return {"signals": out, "evidence": evidence}
 
 
@@ -428,8 +489,77 @@ def _register_evidence(c, pid: str, ev: dict, now: int):
     log.info("%s evidence registered: %s", pid, etype)
 
 
+def run_replay(c: sqlite3.Connection, run_id: int, pid: str, params: dict, now: int):
+    """回放执行器(V6.2 L4 v1)。口径=**重放已采样的 lab_signal 历史,非链上区块重演**;
+    产出=超成本占比/持续性/瞬时信号率/净p50 → 人工评审素材,不自动晋级。"""
+    days = float(params.get("days") or 30)
+    since = now - int(days * 86400)
+    rows = list(c.execute("SELECT ts, payload FROM lab_signal WHERE project_id=? AND ts>=? ORDER BY ts",
+                          (pid, since)))
+    cost = COST_MODEL.get(pid, {}).get("round_trip_bps", 0)
+    series = []
+    for ts, pl in rows:
+        try:
+            p = json.loads(pl)
+            b = p.get("best_bps")
+            if b is None:   # 旧 payload(净口径时代)回落:net+cost 还原 raw
+                b = (p.get("net_best_bps") or 0) + (p.get("cost_bps") or 0)
+            series.append((ts, float(b)))
+        except Exception:  # noqa: BLE001
+            continue
+    n = len(series)
+    if n < 12:
+        c.execute("UPDATE lab_run SET state='FAILED', ended_at=?, note=? WHERE run_id=?",
+                  (now, f"历史样本不足({n}轮<12)——先积累测量数据再回放", run_id))
+        log.warning("%s replay #%s failed: only %d samples", pid, run_id, n)
+        return
+    bests = sorted(b for _, b in series)
+    p50 = bests[n // 2]
+    p90 = bests[min(n - 1, int(n * 0.9))]
+    above = [b > cost for _, b in series]
+    pct_above = round(100 * sum(above) / n, 1)
+    cur = longest = 0
+    for a in above:
+        cur = cur + 1 if a else 0
+        longest = max(longest, cur)
+    trans, tot = 0, 0
+    for i in range(n - 1):
+        if above[i]:
+            tot += 1
+            if not above[i + 1]:
+                trans += 1
+    transient = round(100 * trans / tot, 1) if tot else None
+    stats = {"window_days": days, "rounds": n, "cost_bps": cost,
+             "best_p50_bps": round(p50, 1), "best_p90_bps": round(p90, 1),
+             "pct_rounds_above_cost": pct_above, "longest_streak_rounds": longest,
+             "transient_signal_rate_pct": transient, "net_p50_bps": round(p50 - cost, 1),
+             "span_ts": [series[0][0], series[-1][0]],
+             "note": "口径=重放已采样lab_signal历史(5min粒度),非链上区块重演;假阳性以瞬时率近似"}
+    note = (f"回放{days:g}天{n}轮:超成本占比{pct_above}%·最长连续{longest}轮·"
+            f"瞬时信号率{transient if transient is not None else '—'}%·净p50={round(p50 - cost, 1)}bps")
+    c.execute("UPDATE lab_run SET state='DONE', ended_at=?, samples=?, result_bps=?, params=?, note=? "
+              "WHERE run_id=?", (now, n, round(p50 - cost, 1),
+                                 json.dumps({**params, "stats": stats}, ensure_ascii=False), note, run_id))
+    c.execute("INSERT INTO research_outbox(project_id,title,summary,severity,created_at,"
+              "artifact_type,schema_version) VALUES(?,?,?,?,?,'LAB_RUN_COMPLETED',2)",
+              (pid, f"{pid} 回放完成(#{run_id})",
+               note + "\n" + stats["note"] + f"\n窗口:{days:g}天 成本假设:{cost}bps p90={round(p90, 1)}bps",
+               "info", now))
+    log.info("%s replay #%s done: %s", pid, run_id, note)
+
+
 def loop_once(c: sqlite3.Connection):
     now = int(time.time())
+    # ── REPLAY 轮次:一次性执行(历史重放),完成即 DONE ──
+    for run_id, pid, params_s in list(c.execute(
+            "SELECT run_id, project_id, params FROM lab_run WHERE state='RUNNING' AND kind='REPLAY'")):
+        try:
+            run_replay(c, run_id, pid, json.loads(params_s or "{}"), now)
+        except Exception as e:  # noqa: BLE001
+            c.execute("UPDATE lab_run SET state='FAILED', ended_at=?, note=? WHERE run_id=?",
+                      (now, f"REPLAY ERR:{repr(e)[:120]}", run_id))
+            log.warning("%s replay #%s crashed: %r", pid, run_id, e)
+        c.commit()   # 逐轮即时提交,绝不带着写锁跨网络请求(database is locked 课)
     runs = list(c.execute(
         "SELECT run_id, project_id FROM lab_run WHERE state='RUNNING' AND kind='MEASURE'"))
     for run_id, pid in runs:
@@ -473,6 +603,8 @@ def loop_once(c: sqlite3.Connection):
         except Exception as e:  # noqa: BLE001
             c.execute("UPDATE lab_run SET note=? WHERE run_id=?", (f"ERR:{repr(e)[:120]}", run_id))
             log.warning("%s scan failed: %r", pid, e)
+        # 逐项目即时提交:下一项目的网络请求(报价含 sleep)绝不发生在持写锁的事务里
+        c.commit()
     c.commit()
 
 
@@ -480,7 +612,8 @@ def main():
     log.info("dexlab-scanner up interval=%ss scanners=%s", INTERVAL, list(_SCANNERS))
     while True:
         try:
-            c = sqlite3.connect(DB)
+            c = sqlite3.connect(DB, timeout=30)
+            c.execute("PRAGMA busy_timeout=15000")
             loop_once(c)
             c.close()
         except Exception:  # noqa: BLE001

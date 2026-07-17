@@ -117,9 +117,10 @@ _SEED = [
 
 
 def db():
-    c = sqlite3.connect(DB)
+    c = sqlite3.connect(DB, timeout=10)
     c.row_factory = sqlite3.Row
     c.execute("PRAGMA journal_mode=WAL")   # scanner 写 + API 读并发
+    c.execute("PRAGMA busy_timeout=8000")  # 扫描器短事务写入时等待而非立即 locked
     return c
 
 
@@ -326,16 +327,27 @@ def lifecycle(pid: str, req: Request):
     else:
         add("MEASURE", "AVAILABLE", cond=f"开始扫描后由 worker 每5分钟采样;最小样本 ≥{_MIN_SAMPLES}",
             nxt="scan_start")
-    rb = []
-    if samples < _MIN_SAMPLES:
-        rb.append(f"测量样本不足({samples}/{_MIN_SAMPLES})")
-    if ev["missing"]:
-        rb.append("必需证据未齐:" + "/".join(EVIDENCE_TYPE_CN.get(t, t) for t in ev["missing"]))
-    rb.append("回放执行器未建(升级包 L4)——历史窗口回放能力待开发,不显示假回放")
-    add("REPLAY", "NOT_APPLICABLE" if sentinel else "LOCKED", None if sentinel else rb,
-        "可执行成本/容量/滑点/假阳性过滤通过", "")
+    rep_running = c.execute("SELECT count(*) FROM lab_run WHERE project_id=? AND kind='REPLAY' "
+                            "AND state='RUNNING'", (pid,)).fetchone()[0]
+    rep_done = c.execute("SELECT run_id, note, ended_at FROM lab_run WHERE project_id=? AND kind='REPLAY' "
+                         "AND state='DONE' ORDER BY run_id DESC LIMIT 1", (pid,)).fetchone()
+    if sentinel:
+        add("REPLAY", "NOT_APPLICABLE")
+    elif rep_running:
+        add("REPLAY", "CURRENT", cond="回放执行器将在下一轮(≤5分钟)完成历史重放",
+            data={"running": rep_running})
+    elif rep_done:
+        add("REPLAY", "COMPLETED",
+            cond="口径=重放已采样lab_signal历史(非区块重演);结果须人工评审,不自动晋级",
+            nxt="replay", data={"latest_run_id": rep_done["run_id"], "latest": rep_done["note"]})
+    elif samples >= _MIN_SAMPLES:
+        add("REPLAY", "AVAILABLE", cond="重放已采样历史→超成本占比/持续性/瞬时信号率/净p50",
+            nxt="replay")
+    else:
+        add("REPLAY", "LOCKED", [f"测量样本不足({samples}/{_MIN_SAMPLES})——先积累采样再回放"],
+            "达到最小样本后可回放", "")
     add("SHADOW", "NOT_APPLICABLE" if sentinel else "LOCKED",
-        None if sentinel else ["回放未通过——影子账本/风险预算/退出路径未验证"],
+        None if sentinel else ["影子执行器未建(后续批次)", "回放结果须人工评审通过(不自动晋级)"],
         "影子账本+风险预算+权限+退出路径通过", "")
     add("CANARY", "NOT_APPLICABLE" if sentinel else "LOCKED",
         None if sentinel else ["影子未通过", "需 D-canary 独立钱包 + HOUSE_RND + Passkey + 明确预算(人工审批)"],
