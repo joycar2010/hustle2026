@@ -3,7 +3,7 @@
     <RiskStatusBar />
     <!-- 研判对象条:canonical 搜索(§7.1)——币种/交易对/中英文别名;AiCoin dbKey 只在服务端 -->
     <div class="objbar card">
-      <b class="sym">{{ sym || '—' }}</b>
+      <b class="sym" @click="openAsset360(sym)" style="cursor:pointer" title="点击查看Asset 360">{{ sym || '—' }}</b>
       <el-select v-model="prod" size="small" style="width:88px" title="研判目标产品(决定指标面与计划产品)" @change="loadAll">
         <el-option v-for="p in PRODUCTS" :key="p" :value="p"/>
       </el-select>
@@ -165,6 +165,8 @@
       </template>
     </el-dialog>
   </div>
+  <!-- Asset 360 抽屉 -->
+  <Asset360 v-model:open="a360Open" :symbol="a360Symbol" />
 </template>
 
 <script setup>
@@ -172,6 +174,7 @@ import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
 import * as echarts from 'echarts'
+import Asset360 from '../../components/v62/Asset360.vue'
 import RiskStatusBar from '../../components/RiskStatusBar.vue'
 import ValueCell from '../../components/v62/ValueCell.vue'
 import { mixApi } from '../../api/mix'
@@ -254,6 +257,16 @@ function pickSym(s) {
 function openAiCoinSite() { copySym(); window.open(`https://www.aicoin.com/zh-Hans/search?keyword=${encodeURIComponent(sym.value)}`) }
 function copySym() { navigator.clipboard?.writeText(sym.value); ElMessage.success(`已复制 ${sym.value}`) }
 function scrollVenues() { venuesEl.value?.scrollIntoView({ behavior: 'smooth' }) }
+
+// Asset 360 抽屉
+const a360Open = ref(false)
+const a360Symbol = ref('')
+function openAsset360(symbol) {
+  if (!symbol || symbol === '—') return
+  a360Symbol.value = symbol
+  a360Open.value = true
+}
+
 async function markAnomaly() {
   try {
     await mixApi.researchCaseCreate({ symbol: sym.value, review_mode: 'QUICK', market_stage: '看不清',

@@ -51,7 +51,7 @@
           <div class="tbody">
             <template v-for="w in rows" :key="w.work_item_id">
               <div class="trow" :class="{sel:sel?.work_item_id===w.work_item_id}" @click="sel=w">
-                <span style="width:120px" class="t1b">{{ sel?.work_item_id===w.work_item_id?'▾':'▸' }} {{ w.symbol }}</span>
+                <span style="width:120px" class="t1b">{{ sel?.work_item_id===w.work_item_id?'▾':'▸' }} <b @click.stop="openAsset360(w.symbol)" style="cursor:pointer">{{ w.symbol }}</b></span>
                 <span style="width:64px" class="t2b">{{ w.strategy_code }}</span>
                 <span style="width:56px" class="t2">{{ srcCn(w.source) }}</span>
                 <span style="width:64px" :class="w.automation_mode==='AUTO'?'green':'amber'">{{ autoCn(w.automation_mode) }}</span>
@@ -163,12 +163,15 @@
       </template>
     </el-dialog>
   </div>
+  <!-- Asset 360 抽屉 -->
+  <Asset360 v-model:open="a360Open" :symbol="a360Symbol" />
 </template>
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRouter } from 'vue-router'
 import { mixApi } from '../../api/mix'
+import Asset360 from '../../components/v62/Asset360.vue'
 import { useV6Snapshot } from '../../composables/useV6'
 import V6StatusBar from '../../components/V6StatusBar.vue'
 import PartialRepayModal from '../../components/rules/PartialRepayModal.vue'
@@ -298,6 +301,16 @@ watch(items, list => {   // 快照到达后按 URL 恢复选中行
 }, { once: false })
 const repayModal = ref({ open: false, symbol: '' })
 const closePrev = ref({ open: false, symbol: '' })
+
+// Asset 360 抽屉
+const a360Open = ref(false)
+const a360Symbol = ref('')
+function openAsset360(symbol) {
+  if (!symbol) return
+  a360Symbol.value = symbol
+  a360Open.value = true
+}
+
 function dispatchAct(a) {
   const w = sel.value
   if (!w || !a.wired) return
