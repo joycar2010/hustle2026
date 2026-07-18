@@ -8,7 +8,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
-from .routers import aicoin, ledger, maintenance, proposal, positions, strategies, rules, accounts, misc, me, auth, history, ops, notify_center, credentials, ai, investor, risk
+from .routers import aicoin, ledger, maintenance, proposal, positions, strategies, rules, accounts, misc, me, auth, history, ops, notify_center, credentials, ai, investor, risk, intents
 from .routers import v6ops, portal, lab, webauthn_auth, training, research
 
 app = FastAPI(title="HustleCoin Mix API", version="0.1.0")
@@ -36,7 +36,7 @@ for r in (positions.router, strategies.router, rules.router, accounts.router, mi
 
 # V6 契约(方案 §4/§8/§9/§13):operator/portal/lab 三命名空间 + WebAuthn
 API6 = "/api/v6"
-for r in (v6ops.router, portal.router, lab.router, training.router, research.router):
+for r in (v6ops.router, portal.router, lab.router, training.router, research.router, intents.router):
     app.include_router(r, prefix=API6)
 app.include_router(webauthn_auth.router, prefix=API)
 
