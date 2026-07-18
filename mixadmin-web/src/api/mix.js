@@ -264,6 +264,9 @@ export const mixApi = {
   v6LeaseRelease: (b) => http6.post('/operator/lease/release', b),
   v6LegacyCompare: () => http6.get('/operator/legacy/compare'),
   v6RiskControl: () => http6.get('/operator/risk-control'),
+  // Asset 360 单币全景 (PATCH-01 A1-A4)
+  assetsSearch: (q, limit = 20) => http6.get('/assets/search', { params: { q, limit } }),
+  asset360Snapshot: (assetId) => http6.get(`/assets/${assetId}/360`),
   v6LegacyRuns: () => http6.get('/operator/legacy/runs'),
   v6LabHealth: () => http6.get('/lab/health'),
   v6LabProjects: () => http6.get('/lab/projects'),

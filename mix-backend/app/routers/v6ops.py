@@ -143,6 +143,20 @@ async def risk_control_snapshot(_who=Depends(require_viewer)):
     return await v6core.build_risk_control_snapshot()
 
 
+# ══ Asset 360 单币全景 API (MIX-V6.2-ASSET360-PATCH-01 A1) ═══════════════
+from app import asset360
+
+@router.get("/assets/search")
+async def assets_search(q: str, limit: int = 20, _who=Depends(require_viewer)):
+    """资产搜索：规范symbol/别名/合约地址（A1阶段=预置列表+别名；A3接CoinGecko）。"""
+    return {"results": asset360.search_assets(q, limit)}
+
+@router.get("/assets/{asset_id}/360")
+async def asset360_snapshot(asset_id: str, _who=Depends(require_viewer)):
+    """单币全景快照：跨平台价格/资金费/OI/充提/韩国/市值（A1-A3分批完成）。"""
+    return await asset360.build_asset360_snapshot(asset_id.upper())
+
+
 @router.get("/operator/workitems")
 async def workitems(stage: str = "", strategy: str = "", _who=Depends(require_viewer)):
     """工作项投影(V6.1 §4 全字段+服务端 allowed_actions)。

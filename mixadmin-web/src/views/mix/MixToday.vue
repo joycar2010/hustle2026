@@ -41,7 +41,8 @@
             <div v-for="w in opps" :key="w.work_item_id" class="row tall opp3" :class="{sel:selId===w.work_item_id, submitting:rowState[w.work_item_id]==='loading'}"
                  @click="openItem(w)">
               <div class="r1">
-                <b class="sym">{{ w.symbol }} · {{ w.strategy_code }}</b>
+                <b class="sym" @click.stop="openAsset360(w.symbol)">{{ w.symbol }}</b>
+                <span class="prod">· {{ w.strategy_code }}</span>
                 <span v-if="w.research_status && w.research_status!=='NOT_REQUIRED'" class="rs" :class="w.research_status">
                   研判{{ {PENDING:'待做',COMPLETED:'完成',EXPIRED:'过期'}[w.research_status]||'' }}</span>
                 <span class="fill"></span>
@@ -73,7 +74,8 @@
               <div class="r1">
                 <span v-if="w.account_legs?.length" class="expbtn" :class="{on:!!expRows[w.work_item_id]}"
                       @click.stop="toggleExp(w.work_item_id)">{{ expRows[w.work_item_id] ? '▾' : '▸' }}</span>
-                <b class="sym">{{ w.symbol }} · {{ w.strategy_code }}</b>
+                <b class="sym" @click.stop="openAsset360(w.symbol)">{{ w.symbol }}</b>
+                <span class="prod">· {{ w.strategy_code }}</span>
                 <span class="st" :class="stCls(w)">{{ w.stage_detail || w.workflow_stage }}</span>
                 <!-- §6.3 点差保护=一等状态,不藏详情;shadow 评估,退出决策仍人工 -->
                 <span v-if="w.risk_protection_state && w.risk_protection_state!=='NORMAL'"
@@ -200,6 +202,13 @@
     </el-drawer>
     <PartialRepayModal v-model="repay.open" :symbol="repay.symbol"/>
     <ClosePreviewDialog v-model="closeP.open" :symbol="closeP.symbol"/>
+    <!-- Asset 360 单币全景抽屉（批A入口：币种点击；批B-C补充提/韩国/研判表单） -->
+    <el-drawer v-model="asset360Open" :size="asset360Fullscreen?'100%':'60%'" direction="rtl"
+               :show-close="false" :close-on-press-escape="true" :append-to-body="true"
+               :destroy-on-close="false" class="a360drawer">
+      <Asset360 v-if="asset360Open && asset360Id" :asset-id="asset360Id" :fullscreen="asset360Fullscreen"
+                @close="closeAsset360" @toggle-fullscreen="toggleAsset360Fullscreen"/>
+    </el-drawer>
     <!-- 手动计划(泛产品):研判先行——本弹窗只指路,不直接建计划 -->
     <el-dialog v-model="npOpen" title="新建手动计划（研判先行 · 全产品同一链路）" width="440px">
       <el-form label-width="80px" size="small">
@@ -223,7 +232,7 @@
 import { ref, computed, watch, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
-import { mixApi } from '../../api/mix'
+import Asset360 from '../../components/v62/Asset360.vue'
 import { useV6Snapshot } from '../../composables/useV6'
 import { useSelection } from '../../composables/useSelection'
 import V6StatusBar from '../../components/V6StatusBar.vue'
@@ -409,6 +418,14 @@ const acctOverview = computed(() => {
   }
   return { worst, minBud, closeoutSum }
 })
+// Asset 360 单币全景抽屉（批A §6A入口复用：所有币种行一次点击打开同一抽屉）
+const asset360Open = ref(false); const asset360Id = ref(''); const asset360Fullscreen = ref(false)
+function openAsset360(symbol) {
+  asset360Id.value = symbol?.toUpperCase() || ''
+  if (asset360Id.value) { asset360Open.value = true; asset360Fullscreen.value = false }
+}
+function closeAsset360() { asset360Open.value = false }
+function toggleAsset360Fullscreen() { asset360Fullscreen.value = !asset360Fullscreen.value }
 // LAB 提醒(与旧中控台同一已读键 mix_lab_read_id:同一 artifact 两处不重复打扰)
 const labNote = ref(''); const labLatestId = ref(0)
 async function loadLabNote() {
@@ -474,12 +491,15 @@ function dismissLab() {
 .rs.COMPLETED{color:var(--mix-green);border-color:#0ECB8155}
 .rs.PENDING{color:var(--mix-accent);border-color:#F0B90B55}
 .up{color:var(--mix-green)}.dn{color:var(--mix-red)}.warn{color:#FF8A3D}
+:deep(.a360drawer .el-drawer__body){padding:0;overflow:hidden}
 .row .r1{display:flex;align-items:center;gap:10px}
 .row .r2{font-size:9.5px;color:var(--mix-t3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .row.sel{background:var(--mix-card2);border-left:2px solid var(--mix-blue)}
 .row.bad{background:#F6465D0A}
 .row.submitting{opacity:.75}
-.sym{font-size:11px;color:var(--mix-t1)}
+.sym{font-size:11px;color:var(--mix-t1);cursor:pointer;border-bottom:1px dashed transparent}
+.sym:hover{color:var(--mix-accent);border-bottom-color:var(--mix-accent)}
+.prod{font-size:11px;color:var(--mix-t2)}
 .ev{font-size:11px;font-weight:700}
 .st{font-size:10.5px}
 .ddl{font-size:9.5px;color:var(--mix-t3)}
