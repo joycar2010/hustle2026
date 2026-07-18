@@ -232,7 +232,7 @@
 import { ref, computed, watch, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
-import mixApi from '../../api/mix'
+import { mixApi } from '../../api/mix'
 import Asset360 from '../../components/v62/Asset360.vue'
 import { useV6Snapshot } from '../../composables/useV6'
 import { useSelection } from '../../composables/useSelection'
