@@ -84,7 +84,7 @@
             <span class="c-exp" @click.stop="w.account_legs?.length && $emit('toggle', w.work_item_id)">
               <i v-if="w.account_legs?.length" class="expbtn" :class="{on:expanded[w.work_item_id]}">{{ expanded[w.work_item_id]?'▾':'▸' }}</i></span>
             <span class="c-stage"><i class="st" :class="w.workflow_stage">{{ w.stage_detail || STAGE_CN[w.workflow_stage] || w.workflow_stage }}</i></span>
-            <span class="c-sym"><b>{{ w.symbol }}</b><i class="sub">{{ w.strategy_code }}</i></span>
+            <span class="c-sym"><b @click.stop="$emit('openAsset', w.symbol)" style="cursor:pointer">{{ w.symbol }}</b><i class="sub">{{ w.strategy_code }}</i></span>
             <span class="c-ctl">{{ CTL_CN[w.automation_mode] || '—' }}</span>
             <span class="c-route ell" :title="w.route||''">{{ w.route || '—' }}</span>
             <span class="s-num r">{{ nf(w.capital_reserved,0) }}</span>
