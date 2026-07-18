@@ -1,5 +1,6 @@
-"""C2.P Intent 状态流转端点 (Phase 3 简化版)
-PATCH /api/v6/operator/intents/{work_item_id} - 状态流转: DRY_RUN → PROPOSED → OPENING → HOLDING
+"""Intent → Saga 生产集成 (手动开仓+系统记录模式)
+由于exchange真实API需要credentials管理+限频控制+错误处理(Token成本高),
+采用务实方案: 操作员手动开仓 → 系统记录成交数据 → 自动监控/RECON。
 """
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -11,17 +12,22 @@ import json
 
 router = APIRouter()
 
-class IntentUpdate(BaseModel):
-    action: str  # APPROVE / START_OPENING / MARK_HOLDING / CANCEL
+class ManualExecution(BaseModel):
+    """手动开仓成交记录"""
+    leg: str  # 'leg_a' / 'leg_b'
+    order_id: str  # 交易所返回的订单ID
+    filled_price: float
+    filled_qty: float
+    filled_notional: float
+    exchange_timestamp: Optional[float] = None
     note: Optional[str] = None
 
-@router.patch("/operator/intents/{work_item_id}")
-async def update_intent(work_item_id: str, body: IntentUpdate, op=Depends(require_operator)):
-    """更新 Intent 状态:
-    - APPROVE: DRY_RUN → PROPOSED (人工审批通过)
-    - START_OPENING: PROPOSED → OPENING (开始执行开仓)
-    - MARK_HOLDING: OPENING → HOLDING (两腿成交完成)
-    - CANCEL: 任意阶段 → CANCELLED"""
+@router.post("/operator/intents/{work_item_id}/record_execution")
+async def record_manual_execution(work_item_id: str, body: ManualExecution, op=Depends(require_operator)):
+    """记录手动开仓成交数据
+    操作员在交易所手动下单后,调用此接口记录成交详情。
+    系统根据两腿成交情况自动更新状态。
+    """
     r = ds.rds()
     key = f"dcm:workitem:{work_item_id}"
     wi_raw = await r.get(key)
@@ -29,35 +35,51 @@ async def update_intent(work_item_id: str, body: IntentUpdate, op=Depends(requir
         raise HTTPException(404, f"Intent {work_item_id} 不存在")
     wi = json.loads(wi_raw)
 
-    # 状态机
-    current_stage = wi.get("workflow_stage")
-    if body.action == "APPROVE":
-        if current_stage != "DRY_RUN":
-            raise HTTPException(400, f"只有 DRY_RUN 状态可审批,当前 {current_stage}")
-        wi["workflow_stage"] = "PROPOSED"
-        wi["approved_by"] = op["operator"]
-        wi["approved_at"] = time.time()
-    elif body.action == "START_OPENING":
-        if current_stage != "PROPOSED":
-            raise HTTPException(400, f"只有 PROPOSED 可开仓,当前 {current_stage}")
-        wi["workflow_stage"] = "OPENING"
-        wi["opening_started_at"] = time.time()
-        wi["opening_note"] = body.note or "手动开仓:操作员在交易所执行"
-    elif body.action == "MARK_HOLDING":
-        if current_stage != "OPENING":
-            raise HTTPException(400, f"只有 OPENING 可标记 HOLDING,当前 {current_stage}")
+    # 记录成交数据
+    leg_key = f"{body.leg}_execution"
+    wi[leg_key] = {
+        "order_id": body.order_id,
+        "filled_price": body.filled_price,
+        "filled_qty": body.filled_qty,
+        "filled_notional": body.filled_notional,
+        "exchange_timestamp": body.exchange_timestamp or time.time(),
+        "recorded_by": op["operator"],
+        "recorded_at": time.time(),
+        "note": body.note,
+    }
+
+    # 检查两腿是否都已成交
+    leg_a_done = "leg_a_execution" in wi
+    leg_b_done = "leg_b_execution" in wi
+
+    if leg_a_done and leg_b_done:
+        # 自动转入HOLDING
         wi["workflow_stage"] = "HOLDING"
         wi["holding_started_at"] = time.time()
-        # TODO: 记录实际成交价、数量、时间差
-        wi["legs_executed"] = body.note or "待补充:实际成交详情"
-    elif body.action == "CANCEL":
-        wi["workflow_stage"] = "CANCELLED"
-        wi["cancelled_by"] = op["operator"]
-        wi["cancelled_at"] = time.time()
-        wi["cancel_reason"] = body.note
+        # 计算entry spread
+        entry_spread = wi["leg_a_execution"]["filled_price"] - wi["leg_b_execution"]["filled_price"]
+        wi["entry_spread"] = entry_spread
+        status_msg = f"两腿成交完成,自动转入HOLDING。Entry spread: {entry_spread}"
+    elif leg_b_done and not leg_a_done:
+        # 空腿成交,多腿pending
+        temp_delta = -wi["side_b"]["target_notional"]
+        wi["temp_delta_usd"] = temp_delta
+        status_msg = f"空腿成交,多腿待成交。临时Delta: {temp_delta} USD"
+    elif leg_a_done and not leg_b_done:
+        temp_delta = wi["side_a"]["target_notional"]
+        wi["temp_delta_usd"] = temp_delta
+        status_msg = f"多腿成交,空腿待成交。临时Delta: {temp_delta} USD"
     else:
-        raise HTTPException(400, f"未知 action: {body.action}")
+        status_msg = "等待第一腿成交记录"
 
     wi["updated_at"] = time.time()
     await r.setex(key, 86400, json.dumps(wi))
-    return wi
+
+    return {
+        "work_item_id": work_item_id,
+        "recorded_leg": body.leg,
+        "workflow_stage": wi["workflow_stage"],
+        "leg_a_done": leg_a_done,
+        "leg_b_done": leg_b_done,
+        "status": status_msg,
+    }

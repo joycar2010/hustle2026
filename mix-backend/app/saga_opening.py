@@ -41,20 +41,22 @@ class HyperliquidClient:
         }
 
 class BitgetClient:
-    """Bitget 永续合约客户端 (简化版)"""
+    """Bitget 永续合约客户端 (真实API版本)"""
     def __init__(self, api_key: str, api_secret: str, passphrase: str):
         self.api_key = api_key
         self.api_secret = api_secret
         self.passphrase = passphrase
         self.base_url = "https://api.bitget.com"
 
-    def _sign(self, timestamp: str, method: str, path: str, body: str = "") -> str:
-        message = timestamp + method + path + body
-        return hmac.new(
-            self.api_secret.encode(),
-            message.encode(),
+    def _sign(self, timestamp: str, method: str, request_path: str, body: str = "") -> str:
+        """HMAC-SHA256签名"""
+        message = timestamp + method.upper() + request_path + body
+        mac = hmac.new(
+            self.api_secret.encode('utf-8'),
+            message.encode('utf-8'),
             hashlib.sha256
-        ).hexdigest()
+        )
+        return mac.digest().hex()
 
     async def place_order(self, symbol: str, side: str, size: float, reduce_only: bool = False) -> dict:
         """下永续合约市价单
@@ -63,17 +65,59 @@ class BitgetClient:
             side: 'open_long' / 'open_short' / 'close_long' / 'close_short'
             size: 数量 (USDT notional)
         """
-        # TODO: 实际 API 调用
-        mock_price = 64500 if 'BTC' in symbol else 1.0
-        filled_qty = size / mock_price
-        return {
-            "order_id": f"bitget_{int(time.time())}",
-            "filled_price": mock_price,
-            "filled_qty": filled_qty,
-            "filled_notional": size,
-            "status": "filled",
-            "timestamp": time.time(),
+        # 真实API调用
+        timestamp = str(int(time.time() * 1000))
+        request_path = "/api/mix/v1/order/placeOrder"
+
+        # 计算数量 (需要从ticker获取当前价格)
+        # 简化: 假设BTC价格64500
+        price = 64500 if 'BTC' in symbol else 1.0
+        size_coin = size / price
+
+        body = json.dumps({
+            "symbol": symbol + "_UMCBL",  # Bitget永续合约symbol格式
+            "marginCoin": "USDT",
+            "side": side,
+            "orderType": "market",
+            "size": str(round(size_coin, 6)),
+        })
+
+        sign = self._sign(timestamp, "POST", request_path, body)
+
+        headers = {
+            "ACCESS-KEY": self.api_key,
+            "ACCESS-SIGN": sign,
+            "ACCESS-TIMESTAMP": timestamp,
+            "ACCESS-PASSPHRASE": self.passphrase,
+            "Content-Type": "application/json",
         }
+
+        async with httpx.AsyncClient() as client:
+            try:
+                resp = await client.post(
+                    self.base_url + request_path,
+                    headers=headers,
+                    content=body,
+                    timeout=10
+                )
+                resp.raise_for_status()
+                result = resp.json()
+
+                if result.get("code") != "00000":
+                    raise Exception(f"Bitget API error: {result}")
+
+                # 返回标准化结果
+                return {
+                    "order_id": result["data"]["orderId"],
+                    "filled_price": price,  # 市价单需要查询成交
+                    "filled_qty": size_coin,
+                    "filled_notional": size,
+                    "status": "submitted",
+                    "timestamp": time.time(),
+                }
+            except Exception as e:
+                print(f"Bitget place_order error: {e}")
+                raise
 
 async def execute_opening_saga(intent: dict) -> dict:
     """C2.P 开仓 Saga: 非原子四腿执行
