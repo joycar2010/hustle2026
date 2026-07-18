@@ -120,6 +120,147 @@ async def _venue_markets(venue: str, canonical: str) -> dict:
         "oi_usd": _mv(None, "NOT_CONNECTED", venue, None, "USD"),
     }
 
+# ══ §A2 充提网络状态（简化版：币级摘要，详细网络留 A5 优化） ═════════════
+async def _venue_networks(venue: str, canonical: str) -> list[dict]:
+    """单所单币充提状态摘要。
+    A2 简化版：由于币安 /sapi/v1/capital/config/getall 需签名非公开，OKX/Bybit 类似，
+    且 cred-agent 架构改造耗时，A2 阶段只返回币级摘要占位，详细逐网络状态留 A5 优化
+    （届时统一从 cred-agent 定时采集并缓存到 Redis）。"""
+    # A2 简化：返回币级摘要占位
+    return [
+        {
+            "venue": venue,
+            "canonical": canonical,
+            "network": "summary",  # 标记为摘要行
+            "deposit_status": "NOT_CONNECTED",  # A5 补：从 cred-agent 缓存读取
+            "withdrawal_status": "NOT_CONNECTED",
+            "note": "详细逐网络状态需签名 API，A5 优化时统一采集",
+        }
+    ]
+
+def _map_network_chain(network_name: str) -> str:
+    """网络名映射到 chain_id（A2 简化版，A3 完善）。"""
+    n = network_name.upper()
+    if "ETH" in n or "ERC20" in n:
+        return "ethereum"
+    if "BSC" in n or "BEP20" in n:
+        return "binance-smart-chain"
+    if "ARB" in n:
+        return "arbitrum"
+    if "OP" in n and "OPTIMISM" in n:
+        return "optimism"
+    if "POLYGON" in n or "MATIC" in n:
+        return "polygon"
+    if "AVAX" in n:
+        return "avalanche"
+    if "SOL" in n:
+        return "solana"
+    return network_name.lower()
+
+# ══ §A3 韩国市场+市值 ═════════════════════════════════════════════════════
+async def _korea_markets(canonical: str) -> list[dict]:
+    """韩国 Upbit/Bithumb KRW 盘口 + 区域溢价五前提闸。
+    数据源：Upbit /v1/ticker, Bithumb /public/ticker/{pair} 公开端点 + exchangerate-api USDKRW。"""
+    try:
+        import httpx
+        korea_rows = []
+        # 获取 USDKRW 汇率
+        async with httpx.AsyncClient(timeout=10) as cli:
+            fx_r = await cli.get("https://api.exchangerate-api.com/v4/latest/USD")
+            fx_r.raise_for_status()
+            fx_data = fx_r.json()
+            usdkrw = fx_data.get("rates", {}).get("KRW")
+            if not usdkrw:
+                return []
+            # Upbit
+            try:
+                upbit_r = await cli.get(f"https://api.upbit.com/v1/ticker?markets=KRW-{canonical}")
+                upbit_r.raise_for_status()
+                upbit_data = upbit_r.json()
+                if upbit_data and len(upbit_data) > 0:
+                    tick = upbit_data[0]
+                    krw_price = tick.get("trade_price")
+                    if krw_price:
+                        korea_rows.append({
+                            "venue": "upbit",
+                            "canonical": canonical,
+                            "listed": True,
+                            "market_pair": f"KRW-{canonical}",
+                            "krw_bid": krw_price,  # Upbit ticker 只有 trade_price
+                            "krw_ask": krw_price,
+                            "krw_mid": krw_price,
+                            "normalized_price_usd": krw_price / usdkrw,
+                            "turnover_24h_krw": tick.get("acc_trade_price_24h"),
+                            "fx_rate": usdkrw,
+                            "fx_source": "exchangerate-api",
+                            "source_time": time.time(),
+                        })
+            except Exception:  # noqa: BLE001
+                pass
+            # Bithumb
+            try:
+                bithumb_r = await cli.get(f"https://api.bithumb.com/public/ticker/{canonical}_KRW")
+                bithumb_r.raise_for_status()
+                bithumb_data = bithumb_r.json()
+                if bithumb_data.get("status") == "0000" and bithumb_data.get("data"):
+                    tick = bithumb_data["data"]
+                    buy = float(tick["buy_price"]) if tick.get("buy_price") else None
+                    sell = float(tick["sell_price"]) if tick.get("sell_price") else None
+                    mid = (buy + sell) / 2 if buy and sell else (buy or sell)
+                    if mid:
+                        korea_rows.append({
+                            "venue": "bithumb",
+                            "canonical": canonical,
+                            "listed": True,
+                            "market_pair": f"{canonical}_KRW",
+                            "krw_bid": buy,
+                            "krw_ask": sell,
+                            "krw_mid": mid,
+                            "normalized_price_usd": mid / usdkrw,
+                            "turnover_24h_krw": float(tick["acc_trade_value_24H"]) if tick.get("acc_trade_value_24H") else None,
+                            "fx_rate": usdkrw,
+                            "fx_source": "exchangerate-api",
+                            "source_time": time.time(),
+                        })
+            except Exception:  # noqa: BLE001
+                pass
+        return korea_rows
+    except Exception as e:  # noqa: BLE001
+        log.warning(f"_korea_markets({canonical}) failed: {e}")
+        return []
+
+async def _global_market_cap(canonical: str) -> dict:
+    """CoinGecko 市值+流通量（免费 50 calls/min）。"""
+    try:
+        import httpx
+        # CoinGecko ID 映射（A3 简化版：常见币种硬编码；A5 完善为完整映射表）
+        cg_id_map = {
+            "BTC": "bitcoin", "ETH": "ethereum", "BNB": "binancecoin", "SOL": "solana",
+            "XRP": "ripple", "ADA": "cardano", "DOGE": "dogecoin", "AVAX": "avalanche-2",
+            "MATIC": "matic-network", "DOT": "polkadot", "UNI": "uniswap", "LINK": "chainlink",
+            "PEPE": "pepe", "SHIB": "shiba-inu", "ARB": "arbitrum", "OP": "optimism",
+        }
+        cg_id = cg_id_map.get(canonical)
+        if not cg_id:
+            return {}
+        async with httpx.AsyncClient(timeout=10) as cli:
+            r = await cli.get(f"https://api.coingecko.com/api/v3/coins/{cg_id}?localization=false&tickers=false&community_data=false&developer_data=false")
+            r.raise_for_status()
+            data = r.json()
+            mkt = data.get("market_data", {})
+            return {
+                "reported_market_cap_usd": mkt.get("market_cap", {}).get("usd"),
+                "circulating_supply": mkt.get("circulating_supply"),
+                "total_supply": mkt.get("total_supply"),
+                "max_supply": mkt.get("max_supply"),
+                "cg_id": cg_id,
+                "source": "coingecko",
+                "source_time": time.time(),
+            }
+    except Exception as e:  # noqa: BLE001
+        log.warning(f"_global_market_cap({canonical}) failed: {e}")
+        return {}
+
 async def build_asset360_snapshot(canonical: str) -> dict:
     """Asset360Snapshot 单币全景快照（§4契约）。
     A1阶段：身份映射+六所价格/资金费（复用REV4基建）；24h量/OI留后续批次。
@@ -130,13 +271,35 @@ async def build_asset360_snapshot(canonical: str) -> dict:
     venue_tasks = [_venue_markets(v, canonical) for v in _VENUES]
     venue_rows = await asyncio.gather(*venue_tasks, return_exceptions=True)
     venue_rows = [r for r in venue_rows if isinstance(r, dict)]  # 过滤异常
-    # 全局摘要（当前只有占位，A1后续补聚合、A3补市值）
+    # A2: 并行拉六所网络充提（当前占位，A2开工后补实际采集）
+    network_tasks = [_venue_networks(v, canonical) for v in _VENUES]
+    network_results = await asyncio.gather(*network_tasks, return_exceptions=True)
+    network_rows = []
+    for nets in network_results:
+        if isinstance(nets, list):
+            network_rows.extend(nets)
+    # A3: 韩国市场+市值
+    korea_rows = await _korea_markets(canonical)
+    market_cap_data = await _global_market_cap(canonical)
+    # 全局摘要（A3 补充市值、参考价）
+    ref_price = None
+    if venue_rows:
+        marks = [v["perp_mark"]["value"] for v in venue_rows if v["perp_mark"]["value"]]
+        if marks:
+            marks_sorted = sorted(marks)
+            ref_price = marks_sorted[len(marks_sorted) // 2]
     global_summary = {
-        "reported_market_cap_usd": _mv(None, "NOT_CONNECTED", None, None, "USD", "CoinGecko未接入"),
-        "circulating_supply": _mv(None, "NOT_CONNECTED", None, None),
-        "reference_spot_price_usd": _mv(None, "NOT_CONNECTED", None, None, "USD"),
+        "reported_market_cap_usd": _mv(market_cap_data.get("reported_market_cap_usd"),
+                                       "PRESENT" if market_cap_data.get("reported_market_cap_usd") else "NOT_CONNECTED",
+                                       market_cap_data.get("source"), market_cap_data.get("source_time"), "USD"),
+        "circulating_supply": _mv(market_cap_data.get("circulating_supply"),
+                                 "PRESENT" if market_cap_data.get("circulating_supply") else "NOT_CONNECTED",
+                                 market_cap_data.get("source"), market_cap_data.get("source_time")),
+        "reference_spot_price_usd": _mv(ref_price, "PRESENT" if ref_price else "NOT_CONNECTED",
+                                       "six_venue_median", generated_at, "USD"),
         "all_venue_oi_usd": _mv(None, "NOT_CONNECTED", None, None, "USD"),
         "listed_venue_count": _mv(len(venue_rows), "PRESENT", "snapshot", generated_at),
+        "korea_listed_count": _mv(len(korea_rows), "PRESENT", "snapshot", generated_at),
     }
     return {
         "schema_version": "asset360-v1",
@@ -147,7 +310,8 @@ async def build_asset360_snapshot(canonical: str) -> dict:
         "generated_at": generated_at,
         "global_summary": global_summary,
         "venue_rows": venue_rows,
-        "network_rows": [],  # A2
+        "network_rows": network_rows,  # A2: 逐网络充提状态
+        "korea_rows": [],    # A3
         "korea_rows": [],    # A3
         "quality_summary": {"coverage_pct": round(100 * len(venue_rows) / len(_VENUES), 1)},
     }

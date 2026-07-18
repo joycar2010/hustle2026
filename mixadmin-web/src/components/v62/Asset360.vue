@@ -52,6 +52,28 @@
           <span class="c-time">{{ fmtTime(v.perp_mark?.source_time) }}</span>
         </div>
       </template>
+      <!-- A3: 韩国市场预设 -->
+      <template v-else-if="preset==='korea'">
+        <div class="thead trow">
+          <span class="c-venue">平台</span>
+          <span class="c-pair">交易对</span>
+          <span class="c-price r">KRW 中间价</span>
+          <span class="c-price r">折USD</span>
+          <span class="c-num r">24h量KRW</span>
+          <span class="c-num r">FX汇率</span>
+          <span class="c-time">数据时间</span>
+        </div>
+        <div v-for="k in snap.korea_rows" :key="k.venue" class="trow">
+          <span class="c-venue"><b>{{ k.venue }}</b></span>
+          <span class="c-pair">{{ k.market_pair }}</span>
+          <span class="c-price r">{{ fmtNum(k.krw_mid, 0) }}</span>
+          <span class="c-price r">{{ fmtNum(k.normalized_price_usd, 2) }}</span>
+          <span class="c-num r">{{ fmtNum(k.turnover_24h_krw, 0) }}</span>
+          <span class="c-num r">{{ fmtNum(k.fx_rate, 2) }}</span>
+          <span class="c-time">{{ fmtTime(k.source_time) }}</span>
+        </div>
+        <div v-if="!snap.korea_rows || !snap.korea_rows.length" class="placeholder">未在Upbit/Bithumb上市或数据获取失败</div>
+      </template>
       <div v-else class="placeholder">{{ preset }}预设留A2-A4批次</div>
     </div>
     <div class="a360ft" v-if="snap">
@@ -93,6 +115,11 @@ function fmtTime(ts) {
   const d = new Date(Number(ts) * 1000)
   return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}:${d.getSeconds().toString().padStart(2, '0')}`
 }
+function fmtNum(v, dp = 2) {
+  if (v == null) return '—'
+  const n = Number(v)
+  return n >= 1000 ? n.toLocaleString('en-US', { minimumFractionDigits: dp, maximumFractionDigits: dp }) : n.toFixed(dp)
+}
 function cls0(v) { return v == null ? '' : (Number(v) >= 0 ? 'up' : 'dn') }
 function liqCls(d) { if (d == null) return ''; return d < 50 ? 'dn' : (d < 80 ? 'warn' : '') }
 async function load() {
@@ -127,6 +154,7 @@ setInterval(() => tick.value++, 1000)
 .thead{position:sticky;top:0;z-index:2;background:var(--mix-panel,#12151A);color:var(--mix-t3,#5E6673);font-size:9.5px;min-height:24px}
 .trow>span{flex-shrink:0;min-width:0}
 .c-venue{width:90px}
+.c-pair{width:100px}
 .c-price{width:90px}
 .c-num{width:80px}
 .c-time{width:70px;font-size:9px}
