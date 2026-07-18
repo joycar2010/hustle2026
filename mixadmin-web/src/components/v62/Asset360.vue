@@ -134,8 +134,9 @@ watch(() => props.assetId, () => load(), { immediate: true })
 setInterval(() => tick.value++, 1000)
 </script>
 <style scoped>
-.a360{display:flex;flex-direction:column;gap:8px;background:var(--mix-card,#181B21);border:1px solid var(--mix-border,#262B33);border-radius:8px;overflow:hidden;height:100%}
-.a360.fullscreen{position:fixed;top:0;left:0;right:0;bottom:0;z-index:9999;border-radius:0}
+.a360{display:flex;flex-direction:column;gap:8px;background:var(--mix-card,#181B21);border:1px solid var(--mix-border,#262B33);border-radius:8px;overflow:hidden;
+  position:fixed;top:0;right:0;bottom:0;width:60%;z-index:9000;box-shadow:-4px 0 24px rgba(0,0,0,0.3)}
+.a360.fullscreen{position:fixed;top:0;left:0;right:0;bottom:0;width:100%;z-index:9999;border-radius:0}
 .a360hd{display:flex;justify-content:space-between;align-items:center;padding:8px 12px;border-bottom:1px solid var(--mix-border,#262B33);background:var(--mix-panel,#12151A)}
 .title{display:flex;align-items:center;gap:8px}
 .title b{font-size:16px;color:var(--mix-t1,#EAECEF)}
