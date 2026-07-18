@@ -23,7 +23,7 @@
       <!-- 深表格视图:与轻列表同一快照同一抽屉,队列过滤共用流程条 -->
       <WorkTable v-if="viewMode==='table'" :items="tableItems" :row-state="rowState" :sel-id="selId"
                  :preset="wtPreset" :product="wtProduct" :expanded="expRows"
-                 @open="openItem" @run="runAct" @toggle="toggleExp"
+                 @open="openItem" @run="runAct" @toggle="toggleExp" @open-asset="openAsset360"
                  @update:preset="setWtPreset" @update:product="setWtProduct"/>
       <!-- 窄屏页签(≥1360 自动隐藏,三栏并排) -->
       <div v-if="viewMode==='list'" class="vtabs">
