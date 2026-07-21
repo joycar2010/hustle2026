@@ -1,0 +1,2 @@
+$sup=Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" | Where-Object { $_.CommandLine -like '*supervisor.ps1*' }
+if(-not $sup){ "$([DateTime]::Now.ToString('MM-dd HH:mm:ss')) guardian: supervisor DOWN -> restart" | Add-Content "D:\QHMT5\logs\guardian.log"; Start-Process powershell.exe -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-WindowStyle','Hidden','-File','D:\QHMT5\supervisor.ps1' }

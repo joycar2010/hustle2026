@@ -1,0 +1,56 @@
+[
+    {
+        "slot":  "s1",
+        "family":  "ic",
+        "port":  8061,
+        "state":  "warm",
+        "alloc":  null,
+        "pid":  null,
+        "platform":  "MT5"
+    },
+    {
+        "slot":  "s2",
+        "family":  "ic",
+        "port":  8062,
+        "state":  "warm",
+        "alloc":  null,
+        "pid":  null,
+        "platform":  "MT5"
+    },
+    {
+        "slot":  "s3",
+        "family":  "exness",
+        "port":  8063,
+        "state":  "warm",
+        "alloc":  null,
+        "pid":  null,
+        "platform":  "MT5"
+    },
+    {
+        "slot":  "s4",
+        "family":  "exness",
+        "port":  8064,
+        "state":  "warm",
+        "alloc":  null,
+        "pid":  null,
+        "platform":  "MT5"
+    },
+    {
+        "slot":  "m1",
+        "family":  "mt4-ic",
+        "platform":  "MT4",
+        "port":  8065,
+        "state":  "warm",
+        "alloc":  null,
+        "pid":  null
+    },
+    {
+        "slot":  "m2",
+        "family":  "mt4-exness",
+        "platform":  "MT4",
+        "port":  8066,
+        "state":  "warm",
+        "alloc":  null,
+        "pid":  null
+    }
+]
