@@ -17,6 +17,12 @@ async def meta_enums():
     return enums_payload()
 
 
+# ---- 外部 watchdog 健康摘要（开放：无敏感数据，独立 box 轮询用） ----
+@router.get("/watchdog")
+async def watchdog_digest():
+    return await adapters.watchdog_digest()
+
+
 # ---- 监控 ----
 @router.get("/monitor/heartbeats")
 async def heartbeats(_who=Depends(require_viewer)):

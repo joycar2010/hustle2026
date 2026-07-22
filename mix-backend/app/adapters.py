@@ -578,6 +578,26 @@ async def heartbeats() -> list[dict]:
     return sorted(out, key=lambda x: (x["ok"], x["proc"]))
 
 
+async def watchdog_digest() -> dict:
+    """外部 watchdog 最小健康摘要(开放,无敏感数据:仅健康布尔/计数/equity_present)。
+    聚合 dcm:hb:* + risk:status 新鲜度;独立 box 轮询判断整个生产面死活。
+    ok=false 或端点不可达 → 独立通道告警(2026-07-21 §5.5 外部 watchdog)。"""
+    hbs = await heartbeats()
+    stale = [h["proc"] for h in hbs if not h.get("ok")]
+    risk = await ds.get_json("dcm:risk:status") or {}
+    rts = risk.get("ts")
+    risk_age = int(_now() - float(rts)) if rts else None
+    equity = (risk.get("reconcile") or {}).get("total_equity_usdt")
+    mode = risk.get("global_mode") or (await ds.get_json("dcm:risk:policy") or {}).get("global_mode")
+    critical = {"risk-ledger", "exec-manager", "exec-recon", "gateway", "feed-cex"}
+    critical_stale = [s for s in stale if s in critical]
+    ok = (risk_age is not None and risk_age < 180) and not critical_stale and equity is not None
+    return {"ok": ok, "ts": int(_now()), "services_total": len(hbs),
+            "services_stale": stale, "critical_stale": critical_stale,
+            "risk_status_age_sec": risk_age, "global_mode": mode,
+            "equity_present": equity is not None}
+
+
 async def freshness() -> dict:
     fund = await _funding("binance")
     stale = sum(1 for v in fund.values() if v.get("ts") and _now() - float(v["ts"]) > 1800)
