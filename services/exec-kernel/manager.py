@@ -8,6 +8,7 @@ C1 现货腿在理财(LDXVG)→平仓须先赎回(标 NEED_EARN_REDEEM,不擅自
 发布 dcm:exec:manager + 心跳 dcm:hb:exec-manager。
 """
 import asyncio
+import hashlib
 import json
 import os
 import sys
@@ -279,6 +280,60 @@ async def manage_pair(pid, cfg, store, r):
     return st
 
 
+_last_cfg_hash = None
+
+
+async def _mirror_config_to_pg(pool, cfg):
+    """把当前非空 config 镜像到 PG(单行快照,write-through 备份)。"""
+    async with pool.acquire() as c:
+        await c.execute(
+            "INSERT INTO exec_manager_config(id, config, updated_at) VALUES(1, $1::jsonb, now()) "
+            "ON CONFLICT (id) DO UPDATE SET config=EXCLUDED.config, updated_at=now()",
+            json.dumps(cfg, ensure_ascii=False))
+
+
+async def _restore_config_from_pg(pool):
+    """Redis config 键缺失(疑 Redis 重置)时从 PG 快照恢复。
+    仅在快照非空 **且** 确有 OPEN saga(真有仓要管)时才恢复,防 flat 后复活陈旧 config。"""
+    async with pool.acquire() as c:
+        row = await c.fetchrow("SELECT config FROM exec_manager_config WHERE id=1")
+        if not row or not row["config"]:
+            return None
+        cfg = row["config"] if isinstance(row["config"], dict) else json.loads(row["config"])
+        if not (cfg.get("symbols") or cfg.get("pairs")):
+            return None
+        open_cnt = await c.fetchval("SELECT count(*) FROM exec_saga WHERE state='OPEN'")
+        if not open_cnt:
+            return None
+        return cfg
+
+
+async def _load_config(r, pool):
+    """读 Redis 权威 config。键**缺失**(GET=None,疑 Redis wipe)且 PG 有快照+活 saga → 自愈恢复;
+    键**存在但空**(操作员主动清空)→ 尊重不恢复,并把空镜像到 PG。非空 → 镜像 PG 作备份。"""
+    global _last_cfg_hash
+    raw = await r.get(CONFIG_KEY)
+    if raw is None:
+        snap = await _restore_config_from_pg(pool)
+        if snap is not None:
+            await r.set(CONFIG_KEY, json.dumps(snap, ensure_ascii=False))
+            await _alert(r, "config-selfheal", "manager配置PG自愈恢复",
+                         "Redis config 键缺失(疑 Redis 重置),已从 PG 快照恢复 watch-list 并重新纳管在管仓",
+                         level="warn")
+            _last_cfg_hash = None
+            return snap
+        return {}
+    cfg = json.loads(raw or "{}")
+    try:
+        h = hashlib.md5(json.dumps(cfg, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+        if h != _last_cfg_hash:
+            await _mirror_config_to_pg(pool, cfg)   # 空 config 也镜像=尊重主动清空
+            _last_cfg_hash = h
+    except Exception as e:  # noqa: BLE001  # 镜像失败不能挡主循环
+        print("mgr config mirror err", repr(e)[:100])
+    return cfg
+
+
 async def main():
     global _alert_pool
     pool = await asyncpg.create_pool(os.environ["DCM_PG_DSN"], min_size=1, max_size=2)
@@ -289,7 +344,7 @@ async def main():
     once = "--once" in sys.argv
     while True:
         try:
-            cfg = json.loads(await r.get(CONFIG_KEY) or "{}")
+            cfg = await _load_config(r, pool)
             states, pair_states = [], []
             for sym, scfg in (cfg.get("symbols") or {}).items():
                 states.append(await manage_symbol(sym, scfg, store, r))
@@ -297,8 +352,16 @@ async def main():
                 pair_states.append(await manage_pair(pid, pcfg, store, r))
             await r.set("dcm:exec:manager", json.dumps({"ts": int(time.time()), "symbols": states,
                         "pairs": pair_states}, ensure_ascii=False), ex=300)
+            # PATCH-02 §8.6 RiskExitSaga(shadow):读 dcm:risk:exit → 发退出计划 dcm:risk:exit:saga(零下单)
+            n_plan, n_armed = 0, 0
+            try:
+                from risk_exit_saga import plan_and_publish
+                n_plan, n_armed = await plan_and_publish(r)
+            except Exception as e:  # noqa: BLE001
+                print("risk-exit-saga err", repr(e)[:120])
             await r.set("dcm:hb:exec-manager", json.dumps({"ts": int(time.time()), "pid": os.getpid(),
-                        "service": "exec-manager", "managed": len(states) + len(pair_states)}), ex=300)
+                        "service": "exec-manager", "managed": len(states) + len(pair_states),
+                        "exit_plans": n_plan, "exit_armed": n_armed}), ex=300)
             print("manager:", [f"{s['symbol']}/{s['mode']} {s['action']} [{s.get('signal')}]" for s in states] +
                   [f"{s['pair']}(C2)/{s['mode']} {s['action']} [{s.get('signal')}]" for s in pair_states] or "no config")
         except Exception as e:  # noqa: BLE001

@@ -110,15 +110,20 @@ async def reconcile(pool, r) -> dict:
     breaks = list(unchecked)
     matched = 0
     for venue in CHECK_VENUES:
-        if not expected.get(venue):
+        exp = expected.get(venue) or {}
+        # 非 MARGIN venue 即使零声称仓也拉实盘扫裸仓——闭合"配置丢失/manager死致 venue 级孤儿"盲区
+        # (2026-07-21 混沌演练发现:manager:config 被 wipe 后 expected 全空,旧逻辑 continue 跳过整个 venue,
+        #  DEXEUSDT 裸在交易所却扫不到;R11 兜住但 recon 该做第二网)。
+        # MARGIN venue 无声称仓仍跳过:coin C3.S 共用保证金账户,未声明债务是 coin 合法仓不越界扫。
+        if not exp and venue in MARGIN_VENUES:
             continue
         actual = await _venue_positions(venue)
         if actual is None:
-            for sym, e in expected[venue].items():
+            for sym, e in exp.items():
                 breaks.append({"type": "VENUE_READ_FAIL", "venue": venue, "symbol": sym, "source": e["source"]})
             continue
         actual = dict(actual)
-        for sym, e in expected[venue].items():
+        for sym, e in exp.items():
             amt = actual.pop(sym, None)
             if amt is None or abs(amt) < 1e-12:
                 breaks.append({"type": "ORPHAN_CLAIM", "venue": venue, "symbol": sym, "source": e["source"],
