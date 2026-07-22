@@ -1,0 +1,9 @@
+[Unit]
+Description=External production watchdog (independent of A/B/C; polls public health digest, alerts via Feishu; read-only never trades)
+After=network-online.target
+[Service]
+Type=oneshot
+User=ec2-user
+WorkingDirectory=/home/ec2-user/watchdog
+EnvironmentFile=/home/ec2-user/watchdog/watchdog.env
+ExecStart=/usr/bin/python3 /home/ec2-user/watchdog/watchdog.py

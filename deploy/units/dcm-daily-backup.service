@@ -1,0 +1,5 @@
+[Unit]
+Description=Daily pg_dump of dcm_main/mix_main/coin_legacy (verified non-empty, 14d rotate)
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/dcm-daily-backup.sh

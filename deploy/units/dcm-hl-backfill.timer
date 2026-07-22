@@ -1,0 +1,7 @@
+[Unit]
+Description=Run HL funding backfill every 4h
+[Timer]
+OnCalendar=*-*-* 0/4:17:00
+Persistent=true
+[Install]
+WantedBy=timers.target

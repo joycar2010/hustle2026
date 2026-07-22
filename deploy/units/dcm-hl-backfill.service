@@ -1,0 +1,7 @@
+[Unit]
+Description=HL funding backfill into income_records (idempotent, ledger blind-spot fix)
+[Service]
+Type=oneshot
+User=ec2-user
+WorkingDirectory=/home/ec2-user/dexcexmix
+ExecStart=/bin/bash -c "venv/bin/python hl_income_backfill.py $(date -d \"2 days ago\" +%%s); venv/bin/python hl_fills_backfill.py $(date -d \"2 days ago\" +%%s)"
