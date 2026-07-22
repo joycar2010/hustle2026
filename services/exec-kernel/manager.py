@@ -91,6 +91,38 @@ async def _signal_target(sym, cfg, r):
     return cfg.get("target", "hold"), "config"
 
 
+async def _close_saga_if_open(pool, sid):
+    """把仍 OPEN 的 saga 转 CLOSED——仅 UPDATE 已存在行(WHERE state!='CLOSED'),绝不 INSERT 幽灵行。
+    manager 本轮已读实盘=flat 才调用,所以是 owner-of-record 的权威平仓收尾(闭合'外部平仓→saga 永远 OPEN'幽灵源)。
+    返回是否真的收了一行(供日志)。"""
+    if pool is None:
+        return False
+    try:
+        res = await pool.execute(
+            "UPDATE exec_saga SET state='CLOSED', saga_version=saga_version+1, updated_at=now() "
+            "WHERE saga_id=$1 AND state <> 'CLOSED'", sid)
+        return res.endswith(" 1")
+    except Exception:  # noqa: BLE001
+        return False
+
+
+async def _close_sagas_by_prefix(pool, prefix):
+    """按 saga_id 前缀把仍 OPEN 的 saga 转 CLOSED(C2 pair flat 时 gen 已删、拿不到完整 sid)。
+    仅 UPDATE 已存在行,返回收了几行。"""
+    if pool is None:
+        return 0
+    try:
+        res = await pool.execute(
+            "UPDATE exec_saga SET state='CLOSED', saga_version=saga_version+1, updated_at=now() "
+            "WHERE saga_id LIKE $1 AND state <> 'CLOSED'", prefix + "%")
+        try:
+            return int(res.rsplit(" ", 1)[1])
+        except Exception:  # noqa: BLE001
+            return 0
+    except Exception:  # noqa: BLE001
+        return 0
+
+
 async def manage_symbol(sym, cfg, store, r):
     mode = cfg.get("mode", "shadow")
     target, signal_why = await _signal_target(sym, cfg, r)
@@ -113,7 +145,11 @@ async def manage_symbol(sym, cfg, store, r):
         await store.save_leg(sid, 0, f"adopt-{sym}-perp", "FILLED", amt)
         await store.save_leg(sid, 1, f"adopt-{sym}-spot", "FILLED", spot)
     else:
-        st["action"] = "flat(nothing to manage)"
+        # 实盘 flat:若旧 saga 仍 OPEN(外部平仓/漂移致孤儿)→ owner-of-record 收尾转 CLOSED
+        if await _close_saga_if_open(store.pool, sid):
+            st["action"] = "flat(saga reaped→CLOSED)"
+        else:
+            st["action"] = "flat(nothing to manage)"
         return st
 
     if target == "hold":
@@ -232,7 +268,9 @@ async def manage_pair(pid, cfg, store, r):
     gen_key = f"dcm:exec:manager:gen:{pid}"
     if all(abs(a) < 1e-9 for a in amts):
         await r.delete(gen_key)
-        st["action"] = "flat(nothing to manage)"
+        # 两腿都 flat:收尾该 pair 所有代际仍 OPEN 的 saga(mgr-{pid}-<gen>)转 CLOSED
+        n = await _close_sagas_by_prefix(store.pool, f"mgr-{pid}-")
+        st["action"] = f"flat(saga reaped {n}→CLOSED)" if n else "flat(nothing to manage)"
         return st
     gen = await r.get(gen_key)
     if not gen:

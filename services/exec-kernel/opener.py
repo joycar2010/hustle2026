@@ -15,6 +15,7 @@ dualperp 引擎退役后,carry-advisor 的 active 路由无人消费开仓。ope
 import asyncio
 import json
 import os
+import re
 import sys
 import time
 
@@ -109,12 +110,29 @@ async def _managed_symbols(r, pool):
         pass
     if pool is not None:
         try:
+            # ⚠️exec_saga 无 symbol 列——symbol 内嵌在 saga_id(mgr-APTUSDT-<gen> / c2-ESPORTSUSDT-<gen> /
+            #   C1 形态 mgr-BTCUSDT 无 gen 尾)。旧查询 SELECT symbol 每轮抛 UndefinedColumnError 被
+            #   except:pass 静默吞掉→此去重护栏自诞生起从未生效(2026-07-22 P2 发现)。改为解析 saga_id。
             for row in await pool.fetch(
-                    "SELECT DISTINCT symbol FROM exec_saga WHERE state NOT IN ('CLOSED','QUARANTINED')"):
-                managed.add(row["symbol"])
+                    "SELECT saga_id FROM exec_saga WHERE state NOT IN ('CLOSED','QUARANTINED')"):
+                s = _symbol_from_saga_id(row["saga_id"])
+                if s:
+                    managed.add(s)
         except Exception:  # noqa: BLE001
             pass
     return {m for m in managed if m}
+
+
+_SAGA_SYM_RE = re.compile(r"[A-Z0-9]{2,}(?:USDT|USDC|USD|BUSD)")
+
+
+def _symbol_from_saga_id(saga_id):
+    """从 saga_id 提取交易对 symbol。saga_id 形如 mgr-<sym>-<gen> / c2-<sym>-<gen> / mgr-<sym>(C1)。
+    取第一个形如 <BASE>USDT 的 token(gen 是纯数字时间戳,不会误匹配)。"""
+    if not saga_id:
+        return None
+    m = _SAGA_SYM_RE.search(str(saga_id).upper())
+    return m.group(0) if m else None
 
 
 # ── 二期:一档容量因子(shadow先行,enforce须DCM_OPENER_DEPTH_ENFORCE=true) ──
