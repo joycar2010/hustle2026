@@ -27,8 +27,42 @@ INTERVAL = int(os.environ.get("DCM_VENUE_STATUS_INTERVAL_SEC", "120"))
 
 _LIVENESS = {
     "gate": "https://api.gateio.ws/api/v4/spot/time",
-    "bitget": "https://api.bitget.com/api/v2/public/time",
 }
+
+# 平台级维护关键词(标题命中+6h内=venue级降级;asset_maintenance 单币钱包暂停不动全所)
+_MAINT_WORDS = ("system upgrade", "system maintenance", "suspend futures", "suspend trading",
+                "platform maintenance", "trading halt")
+
+
+async def _bitget(cli):
+    """官方公告API(2026-07-25 增强,替代 liveness 弱信号):
+    GET /api/v2/public/annoucements(官方拼写如此)——maintenance_system_updates 类
+    近6h平台级维护公告→降级;单币 asset_maintenance 只记 note 不动全所。"""
+    try:
+        d = (await cli.get("https://api.bitget.com/api/v2/public/annoucements?language=en_US")).json()
+        if str(d.get("code")) != "00000":
+            return {"ok": None, "indicator": "unknown", "note": f"api code {d.get('code')}"}
+        now_ms = time.time() * 1000
+        plat, assets = [], 0
+        for a in (d.get("data") or []):
+            if a.get("annType") != "maintenance_system_updates":
+                continue
+            age_h = (now_ms - float(a.get("cTime") or 0)) / 3600000
+            if age_h > 6:
+                continue
+            title = str(a.get("annTitle") or "")
+            if a.get("annSubType") == "asset_maintenance":
+                assets += 1
+                continue
+            if any(w in title.lower() for w in _MAINT_WORDS):
+                plat.append(title[:60])
+        if plat:
+            return {"ok": False, "indicator": "maintenance",
+                    "note": ("平台级维护:" + "; ".join(plat[:2]))[:120]}
+        note = f"近6h单币维护公告{assets}条(不动全所)" if assets else "官方公告无平台级维护"
+        return {"ok": True, "indicator": "none", "note": note}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": None, "indicator": "unknown", "note": f"fetch_fail:{repr(e)[:60]}"}
 
 
 async def _bybit(cli):
@@ -85,6 +119,7 @@ async def collect() -> dict:
         out["binance"] = await _binance(cli)
         out["okx"] = await _okx(cli)
         out["bybit"] = await _bybit(cli)
+        out["bitget"] = await _bitget(cli)
         for v in _LIVENESS:
             out[v] = await _liveness(cli, v)
     # hyperliquid 无标准状态页 API:不臆断,标 unknown(账户探针兜底)

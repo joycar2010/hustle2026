@@ -172,55 +172,20 @@ class QtyMismatchHandler:
 
     async def _adjust_manager_qty(self, parts: List[str], venue: str, symbol: str,
                                    expected: float, actual: float, history: List[dict]) -> dict:
-        """调整 Manager 的仓位数量"""
-        # Manager 的 saga 可能已经完成,需要查找对应的 pair
-        pair_id = parts[1]  # BTCUSDT
-
-        # 查找活跃的 pair
-        pairs = await self.pool.fetch(
-            """
-            SELECT id, symbol, venue, qty_target, qty_filled
-            FROM exec_pairs
-            WHERE symbol = $1 AND venue = $2
-            AND state NOT IN ('CLOSED', 'FAILED')
-            ORDER BY created_at DESC
-            LIMIT 1
-            """,
-            pair_id, venue
-        )
-
-        if not pairs:
-            return {
-                "action": "MGR_NO_ACTIVE_PAIR",
-                "success": False,
-                "details": {"note": "No active pair found", "pair_id": pair_id}
-            }
-
-        pair = pairs[0]
-
-        # 更新 qty_filled 为实际数量
-        await self.pool.execute(
-            """
-            UPDATE exec_pairs
-            SET qty_filled = $1,
-                updated_at = NOW(),
-                note = COALESCE(note, '') || ' [RECON QTY adjusted: ' || $2::text || ' → ' || $3::text || ']'
-            WHERE id = $4
-            """,
-            actual, expected, actual, pair["id"]
-        )
-
+        """MGR 源诚实语义修正(2026-07-25):原实现查不存在的 exec_pairs 表=死代码。
+        MGR 的 expected 来自 manager 20s 快照,而快照本身就是从交易所实读的——
+        无 DB 账本可"调",持续 QTY_MISMATCH 只可能是 recon 与 manager 两次实盘读之间的
+        时序差/所侧 API 不一致。正确动作=升级告警交人工,绝不伪造调整。"""
         return {
-            "action": "MGR_QTY_ADJUSTED",
+            "action": "MGR_READ_DIVERGENCE",
             "success": True,
             "details": {
-                "pair_id": pair["id"],
-                "symbol": pair_id,
-                "venue": venue,
-                "old_qty": expected,
-                "new_qty": actual,
-                "confirmed_cycles": len(history)
-            }
+                "note": ("MGR expected 每20s自实盘刷新,无账本可调;连续3轮读数分歧="
+                         "recon/manager 双读不一致(所侧API或时序),须人工核查该 venue 读路径"),
+                "pair_id": parts[1], "venue": venue,
+                "expected": expected, "actual": actual,
+                "recent": history[-3:],
+            },
         }
 
     async def _adjust_c2_qty(self, parts: List[str], venue: str, symbol: str,
