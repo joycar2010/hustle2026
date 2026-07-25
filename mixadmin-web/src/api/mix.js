@@ -14,11 +14,14 @@ http.interceptors.request.use(cfg => {
 })
 // 401 → 通知登录门重新弹出（不再 window.prompt,避免与门重复）
 http.interceptors.response.use(r => r.data, e => {
-  if (e?.response?.status === 401 && !location.pathname.startsWith('/wall/')) {
+  if (e?.response?.status === 401 && !location.pathname.startsWith('/wall/')
+      && !String(e?.config?.url || '').includes('/auth/login')) {
     localStorage.removeItem('mix_token')
     window.dispatchEvent(new Event('mix-auth-required'))
   }
-  return Promise.reject(e?.response?.data || e)
+  const d = e?.response?.data || e
+  if (d && typeof d === 'object') d.status = e?.response?.status
+  return Promise.reject(d)
 })
 
 // V6 契约实例(/api/v6):同域同鉴权,只有前缀不同
@@ -59,6 +62,10 @@ export const mixApi = {
   proposals: () => http.get('/proposals'),
   proposalApprove: (id, code, ticket) => http.post(`/proposal/${id}/approve`, ticket ? { reauth_ticket: ticket } : { code }),
   proposalReject: (id) => http.post(`/proposal/${id}/reject`),
+  fastlaneLimitGet: () => http6.get('/fastlane/limit'),
+  fastlaneLimitPut: (b) => http6.put('/fastlane/limit', b),
+  fastlaneOpen: (b) => http6.post('/fastlane/open', b),
+  fastlaneClose: (b) => http6.post('/fastlane/close', b),
   totpStatus: () => http.get('/totp/status'),
   totpProvision: () => http.post('/totp/provision'),
   totpConfirm: (code) => http.post('/totp/confirm', { code }),
@@ -78,7 +85,7 @@ export const mixApi = {
   aicoinLabList: (symbol) => http.get('/aicoin/labcases', { params: symbol ? { symbol } : {} }),
   whoami: () => http.get('/auth/whoami'),
   whoamiWith: (t) => http.get('/auth/whoami', { headers: { 'X-Op-Token': t } }),
-  login: (username, password) => http.post('/auth/login', { username, password }),
+  login: (username, password, totp) => http.post('/auth/login', { username, password, totp_code: totp || null }),
 
   positions: ({ view = 'flat', sort = 'opened_at', dir = 'asc', strategy = '' } = {}) =>
     http.get('/positions', { params: { view, sort, dir, ...(strategy ? { strategy } : {}) } }),
@@ -162,6 +169,7 @@ export const mixApi = {
   notifyBroadcast: (b) => http.post('/notify/broadcast', b),
   channelsGet: () => http.get('/notify/channels'),
   channelsPut: (b) => http.put('/notify/channels', b),
+  channelsEmailTest: () => http.post('/notify/channels/email_test', {}),
   notifyAiGet: () => http.get('/notify/ai'),
   notifyAiSave: (b) => http.put('/notify/ai', b),
   notifyAiTest: (b) => http.post('/notify/ai/test', b || {}),
@@ -288,4 +296,7 @@ export const mixApi = {
   webauthnAuthOptions: () => http.post('/webauthn/auth/options'),
   webauthnAuthVerify: (b) => http.post('/webauthn/auth/verify', b),
   webauthnCreds: () => http.get('/webauthn/credentials'),
+  // opener 护栏配置(C2 自动开仓额度/深度/频率三闸)
+  openerGuards: () => http.get('/rules/opener'),
+  openerGuardsSave: (b) => http.put('/rules/opener', b),
 }

@@ -121,13 +121,22 @@
       <!-- ③ 邮件(SMTP) -->
       <el-tab-pane label="邮件(SMTP)" name="email">
         <div class="card" style="max-width:600px">
-          <el-alert title="邮件通道配置留位（未接 SMTP 前不真发送）" type="info" :closable="false" show-icon style="margin-bottom:12px" />
+          <el-alert :title="ch.emailNote || '邮件通道'" :type="ch.emailNote && ch.emailNote.startsWith('邮件通道已配置') ? 'success' : 'warning'" :closable="false" show-icon style="margin-bottom:12px" />
           <el-form label-width="120">
-            <el-form-item label="SMTP 主机"><el-input v-model="ch.email.host" /></el-form-item>
-            <el-form-item label="端口"><el-input v-model="ch.email.port" style="max-width:140px" /></el-form-item>
-            <el-form-item label="发件账号"><el-input v-model="ch.email.user" /></el-form-item>
-            <el-form-item label="发件人显示"><el-input v-model="ch.email.sender" /></el-form-item>
-            <el-form-item><el-button type="warning" @click="saveChannels">保存配置</el-button></el-form-item>
+            <el-form-item label="SMTP 主机"><el-input v-model="ch.email.host" placeholder="如 smtp.qq.com" /></el-form-item>
+            <el-form-item label="端口"><el-input v-model="ch.email.port" style="max-width:140px" placeholder="465=SSL / 587=STARTTLS" /></el-form-item>
+            <el-form-item label="发件账号"><el-input v-model="ch.email.user" placeholder="如 xxx@qq.com" /></el-form-item>
+            <el-form-item label="授权码/密码">
+              <el-input v-model="ch.email.password" type="password" show-password autocomplete="new-password"
+                        :placeholder="ch.emailPasswordSet ? '已配置(留空=不改)' : 'QQ/163邮箱用授权码,非登录密码'" />
+            </el-form-item>
+            <el-form-item label="收件人"><el-input v-model="ch.email.to" placeholder="告警接收邮箱,多个用英文逗号分隔" /></el-form-item>
+            <el-form-item label="发件人显示"><el-input v-model="ch.email.sender" placeholder="如 hustle Mix(可留空)" /></el-form-item>
+            <el-form-item>
+              <el-button type="warning" @click="saveChannels">保存配置</el-button>
+              <el-button @click="testEmailChannel" :loading="emailTesting">发送测试邮件</el-button>
+            </el-form-item>
+            <div style="color:#909399;font-size:12px">保存后配置同步分发至 DCM 风控面——fatal 级风险告警自动升级发邮件;手动广播勾选"邮件"渠道亦走此配置。</div>
           </el-form>
         </div>
       </el-tab-pane>
@@ -214,7 +223,7 @@
               <el-checkbox-group v-model="bc.channels">
                 <el-checkbox value="marquee">跑马灯</el-checkbox>
                 <el-checkbox value="feishu">飞书</el-checkbox>
-                <el-checkbox value="email" disabled>邮件（未接线）</el-checkbox>
+                <el-checkbox value="email">邮件</el-checkbox>
               </el-checkbox-group>
             </el-form-item>
             <el-form-item label="声音人设">
@@ -313,7 +322,16 @@ import { mixApi } from '../../api/mix'
 const tab = ref('maint')
 const saving = ref(false), sending = ref(false), lastResult = ref('')
 const mt = reactive({ enabled: false, stop_strategy: true, block_trading: true, block_login: false, title: '系统维护中', content: '', until_at: null })
-const ch = ref({ feishuWebhook: '', feishuConfigured: false, feishuAppId: '', feishuAppConfigured: false, feishuOpenId: '', email: { host: '', port: '', user: '', sender: '' } })
+const ch = ref({ feishuWebhook: '', feishuConfigured: false, feishuAppId: '', feishuAppConfigured: false, feishuOpenId: '', emailPasswordSet: false, emailNote: '', email: { host: '', port: '', user: '', sender: '', password: '', to: '' } })
+const emailTesting = ref(false)
+async function testEmailChannel() {
+  emailTesting.value = true
+  try {
+    const r = await mixApi.channelsEmailTest()
+    r.status === 'sent' ? ElMessage.success(`测试邮件已发送 → ${r.to}`) : ElMessage.error(r.detail || '发送失败')
+  } catch (e) { ElMessage.error(e?.detail || e?.response?.data?.detail || '发送失败(先保存配置)') }
+  finally { emailTesting.value = false }
+}
 const feishuApp = ref({ app_id: '', secret: '', open_id: '' })
 const testPhone = ref('')
 // AI 客服弹窗配置
@@ -358,7 +376,7 @@ async function allStop() {
   Object.assign(mt, r.state || {}); mt.enabled = true
   ElMessage.warning('已一键全停：' + (r.kill_switch?.message || 'Kill Switch 已执行'))
 }
-async function loadChannels() { try { ch.value = { ...ch.value, ...(await mixApi.channelsGet()) } } catch (e) { /* */ } }
+async function loadChannels() { try { const d = await mixApi.channelsGet(); ch.value = { ...ch.value, ...d, email: { to: '', ...(d.email || {}), password: '' } } } catch (e) { /* */ } }
 async function saveChannels() {
   try { await mixApi.channelsPut({ feishuWebhook: ch.value.feishuWebhook, email: ch.value.email }); ElMessage.success('已保存'); loadChannels() }
   catch (e) { ElMessage.error(e?.detail || '保存失败') }

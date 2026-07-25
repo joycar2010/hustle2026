@@ -17,6 +17,75 @@ log = logging.getLogger("mix.notify")
 router = APIRouter(tags=["notify-center"])
 
 MARQUEE_CHANNEL = "dcm:notify:broadcast"
+EMAIL_REDIS_KEY = "dcm:notify:email"   # SMTP 配置分发键(dcm_common email_sender 消费,P0 邮件通道)
+
+
+# ── 邮件(SMTP)真发送(2026-07-25 补齐:此前配置留位不真发) ──────────────────────
+_EMAIL_KEYS = ("host", "port", "user", "sender", "password", "to")
+
+
+async def _email_conf(pool) -> dict:
+    row = await pool.fetchrow("SELECT email_conf FROM notify_settings WHERE id=1")
+    conf = row["email_conf"] if row else {}
+    if isinstance(conf, str):
+        conf = json.loads(conf or "{}")
+    return conf or {}
+
+
+def _email_ready(conf: dict) -> bool:
+    return bool(conf.get("host") and conf.get("user") and conf.get("password") and conf.get("to"))
+
+
+def _smtp_send_sync(conf: dict, subject: str, body_text: str):
+    """同步 SMTP 发送(465=SSL / 其他=STARTTLS),timeout=10s。返回 (ok, detail)。"""
+    import smtplib
+    import ssl as _ssl
+    from email.mime.text import MIMEText
+    from email.utils import formatdate
+    host = str(conf.get("host") or "").strip()
+    port = int(conf.get("port") or 465)
+    user = str(conf.get("user") or "").strip()
+    pw = str(conf.get("password") or "")
+    to = [x.strip() for x in str(conf.get("to") or "").split(",") if x.strip()]
+    sender_disp = str(conf.get("sender") or "").strip()
+    frm = f"{sender_disp} <{user}>" if sender_disp else user
+    if not (host and user and pw and to):
+        return False, "SMTP 未配置齐(host/user/授权码/收件人)"
+    msg = MIMEText(body_text, "plain", "utf-8")
+    msg["Subject"] = subject
+    msg["From"] = frm
+    msg["To"] = ", ".join(to)
+    msg["Date"] = formatdate(localtime=True)
+    try:
+        if port == 465:
+            with smtplib.SMTP_SSL(host, port, timeout=10, context=_ssl.create_default_context()) as s:
+                s.login(user, pw)
+                s.sendmail(user, to, msg.as_string())
+        else:
+            with smtplib.SMTP(host, port, timeout=10) as s:
+                s.starttls(context=_ssl.create_default_context())
+                s.login(user, pw)
+                s.sendmail(user, to, msg.as_string())
+        return True, "sent"
+    except Exception as e:  # noqa: BLE001
+        return False, repr(e)[:200]
+
+
+async def _smtp_send(conf: dict, subject: str, body_text: str):
+    import asyncio as _aio
+    return await _aio.to_thread(_smtp_send_sync, conf, subject, body_text)
+
+
+async def _publish_email_conf(conf: dict):
+    """把 SMTP 配置分发到 Redis(dcm_common email_sender 双机消费=P0 fatal 邮件升级通道)。"""
+    r = ds.rds()
+    if r is None:
+        return
+    try:
+        await r.set(EMAIL_REDIS_KEY, json.dumps(
+            {k: conf.get(k, "") for k in _EMAIL_KEYS}, ensure_ascii=False))
+    except Exception as e:  # noqa: BLE001
+        log.warning("email conf redis publish: %s", e)
 
 
 async def _pool():
@@ -200,8 +269,14 @@ async def broadcast(body: dict, op=Depends(require_operator)):
             results["feishu"] = "sent" if ok else detail
             await _log_send(pool, "feishu", hook[-18:], title, text, ok, detail, op["operator"])
     if "email" in channels:
-        results["email"] = "邮件通道未接 SMTP（配置留位,不假发送）"
-        await _log_send(pool, "email", "-", title, text, False, "SMTP 未接线", op["operator"])
+        conf = await _email_conf(pool)
+        if not _email_ready(conf):
+            results["email"] = "SMTP 未配置齐(通知模块→邮件(SMTP) 填主机/账号/授权码/收件人)"
+            await _log_send(pool, "email", "-", title, text, False, "SMTP 未配置齐", op["operator"])
+        else:
+            ok, detail = await _smtp_send(conf, f"[Mix {level.upper()}] {title}", text)
+            results["email"] = "sent" if ok else detail
+            await _log_send(pool, "email", str(conf.get("to"))[:60], title, text, ok, detail, op["operator"])
     await proxy.audit(op["operator"], op["role"], "notify.broadcast", ",".join(channels),
                       {"title": title, "level": level}, str(results)[:200])
     return {"results": results}
@@ -500,8 +575,12 @@ async def channels_get(_who=Depends(require_viewer)):
             "feishuAppId": app_id,
             "feishuAppConfigured": bool(app_id),
             "feishuOpenId": fconf.get("open_id") or os.environ.get("DCM_FEISHU_OPEN_ID", ""),
-            "email": {k: email.get(k, "") for k in ("host", "port", "user", "sender")},
-            "emailNote": "邮件通道未接 SMTP,保存仅留位"}
+            "email": {k: email.get(k, "") for k in ("host", "port", "user", "sender", "to")},
+            "emailPasswordSet": bool(email.get("password")),
+            "emailNote": ("邮件通道已配置(fatal级风险告警+广播真发送)" if _email_ready(email)
+                          else "待补齐:" + "/".join(lbl for k, lbl in
+                               (("host", "主机"), ("user", "账号"), ("password", "授权码"), ("to", "收件人"))
+                               if not email.get(k)))}
 
 
 # ---------------- AI 客服（浮动球主动弹窗：重要通知推给前端 AI 助手） ----------------
@@ -559,14 +638,37 @@ async def channels_put(body: dict, op=Depends(require_operator)):
         fc = {k: str(body["feishuConf"].get(k, ""))[:160] for k in ("app_id", "secret", "open_id")}
         args.append(json.dumps({k: v for k, v in fc.items() if v}))
         sets.append(f"feishu_conf=${len(args)}::jsonb")
+    new_email = None
     if isinstance(body.get("email"), dict):
-        args.append(json.dumps({k: str(body["email"].get(k, ""))[:120]
-                                for k in ("host", "port", "user", "sender", "password")}))
+        # 授权码留空=保留旧值(UI 不回显密码,重存不清空)
+        cur = await _email_conf(pool)
+        new_email = {k: str(body["email"].get(k, ""))[:120] for k in _EMAIL_KEYS}
+        if not new_email.get("password"):
+            new_email["password"] = str(cur.get("password") or "")
+        args.append(json.dumps(new_email))
         sets.append(f"email_conf=${len(args)}::jsonb")
     if not sets:
         return {"saved": False, "note": "无变更"}
     await pool.execute(f"UPDATE notify_settings SET {', '.join(sets)}, updated_by='{op['operator']}', "
                        "updated_at=now() WHERE id=1", *args)
+    if new_email is not None:
+        await _publish_email_conf(new_email)   # 分发 Redis → dcm P0 邮件通道双机即取
     await proxy.audit(op["operator"], op["role"], "notify.channels", "notify_settings",
                       {k: body[k] for k in body if k != "email"}, "saved")
     return {"saved": True}
+
+
+@router.post("/notify/channels/email_test")
+async def channels_email_test(op=Depends(require_operator)):
+    """发送测试邮件(用已保存 SMTP 配置)——端到端验证通道。"""
+    pool = await _pool()
+    conf = await _email_conf(pool)
+    if not _email_ready(conf):
+        raise HTTPException(400, "SMTP 未配置齐(主机/账号/授权码/收件人)")
+    ok, detail = await _smtp_send(
+        conf, "[Mix] 邮件通道测试",
+        f"这是一封测试邮件——mixadmin 通知模块邮件(SMTP)通道端到端验证。\n"
+        f"操作员: {op['operator']}\n时间: {dt.datetime.now().isoformat()}\n"
+        f"该通道同时服务: 手动广播(勾选邮件) + DCM 风控 fatal 级告警自动升级。")
+    await _log_send(pool, "email", str(conf.get("to"))[:60], "邮件通道测试", "test", ok, detail, op["operator"])
+    return {"status": "sent" if ok else "failed", "detail": detail, "to": conf.get("to")}
