@@ -345,6 +345,14 @@ async def compute_and_publish(pool, r) -> dict:
     except Exception:  # noqa: BLE001
         pass
     stage_armed_in = bool(armed_engines_in)
+    # data_ok 维收编(ADR-002 阶段E 收官,2026-07-25):旧世界"feed 死=引擎自然停"的数据健康语义
+    # 进聚合器——feed-cex 心跳<120s 才算数据健康。至此 CAN_OPEN_ARMED = CAN_OPEN AND armed AND data_ok
+    # ⊆ 旧闸 old_allow(armed AND data_ok),NEW_LOOSER 结构性不可能,gates_shadow 对比使命终结(已移除)。
+    try:
+        _fhb = json.loads(await r.get("dcm:hb:feed-cex") or "{}")
+        feed_data_ok = time.time() - float(_fhb.get("ts") or 0) < 120
+    except Exception:  # noqa: BLE001
+        feed_data_ok = False
 
     venues_out, cred_epochs, cred_rotations = {}, {}, []
     for v in SUPPORTED_VENUES:
@@ -422,7 +430,7 @@ async def compute_and_publish(pool, r) -> dict:
             inc_state = "NORMAL"
         v_armed = stage_armed_in or v in armed_pair_venues_in
         caps_out = _capabilities(mode)
-        caps_out["CAN_OPEN_ARMED"] = bool(caps_out["CAN_OPEN"] and v_armed)
+        caps_out["CAN_OPEN_ARMED"] = bool(caps_out["CAN_OPEN"] and v_armed and feed_data_ok)
         venues_out[v] = {
             "mode": mode, "reason": reason,
             "incident_state": inc_state,
@@ -465,7 +473,8 @@ async def compute_and_publish(pool, r) -> dict:
     body = {
         "ts": int(time.time()),
         "global_mode": global_ovr,
-        "armed_state": {"engines": armed_engines_in, "pair_venues": sorted(armed_pair_venues_in)},
+        "armed_state": {"engines": armed_engines_in, "pair_venues": sorted(armed_pair_venues_in),
+                        "feed_data_ok": feed_data_ok},
         "venues": venues_out,
         "capped_venues": [v for v, d in venues_out.items() if d["mode"] != "NORMAL"],
         "nav": nav,

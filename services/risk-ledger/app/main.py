@@ -26,7 +26,6 @@ from dcm_common.heartbeat import Heartbeat
 from dcm_common.notify import Notifier, feishu_from_env
 
 from policy import compute_and_publish, corebox_check  # noqa: E402  # G0 风险策略权威+CORE_POOL 封闭盒子
-import gates_shadow  # noqa: E402  # ADR-002 阶段A:三闸收编 shadow 对比(只记录)
 import defense_pack  # noqa: E402  # 批次6:证据包(REDUCE+ 进入时自动生成)
 import incidents  # noqa: E402  # 批次1:有状态 Incident(发生/升级/恢复/超时四时点通知)
 
@@ -509,13 +508,10 @@ async def main():
                                     "nav": pol.get("nav")}
                 await _post_policy(pool, pol)
                 status["incidents"] = await incidents.active_summary(pool)
-                gs = await gates_shadow.snapshot_and_diff(pool, r, pol)
-                status["gates_shadow"] = gs
-                # 阶段C 哨兵:genuine NEW_LOOSER(真实危险放宽)必须持续为零——非零即告警(阶段E门槛)
-                if int(gs.get("genuine_looser") or 0) > 0:
-                    await fire("gates-genuine-looser", "三闸真实危险放宽",
-                               f"本轮 genuine NEW_LOOSER={gs['genuine_looser']}(数据不健康放行或武装态下旧拦新放),"
-                               f"阶段E 前置被破坏,须审查 gate_shadow_diff inputs.genuine=true 行", level="fatal")
+                # ADR-002 阶段E(2026-07-25):gates_shadow 对比已物理移除——armed+data_ok 两维收编后
+                # CAN_OPEN_ARMED = CAN_OPEN AND armed AND data_ok ⊆ 旧闸 old_allow,NEW_LOOSER 结构性
+                # 不可能,对比使命终结。审计历史保留在 gate_shadow_diff 表。G-C place 白名单(real_venue
+                # _arm_gate)按 ADR-002 铁律不收编、永远叠加,不属移除范围。
             except Exception:
                 log.exception("policy compute/publish failed (continuing)")
             # CORE_POOL 封闭盒子不变量:组权益突降/成员限制 → 告警(fire 走共享节流+落库)
@@ -525,7 +521,7 @@ async def main():
                                      "members": cbmon.get("member_count")}
             except Exception:
                 log.exception("corebox check failed (continuing)")
-            # status 发布收尾:含 policy/incidents/gates_shadow/corebox 全字段(修:原发布在富化前,gates_shadow 从未发布)
+            # status 发布收尾:含 policy/incidents/corebox 全字段(修:原发布在富化前部分字段从未发布)
             await r.set("dcm:risk:status", json.dumps(status, ensure_ascii=False, default=str), ex=180)
             await hb.beat_once()
             log.info("LEDGER_OK services=%s alerts=%d policy_v=%s capped=%s",
