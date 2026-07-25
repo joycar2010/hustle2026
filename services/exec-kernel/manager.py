@@ -345,6 +345,15 @@ async def manage_pair(pid, cfg, store, r):
         st["action"] = f"close_{final}"
         if final == "CLOSED":
             await r.delete(gen_key)
+            # opener 冷却打戳(guards 批接线,2026-07-25):刚平仓币进冷却,opener 候选跳过防 churning。
+            # TTL 从 guards 配置读(回落 3600s),×1.2 冗余与 opener _symbol_in_cooldown 对齐。
+            try:
+                _g = json.loads(await r.get("dcm:exec:opener:guards") or "{}")
+                _cd = int(float(_g.get("per_symbol_cooldown_sec") or 3600))
+                if _cd > 0:
+                    await r.setex(f"dcm:exec:opener:cooldown:{sym}", int(_cd * 1.2), str(time.time()))
+            except Exception:  # noqa: BLE001
+                pass
         else:   # QUARANTINED=有腿平不掉,人工兜底,告警
             await _alert(r, pid, f"{pid} 平仓被隔离(C2)",
                          f"close_pair 有腿平不掉进 QUARANTINED,可能残留敞口。"
