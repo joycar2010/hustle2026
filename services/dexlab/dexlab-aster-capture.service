@@ -1,0 +1,9 @@
+[Unit]
+Description=DexLab ASTER venue-admission read-only capture (LP5)
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/ec2-user/dexlab
+ExecStart=/home/ec2-user/dexlab/venv/bin/python /home/ec2-user/dexlab/aster_probe.py capture
+User=ec2-user

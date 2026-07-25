@@ -1,0 +1,10 @@
+[Unit]
+Description=Hourly ASTER admission capture (LP5 MEASURE)
+
+[Timer]
+OnBootSec=180
+OnUnitActiveSec=3600
+Persistent=true
+
+[Install]
+WantedBy=timers.target
