@@ -68,6 +68,7 @@ EXPECTED_HB = {
     "account-snapshot": 240,
     "depth-sampler": 400,
     "basis-sampler": 200,
+    "venue-status": 400,     # 官方状态页进料,120s/轮(2026-07-25)
     # engine-lending 已退役(2026-07-24 关1收口:shadow 3天零写入,已停服)——摘出期望清单
     # engine-basis/engine-dualperp 已退役(2026-07-14,统一执行内核接管)——新权威:
     "exec-manager": 120,     # 20s/轮,持仓 owner-of-record

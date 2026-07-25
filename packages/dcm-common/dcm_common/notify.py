@@ -14,8 +14,16 @@ from dataclasses import dataclass
 
 import redis as redis_sync
 
+from .email_sender import email_configured, send_alert_email
 from .feishu import send_bot_chat, send_bot_text, send_webhook_text
 from .throttle import throttle_ok
+
+
+def _email_levels() -> set:
+    """升级到邮件的级别集(默认只 fatal——P0 通道语义,warn/info 绝不轰炸邮箱)。"""
+    import os
+    raw = os.environ.get("DCM_EMAIL_LEVELS", "fatal")
+    return {x.strip() for x in raw.split(",") if x.strip()}
 
 logger = logging.getLogger(__name__)
 
@@ -107,6 +115,12 @@ class Notifier:
             ok, detail = send_bot_text(self.feishu.app_id, self.feishu.app_secret,
                                        self.feishu.open_id, f"{self.service}|{title}", content)
             results["feishu_bot"] = detail if not ok else "sent"
+
+        # P0 邮件通道(2026-07-25,替代短信/电话):fatal 升级邮件——此处已过 300s/1 硬地板
+        # 节流,不会风暴;未配置 SMTP=静默跳过;失败只记 results 不反噬主链路。
+        if level in _email_levels() and email_configured():
+            ok, detail = send_alert_email(f"[DCM {level.upper()}] {self.service}|{title}", content)
+            results["email"] = "sent" if ok else detail
 
         if marquee:
             try:

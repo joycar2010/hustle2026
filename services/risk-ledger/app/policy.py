@@ -391,6 +391,18 @@ async def compute_and_publish(pool, r) -> dict:
             hits.append({"scope": "WITHDRAWAL", "mode": wd_mode, "why": wd_reason})
             await _persist_restriction(pool, v, "MEDIUM" if wd_mode == "WATCH" else "HARD",
                                        "WITHDRAWAL_DELAY", f"WD:{wd_mode}")
+        # 官方状态页(venue-status-ingest,2026-07-25):进行中维护/major/critical → 下压模式。
+        # unknown/抓取失败不动作(fail-open,账户探针兜底)——官方信源只增严不放宽。
+        try:
+            vs = json.loads(await r.get(f"dcm:risk:venue_status:{v}") or "{}")
+        except Exception:  # noqa: BLE001
+            vs = {}
+        _ind = str(vs.get("indicator") or "unknown")
+        if _ind in ("maintenance", "major", "critical"):
+            _st_mode = "REDUCE_ONLY" if _ind == "critical" else "NO_NEW_RISK"
+            mode = _stricter(mode, _st_mode)
+            reason = f"官方状态[{_ind}:{str(vs.get('note') or '')[:40]}]|" + reason
+            hits.append({"scope": "VENUE_STATUS", "mode": _st_mode, "why": _ind})
         # 条款登记(V5 §6.1):PROHIBITED=硬闸 FROZEN;UNCLEAR=WATCH 级弱信号(当前书≈HOUSE_RND)
         vp = vpolicy.get(v)
         if vp:
