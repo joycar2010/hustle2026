@@ -1,0 +1,13 @@
+[Unit]
+Description=DEX_LAB API (V6 lab domain, isolated, no prod creds)
+After=network.target
+[Service]
+User=ec2-user
+WorkingDirectory=/home/ec2-user/dexlab
+EnvironmentFile=/home/ec2-user/dexlab/.env
+ExecStart=/home/ec2-user/dexlab/venv/bin/uvicorn main:app --host 127.0.0.1 --port 8700
+Restart=always
+RestartSec=5
+MemoryMax=512M
+[Install]
+WantedBy=multi-user.target

@@ -49,16 +49,70 @@ except Exception:  # noqa: BLE001  # 包缺失时内联同口径(禁 abs)
                 net += float(lg.get("daily_pct") or 0)
         return net
 
-REDIS_URL = os.environ.get("DCM_REDIS_URL", "redis://10.0.1.212:6379/0")
+REDIS_URL = os.environ.get("DCM_REDIS_URL", "redis://10.0.1.95:6379/0")   # 默认改95(212已退役)
 PG_DSN = os.environ.get("DCM_PG_DSN", "")
 INTERVAL = int(os.environ.get("DCM_OPENER_INTERVAL_SEC", "60"))
 FUNDING_STALE_SEC = int(os.environ.get("DCM_OPENER_FUNDING_STALE_SEC", "1800"))
-HOLD_HOURS = float(os.environ.get("DCM_OPENER_HOLD_HOURS", "8"))
-FEE_BPS_PER_FILL = float(os.environ.get("DCM_OPENER_FEE_BPS", "5"))
-EST_ROUNDTRIP_COST_BPS = float(os.environ.get("DCM_OPENER_EST_COST_BPS", "8"))  # 往返价差估计(缺深度时)
-MIN_NET_DAILY_PCT = float(os.environ.get("DCM_OPENER_MIN_NET_DAILY_PCT", "0.1"))
-MIN_E_BPS = float(os.environ.get("DCM_OPENER_MIN_E_BPS", "0"))
 MAX_CANDIDATES = int(os.environ.get("DCM_OPENER_MAX_CANDIDATES", "20"))
+
+# ── 四期:guards 三方合并落地(2026-07-25,原 opener_guards_WIP.patch 收编) ──
+# 护栏配置权威=dcm:exec:opener:guards(Redis JSON,operator 经 mix-backend 写);env 覆盖 defaults,
+# Redis 覆盖 env。经济参数(hold/fee/cost/min_net/min_e)+深度硬闸+三重配额+逐币冷却全热配置。
+GUARDS_KEY = "dcm:exec:opener:guards"
+COOLDOWN_KEY_PREFIX = "dcm:exec:opener:cooldown:"
+
+_GUARD_DEFAULTS = {
+    "depth_enforce": True,   # 默认ON:THIN 直接跳过成硬闸(guards 批意图)
+    "depth_k": 3.0,
+    "hold_hours": 8.0,
+    "fee_bps_per_fill": 5.0,
+    "est_roundtrip_cost_bps": 8.0,
+    "min_net_daily_pct": 0.1,
+    "min_e_bps": 0.0,
+    "max_notional_per_candidate_usdt": 200.0,
+    "max_total_armed_notional_usdt": 1000.0,
+    "max_concurrent_positions": 5,
+    "per_symbol_cooldown_sec": 3600,
+}
+
+
+async def _load_guards(r):
+    """读护栏配置:defaults ← env(DCM_OPENER_<KEY大写>) ← Redis(dcm:exec:opener:guards)。"""
+    try:
+        raw = await r.get(GUARDS_KEY)
+        cfg = json.loads(raw) if raw else {}
+    except Exception:  # noqa: BLE001
+        cfg = {}
+    out = dict(_GUARD_DEFAULTS)
+    for k, dv in _GUARD_DEFAULTS.items():
+        ev = os.environ.get(f"DCM_OPENER_{k.upper()}")
+        if ev is not None:
+            try:
+                out[k] = (ev.lower() == "true") if isinstance(dv, bool) else type(dv)(ev)
+            except (ValueError, AttributeError):
+                pass
+        if k in cfg and cfg[k] is not None:
+            try:
+                out[k] = (bool(cfg[k]) if isinstance(dv, bool) else type(dv)(cfg[k]))
+            except (ValueError, TypeError):
+                pass
+    return out
+
+
+async def _symbol_in_cooldown(r, sym, guards, now):
+    """单币频率限制:刚平仓币进冷却,期内跳过(防 churning)。"""
+    cd_sec = guards.get("per_symbol_cooldown_sec", 3600)
+    if cd_sec <= 0:
+        return False, None
+    try:
+        raw = await r.get(f"{COOLDOWN_KEY_PREFIX}{sym}")
+        if raw:
+            elapsed = now - float(raw)
+            if elapsed < cd_sec:
+                return True, f"cooldown({int(cd_sec - elapsed)}s剩余)"
+    except Exception:  # noqa: BLE001
+        pass
+    return False, None
 # ── 三期:carry衰减折价+持续性闸+新候选飞书(2026-07-21,三天冲刺tracking error课) ──
 # ACE实证:开仓报3.3%/d,9h实收carry为负——尖峰费率入场即衰减。两道防线:
 #  折价: funding_income按 DECAY 打折后过E闸(报价高估的经验修正)
@@ -135,11 +189,7 @@ def _symbol_from_saga_id(saga_id):
     return m.group(0) if m else None
 
 
-# ── 二期:一档容量因子(shadow先行,enforce须DCM_OPENER_DEPTH_ENFORCE=true) ──
-DEPTH_K = float(os.environ.get("DCM_OPENER_DEPTH_K", "3"))          # 一档额须≥目标名义×K
-DEPTH_ENFORCE = os.environ.get("DCM_OPENER_DEPTH_ENFORCE", "").lower() == "true"
-
-
+# ── 二期:一档容量因子(参数已收编 guards:depth_k/depth_enforce,默认硬闸ON) ──
 async def _depth_l1(r, venue, sym):
     """读 l1lite 一档(WS采集,base qty已含张数换算);开多吃卖1/开空吃买1。
     顺带续订 want 键(TTL900,opener 60s/轮=候选币常驻订阅)。"""
@@ -156,9 +206,12 @@ async def _depth_l1(r, venue, sym):
 
 
 async def evaluate(r, pool, now):
+    guards = await _load_guards(r)
     ra = await r.hgetall("dcm:route:assignments")
     managed = await _managed_symbols(r, pool)
     candidates, skipped = [], []
+    managed_notional = 0.0    # 在管名义(quota total 分母)
+    accepted_notional = 0.0   # 本轮已接受候选名义
     for sym, raw in (ra or {}).items():
         try:
             rt = json.loads(raw)
@@ -170,6 +223,11 @@ async def evaluate(r, pool, now):
             continue
         if sym in managed:
             skipped.append({"symbol": sym, "reason": "already_managed"})
+            managed_notional += float(rt.get("target_notional_usdt") or 0)
+            continue
+        in_cd, cd_msg = await _symbol_in_cooldown(r, sym, guards, now)
+        if in_cd:
+            skipped.append({"symbol": sym, "reason": cd_msg})
             continue
         vl, vs = rt.get("venue_long"), rt.get("venue_short")
         target = float(rt.get("target_notional_usdt") or 0)
@@ -186,12 +244,15 @@ async def evaluate(r, pool, now):
             continue
         net_daily = o1_signed_cashflow_daily_pct(
             [{"side": "perp_long", "daily_pct": fl}, {"side": "perp_short", "daily_pct": fs}])
-        funding_income_bps = net_daily * HOLD_HOURS / 24.0 * 100.0
-        fees_bps = FEE_BPS_PER_FILL * 4.0
+        hold_hours = guards["hold_hours"]
+        fee_bps_fill = guards["fee_bps_per_fill"]
+        est_cost = guards["est_roundtrip_cost_bps"]
+        funding_income_bps = net_daily * hold_hours / 24.0 * 100.0
+        fees_bps = fee_bps_fill * 4.0
         # 三期折价:按经验衰减系数打折(raw保留展示)
         funding_income_raw_bps = funding_income_bps
         funding_income_bps = funding_income_bps * CARRY_DECAY
-        e_bps = funding_income_bps - fees_bps - EST_ROUNDTRIP_COST_BPS
+        e_bps = funding_income_bps - fees_bps - est_cost
         pol, _ = await read_policy(r)
         pv = (pol or {}).get("venues") or {}
         charge = max(_risk_charge_bps((pv.get(vl) or {}).get("tier")),
@@ -205,23 +266,41 @@ async def evaluate(r, pool, now):
                "parts": {"funding_income": round(funding_income_bps, 2),
                          "funding_income_raw": round(funding_income_raw_bps, 2),
                          "carry_decay": CARRY_DECAY,
-                         "fees": round(fees_bps, 2), "est_cost": EST_ROUNDTRIP_COST_BPS},
+                         "fees": round(fees_bps, 2), "est_cost": est_cost},
                "route_reason": rt.get("reason")}
-        # 一档容量因子(shadow):多腿开仓吃 venue_long 卖1,空腿吃 venue_short 买1
+        # 一档容量因子:多腿开仓吃 venue_long 卖1,空腿吃 venue_short 买1
         dl = await _depth_l1(r, vl, sym)
         ds_ = await _depth_l1(r, vs, sym)
         top_l = (dl.get("aq") or 0) * (dl.get("ask") or 0) if dl else None
         top_s = (ds_.get("bq") or 0) * (ds_.get("bid") or 0) if ds_ else None
         depth_top = min(top_l, top_s) if (top_l is not None and top_s is not None) else None
+        depth_k = guards["depth_k"]
         cap_ratio = round(depth_top / target, 2) if (depth_top is not None and target > 0) else None
         rec["depth_l1_usdt"] = round(depth_top, 0) if depth_top is not None else None
         rec["capacity_ratio"] = cap_ratio
         rec["depth_verdict"] = ("NO_DATA" if cap_ratio is None
-                                else "OK" if cap_ratio >= DEPTH_K else "THIN")
-        gate_ok = (target > 0 and net_daily >= MIN_NET_DAILY_PCT and e_bps >= MIN_E_BPS)
-        if DEPTH_ENFORCE and rec["depth_verdict"] == "THIN":
+                                else "OK" if cap_ratio >= depth_k else "THIN")
+        min_net = guards["min_net_daily_pct"]
+        min_e = guards["min_e_bps"]
+        gate_ok = (target > 0 and net_daily >= min_net and e_bps >= min_e)
+        if guards["depth_enforce"] and rec["depth_verdict"] == "THIN":
             gate_ok = False
-            rec["reason"] = f"depth_thin(一档{rec['depth_l1_usdt']}U<{DEPTH_K}x目标{target}U)"
+            rec["reason"] = f"depth_thin(一档{rec['depth_l1_usdt']}U<{depth_k}x目标{target}U)"
+        # 三重配额(guards 批):单币帽 → 总名义帽 → 并发仓位帽
+        max_per = guards["max_notional_per_candidate_usdt"]
+        if gate_ok and target > max_per:
+            rec["target_notional_usdt"] = round(max_per, 2)
+            rec["target_clamped"] = True
+            target = max_per
+        max_total = guards["max_total_armed_notional_usdt"]
+        if gate_ok and (managed_notional + accepted_notional + target) > max_total:
+            gate_ok = False
+            rec["reason"] = (f"quota_total(在管{managed_notional:.0f}+已接{accepted_notional:.0f}"
+                             f"+本币{target:.0f}>{max_total:.0f}U)")
+        max_slots = guards["max_concurrent_positions"]
+        if gate_ok and (len(managed) + len(candidates)) >= max_slots:
+            gate_ok = False
+            rec["reason"] = f"quota_slots(在管{len(managed)}+已接{len(candidates)}>={max_slots})"
         if gate_ok and PERSIST_ROUNDS > 1:
             pk = f"dcm:opener:persist:{sym}:{vl}:{vs}"
             try:
@@ -234,6 +313,7 @@ async def evaluate(r, pool, now):
                 gate_ok = False
                 rec["reason"] = f"persist {strikes}/{PERSIST_ROUNDS}(连续达标轮数不足,防尖峰)"
         if gate_ok:
+            accepted_notional += target
             # manager pairs 交接片段(operator 直接复制并入 config;默认 shadow+hold,采纳后再翻 armed+close 由信号驱动)
             rec["manager_pair"] = {
                 "mode": "shadow", "target": "hold", "signal_source": "route", "symbol": sym,
@@ -241,8 +321,8 @@ async def evaluate(r, pool, now):
             candidates.append(rec)
         else:
             if "reason" not in rec:
-                rec["reason"] = ("net<%.2f" % MIN_NET_DAILY_PCT if net_daily < MIN_NET_DAILY_PCT
-                                 else "e_bps<%.1f" % MIN_E_BPS if e_bps < MIN_E_BPS else "target=0")
+                rec["reason"] = ("net<%.2f" % min_net if net_daily < min_net
+                                 else "e_bps<%.1f" % min_e if e_bps < min_e else "target=0")
             if not rec["reason"].startswith("persist"):
                 try:
                     await r.delete(f"dcm:opener:persist:{sym}:{vl}:{vs}")
@@ -252,9 +332,8 @@ async def evaluate(r, pool, now):
     candidates.sort(key=lambda c: c["e_bps"], reverse=True)
     return {"ts": int(now), "mode": "shadow", "candidates": candidates[:MAX_CANDIDATES],
             "candidate_count": len(candidates), "skipped": skipped[:MAX_CANDIDATES],
-            "gate": {"min_net_daily_pct": MIN_NET_DAILY_PCT, "min_e_bps": MIN_E_BPS,
-                     "hold_hours": HOLD_HOURS,
-                     "depth_k": DEPTH_K, "depth_enforce": DEPTH_ENFORCE}}
+            "gate": {**guards, "carry_decay": CARRY_DECAY, "persist_rounds": PERSIST_ROUNDS,
+                     "managed_notional_usdt": round(managed_notional, 2)}}
 
 
 async def main():

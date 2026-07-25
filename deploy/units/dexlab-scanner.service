@@ -1,0 +1,12 @@
+[Unit]
+Description=DEX_LAB scanner worker (D1/D2/D4, public data only, read-only)
+After=network.target
+[Service]
+User=ec2-user
+WorkingDirectory=/home/ec2-user/dexlab
+ExecStart=/usr/bin/python3 /home/ec2-user/dexlab/scanner.py
+Restart=always
+RestartSec=10
+MemoryMax=256M
+[Install]
+WantedBy=multi-user.target
