@@ -69,7 +69,7 @@ EXPECTED_HB = {
     "account-snapshot": 240,
     "depth-sampler": 400,
     "basis-sampler": 200,
-    "engine-lending": 900,   # S4 shadow 决策账,300s/轮
+    # engine-lending 已退役(2026-07-24 关1收口:shadow 3天零写入,已停服)——摘出期望清单
     # engine-basis/engine-dualperp 已退役(2026-07-14,统一执行内核接管)——新权威:
     "exec-manager": 120,     # 20s/轮,持仓 owner-of-record
     "exec-recon": 400,       # 120s/轮,6所对账
@@ -502,7 +502,6 @@ async def main():
         try:
             status = await check_round(r, pool)
             hb.extra = {"alerts": status.get("alerts_this_round", 0)}
-            await r.set("dcm:risk:status", json.dumps(status, ensure_ascii=False, default=str), ex=180)
             # G0 风险策略权威:算逐 venue 有效模式+能力位→发布 dcm:risk:policy(唯一发布者)
             try:
                 pol = await compute_and_publish(pool, r)
@@ -510,7 +509,13 @@ async def main():
                                     "nav": pol.get("nav")}
                 await _post_policy(pool, pol)
                 status["incidents"] = await incidents.active_summary(pool)
-                status["gates_shadow"] = await gates_shadow.snapshot_and_diff(pool, r, pol)
+                gs = await gates_shadow.snapshot_and_diff(pool, r, pol)
+                status["gates_shadow"] = gs
+                # 阶段C 哨兵:genuine NEW_LOOSER(真实危险放宽)必须持续为零——非零即告警(阶段E门槛)
+                if int(gs.get("genuine_looser") or 0) > 0:
+                    await fire("gates-genuine-looser", "三闸真实危险放宽",
+                               f"本轮 genuine NEW_LOOSER={gs['genuine_looser']}(数据不健康放行或武装态下旧拦新放),"
+                               f"阶段E 前置被破坏,须审查 gate_shadow_diff inputs.genuine=true 行", level="fatal")
             except Exception:
                 log.exception("policy compute/publish failed (continuing)")
             # CORE_POOL 封闭盒子不变量:组权益突降/成员限制 → 告警(fire 走共享节流+落库)
@@ -520,6 +525,8 @@ async def main():
                                      "members": cbmon.get("member_count")}
             except Exception:
                 log.exception("corebox check failed (continuing)")
+            # status 发布收尾:含 policy/incidents/gates_shadow/corebox 全字段(修:原发布在富化前,gates_shadow 从未发布)
+            await r.set("dcm:risk:status", json.dumps(status, ensure_ascii=False, default=str), ex=180)
             await hb.beat_once()
             log.info("LEDGER_OK services=%s alerts=%d policy_v=%s capped=%s",
                      status.get("services"), status.get("alerts_this_round", 0),

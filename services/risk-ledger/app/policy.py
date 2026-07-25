@@ -59,6 +59,24 @@ def classify_err(err: str):
     return "MEDIUM", "PRIVATE_API_ERROR"
 
 
+async def _blocked_symbols(r) -> dict:
+    """PATCH-02 §8:点差保护(mix-backend risk_guard 发 dcm:risk:exit,shadow)→ 逐币阻断集。
+    state≥NO_ADD 的币进 blocked_symbols(带原因/状态),供执行闸按 symbol 拦新增(减险不受影响)。
+    风险策略权威在 risk-ledger:此处只是把 C 机 shadow 评估收编进单一 policy 快照,不新建第二权威。"""
+    out = {}
+    try:
+        raw = await r.get("dcm:risk:exit")
+        items = (json.loads(raw) if raw else {}).get("items") or {}
+        for sym, v in items.items():
+            st = v.get("state")
+            if st in ("NO_ADD", "REDUCE_REQUIRED", "EXIT_REQUIRED"):
+                out[sym] = {"state": st, "reason": ";".join(v.get("reasons") or [])[:120],
+                            "l_now": v.get("l_now"), "mode": "shadow"}
+    except Exception:  # noqa: BLE001
+        pass
+    return out
+
+
 async def _venue_exposure(r, venue: str):
     """从 dcm:account:{venue} 算在场名义 = Σ|qty|×mark;返回 (notional, equity, ok, err, key_fp)。"""
     try:
@@ -304,6 +322,30 @@ async def compute_and_publish(pool, r) -> dict:
                      and vp["next_review_at"].timestamp() < time.time())]
 
     global_ovr = overrides.get("GLOBAL:GLOBAL", {}).get("mode", "NORMAL")
+
+    # 武装态收编(ADR-002 阶段E 前置,2026-07-25):G-A/G-B 的"策略是否武装"从旧闸语义收编为
+    # 聚合器输入维——engine_config(*.mode=armed) + manager pairs(cfg.mode=armed 的 legs venue)。
+    # 零行为变更:CAN_OPEN 语义不动(消费者 policy_client/real_venue 不受影响),
+    # 新增 CAN_OPEN_ARMED = CAN_OPEN AND 武装——"此刻真的能开"的完整判定,供 gates_shadow 对比
+    # 与未来阶段E 单一权威使用。
+    armed_engines_in = []
+    try:
+        for row in await pool.fetch("SELECT engine, cval FROM engine_config WHERE ckey='mode'"):
+            if row["cval"] == "armed":
+                armed_engines_in.append(row["engine"])
+    except Exception:  # noqa: BLE001
+        pass
+    armed_pair_venues_in = set()
+    try:
+        mcfg = json.loads(await r.get("dcm:exec:manager:config") or "{}")
+        for pc in (mcfg.get("pairs") or {}).values():
+            if pc.get("mode") == "armed":
+                for lg in (pc.get("legs") or []):
+                    armed_pair_venues_in.add(lg.get("venue"))
+    except Exception:  # noqa: BLE001
+        pass
+    stage_armed_in = bool(armed_engines_in)
+
     venues_out, cred_epochs, cred_rotations = {}, {}, []
     for v in SUPPORTED_VENUES:
         notional, equity, ok, err, key_fp = await _venue_exposure(r, v)
@@ -378,15 +420,19 @@ async def compute_and_publish(pool, r) -> dict:
             inc_state = "WATCH"
         else:
             inc_state = "NORMAL"
+        v_armed = stage_armed_in or v in armed_pair_venues_in
+        caps_out = _capabilities(mode)
+        caps_out["CAN_OPEN_ARMED"] = bool(caps_out["CAN_OPEN"] and v_armed)
         venues_out[v] = {
             "mode": mode, "reason": reason,
             "incident_state": inc_state,
             "recovery": recovery,
             "modes_hit": hits,
+            "armed": v_armed,
             "exposure_notional": round(notional, 2), "equity": round(equity, 2),
             "cap_usdt": cap_val, "warn_ratio": warn_ratio,
             "tier": (cap_row.get("tier") if cap_row else None),
-            "capabilities": _capabilities(mode),
+            "capabilities": caps_out,
         }
 
     # NAV haircut:逐 venue trapped = equity × 折价率(按最终有效模式);净 NAV = 总权益 − trapped。
@@ -419,6 +465,7 @@ async def compute_and_publish(pool, r) -> dict:
     body = {
         "ts": int(time.time()),
         "global_mode": global_ovr,
+        "armed_state": {"engines": armed_engines_in, "pair_venues": sorted(armed_pair_venues_in)},
         "venues": venues_out,
         "capped_venues": [v for v, d in venues_out.items() if d["mode"] != "NORMAL"],
         "nav": nav,
@@ -427,6 +474,7 @@ async def compute_and_publish(pool, r) -> dict:
         "policy_registry": {"unreviewed": unreviewed,
                             "prohibited": [v for v, vp in vpolicy.items()
                                            if vp.get("arbitrage_status") == "PROHIBITED"]},
+        "blocked_symbols": await _blocked_symbols(r),   # PATCH-02 §8:点差保护逐币阻断(shadow)
     }
     # (epoch, sequence) 双单调 fencing(ADR-005)+ PG outbox 耐久发布(批次2):
     # 同一事务 bump 版本 + upsert effective_risk_policy 全量快照 + 写 outbox——
