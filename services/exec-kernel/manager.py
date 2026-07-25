@@ -23,6 +23,14 @@ from real_venue import BinanceRealVenue, MultiVenue, venue_armed, venue_sym  # n
 from store import PgSagaStore  # noqa: E402
 from policy_client import read_policy, set_pool as policy_set_pool  # noqa: E402  # G0 风险策略消费
 
+# Intent 工厂集成(关4 Phase C)
+sys.path.insert(0, "/home/ec2-user/dexcexmix/src/services/exec-kernel")
+from intent import RebalanceIntent, ClosePairIntent  # noqa: E402
+from planner import IntentPlanner  # noqa: E402
+from intent_store import save_intent, link_saga_to_intent  # noqa: E402
+
+_intent_planner = IntentPlanner(min_order_usdt=5.0)
+
 try:
     from dcm_common.notify import Notifier, feishu_from_env
     _notifier = Notifier(os.environ.get("DCM_REDIS_URL", "redis://10.0.1.212:6379/0"),
@@ -302,6 +310,33 @@ async def manage_pair(pid, cfg, store, r):
                      level="warn", extra={"type": "CLOSE_RECOMMENDED", "legs": st["legs"]})
         return st
     if target == "close":
+        # Intent 工厂路径(关4 Phase C):ClosePairIntent → Plan → Saga
+        intent = ClosePairIntent(
+            intent_id="",
+            intent_type=None,  # will be set by __post_init__
+            created_at=0,
+            reason=signal_why,
+            pair_id=pid,
+            symbol=sym,
+            venue_long=legs[0]["venue"] if len(legs) > 0 else "",
+            venue_short=legs[1]["venue"] if len(legs) > 1 else "",
+        )
+        plan = _intent_planner.plan(intent)
+        # 用 plan.legs 更新实际持仓数量(plan.legs qty=0 占位,需填充)
+        for i, pleg in enumerate(plan.legs):
+            if i < len(legs):
+                pleg["qty"] = legs[i]["qty"]  # 从实盘持仓填充
+        legs = plan.legs  # 替换为 Intent 工厂生成的 legs
+        st["intent_id"] = intent.intent_id
+        st["saga_plan"] = plan.saga_id
+        # 持久化 Intent(Phase D)
+        try:
+            await save_intent(store.pool, intent)
+            await link_saga_to_intent(store.pool, sid, intent.intent_id)
+        except Exception as e:  # noqa: BLE001
+            pass  # 持久化失败不阻塞执行
+
+
         if not armed:
             st["action"] = "would_close(shadow)"
             return st
