@@ -6,8 +6,8 @@ After=network-online.target
 Type=oneshot
 WorkingDirectory=/home/ec2-user/dexlab
 Environment=SNAPSHOT_KEEP=5
-# S3 archive: after bucket + instanceRole PutObject grant, uncomment and set bucket name
-# Environment=S3_BUCKET=hustle-lab-archive-130413243655
+# S3 archive: bucket created 2026-07-25 (versioning on, instanceRole Put/Get/List, no Delete)
+Environment=S3_BUCKET=hustle-lab-archive-130413243655
 ExecStart=/home/ec2-user/dexlab/venv/bin/python /home/ec2-user/dexlab/tools/lab_snapshot.py
 User=ec2-user
 Nice=10
