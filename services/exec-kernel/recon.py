@@ -2,7 +2,10 @@
 读 dcm_main 引擎声称持仓(期望)对比各所 RealVenue 交易所真相(实际),逐腿分类:
   MATCH / QTY_MISMATCH / SIDE_MISMATCH / ORPHAN_CLAIM(声称在管实盘平)/
   NAKED_EXCHANGE(实盘有仓内核不知=最危险)/ UNCHECKABLE(venue 无适配器)
-已支持 venue:binance/bybit/gate/bitget(okx/HL 待补)。发布 dcm:exec:recon + 心跳。**只读。**
+已支持 venue:binance/bybit/gate/bitget(okx/HL 待补)。发布 dcm:exec:recon + 心跳。
+2026-07-25 三方合并:git eb5cbb8c(改良reconcile+reap_orphans GC)+RECON自动化(armed handler
+dispatch,关3)——此前自动化部署基于旧版覆盖丢失 reaper,本版收复;并修自动化双调用/print笔误。
+armed 模式下按 DCM_RECON_AUTO_FIX 类型自动修复;其余仍**只读**。
 """
 import asyncio
 import json
@@ -25,6 +28,58 @@ SUPPORTED = {"binance", "bybit", "gate", "bitget", "okx", "hyperliquid"}
 # 所以只对 manager 声明的 C3 腿对账,**绝不做裸债全量扫描**(否则误报 coin 合法债务为 NAKED)。
 MARGIN_VENUES = {"binance-margin"}
 CHECK_VENUES = SUPPORTED | MARGIN_VENUES
+
+# ── RECON 自动化(关3):armed 模式按类型 dispatch handler 自动修复 ─────────────
+from recon_orphan_handler import OrphanClaimHandler as _OrphanClaimHandler  # noqa: E402
+from recon_qty_handler import QtyMismatchHandler as _QtyMismatchHandler  # noqa: E402
+
+_RECON_MODE = os.environ.get("DCM_RECON_MODE", "shadow")
+_AUTO_FIX_TYPES = set(os.environ.get("DCM_RECON_AUTO_FIX", "").split(","))
+
+
+async def _process_breaks_auto(pool, breaks: list, redis_client) -> dict:
+    """自动处理检测到的异常(armed only)。每轮只调用一次(修:此前双调用致双写 recon_fixes)。"""
+    if _RECON_MODE != "armed" or not breaks:
+        return {"processed": 0, "success": 0, "failed": 0, "skipped": len(breaks), "mode": _RECON_MODE}
+
+    orphan_handler = _OrphanClaimHandler(pool)
+    qty_handler = _QtyMismatchHandler(pool, redis_client)
+    processed = success = failed = skipped = 0
+
+    for b in breaks:
+        break_type = b.get("type")
+        if break_type not in _AUTO_FIX_TYPES:
+            skipped += 1
+            continue
+        handler = None
+        if break_type == "ORPHAN_CLAIM":
+            handler = orphan_handler
+        elif break_type == "QTY_MISMATCH":
+            handler = qty_handler
+        if not handler:
+            skipped += 1
+            continue
+        try:
+            if not await handler.can_handle(break_type):
+                skipped += 1
+                continue
+        except Exception as e:  # noqa: BLE001
+            print(f"Handler check failed: {break_type}: {e}")
+            skipped += 1
+            continue
+        try:
+            processed += 1
+            result = await handler.handle(b)
+            if result.get("success"):
+                success += 1
+            else:
+                failed += 1
+        except Exception as e:  # noqa: BLE001
+            print(f"Auto-fix failed: {break_type} {b.get('venue')} {b.get('symbol')}: {e}")
+            failed += 1
+
+    return {"processed": processed, "success": success, "failed": failed,
+            "skipped": skipped, "mode": "armed"}
 
 
 def _venue_sym(venue, sym):
@@ -172,6 +227,8 @@ async def reconcile(pool, r) -> dict:
                "breaks": breaks, "break_types": sorted({b["type"] for b in breaks}),
                "real_syms": sorted(real_syms), "read_fail_venues": sorted(read_fail_venues),
                "clean_read": not read_fail_venues}
+    # RECON 自动化(关3):armed 按 DCM_RECON_AUTO_FIX 类型修复;结果并入发布快照(单次调用)
+    summary["auto_fix"] = await _process_breaks_auto(pool, breaks, r)
     await r.set("dcm:exec:recon", json.dumps(summary, ensure_ascii=False), ex=max(INTERVAL * 3, 600))
     return summary
 

@@ -311,7 +311,12 @@ async def set_config(request: Request):
 
 @app.post("/api/admin/kill")
 async def kill_switch(request: Request):
-    """全局急停:所有引擎置 shadow + 清白名单(停新开;不强平,平仓另走路由 off)。SUPER_ADMIN。"""
+    """全局急停:停新开;不强平(平仓/减险不受影响)。SUPER_ADMIN。
+    G-B收编(ADR-002,2026-07-25 演练发现原实现只写已退役 dualperp engine_config=死按钮):
+    真实作用面=写 GLOBAL risk_policy_override NO_NEW_RISK → policy 全 venue 收紧
+    CAN_OPEN=False → 执行器 _policy_gate 拦所有新增(canary/manager/opener 统一生效);
+    并 publish dcm:risk:trigger 直通唤醒 risk-ledger 秒级重算(不等30s轮距)。
+    旧 engine_config 写保留(退役引擎路径兼容)。解除=POST /api/admin/unkill(GLOBAL置NORMAL)。"""
     who = await _operator(request)
     if not who or not _has_role(who[1], "SUPER_ADMIN"):
         return JSONResponse(status_code=403, content={"error": "需 SUPER_ADMIN"})
@@ -322,9 +327,39 @@ async def kill_switch(request: Request):
             "ON CONFLICT (engine,ckey) DO UPDATE SET cval=$2,version=engine_config.version+1,"
             "updated_by=$3,updated_at=now()", key, val, op)
     await _publish_config("dualperp")
-    await _audit(op, role, "KILL_SWITCH", "dualperp", {}, "置shadow+清白名单")
+    # G-B真实作用面:单一风险权威 GLOBAL override(最新行生效)
+    await _pool.execute(
+        "INSERT INTO risk_policy_override(scope_type,scope_key,mode,reason,created_by) "
+        "VALUES('GLOBAL','GLOBAL','NO_NEW_RISK',$1,$2)",
+        "KILL_SWITCH 全局急停(停新开不强平)", op)
+    try:
+        await _redis.publish("dcm:risk:trigger", "kill-switch")
+    except Exception:  # noqa: BLE001  # trigger失败不阻塞急停(30s轮距兜底)
+        pass
+    await _audit(op, role, "KILL_SWITCH", "GLOBAL", {},
+                 "GLOBAL override NO_NEW_RISK+dualperp置shadow+清白名单")
     logger.warning(f"KILL_SWITCH by {op}")
-    return {"ok": True, "message": "全组合已置 shadow,白名单已清(存量仓位需手动路由 off 平仓)"}
+    return {"ok": True, "message": "全局急停生效:GLOBAL=NO_NEW_RISK(全venue CAN_OPEN=False,停新开;"
+                                   "平仓/减险不受影响)。解除:POST /api/admin/unkill"}
+
+
+@app.post("/api/admin/unkill")
+async def unkill_switch(request: Request):
+    """解除全局急停:GLOBAL override 置 NORMAL(最新行生效)。SUPER_ADMIN,审计留痕。"""
+    who = await _operator(request)
+    if not who or not _has_role(who[1], "SUPER_ADMIN"):
+        return JSONResponse(status_code=403, content={"error": "需 SUPER_ADMIN"})
+    op, role = who
+    await _pool.execute(
+        "INSERT INTO risk_policy_override(scope_type,scope_key,mode,reason,created_by) "
+        "VALUES('GLOBAL','GLOBAL','NORMAL',$1,$2)", "解除 KILL_SWITCH(操作员放行)", op)
+    try:
+        await _redis.publish("dcm:risk:trigger", "unkill")
+    except Exception:  # noqa: BLE001
+        pass
+    await _audit(op, role, "UNKILL_SWITCH", "GLOBAL", {}, "GLOBAL override 置 NORMAL")
+    logger.warning(f"UNKILL_SWITCH by {op}")
+    return {"ok": True, "message": "急停已解除:GLOBAL=NORMAL(注意:引擎武装态需另行恢复)"}
 
 
 @app.post("/api/admin/route")
