@@ -205,8 +205,22 @@ async def _depth_l1(r, venue, sym):
         return None
 
 
+ROUTE_QUAL_KEY = "dcm:route:qualification"  # C投影(REPORT_ONLY只读)
+
+
+async def _load_route_qual(r):
+    """读C发布的路由授权投影;失败返回空(fail-open,只报层绝不阻断开仓)。"""
+    try:
+        import json as _j
+        snap = _j.loads(await r.get(ROUTE_QUAL_KEY) or "{}")
+        return snap.get("routes", {}) or {}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
 async def evaluate(r, pool, now):
     guards = await _load_guards(r)
+    route_qual = await _load_route_qual(r)  # REPORT_ONLY标注源
     ra = await r.hgetall("dcm:route:assignments")
     managed = await _managed_symbols(r, pool)
     candidates, skipped = [], []
@@ -318,6 +332,12 @@ async def evaluate(r, pool, now):
             rec["manager_pair"] = {
                 "mode": "shadow", "target": "hold", "signal_source": "route", "symbol": sym,
                 "legs": [{"venue": vl, "side": "BUY"}, {"venue": vs, "side": "SELL"}]}
+            _rq = route_qual.get(sym)
+            rec["route_qualification"] = {
+                "authorized": bool(_rq),
+                "basis": (_rq or {}).get("basis"),
+                "mode": (_rq or {}).get("mode"),
+                "note": ("有效授权账" if _rq else "无授权账(REPORT_ONLY:候选新路由,采纳前须建route_qualification)")}
             candidates.append(rec)
         else:
             if "reason" not in rec:
@@ -329,9 +349,12 @@ async def evaluate(r, pool, now):
                 except Exception:  # noqa: BLE001
                     pass
             skipped.append(rec)
+    _unqual = sorted({c["symbol"] for c in candidates
+                      if not c.get("route_qualification", {}).get("authorized")})
     candidates.sort(key=lambda c: c["e_bps"], reverse=True)
     return {"ts": int(now), "mode": "shadow", "candidates": candidates[:MAX_CANDIDATES],
             "candidate_count": len(candidates), "skipped": skipped[:MAX_CANDIDATES],
+            "report_only_unqualified": _unqual,  # REPORT_ONLY:候选中无授权账的路由(只报不拦)
             "gate": {**guards, "carry_decay": CARRY_DECAY, "persist_rounds": PERSIST_ROUNDS,
                      "managed_notional_usdt": round(managed_notional, 2)}}
 

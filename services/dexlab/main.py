@@ -446,6 +446,21 @@ def verdicts(req: Request):
     return rows
 
 
+@app.get("/v3/artifacts")
+def v3_artifacts(req: Request, since_id: str = "", limit: int = 50):
+    """LP4:签名artifact拉取端点(C-control research-inbox消费;X-Lab-Token鉴权)。
+    只读;按artifact_id升序;C端负责验签/hash/expiry/schema校验(§11.2)。"""
+    _auth(req)
+    c = db()
+    try:
+        rows = c.execute(
+            "SELECT * FROM research_artifact WHERE artifact_id > ? "
+            "ORDER BY artifact_id LIMIT ?", (since_id, min(int(limit), 200))).fetchall()
+        return {"artifacts": [dict(r) for r in rows], "count": len(rows)}
+    finally:
+        c.close()
+
+
 @app.get("/outbox")
 def outbox(req: Request):
     """research_outbox 单向研究摘要——生产侧只显示「LAB 有新结果」提醒,信号不入可执行列表。"""
