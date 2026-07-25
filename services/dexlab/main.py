@@ -29,6 +29,7 @@ import sqlite3
 import logging
 import lab_spine as _spine
 import lab_schema as _schema   # 第二代严谨表代码自有 DDL
+import lab_platform as _platform  # V6.2 LP0 平台治理面(Subject/六轴/gate_profile/watch)
 
 from fastapi import FastAPI, Request, HTTPException
 
@@ -208,7 +209,8 @@ def _init():
     os.makedirs(os.path.dirname(DB), exist_ok=True)
     c = db()
     c.executescript(_DDL)
-    _schema.ensure_v2(c)          # 孤儿严谨表收编为代码自有(IF NOT EXISTS 对 live 零作用)+ schema_version 版本戳
+    _schema.ensure_v2(c)
+    _platform.ensure(c)           # LP0 平台 11 表(加法,零动现有表)          # 孤儿严谨表收编为代码自有(IF NOT EXISTS 对 live 零作用)+ schema_version 版本戳
     now = int(time.time())
     for pid, prod, title, stage, chain in _SEED:
         c.execute("INSERT OR IGNORE INTO lab_project(project_id,product,title,stage,chain_protocol,"
