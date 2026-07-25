@@ -1,0 +1,17 @@
+[Unit]
+Description=DexCexMix exec-autopilot (L0 auto-open layer, 30U/order 100U/day, user-authorized 2026-07-25)
+After=network-online.target dcm-exec-runner.service
+Wants=network-online.target
+
+[Service]
+User=ec2-user
+Slice=dexcexmix.slice
+MemoryMax=128M
+WorkingDirectory=/home/ec2-user/dexcexmix
+EnvironmentFile=/home/ec2-user/dexcexmix/.env
+ExecStart=/home/ec2-user/dexcexmix/venv/bin/python autopilot.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

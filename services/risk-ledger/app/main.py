@@ -75,6 +75,7 @@ EXPECTED_HB = {
     "exec-recon": 400,       # 120s/轮,6所对账
     "exec-opener": 300,      # 60s/轮,shadow 开仓候选决策(不下单)
     "exec-repair": 300,      # 60s/轮,G2 RiskRepair 修复意图(shadow,不下单)
+    "exec-autopilot": 300,   # 60s/轮,L0 全自动开仓层(2026-07-25 用户授权)
 }
 RECON_VENUES = ("binance", "bybit", "okx", "gate", "bitget", "hyperliquid")
 STALE_STATUSES = ("PENDING_BORROW", "BORROWED_IDLE", "PENDING_REPAY")
