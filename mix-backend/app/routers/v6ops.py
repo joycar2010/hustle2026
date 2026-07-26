@@ -67,16 +67,48 @@ CREATE TABLE IF NOT EXISTS legacy_compare_run (
     legacy_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
     diffs JSONB NOT NULL DEFAULT '[]'::jsonb,
     diff_count INT NOT NULL DEFAULT 0,
-    phase TEXT NOT NULL DEFAULT 'V6_READONLY_SHADOW')"""
+    phase TEXT NOT NULL DEFAULT 'V6_READONLY_SHADOW');
+CREATE TABLE IF NOT EXISTS automation_control_log (
+    id BIGSERIAL PRIMARY KEY,
+    loop_id TEXT NOT NULL,
+    action TEXT NOT NULL CHECK (action IN ('PAUSE','RESUME')),
+    control_key TEXT NOT NULL DEFAULT '',
+    prev_value TEXT,
+    new_value TEXT,
+    effect TEXT NOT NULL,          -- APPLIED / SHADOW_LOGGED / STAGED_AWAIT_SUPERVISION
+    reason TEXT NOT NULL DEFAULT '',
+    actor TEXT NOT NULL DEFAULT '',
+    actor_role TEXT NOT NULL DEFAULT '',
+    writer_epoch BIGINT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now())"""
+
+# ─── R4 自动化环控制(暂停/恢复)：typed command 接权威 Redis 控制键 ───
+# 主控总闸(须盯盘时人工置 1 才真实改键)——缺失/≠1 时全走 SHADOW 只登记不改键，真钱零行为改变。
+_AUTOCTL_MASTER = "dcm:v6:automation:control:enabled"
+# 恢复(re-arm)副闸：即便主闸开，resume 仍须此键=1（盯盘二次授权），否则 STAGED 不放行。
+_AUTOCTL_RESUME_OK = "dcm:v6:automation:resume:authorized"
+# 可 Web 控制的真钱自动环 → 其单键 Redis 闸（两钥匙型：Web 只碰 Redis 键，B 机 env 仍需就位，
+# 故 Web 只能"更严格"地压停或在 env 允许时放行，绝不能绕过 B 机本地武装钥匙）。
+_CONTROLLABLE_LOOPS = {
+    "phase-autopilot": {"key": "dcm:phase:auto:armed", "two_key": "B:PHASE_AUTO_ARMED",
+                        "name": "相位自动开平仓"},
+    "c3s-autopilot": {"key": "dcm:c3s:v6:autopilot", "two_key": None,
+                      "name": "C3.S 影子自主环(零真钱)"},
+    "c4-exec-cli": {"key": "dcm:c4:exec:armed", "two_key": "B:DCM_C4_ARMED",
+                    "name": "C4/C5 期现交割执行器"},
+}
 
 # 新增风险类命令(风险能力/维护/手机角色都要拦);减险类永远放行
-_RISK_ADDING = {"opportunity_to_workbench", "proposal_dry_run", "lease_acquire_auto"}
+# resume_automation=重新武装真钱自动环=新增风险(全闸);pause_automation=压停=减险(永远放行)
+_RISK_ADDING = {"opportunity_to_workbench", "proposal_dry_run", "lease_acquire_auto",
+                "resume_automation"}
 # PATCH-02 §10.2 手机白名单(服务端强制,UI 隐藏≠权限;越界返回 403):
 #   ack_incident/pause_new_risk/add_to_watch/dismiss_non_risk_item=登记类立即
 #   preview_reduction=只读预演(无重认证)  approve_reduction/cancel_open_orders=减险执行(须重认证)
 _MOBILE_ALLOWED = {"pause_new_risk", "opportunity_watch", "opportunity_ignore",
                    "workitem_ack", "ack_incident", "add_to_watch", "dismiss_non_risk_item",
-                   "preview_reduction", "approve_reduction", "cancel_open_orders", "coin_reduce"}
+                   "preview_reduction", "approve_reduction", "cancel_open_orders", "coin_reduce",
+                   "pause_automation"}  # 手机紧急压停自动环(减险方向)放行;resume 禁手机
 # 减险执行类:须最新快照重预演+重认证(reauth_ticket);快照过期不阻断减险但强制重预演
 _REDUCE_EXEC = {"approve_reduction", "cancel_open_orders", "coin_reduce"}
 _KNOWN = _RISK_ADDING | _MOBILE_ALLOWED | {
@@ -644,6 +676,48 @@ async def operator_commands(body: dict, x_device_session: str | None = Header(de
             from .maintenance import _risk_override
             await _risk_override("NORMAL", str(params.get("reason") or "V6命令:恢复"), op["operator"])
             result = {"applied": "GLOBAL NORMAL 追加(venue级更严格限制继续生效)"}
+        elif ctype in ("pause_automation", "resume_automation"):
+            # R4:自动化环暂停/恢复 —— 接权威 Redis 控制键。pause=压停(减险,永远放行);
+            # resume=重新武装真钱环(新增风险,已过全闸 freshness+设备Passkey+租约+训练)。
+            # 双重人工护栏:①主控总闸 _AUTOCTL_MASTER 未开 → 全 SHADOW 只登记不改键(真钱零改变);
+            #               ②resume 即便主闸开,仍须副闸 _AUTOCTL_RESUME_OK=1(盯盘二次授权)否则 STAGED。
+            act = "PAUSE" if ctype == "pause_automation" else "RESUME"
+            loop_id = str(params.get("loop_id") or "")
+            spec = _CONTROLLABLE_LOOPS.get(loop_id)
+            if not spec:
+                raise HTTPException(400, f"loop_id 不可控或未知(可控:{sorted(_CONTROLLABLE_LOOPS)})")
+            r = ds.rds()
+            if r is None:
+                raise HTTPException(503, "权威 Redis 不可达,无法执行自动化环控制")
+            ckey = spec["key"]
+            prev = await r.get(ckey)
+            master_on = str(await r.get(_AUTOCTL_MASTER) or "") == "1"
+            target = "0" if act == "PAUSE" else "1"
+            reason = str(params.get("reason") or ("V6命令:压停自动环" if act == "PAUSE" else "V6命令:恢复自动环"))
+            if not master_on:
+                effect, newv = "SHADOW_LOGGED", prev
+                result = {"effect": "SHADOW", "loop_id": loop_id, "control_key": ckey,
+                          "would_set": target, "current": prev,
+                          "note": f"主控总闸未开(SET {_AUTOCTL_MASTER}=1 须盯盘授权);已登记控制意图,未真实改键"}
+            elif act == "RESUME" and str(await r.get(_AUTOCTL_RESUME_OK) or "") != "1":
+                effect, newv = "STAGED_AWAIT_SUPERVISION", prev
+                result = {"effect": "STAGED", "loop_id": loop_id, "control_key": ckey,
+                          "note": f"恢复真钱自动环须副闸授权(SET {_AUTOCTL_RESUME_OK}=1,盯盘二次确认);已登记待放行"}
+                status = "STAGED"
+            else:
+                await r.set(ckey, target)
+                effect, newv = "APPLIED", target
+                twok = spec.get("two_key")
+                result = {"effect": "APPLIED", "loop_id": loop_id, "control_key": ckey,
+                          "prev": prev, "new": target,
+                          "note": (f"{spec['name']}:Redis 闸已置 {target}"
+                                   + (f";两钥匙型另需 B 机 {twok} 就位方全生效" if twok else ""))}
+            await pool.execute(
+                "INSERT INTO automation_control_log(loop_id, action, control_key, prev_value, "
+                "new_value, effect, reason, actor, actor_role, writer_epoch) "
+                "VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)",
+                loop_id, act, ckey, prev, newv, effect, reason,
+                op["operator"], op["role"], body.get("writer_epoch"))
         elif ctype in ("opportunity_to_workbench", "opportunity_watch", "opportunity_ignore"):
             act = {"opportunity_to_workbench": "TO_WORKBENCH", "opportunity_watch": "WATCH",
                    "opportunity_ignore": "IGNORE"}[ctype]
@@ -745,6 +819,38 @@ async def commands_log(limit: int = 50, _who=Depends(require_viewer)):
         "writer_epoch, status, result, created_at::text FROM v6_command_log ORDER BY id DESC LIMIT $1",
         max(1, min(limit, 200)))
     return [dict(r) for r in rows]
+
+
+@router.get("/operator/automation/control/state")
+async def automation_control_state(_who=Depends(require_viewer)):
+    """R4 自动化环控制面板(只读):主控总闸/恢复副闸状态 + 各可控环当前 Redis 闸值 + 最近控制记录。
+    真钱零改变:本端点纯读;改键只经 POST /operator/commands(pause_automation/resume_automation)。"""
+    pool = await _pool()
+    r = ds.rds()
+    master_on = resume_ok = False
+    loops = []
+    if r is not None:
+        try:
+            master_on = str(await r.get(_AUTOCTL_MASTER) or "") == "1"
+            resume_ok = str(await r.get(_AUTOCTL_RESUME_OK) or "") == "1"
+            for lid, spec in _CONTROLLABLE_LOOPS.items():
+                v = await r.get(spec["key"])
+                loops.append({"loop_id": lid, "name": spec["name"], "control_key": spec["key"],
+                              "value": v, "armed": v == "1", "two_key": spec.get("two_key")})
+        except Exception:  # noqa: BLE001
+            pass
+    try:
+        recent = await pool.fetch(
+            "SELECT loop_id, action, control_key, prev_value, new_value, effect, reason, "
+            "actor, created_at::text FROM automation_control_log ORDER BY id DESC LIMIT 20")
+        recent = [dict(x) for x in recent]
+    except Exception:  # noqa: BLE001
+        recent = []
+    return {"master_control_enabled": master_on, "resume_authorized": resume_ok,
+            "master_key": _AUTOCTL_MASTER, "resume_key": _AUTOCTL_RESUME_OK,
+            "controllable_loops": loops, "recent_actions": recent,
+            "note": ("主控总闸开=命令真实改键;关=SHADOW 只登记。"
+                     "恢复真钱环另需恢复副闸。均由盯盘时人工在权威 Redis 置键。")}
 
 
 # ─────────────────────────── 旧 C3.S 对比(§14.1) ───────────────────────────

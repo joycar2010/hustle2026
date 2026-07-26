@@ -18,9 +18,36 @@
     <span class="fill"></span>
     <a class="more" @click="drawer = true">回路详情 →</a>
 
-    <el-drawer v-model="drawer" title="自动回路监督(只读 · R0 审计登记册)" size="720px" :append-to-body="true">
+    <el-drawer v-model="drawer" title="自动回路监督(只读 · R0 审计登记册)" size="720px" :append-to-body="true" @open="loadCtl">
       <div class="drawbody">
-        <div class="note">登记册=2026-07-26 R0 逐行审计;TEMP_OBSERVATION 源不作审计权威;控制动作未开放(R4 走统一命令)。</div>
+        <div class="note">登记册=2026-07-26 R0 逐行审计;TEMP_OBSERVATION 源不作审计权威。</div>
+
+        <!-- R4 控制面:typed command 接权威 Redis 闸;主控总闸默认关=SHADOW 只登记不改键 -->
+        <div class="ctlbox" v-if="ctl">
+          <div class="ctlhd">
+            <b>控制面 · R4</b>
+            <span class="chip" :class="ctl.master_control_enabled ? 'red' : 'dim'">
+              主控总闸 {{ ctl.master_control_enabled ? '已开(命令真实改键)' : '关(SHADOW 只登记)' }}</span>
+            <span class="chip" :class="ctl.resume_authorized ? 'wn' : 'dim'">
+              恢复副闸 {{ ctl.resume_authorized ? '已授权' : '未授权' }}</span>
+          </div>
+          <div class="note">压停=减险即时;恢复真钱环=新增风险(须设备 Passkey+租约 epoch+训练认证)。
+            真实改键须盯盘时在权威 Redis 置 <code>{{ ctl.master_key }}</code>=1(恢复另需 <code>{{ ctl.resume_key }}</code>=1)。</div>
+          <div v-for="lp in ctl.controllable_loops" :key="lp.loop_id" class="ctlrow">
+            <b>{{ lp.name }}</b><i class="lid">{{ lp.control_key }}</i>
+            <span class="chip" :class="lp.armed ? 'red' : 'ok'">{{ lp.armed ? '武装中' : '已停' }}</span>
+            <span v-if="lp.two_key" class="chip dim">两钥匙 · {{ lp.two_key }}</span>
+            <span class="fill"></span>
+            <button class="cbtn stop" :disabled="busy" @click="doCtl('pause_automation', lp)">压停</button>
+            <button class="cbtn go" :disabled="busy" @click="doCtl('resume_automation', lp)">恢复</button>
+          </div>
+          <div v-if="ctlMsg" class="ctlmsg" :class="ctlMsgCls">{{ ctlMsg }}</div>
+          <div v-if="(ctl.recent_actions||[]).length" class="recent">
+            <i>最近控制动作</i>
+            <pre v-for="(a,i) in ctl.recent_actions.slice(0,8)" :key="i" class="ev">{{ a.created_at?.slice(5,19) }} {{ a.action }} {{ a.loop_id }} → {{ a.effect }} <span class="dim">({{ a.actor }})</span></pre>
+          </div>
+        </div>
+
         <table class="ltab">
           <thead><tr><th>回路</th><th>机器</th><th>产品</th><th>身份</th><th>风险类</th><th>阶段</th><th>节奏</th></tr></thead>
           <tbody>
@@ -63,7 +90,27 @@ const tlId = ref('')
 const tlEvents = ref([])
 const tlGrade = ref('')
 const tlNote = ref('')
+const ctl = ref(null)
+const ctlMsg = ref('')
+const ctlMsgCls = ref('')
+const busy = ref(false)
 let timer = null
+
+async function loadCtl () {
+  try { ctl.value = await mixApi.automationControlState() } catch (e) { ctl.value = null }
+}
+async function doCtl (cmd, lp) {
+  ctlMsg.value = ''; busy.value = true
+  try {
+    const r = await mixApi.v6Command({ command_type: cmd, params: { loop_id: lp.loop_id, reason: '控制面操作' } })
+    const eff = r?.result?.effect || r?.status || ''
+    ctlMsg.value = `${lp.name}:${r?.result?.note || eff}`
+    ctlMsgCls.value = eff === 'APPLIED' ? 'go' : (eff === 'STAGED' ? 'wn' : 'dim')
+  } catch (e) {
+    ctlMsg.value = `拒绝:${e?.detail || e?.error || e?.message || '未知'}`
+    ctlMsgCls.value = 'bad'
+  } finally { busy.value = false; await loadCtl() }
+}
 
 async function load () {
   try {
@@ -159,4 +206,20 @@ function evLine (e) {
 .ev{margin:0;padding:2px 6px;border-left:2px solid #2B3139;color:#B7BDC6;font-size:11px;white-space:pre-wrap;word-break:break-all}
 .chain{margin-top:10px;color:#848E9C}
 .chain i{font-style:normal;color:#5E6673;margin-right:6px}
+.ctlbox{margin:8px 0 12px;padding:8px 10px;border:1px solid #2B3139;border-radius:6px;background:#1B1E24}
+.ctlhd{display:flex;align-items:center;gap:8px;margin-bottom:4px}
+.ctlhd b{color:#EAECEF}
+.ctlrow{display:flex;align-items:center;gap:8px;padding:5px 0;border-top:1px solid #22262E}
+.ctlrow b{color:#EAECEF}
+.ctlrow .lid{color:#5E6673;font-style:normal;font-size:11px}
+.cbtn{border:1px solid #2B3139;background:#22262E;color:#B7BDC6;border-radius:4px;padding:2px 10px;cursor:pointer;font-size:12px}
+.cbtn:disabled{opacity:.5;cursor:not-allowed}
+.cbtn.stop:hover{border-color:#F6465D;color:#F6465D}
+.cbtn.go:hover{border-color:#0ECB81;color:#0ECB81}
+.ctlmsg{margin-top:6px;font-size:12px}
+.ctlmsg.go{color:#0ECB81}.ctlmsg.wn{color:#F0B90B}.ctlmsg.bad{color:#F6465D}.ctlmsg.dim{color:#848E9C}
+.recent{margin-top:8px}
+.recent i{color:#5E6673;font-style:normal;font-size:11px}
+code{background:#22262E;color:#F0B90B;padding:0 4px;border-radius:3px;font-size:11px}
+.dim{color:#848E9C}
 </style>

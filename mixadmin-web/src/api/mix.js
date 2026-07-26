@@ -288,6 +288,7 @@ export const mixApi = {
   automationSummary: () => http6.get('/automation/summary'),
   automationLoops: () => http6.get('/automation/loops'),
   automationTimeline: (id, limit = 50) => http6.get(`/automation/loops/${encodeURIComponent(id)}/timeline`, { params: { limit } }),
+  automationControlState: () => http6.get('/operator/automation/control/state'),
   // ── V6.2 R3 策略原理白话(版本化,git种子→strategy_playbook表) ──
   playbook: (code) => http6.get(`/playbooks/${encodeURIComponent(code)}`),
   // ── V6.2 R3+ 操作引导契约(§8.3):cue投影/确认/稍后/课程进度 ──
