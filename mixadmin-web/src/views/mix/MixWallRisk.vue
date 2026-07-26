@@ -59,7 +59,7 @@
           <div class="mhead"><span>组合</span><span>产品</span><span class="r">净Delta U</span><span>状态</span></div>
           <div v-for="(r,i) in pfRows" :key="i" class="mrow" :class="{bad: r.recon!=='ok'}">
             <span><b>{{ r.symbol }}</b></span>
-            <span><i class="pbadge">{{ r.product }}</i></span>
+            <span><i class="pbadge" :style="prodStyle(r.strategy_code)">{{ prodCode(r.strategy_code) }}</i></span>
             <span class="r">{{ r.net_delta_usdt ?? 'N/A' }}</span>
             <span :class="r.recon==='ok' ? 'up' : 'bad'"><template v-if="r.recon==='ok'"><FIcon name="check" :size="11"/> 0差异</template><template v-else><FIcon name="warn" :size="11"/> {{ r.recon }}</template></span>
           </div>
@@ -120,6 +120,7 @@ import { useRoute } from 'vue-router'
 import RiskStatusBar from '../../components/RiskStatusBar.vue'
 import WallStatus from '../../components/v62/WallStatus.vue'
 import { mixApi } from '../../api/mix'
+import { STRATEGY_META } from '../../components/PositionTable/types'
 
 const route = useRoute()
 const authed = ref(!!route.query.token || !!localStorage.getItem('mix_token'))
@@ -152,6 +153,21 @@ function minLiq(venue) {
   return ls.length ? Math.min(...ls.map(l => l.dist_liq_pct)) : null
 }
 const n = v => (v == null ? 'N/A' : Number(v).toLocaleString())
+
+// 产品颜色动态绑定
+function prodCode(code) {
+  const meta = STRATEGY_META[code]
+  return meta?.ccode || code
+}
+function prodStyle(code) {
+  const meta = STRATEGY_META[code]
+  if (!meta) return {}
+  return {
+    color: meta.color,
+    background: meta.colorBg
+  }
+}
+
 async function load() {
   try {
     rs.value = await mixApi.riskSummary()
@@ -185,8 +201,7 @@ onUnmounted(() => t1 && clearInterval(t1))
 .cnt { font-size: 10.5px; font-weight: 800; padding: 1px 9px; border-radius: 4px;
   &.p0 { background: rgba(246,70,93,.16); color: #F6465D; }
   &.okc { background: rgba(14,203,129,.12); color: #35b57c; } }
-.pbadge { font-style: normal; font-size: 9px; font-weight: 800; padding: 0 5px; border-radius: 3px;
-  background: rgba(240,185,11,.14); color: #F0B90B; }
+.pbadge { font-style: normal; font-size: 9px; font-weight: 800; padding: 0 5px; border-radius: 3px; }
 .mhead, .mrow { display: grid; grid-template-columns: minmax(110px,1.2fr) 76px 76px 80px 100px; align-items: center; font-size: 10.5px; padding: 0 14px; }
 .mhead { color: var(--mix-t3, #5E6673); font-size: 10px; height: 22px; background: var(--mix-panel, #12151A);
   border-top: 1px solid var(--mix-border, #262B33); border-bottom: 1px solid var(--mix-border, #262B33); }

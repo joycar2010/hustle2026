@@ -11,7 +11,7 @@
           <div v-if="!opps.length" class="dimtxt pad">本轮无过闸候选</div>
           <div v-for="o in opps" :key="o.symbol" class="orow" :class="{sel: sel===o.symbol, blocked: o.blocked}" @click="pick(o)">
             <span class="c1"><b>{{ o.symbol }}</b></span>
-            <span class="c2"><i class="pbadge">C2.H</i></span>
+            <span class="c2"><i class="pbadge" :style="prodStyle(o.strategy_code)">{{ prodCode(o.strategy_code) }}</i></span>
             <span class="c3" :class="(o.risk_adjusted_e_bps??0)>0?'up':'down'">{{ bps(o) }}</span>
             <span class="c4">{{ o.target_notional_usdt ?? 'N/A' }}</span>
             <span class="c5"><b :class="'vx-'+o.venue_long">{{ o.venue_long }}</b>⟶<b :class="'vx-'+o.venue_short">{{ o.venue_short }}</b></span>
@@ -67,7 +67,7 @@
           <div class="chd2"><b>Funding 日历</b><span class="grow" /><span class="dimtxt">在管组合逐结算</span></div>
           <div v-if="!cal.length" class="dimtxt pad">无在管组合</div>
           <div v-for="c in cal" :key="c.symbol" class="crow">
-            <b>{{ c.symbol }}</b><i class="pbadge">{{ c.product }}</i>
+            <b>{{ c.symbol }}</b><i class="pbadge" :style="prodStyle(c.strategy_code)">{{ c.product }}</i>
             <span class="dimtxt">{{ Math.floor(c.next_cashflow.in_min/60) }}h{{ c.next_cashflow.in_min%60 }}m 后</span>
             <span class="grow" />
             <b :class="(c.next_cashflow.est_usdt ?? c.next_cashflow.net_daily_pct) >= 0 ? 'up' : 'down'">
@@ -79,7 +79,7 @@
           <div class="chd2"><b>LAB</b><span class="dimtxt">HOUSE_RND · shadow 决策账</span></div>
           <div v-if="!labRows.length" class="dimtxt pad">无 shadow 持有(engine-lending)</div>
           <div v-for="l in labRows" :key="l.coin" class="crow">
-            <b>{{ l.coin }}</b><i class="pbadge lab2">C3.R·shadow</i>
+            <b>{{ l.coin }}</b><i class="pbadge" :style="prodStyle(l.strategy_code || 'C3.R')">{{ prodCode(l.strategy_code || 'C3.R') }}·shadow</i>
             <span class="grow" /><span class="dimtxt">净差 {{ l.net_daily_pct ?? 'N/A' }}%/d</span>
           </div>
           <div class="cfoot">LAB 战绩不进 CORE_POOL 账;晋级须专场验收</div>
@@ -97,6 +97,7 @@ import { useRoute } from 'vue-router'
 import RiskStatusBar from '../../components/RiskStatusBar.vue'
 import WallStatus from '../../components/v62/WallStatus.vue'
 import { mixApi } from '../../api/mix'
+import { STRATEGY_META } from '../../components/PositionTable/types'
 
 const route = useRoute()
 const authed = ref(!!route.query.token || !!localStorage.getItem('mix_token'))
@@ -112,6 +113,21 @@ const calTotal = computed(() => Math.round(cal.value.reduce((t, c) => t + (c.nex
 const bps = o => (o.risk_adjusted_e_bps != null ? (o.risk_adjusted_e_bps > 0 ? '+' : '') + o.risk_adjusted_e_bps : 'N/A')
 const maxAbs = computed(() => Math.max(0.01, ...va.value.map(r => Math.abs(r.funding_daily_pct || 0))))
 const barH = v => (v == null ? '2px' : Math.max(3, Math.abs(v) / maxAbs.value * 64) + 'px')
+
+// 产品颜色动态绑定
+function prodCode(code) {
+  const meta = STRATEGY_META[code]
+  return meta?.ccode || code
+}
+function prodStyle(code) {
+  const meta = STRATEGY_META[code]
+  if (!meta) return {}
+  return {
+    color: meta.color,
+    background: meta.colorBg
+  }
+}
+
 function openAiCoin() { window.open('/mix/aicoin') }
 async function pick(o) {
   sel.value = o.symbol
@@ -146,8 +162,7 @@ onUnmounted(() => t1 && clearInterval(t1))
 .dimtxt { color: var(--mix-t3, #5E6673); font-size: 10.5px; font-weight: 400; }
 .pad { padding: 8px 14px; }
 .up { color: #0ECB81 !important; } .down { color: #F6465D !important; }
-.pbadge { font-style: normal; font-size: 9px; font-weight: 800; padding: 0 5px; border-radius: 3px;
-  background: rgba(240,185,11,.14); color: #F0B90B; &.lab2 { background: rgba(74,156,255,.14); color: #4A9CFF; } }
+.pbadge { font-style: normal; font-size: 9px; font-weight: 800; padding: 0 5px; border-radius: 3px; }
 .thead, .orow { display: grid; grid-template-columns: 100px 52px 76px 62px minmax(0,1fr) 40px; align-items: center; font-size: 10.5px; }
 .thead { background: var(--mix-panel, #12151A); color: var(--mix-t3, #5E6673); font-size: 10px; height: 22px;
   border-top: 1px solid var(--mix-border, #262B33); border-bottom: 1px solid var(--mix-border, #262B33);
