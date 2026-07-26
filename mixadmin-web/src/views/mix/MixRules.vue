@@ -70,6 +70,47 @@
           <el-button type="warning" :loading="saving" @click="saveS2">保存设置（写代理 · gateway 审计）</el-button>
           <el-button @click="load">还原</el-button>
         </div>
+
+        <!-- opener 自动开仓护栏(B 机 shadow,三闸:额度/深度/频率) -->
+        <div class="s2card opcard">
+          <div class="s2hd">自动开仓护栏 · opener <small style="color:#F0B90B">B机 · shadow</small>
+            <span class="armready" :class="{on:armReady}">{{ armReady?'✓ 武装就绪':'○ 护栏未全开' }}</span>
+          </div>
+          <div class="opgrid">
+            <div class="oprow"><em>深度硬闸</em>
+              <el-switch v-model="op.depth_enforce" size="small" />
+              <span class="tip">THIN 直接跳过(默认 ON)</span></div>
+            <div class="oprow"><em>深度系数</em>
+              <input v-model="op.depth_k" class="inp" style="width:50px" /><i>x</i>
+              <span class="tip">一档额须≥目标×K</span></div>
+            <div class="oprow"><em>单币额度上限</em>
+              <input v-model="op.max_notional_per_candidate_usdt" class="inp" style="width:60px" /><i>U</i></div>
+            <div class="oprow"><em>总额度上限</em>
+              <input v-model="op.max_total_armed_notional_usdt" class="inp" style="width:60px" /><i>U</i>
+              <span class="tip">在管+候选</span></div>
+            <div class="oprow"><em>并发仓位上限</em>
+              <input v-model="op.max_concurrent_positions" class="inp" style="width:50px" /><i>个</i></div>
+            <div class="oprow"><em>单币冷却</em>
+              <input v-model="op.per_symbol_cooldown_sec" class="inp" style="width:60px" /><i>秒</i>
+              <span class="tip">平仓后冷却期内不进候选</span></div>
+            <div class="oprow"><em>净日费率≥</em>
+              <input v-model="op.min_net_daily_pct" class="inp" style="width:50px" /><i>%</i></div>
+            <div class="oprow"><em>经济期望≥</em>
+              <input v-model="op.min_e_bps" class="inp" style="width:50px" /><i>bps</i></div>
+            <div class="oprow"><em>持有窗口</em>
+              <input v-model="op.hold_hours" class="inp" style="width:50px" /><i>小时</i>
+              <span class="tip">funding 收益按持有窗折算</span></div>
+          </div>
+          <div class="opsnap" v-if="opSnap">
+            <b>当前状态</b> 候选 {{ opSnap.candidate_count || 0 }} 个 ·
+            在管名义 {{ opSnap.gate?.managed_notional_usdt || 0 }}U ·
+            <span :class="opSnap.gate?.depth_enforce?'on':'off'">深度{{ opSnap.gate?.depth_enforce?'ON':'OFF' }}</span>
+          </div>
+          <div class="acts" style="margin-top:10px">
+            <el-button type="warning" :loading="opSaving" @click="saveOpener">保存护栏(60s 热生效)</el-button>
+            <el-button @click="loadOpener">还原</el-button>
+          </div>
+        </div>
       </div>
 
       <!-- 其余作用域：引擎侧尚无权威读写点,如实标注 -->
@@ -131,6 +172,13 @@ const loading = ref(false)
 const saving = ref(false)
 const s3p = ref(null)
 const s2 = ref({ mode: '', arm_mode: '', arm_symbols: '', max_notional_hard: '', max_portfolio_notional: '' })
+const op = ref({ depth_enforce: true, depth_k: 3, hold_hours: 8, fee_bps_per_fill: 5, est_roundtrip_cost_bps: 8,
+  min_net_daily_pct: 0.1, min_e_bps: 0, max_notional_per_candidate_usdt: 200,
+  max_total_armed_notional_usdt: 1000, max_concurrent_positions: 5, per_symbol_cooldown_sec: 3600 })
+const opSnap = ref(null)
+const opSaving = ref(false)
+const armReady = computed(() => op.value.depth_enforce && op.value.max_total_armed_notional_usdt > 0
+  && op.value.per_symbol_cooldown_sec > 0)
 
 const fieldMap = computed(() => Object.fromEntries(fields.value.map(f => [f.key, f])))
 const version = computed(() => fieldMap.value.version?.value)
@@ -150,8 +198,23 @@ async function load() {
       const m = Object.fromEntries(fields.value.map(f => [f.key, f.value]))
       s2.value = { mode: m.mode || '', arm_mode: m.arm_mode || '', arm_symbols: m.arm_symbols || '',
                    max_notional_hard: m.max_notional_hard || '', max_portfolio_notional: m.max_portfolio_notional || '' }
+      loadOpener()
     }
   } finally { loading.value = false }
+}
+async function loadOpener() {
+  try {
+    const data = await mixApi.openerGuards()
+    const g = data.guards || {}
+    op.value = { depth_enforce: g.depth_enforce ?? true, depth_k: g.depth_k ?? 3, hold_hours: g.hold_hours ?? 8,
+      fee_bps_per_fill: g.fee_bps_per_fill ?? 5, est_roundtrip_cost_bps: g.est_roundtrip_cost_bps ?? 8,
+      min_net_daily_pct: g.min_net_daily_pct ?? 0.1, min_e_bps: g.min_e_bps ?? 0,
+      max_notional_per_candidate_usdt: g.max_notional_per_candidate_usdt ?? 200,
+      max_total_armed_notional_usdt: g.max_total_armed_notional_usdt ?? 1000,
+      max_concurrent_positions: g.max_concurrent_positions ?? 5,
+      per_symbol_cooldown_sec: g.per_symbol_cooldown_sec ?? 3600 }
+    opSnap.value = data.snapshot
+  } catch (e) { console.warn('loadOpener', e) }
 }
 function setScope(s) { scope.value = s; load() }
 
@@ -178,6 +241,15 @@ async function saveS2() {
     load()
   } catch (e) { ElMessage.error(e?.detail || e?.error || '保存失败') }
   finally { saving.value = false }
+}
+async function saveOpener() {
+  opSaving.value = true
+  try {
+    const r = await mixApi.openerGuardsSave({ guards: op.value })
+    ElMessage.success(r.note || `已保存 ${r.applied?.length || 0} 项`)
+    loadOpener()
+  } catch (e) { ElMessage.error(e?.detail || e?.error || '保存失败') }
+  finally { opSaving.value = false }
 }
 const pub = ref({ open: false, step: 0, dry: null, code: '', busy: false, scope: '' })
 async function openPublish(scope){

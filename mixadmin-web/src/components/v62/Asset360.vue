@@ -16,65 +16,56 @@
       </div>
     </div>
     <div class="a360sum" v-if="snap">
-      <span class="f"><i>流通市值</i><b>{{ mv(gs.reported_market_cap_usd) }}</b></span>
+      <span class="f"><i>币安市值</i><b class="amtx">{{ fmtBig(gs.reported_market_cap_usd?.value) }}</b></span>
       <span class="f"><i>参考价</i><b>{{ mv(gs.reference_spot_price_usd) }}</b></span>
       <span class="f"><i>全所OI</i><b>{{ mv(gs.all_venue_oi_usd) }}</b></span>
       <span class="f"><i>上市平台</i><b>{{ gs.listed_venue_count?.value || '—' }}</b></span>
       <span class="f"><i>数据质量</i><b>{{ snap.quality_summary?.coverage_pct || '—' }}%</b></span>
+      <span class="ksep" v-if="krRows.length"></span>
+      <span class="f kf" v-for="k in krRows" :key="k.venue">
+        <i>韩·{{ k.venue==='upbit'?'Upbit':'Bithumb' }}</i>
+        <b><span class="amtx">{{ fmtNum(k.normalized_price_usd, 2) }}</span>
+          <em class="kprem" :class="premCls(k.normalized_price_usd)">{{ premTxt(k.normalized_price_usd) }}</em></b>
+      </span>
+      <span class="f kf" v-if="!krRows.length"><i>韩国</i><b class="t3">未上市</b></span>
     </div>
-    <div class="a360tabs">
-      <a :class="{on:preset==='research'}" @click="preset='research'">研判</a>
-      <a :class="{on:preset==='exec'}" @click="preset='exec'">执行</a>
-      <a :class="{on:preset==='transfer'}" @click="preset='transfer'">充提</a>
-      <a :class="{on:preset==='korea'}" @click="preset='korea'">韩国</a>
-    </div>
+
     <div class="a360tbl" v-if="snap">
-      <!-- A1阶段：研判预设=价格/资金费/OI（复用REV4基建）；执行/充提/韩国留A2-A3 -->
-      <template v-if="preset==='research'">
-        <div class="thead trow">
-          <span class="c-venue">平台</span>
-          <span class="c-price r">永续标记价</span>
-          <span class="c-price r">浮盈U</span>
-          <span class="c-num r">距强平%</span>
-          <span class="c-num r">ADL</span>
-          <span class="c-num r">资金费%/日</span>
-          <span class="c-num r">结算周期h</span>
-          <span class="c-time">数据时间</span>
-        </div>
-        <div v-for="v in snap.venue_rows" :key="v.venue" class="trow">
-          <span class="c-venue"><b>{{ v.venue }}</b></span>
-          <span class="c-price r">{{ fmtMv(v.perp_mark) }}</span>
-          <span class="c-price r" :class="cls0(v.perp_upnl?.value)">{{ fmtMv(v.perp_upnl) }}</span>
-          <span class="c-num r" :class="liqCls(v.dist_liq_pct?.value)">{{ fmtMv(v.dist_liq_pct) }}</span>
-          <span class="c-num r">{{ fmtMv(v.adl) }}</span>
-          <span class="c-num r" :class="cls0(v.funding_daily_pct?.value)">{{ fmtMv(v.funding_daily_pct) }}</span>
-          <span class="c-num r">{{ fmtMv(v.funding_interval_h) }}</span>
-          <span class="c-time">{{ fmtTime(v.perp_mark?.source_time) }}</span>
-        </div>
-      </template>
-      <!-- A3: 韩国市场预设 -->
-      <template v-else-if="preset==='korea'">
-        <div class="thead trow">
-          <span class="c-venue">平台</span>
-          <span class="c-pair">交易对</span>
-          <span class="c-price r">KRW 中间价</span>
-          <span class="c-price r">折USD</span>
-          <span class="c-num r">24h量KRW</span>
-          <span class="c-num r">FX汇率</span>
-          <span class="c-time">数据时间</span>
-        </div>
-        <div v-for="k in snap.korea_rows" :key="k.venue" class="trow">
-          <span class="c-venue"><b>{{ k.venue }}</b></span>
-          <span class="c-pair">{{ k.market_pair }}</span>
-          <span class="c-price r">{{ fmtNum(k.krw_mid, 0) }}</span>
-          <span class="c-price r">{{ fmtNum(k.normalized_price_usd, 2) }}</span>
-          <span class="c-num r">{{ fmtNum(k.turnover_24h_krw, 0) }}</span>
-          <span class="c-num r">{{ fmtNum(k.fx_rate, 2) }}</span>
-          <span class="c-time">{{ fmtTime(k.source_time) }}</span>
-        </div>
-        <div v-if="!snap.korea_rows || !snap.korea_rows.length" class="placeholder">未在Upbit/Bithumb上市或数据获取失败</div>
-      </template>
-      <div v-else class="placeholder">{{ preset }}预设留A2-A4批次</div>
+      <!-- 单页整合(用户拍板弃tab):研判→执行一档→韩国→充提,一屏下滑全看完 -->
+      <div class="sect">逐所全景 · 现货/合约成交量 · 持仓量 · 杠杆 · 费率 · 充提(WS秒级)</div>
+      <div class="thead trow pano">
+        <span class="c-venue">平台</span>
+        <span class="c-num r">现货量</span>
+        <span class="c-num r">24h合约量</span>
+        <span class="c-num r">合约持仓</span>
+        <span class="c-cap">全仓</span>
+        <span class="c-cap">逐仓</span>
+        <span class="c-num r">当期费率</span>
+        <span class="c-num r">周期h</span>
+        <span class="c-cap">提</span>
+        <span class="c-cap">充</span>
+        <span class="c-price r">现货价</span>
+        <span class="c-price r">合约价</span>
+      </div>
+      <div v-for="v in snap.venue_rows" :key="'p'+v.venue" class="trow pano">
+        <span class="c-venue"><b :class="'vx-'+v.venue">{{ v.venue }}</b></span>
+        <span class="c-num r amtx">{{ fmtBig(v.spot_vol_24h_usd?.value) }}</span>
+        <span class="c-num r amtx">{{ fmtBig(v.perp_vol_24h_usd?.value) }}</span>
+        <span class="c-num r amtx">{{ fmtBig(v.oi_usd?.value) }}</span>
+        <span class="c-cap" :class="capCls(v.has_cross)">{{ capTxt(v.has_cross) }}</span>
+        <span class="c-cap" :class="capCls(v.has_isolated)">{{ capTxt(v.has_isolated) }}</span>
+        <span class="c-num r" :class="cls0(v.funding_daily_pct?.value)">{{ fmtMv(v.funding_daily_pct) }}</span>
+        <span class="c-num r">{{ fmtMv(v.funding_interval_h) }}</span>
+        <span class="c-cap" :class="wdCls(v.withdraw_status)">{{ ioTxt(v.withdraw_status) }}</span>
+        <span class="c-cap" :class="wdCls(v.deposit_status)">{{ ioTxt(v.deposit_status) }}</span>
+        <span class="c-price r">{{ midOf(v.spot_l1) }}</span>
+        <span class="c-price r">{{ midOf(v.perp_l1) }}</span>
+      </div>
+      <div class="placeholder" style="font-size:9.5px">成交量/持仓/价格=WS秒级;全仓逐仓=交易所能力;费率=当期资金费%/日;<b>提/充=待B机充提采集(批二授权后点亮,现"?")</b>。</div>
+
+      <div class="sect">执行一档 · 现货+永续买卖1(判断能不能做)</div>
+      <div class="sect">充提网络</div>
+      <div class="placeholder">逐网络充提状态需签名API,留A5统一采集(cred-agent缓存)</div>
     </div>
     <div class="a360ft" v-if="snap">
       A1阶段：身份映射+六所价格/资金费（复用REV4批A/C基建）；24h量/OI/充提/韩国/市值留后续批次。
@@ -88,6 +79,7 @@ import { ref, computed, watch } from 'vue'
 import { RefreshRight, FullScreen, Close } from '@element-plus/icons-vue'
 import { mixApi } from '../../api/mix'
 
+const mv0 = (v) => (v == null ? '—' : Number(v) >= 1e6 ? (v/1e6).toFixed(1)+'M' : Number(v) >= 1e3 ? (v/1e3).toFixed(1)+'K' : String(Math.round(v)))
 const props = defineProps({
   assetId: { type: String, required: true },
   fullscreen: { type: Boolean, default: false },
@@ -121,6 +113,35 @@ function fmtNum(v, dp = 2) {
   return n >= 1000 ? n.toLocaleString('en-US', { minimumFractionDigits: dp, maximumFractionDigits: dp }) : n.toFixed(dp)
 }
 function cls0(v) { return v == null ? '' : (Number(v) >= 0 ? 'up' : 'dn') }
+function fmtBig(v) {
+  if (v == null) return '—'
+  const n = Number(v)
+  if (n >= 1e12) return (n / 1e12).toFixed(2) + '万亿'
+  if (n >= 1e8) return (n / 1e8).toFixed(2) + '亿'
+  if (n >= 1e4) return (n / 1e4).toFixed(1) + '万'
+  return String(Math.round(n))
+}
+function capTxt(e) { const v = e?.value; return v === true ? '有' : v === false ? '无' : '?' }
+function capCls(e) { const v = e?.value; return v === true ? 'up' : v === false ? 't3' : 't3' }
+function ioTxt(e) { const s = e?.value || e?.state; return s === 'OPEN' ? '开' : s === 'CLOSED' ? '关' : '?' }
+function wdCls(e) { const s = e?.value || e?.state; return s === 'OPEN' ? 'up' : s === 'CLOSED' ? 'dn' : 't3' }
+function midOf(l1) {
+  if (!l1 || l1.state !== 'PRESENT' || l1.bid == null || l1.ask == null) return l1?.state === 'NOT_APPLICABLE' ? '—' : '·'
+  const m = (Number(l1.bid) + Number(l1.ask)) / 2
+  return m >= 1 ? m.toLocaleString('en-US', { maximumFractionDigits: 2 }) : m.toPrecision(4)
+}
+const krRows = computed(() => (snap.value?.korea_rows) || [])
+function premTxt(usd) {
+  const ref = Number(gs.value?.reference_spot_price_usd?.value)
+  if (!usd || !ref) return ''
+  const p = (usd / ref - 1) * 100
+  return (p >= 0 ? '+' : '') + p.toFixed(1) + '%'
+}
+function premCls(usd) {
+  const ref = Number(gs.value?.reference_spot_price_usd?.value)
+  if (!usd || !ref) return 't3'
+  return usd / ref >= 1 ? 'up' : 'dn'
+}
 function liqCls(d) { if (d == null) return ''; return d < 50 ? 'dn' : (d < 80 ? 'warn' : '') }
 async function load() {
   loading.value = true; err.value = ''
@@ -150,7 +171,7 @@ setInterval(() => tick.value++, 1000)
 .a360tabs{display:flex;gap:2px;padding:4px 12px;background:var(--mix-panel,#12151A);border-bottom:1px solid var(--mix-border,#262B33)}
 .a360tabs a{font-size:10.5px;color:var(--mix-t2,#848E9C);padding:4px 12px;border-radius:4px;cursor:pointer}
 .a360tabs a.on{background:var(--mix-card,#181B21);color:var(--mix-t1,#EAECEF);font-weight:600}
-.a360tbl{flex:1;overflow:auto;min-height:0}
+.a360tbl{overflow-x:auto;flex:1;overflow:auto;min-height:0}
 .trow{display:flex;align-items:center;gap:8px;min-width:880px;padding:0 12px;min-height:30px;border-bottom:1px solid var(--mix-border,#262B33);font-size:10.5px;color:var(--mix-t2,#848E9C)}
 .thead{position:sticky;top:0;z-index:2;background:var(--mix-panel,#12151A);color:var(--mix-t3,#5E6673);font-size:9.5px;min-height:24px}
 .trow>span{flex-shrink:0;min-width:0}
@@ -165,4 +186,13 @@ setInterval(() => tick.value++, 1000)
 .a360ft{font-size:8px;color:var(--mix-t3,#5E6673);line-height:1.4;padding:6px 12px;border-top:1px solid var(--mix-border,#262B33)}
 .placeholder{padding:40px;text-align:center;color:var(--mix-t3,#5E6673);font-size:11px}
 .err{padding:20px;text-align:center;color:var(--mix-red,#F6465D);font-size:11px}
+.thin{color:#F6465D!important}
+.t3{color:var(--mix-t3)}
+.sect{font-size:10.5px;font-weight:800;color:var(--mix-gold,#F0B90B);padding:8px 2px 4px;border-bottom:1px solid var(--mix-border,#262B33);margin-bottom:4px}
+.trow.pano{display:grid;grid-template-columns:62px 76px 76px 76px 30px 30px 62px 34px 26px 26px 82px 82px;gap:5px;align-items:center;font-size:10px;padding:3px 12px;border-bottom:1px solid var(--mix-border,#262B33);min-width:770px}
+.trow.pano.thead{color:var(--mix-t3,#5E6673);font-size:9px;background:var(--mix-panel,#12151A)}
+.trow.pano span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-variant-numeric:tabular-nums;min-width:0;width:auto !important}
+.c-cap{text-align:center;font-size:9.5px}
+.kf i{color:#8CA3C7 !important}.ksep{width:1px;height:22px;background:var(--mix-border,#262B33);flex:none}
+.kprem{font-style:normal;font-size:9px;margin-left:3px}
 </style>

@@ -5,9 +5,11 @@
       <span class="fill"></span>
       <i class="ts">数据源 R12-C4 + 采样器 · 30s 自刷</i>
     </div>
-    <div v-for="p in rows" :key="p.pos_id" class="prow" :class="{bad: p.missing, sel: sel && sel.pos_id===p.pos_id}">
+    <!-- 交互与 C2.H 行一致:点交易对名→Asset360 全景;点行任意其它位置→右侧六段抽屉 -->
+    <div v-for="p in rows" :key="p.pos_id" class="prow clickable" :class="{bad: p.missing, sel: sel && sel.pos_id===p.pos_id}"
+         @click="openPos(p)">
       <div class="l1">
-        <b class="sym clickable" @click="openPos(p)">{{ p.symbol }}</b>
+        <b class="sym clickable" @click.stop="$emit('open-asset', baseSym(p.symbol))">{{ p.symbol }}</b>
         <span class="ven">· {{ p.venue }}</span>
         <span class="chip" :class="p.missing ? 'red' : 'ok'">{{ p.missing ? '交割腿缺失!' : '账实一致' }}</span>
         <span class="fill"></span>
@@ -58,6 +60,11 @@ const data = ref(null)
 const sel = ref(null)
 const drawerOpen = computed({ get: () => !!sel.value, set: v => { if (!v) sel.value = null } })
 function openPos (p) { sel.value = p }
+defineEmits(['open-asset'])
+// 交割符号→基础币(Asset360 契约):BTCUSDT-25JUN27→BTCUSDT / DOGE_USDT_20261225→DOGEUSDT
+function baseSym (s) {
+  return String(s || '').split('-')[0].replace(/_(\d{8})$/, '').replace(/_/g, '').toUpperCase()
+}
 let timer = null
 
 async function load () {
@@ -99,6 +106,8 @@ function liqCls (x) { return x == null ? '' : (x < 10 ? 'red' : (x < 20 ? 'warn'
 .prow.bad { border-color: rgba(239,68,68,.55); background: rgba(239,68,68,.06); }
 .l1 { display: flex; align-items: center; gap: 6px; }
 .sym { color: #eef1f6; font-size: 13px; }
+.prow.clickable { cursor: pointer; }
+.prow.clickable:hover { border-color: rgba(212,175,55,.45); }
 .sym.clickable { cursor: pointer; }
 .sym.clickable:hover { color: #e8c266; text-decoration: underline; }
 .prow.sel { border-color: rgba(212,175,55,.55); }

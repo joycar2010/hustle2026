@@ -37,11 +37,11 @@
             <span class="c-exp" @click.stop="w.account_legs?.length && $emit('toggle', w.work_item_id)">
               <i v-if="w.account_legs?.length" class="expbtn" :class="{on:expanded[w.work_item_id]}">{{ expanded[w.work_item_id]?'▾':'▸' }}</i></span>
             <span class="c-stage"><i class="st" :class="w.workflow_stage">{{ w.stage_detail || STAGE_CN[w.workflow_stage] || w.workflow_stage }}</i></span>
-            <span class="c-sym"><b @click.stop="$emit('openAsset', w.symbol)" style="cursor:pointer">{{ w.symbol }}</b></span>
-            <span class="c-prod">{{ w.strategy_code }}</span>
+            <span class="c-sym"><b @click.stop="$emit('openAsset', w.symbol)" style="cursor:pointer;color:var(--mix-gold,#F0B90B);font-weight:800">{{ w.symbol }}</b></span>
+            <span class="c-prod" :class="'px-'+String(w.strategy_code||'').split('.')[0].toLowerCase()">{{ w.strategy_code }}</span>
             <span class="c-src">{{ SRC_CN[w.source] || w.source }}</span>
             <span class="c-ctl">{{ CTL_CN[w.automation_mode] || w.automation_mode || '—' }}</span>
-            <span class="c-route ell" :title="w.route||''">{{ w.route || '—' }}</span>
+            <span class="c-route ell" :title="w.route||''"><template v-for="(rv,ri) in String(w.route||'—').split('↔')" :key="ri"><i v-if="ri" style="color:var(--mix-t3);font-style:normal">↔</i><span :class="'vx-'+rv">{{ rv }}</span></template></span>
             <span class="c-cap r"><ValueCell :value="w.capital_reserved" :state="w.data_state?.capital_reserved" suffix=" U" :dp="0"/></span>
             <span class="c-ev r">
               <ValueCell :value="w.expected_net_return" :state="w.data_state?.expected_net_return" suffix="bps/日" :dp="1"/>
@@ -72,7 +72,7 @@
             <span class="s-num r">借币量</span><span class="s-num r">利率%/d</span><span class="s-wide r">点差 开→现%</span>
           </template>
           <template v-else-if="isC2">
-            <span class="s-num r">多费率%/d</span><span class="s-num r">空费率%/d</span><span class="s-num r">名义差U</span>
+            <span class="s-num r">多费率%/d</span><span class="s-num r">空费率%/d</span><span class="s-num r">持仓差U</span>
           </template>
           <span class="s-num r">费差%/d</span>
           <span class="s-num r">退出盈亏U</span><span class="s-num r">已确认U</span>
@@ -84,10 +84,10 @@
             <span class="c-exp" @click.stop="w.account_legs?.length && $emit('toggle', w.work_item_id)">
               <i v-if="w.account_legs?.length" class="expbtn" :class="{on:expanded[w.work_item_id]}">{{ expanded[w.work_item_id]?'▾':'▸' }}</i></span>
             <span class="c-stage"><i class="st" :class="w.workflow_stage">{{ w.stage_detail || STAGE_CN[w.workflow_stage] || w.workflow_stage }}</i></span>
-            <span class="c-sym"><b @click.stop="$emit('openAsset', w.symbol)" style="cursor:pointer">{{ w.symbol }}</b><i class="sub">{{ w.strategy_code }}</i></span>
+            <span class="c-sym"><b @click.stop="$emit('openAsset', w.symbol)" style="cursor:pointer;color:var(--mix-gold,#F0B90B);font-weight:800">{{ w.symbol }}</b><i class="sub">{{ w.strategy_code }}</i></span>
             <span class="c-ctl">{{ CTL_CN[w.automation_mode] || '—' }}</span>
-            <span class="c-route ell" :title="w.route||''">{{ w.route || '—' }}</span>
-            <span class="s-num r">{{ nf(w.capital_reserved,0) }}</span>
+            <span class="c-route ell" :title="w.route||''"><template v-for="(rv,ri) in String(w.route||'—').split('↔')" :key="ri"><i v-if="ri" style="color:var(--mix-t3);font-style:normal">↔</i><span :class="'vx-'+rv">{{ rv }}</span></template></span>
+            <span class="s-num r amtx">{{ nf(w.capital_reserved,0) }}</span>
             <span class="s-num r">{{ nf(ge(w).net_delta,2) }}</span>
             <template v-if="product==='C3.S'">
               <span class="s-num r">{{ nf(ge(w).borrowed_qty,2) }}</span>
@@ -176,7 +176,7 @@ const LegRows = (p) => {
   const w = p.w
   const cell = (t, cls = '') => h('span', { class: cls }, t == null || t === '' ? '—' : String(t))
   return h('div', { class: 'legblock', onClick: (e) => e.stopPropagation() }, [
-    h('div', { class: 'leghd2' }, ['账户/腿', '方向', '数量', '名义U', '标记价', '浮盈U', '费率/息%/d', '强平距%', 'ADL', '事实态']
+    h('div', { class: 'leghd2' }, ['账户/腿', '方向', '数量', '持仓U', '标记价', '浮盈U', '费率/息%/d', '强平距%', 'ADL', '事实态']
       .map(t => h('span', t))),
     ...(w.account_legs || []).map(l => h('div', { class: 'legrow2' + (l.data_state !== 'PRESENT' ? ' ghost' : '') }, [
       cell(`${l.account} · ${LEG_CN[l.role] || l.role}`),

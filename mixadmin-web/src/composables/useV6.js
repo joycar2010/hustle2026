@@ -7,11 +7,12 @@ import { connectStream } from '../api/mixWs'
 // 调用者角色(模块级缓存,一次 whoami 全站共享)——VIEWER/普通用户对"新增风险"类按钮降级为不可点,
 // 与服务端 workitems 的 allowed_actions 降级同一语义(2026-07-16:test 用户点「送入工作台」被 401 踢出事故)
 const _role = ref('')
+const _strong = ref(false)
 let _roleLoaded = false
 async function _loadRole() {
   if (_roleLoaded) return
   _roleLoaded = true
-  try { const w = await mixApi.whoami(); _role.value = w?.role || 'VIEWER' }
+  try { const w = await mixApi.whoami(); _role.value = w?.role || 'VIEWER'; _strong.value = !!w?.strong_session }
   catch (e) { _role.value = 'VIEWER'; _roleLoaded = false }  // 失败按只读兜底,下次重试
 }
 
@@ -39,6 +40,7 @@ export function useV6Snapshot() {
   const canOpen = computed(() => !stale.value && !!snap.value?.effective_capabilities?.can_open)
   // 角色维度(与系统能力分离:状态条仍显示系统 canOpen,按钮叠加角色)
   const isOperator = computed(() => _role.value === 'OPERATOR' || _role.value === 'SUPER_ADMIN')
+  const isStrong = computed(() => _strong.value)
   const ago = computed(() => {
     if (!snap.value) return 'N/A'
     const s = (Date.now() - Date.parse(snap.value.as_of)) / 1000
@@ -65,5 +67,5 @@ export function useV6Snapshot() {
   })
   onBeforeUnmount(() => { stopWs && stopWs(); clearInterval(poll) })
 
-  return { snap, stale, canOpen, isOperator, ago, wsOn, refetch }
+  return { snap, stale, canOpen, isOperator, isStrong, ago, wsOn, refetch }
 }

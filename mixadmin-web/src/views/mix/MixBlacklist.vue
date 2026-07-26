@@ -17,7 +17,7 @@
       <el-table :data="qrows" size="small" stripe>
         <el-table-column label="作用域" width="140"><template #default="{row}">
           <el-tag size="small" effect="plain" :type="scopeTag(row.scope_type)">{{ row.scope_type }}</el-tag></template></el-table-column>
-        <el-table-column prop="scope_key" label="键" width="140" />
+        <el-table-column label="键" width="140"><template #default="{row}"><b style="color:var(--mix-gold,#F0B90B)">{{ row.scope_key }}</b></template></el-table-column>
         <el-table-column label="模式" width="120"><template #default="{row}">
           <span :class="'m-'+row.mode">{{ row.mode }}</span></template></el-table-column>
         <el-table-column prop="reason" label="原因/证据" min-width="200" show-overflow-tooltip />

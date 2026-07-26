@@ -15,7 +15,7 @@
       <div class="navcards">
         <div class="nc"><span>账面净值 <u :title="'Accounting NAV'">?</u></span><b>{{ n(nav.nav?.accounting_nav_usdt) }} U</b><i>交易所+账本事实口径</i></div>
         <div class="nc"><span>风险调整净值</span><b>{{ n(nav.nav?.risk_adjusted_nav_usdt) }} U</b><i>扣受限/冻结/退出折价</i></div>
-        <div class="nc"><span>可用权益</span><b class="hl">{{ n(nav.nav?.available_equity_usdt) }} U</b><i>可立即部署</i></div>
+        <div class="nc"><span>可用权益</span><b class="hl amtx">{{ n(nav.nav?.available_equity_usdt) }} U</b><i>可立即部署</i></div>
         <div class="nc"><span>暂时取不出的资金</span><b :class="{bad:(nav.nav?.trapped_usdt||0)>0}">{{ n(nav.nav?.trapped_usdt) }} U</b><i>受限平台按风险折价</i></div>
       </div>
       <div class="hd" style="margin-top:12px"><b>净值恒等式检查</b><span class="sub">净值变化 − 出入金 =?= 各收益类目之和(账记错会在这里暴露)</span>
@@ -24,9 +24,9 @@
         <div class="bcat" v-for="(v,k) in bridge.categories||{}" :key="k"><span>{{ k }}</span><b :class="v>=0?'up':'down'">{{ fmt(v) }}</b></div>
       </div>
       <div class="bsum">
-        <span>类目和(component) <b>{{ fmt(bridge.component_sum) }}</b></span>
-        <span>外部流(income TRANSFER) <b>{{ fmt(bridge.external_flow_income) }}</b></span>
-        <span>ΔNAV <b>{{ bridge.delta_nav==null?'N/A(快照不足2点)':fmt(bridge.delta_nav) }}</b></span>
+        <span>类目和(component) <b :class="Number(bridge.component_sum)>0?'up':(Number(bridge.component_sum)<0?'down':'')">{{ fmt(bridge.component_sum) }}</b></span>
+        <span>外部流(income TRANSFER) <b :class="Number(bridge.external_flow_income)>0?'up':(Number(bridge.external_flow_income)<0?'down':'')">{{ fmt(bridge.external_flow_income) }}</b></span>
+        <span>ΔNAV <b :class="bridge.delta_nav==null?'':(Number(bridge.delta_nav)>0?'up':(Number(bridge.delta_nav)<0?'down':''))">{{ bridge.delta_nav==null?'N/A(快照不足2点)':fmt(bridge.delta_nav) }}</b></span>
         <span>残差 <b :class="resCls">{{ bridge.residual==null?'N/A':fmt(bridge.residual) }}</b></span>
         <span class="um">UNMAPPED <b :class="bridge.unmapped_count?'bad':'ok'">{{ bridge.unmapped_count ?? '—' }}</b></span>
         <span class="verdict" :class="bridge.identity_ok?'ok':'warn'">{{ bridge.identity_ok ? '恒等式通过' : (bridge.unmapped_count?'UNMAPPED>0':'待建NAV基线') }}</span>
@@ -67,9 +67,9 @@
     <el-tab-pane label="资金流水" name="flow">
       <div class="hd"><b>提现资金流水</b><span class="sub">withdrawal_observation · 事实只读 · 无快捷提现按钮</span></div>
       <el-table :data="flows" size="small" stripe>
-        <el-table-column prop="venue" label="Venue" width="90" />
+        <el-table-column label="Venue" width="90"><template #default="{row}"><b :class="'vx-'+row.venue">{{ row.venue }}</b></template></el-table-column>
         <el-table-column prop="asset" label="资产" width="80" />
-        <el-table-column prop="amount" label="金额" width="120" align="right" />
+        <el-table-column prop="amount" label="金额" width="120" align="right"><template #default="{row}"><span :class="Number(row.amount)>0?'up':(Number(row.amount)<0?'down':'')">{{ row.amount }}</span></template></el-table-column>
         <el-table-column prop="status" label="状态" width="110"><template #default="{row}">
           <span :class="'fs-'+row.status">{{ row.status }}</span></template></el-table-column>
         <el-table-column prop="venue_tx_id" label="平台流水号" min-width="140" show-overflow-tooltip />
@@ -84,14 +84,14 @@
           <el-option v-for="c in ['FEE','FUNDING','TRADING_PNL','BORROW','EARN','EXTERNAL_FLOW','SETTLEMENT','UNMAPPED']" :key="c" :value="c" /></el-select></div>
       <el-table :data="ledger" size="small" stripe max-height="320">
         <el-table-column prop="ts" label="时间" width="150" />
-        <el-table-column prop="venue" label="Venue" width="80" />
-        <el-table-column prop="symbol" label="标的" width="100" />
+        <el-table-column label="Venue" width="80"><template #default="{row}"><b :class="'vx-'+row.venue">{{ row.venue }}</b></template></el-table-column>
+        <el-table-column label="标的" width="100"><template #default="{row}"><b style="color:var(--mix-gold,#F0B90B)">{{ row.symbol }}</b></template></el-table-column>
         <el-table-column prop="itype" label="账单类型" width="100" />
         <el-table-column label="NAV类目" width="130"><template #default="{row}">
           <span :class="row.nav_category==='UNMAPPED'?'bad':'dim'">{{ row.nav_category }}</span></template></el-table-column>
         <el-table-column prop="amount" label="金额" width="110" align="right"><template #default="{row}">
           <span :class="row.amount>=0?'up':'down'">{{ fmt(row.amount) }}</span></template></el-table-column>
-        <el-table-column prop="strategy_code" label="策略" width="70" />
+        <el-table-column label="策略" width="70"><template #default="{row}"><span v-if="row.strategy_code" :class="'px-'+String(SC_CC[row.strategy_code]||row.strategy_code).split('.')[0].toLowerCase()">{{ SC_CC[row.strategy_code] || row.strategy_code }}</span></template></el-table-column>
       </el-table>
       <div class="hd" style="margin-top:12px"><b>RECON 断点</b><b :class="{bad:recon.total}" style="margin-left:6px">{{ recon.total }}</b></div>
       <div v-if="!recon.breaks?.length" class="dimtxt pad">无断点(账本口径+持仓RECON 全清)</div>
@@ -104,6 +104,8 @@
 </template>
 
 <script setup>
+// 旧S码→产品目录C码显示映射(内部strategy_code不动,仅展示层)
+const SC_CC = { S1:'C1', S2:'C2.H', S3:'C3.S', S4:'C3.R', S5:'C2.C', S6:'O1' }
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import * as echarts from 'echarts'
 import { STRATEGY_META as META } from '../../components/PositionTable/types'
@@ -237,4 +239,6 @@ onUnmounted(() => { window.removeEventListener('resize', onResize); chart?.dispo
 .fs-CONFIRMED { color: #0ECB81; } .fs-PENDING { color: #F0B90B; } .fs-FAILED { color: #F6465D; }
 .brk { font-size: 11px; color: var(--mix-t2,#848E9C); padding: 4px 0; border-bottom: 1px dashed var(--mix-border,#262B33); }
 .bk { font-weight: 700; font-size: 9.5px; padding: 1px 6px; border-radius: 4px; background: rgba(246,70,93,.14); color: #F6465D; margin-right: 8px; }
+.up{color:#0ECB81!important}.down{color:#F6465D!important}
+.nc b{color:#7DE3F4!important}
 </style>

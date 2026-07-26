@@ -4,10 +4,10 @@
        venue 原始风险口径与统一口径并列(§6B.3),未接入=—+注,绝不冒充。 -->
   <div class="rat">
     <div class="factband" v-if="snap">
-      <span class="f"><i>组合权益</i><b>{{ nf(g.portfolio_equity_usdt,0) }} U</b></span>
-      <span class="f"><i>总名义</i><b>{{ nf(g.gross_notional_usdt,0) }} U</b></span>
+      <span class="f"><i>组合权益</i><b class="amtx">{{ nf(g.portfolio_equity_usdt,0) }} U</b></span>
+      <span class="f"><i>总持仓</i><b class="amtx">{{ nf(g.gross_notional_usdt,0) }} U</b></span>
       <span class="f"><i>净Δ</i><b :class="cls0(g.net_delta_usdt)">{{ nf(g.net_delta_usdt,0) }} U</b></span>
-      <span class="f"><i>有效杠杆</i><b>{{ nf(g.effective_leverage,2) }}x</b></span>
+      <span class="f"><i>有效杠杆</i><b class="amtx">{{ nf(g.effective_leverage,2) }}x</b></span>
       <span class="f" :title="g.margin_utilization_note"><i>IM/MM占用</i><b class="dim">未接入</b></span>
       <span class="f"><i>最差强平</i><b :class="liqCls(g.worst_liquidation?.d)">{{ g.worst_liquidation ? nf(g.worst_liquidation.d,0)+'%('+g.worst_liquidation.venue+'·'+(g.worst_liquidation.symbol||'')+')' : '—' }}</b></span>
       <span class="f"><i>受限资本</i><b :class="g.restricted_capital_usdt>0?'wr':''">{{ nf(g.restricted_capital_usdt,0) }} U</b></span>
@@ -20,15 +20,15 @@
       <div class="thead trow">
         <span class="c-acct">平台 / 账户</span><span class="c-mode">模式</span>
         <span class="c-num r">权益U</span><span class="c-num r">浮盈U</span>
-        <span class="c-num r">名义U</span><span class="c-num r">杠杆</span>
+        <span class="c-num r">持仓U</span><span class="c-num r">杠杆</span>
         <span class="c-wide r">最差强平%·币</span><span class="c-num r">ADL</span>
         <span class="c-raw">原始口径(该所定义)</span><span class="c-age r">数据</span>
       </div>
       <template v-for="v in snap.venues" :key="v.venue">
         <div class="trow vrow" :title="'公式 '+(v.formula?.version||'')+':'+(v.formula?.raw||'')">
-          <span class="c-acct"><b>{{ v.venue }}</b><i class="sub" v-if="v.cap_usdt">帽 {{ nf(v.cap_usdt,0) }}U{{ v.cap_utilization_pct!=null ? ' · 用'+v.cap_utilization_pct+'%' : '' }}</i></span>
+          <span class="c-acct"><b :class="'vx-'+v.venue">{{ v.venue }}</b><i class="sub" v-if="v.cap_usdt">帽 {{ nf(v.cap_usdt,0) }}U{{ v.cap_utilization_pct!=null ? ' · 用'+v.cap_utilization_pct+'%' : '' }}</i></span>
           <span class="c-mode"><i class="mode" :class="'m-'+v.mode" :title="v.mode_reason||''">{{ MODE_CN[v.mode]||v.mode }}</i></span>
-          <span class="c-num r"><b>{{ nf(v.equity_usdt,0) }}</b></span>
+          <span class="c-num r"><b class="amtx">{{ nf(v.equity_usdt,0) }}</b></span>
           <span class="c-num r"></span>
           <span class="c-num r"><b>{{ nf(v.gross_notional,0) }}</b></span>
           <span class="c-num r"><b>{{ v.equity_usdt ? nf(v.gross_notional/v.equity_usdt,2)+'x' : '—' }}</b></span>
@@ -44,10 +44,10 @@
         <div v-for="a in v.accounts" :key="v.venue+a.account" class="trow arow" :class="{ghost:a.data_state==='STALE'}">
           <span class="c-acct sub2">└ {{ a.account }}</span>
           <span class="c-mode"></span>
-          <span class="c-num r">{{ nf(a.equity_usdt,1) }}</span>
+          <span class="c-num r amtx">{{ nf(a.equity_usdt,1) }}</span>
           <span class="c-num r" :class="cls0(a.upnl_usdt)">{{ nf(a.upnl_usdt,2) }}</span>
-          <span class="c-num r">{{ nf(a.gross_notional,1) }}</span>
-          <span class="c-num r">{{ nf(a.effective_leverage,2) }}</span>
+          <span class="c-num r amtx">{{ nf(a.gross_notional,1) }}</span>
+          <span class="c-num r amtx">{{ nf(a.effective_leverage,2) }}</span>
           <span class="c-wide r" :class="liqCls(a.min_dist_liq_pct)">{{ a.min_dist_liq_pct!=null ? nf(a.min_dist_liq_pct,0)+'%·'+(a.worst_symbol||'') : (a.position_count? '—' : '无仓') }}</span>
           <span class="c-num r">{{ a.adl_max ?? '—' }}</span>
           <span class="c-raw"></span>
@@ -57,7 +57,7 @@
       <div v-if="!snap.venues?.length" class="empty">暂无账户快照(account-snapshot 未上报)</div>
     </div>
     <div class="ft" v-if="snap">
-      各所"风险率"分子/分母/安全方向定义不同(悬停平台行看公式注册表);统一口径=权益/名义/有效杠杆/最差强平距离,
+      各所"风险率"分子/分母/安全方向定义不同(悬停平台行看公式注册表);统一口径=权益/持仓/有效杠杆/最差强平距离,
       IM/MM 保证金占用未接入(PLANNED)。{{ wall ? '外接墙只读,不发命令。' : '冻结新增/减险→风险事件页操作。' }}
       过期账户=快照>180s 或上报失败,fail-closed 按不可信处理。
     </div>

@@ -11,16 +11,16 @@
         <el-checkbox v-model="showNormal" size="small">显示正常平台</el-checkbox>
       </div>
       <el-table :data="rowsShown" size="small" :row-class-name="rowCls">
-        <el-table-column label="Venue" width="96"><template #default="{row}"><b class="vn link" @click="$router.push('/mix/venue/'+row.venue)">{{ row.venue }}</b>
+        <el-table-column label="Venue" width="96"><template #default="{row}"><b class="vn link" :class="'vx-'+row.venue" @click="$router.push('/mix/venue/'+row.venue)">{{ row.venue }}</b>
           <i class="tier" v-if="row.tier">Tier {{ row.tier }}</i></template></el-table-column>
         <el-table-column label="当前限制" width="150"><template #default="{row}">
           <span class="mch" :class="modeCls(row.mode)" :title="expertView?'':row.mode">{{ expertView ? row.mode : term(row.mode) }}</span></template></el-table-column>
         <el-table-column label="风险事件态" width="86"><template #default="{row}">{{ row.incident_state || '—' }}</template></el-table-column>
         <el-table-column label="恢复阶梯" width="96"><template #default="{row}">
           {{ row.recovery ? `阶段${row.recovery.stage}·${Math.round(row.recovery.allow_pct*100)}%` : '—' }}</template></el-table-column>
-        <el-table-column label="权益U" width="86" align="right"><template #default="{row}">{{ n(row.equity) }}</template></el-table-column>
-        <el-table-column label="敞口U" width="80" align="right"><template #default="{row}">{{ n(row.exposure_notional) }}</template></el-table-column>
-        <el-table-column label="上限U" width="80" align="right"><template #default="{row}">{{ n(row.cap_usdt) }}</template></el-table-column>
+        <el-table-column label="权益U" width="86" align="right"><template #default="{row}"><span class="amtx">{{ n(row.equity) }}</span></template></el-table-column>
+        <el-table-column label="敞口U" width="80" align="right"><template #default="{row}"><span class="amtx">{{ n(row.exposure_notional) }}</span></template></el-table-column>
+        <el-table-column label="上限U" width="80" align="right"><template #default="{row}"><span class="amtx">{{ n(row.cap_usdt) }}</span></template></el-table-column>
         <el-table-column label="折价/受限U" width="96" align="right"><template #default="{row}">
           <span :class="{bad: row.trapped_usdt>0}">{{ row.haircut_pct ? (row.haircut_pct*100)+'% / '+n(row.trapped_usdt) : '—' }}</span></template></el-table-column>
         <el-table-column label="提现健康" min-width="150"><template #default="{row}">
@@ -46,7 +46,7 @@
         <div v-if="!incidents.length" class="dim pad">无活跃事件</div>
         <div v-for="i in incidents" :key="i.venue + i.rule" class="inc">
           <span class="mch" :class="i.severity==='fatal' ? 'red' : 'watch'">{{ i.state }}</span>
-          <b>{{ i.venue }}</b> · {{ i.title }}
+          <b :class="'vx-'+i.venue">{{ i.venue }}</b> · {{ i.title }}
           <span class="dim">命中{{ i.hit_count }}次 · 持续{{ fmtAge(i.age_sec) }}</span>
           <div class="incd">{{ i.detail }}</div>
         </div>
@@ -56,7 +56,7 @@
         <div class="chd">模式转变历史(近20)</div>
         <div v-if="!transitions.length" class="dim pad">无记录</div>
         <div v-for="(t, i) in transitions" :key="i" class="tr">
-          <b>{{ t.venue }}</b>
+          <b :class="'vx-'+t.venue">{{ t.venue }}</b>
           <span class="mch sm" :class="modeCls(t.before_mode)" :title="t.before_mode">{{ expertView ? t.before_mode : term(t.before_mode) }}</span>→
           <span class="mch sm" :class="modeCls(t.after_mode)" :title="t.after_mode">{{ expertView ? t.after_mode : term(t.after_mode) }}</span>
           <span class="dim">{{ String(t.reason||'').split('|')[0].slice(0,36) }} · {{ (t.recorded_at||'').slice(5,16) }}</span>

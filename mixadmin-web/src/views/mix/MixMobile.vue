@@ -32,11 +32,11 @@
     <!-- ② 持仓(rc9an 组合详情=点行展开;F5tIL 平仓两步确认=预演) -->
     <div class="body" v-show="tab==='pos'">
       <div class="mcard col" v-for="(r,i) in pf.rows || []" :key="i" @click="exp = exp===i ? -1 : i">
-        <div class="row1"><b>{{ r.symbol }}</b><i class="pb">{{ r.product }}</i>
+        <div class="row1"><b style="color:var(--mix-gold,#F0B90B);font-weight:800">{{ r.symbol }}</b><i class="pb" :class="'px-'+String(r.product||'').split('.')[0].toLowerCase()">{{ r.product }}</i>
           <span class="grow" /><span :class="r.recon==='ok' ? 'ok2' : 'bad2'"><FIcon :name="r.recon==='ok' ? 'check' : 'warn'" :size="12"/></span></div>
         <div class="dim2">{{ r.route }} · {{ r.saga_state }} · Δ {{ r.net_delta_usdt ?? 'N/A' }}U · 缓冲 {{ r.margin_buffer != null ? r.margin_buffer + '%' : 'N/A' }}</div>
         <div v-if="exp===i" class="det">
-          <div v-for="(lg,j) in r.legs" :key="j" class="dim2">{{ lg.venue }} {{ (lg.amt||0)>=0?'多':'空' }} {{ lg.amt }} · upnl {{ lg.upnl ?? 'N/A' }}</div>
+          <div v-for="(lg,j) in r.legs" :key="j" class="dim2"><i :class="'vx-'+lg.venue" style="font-style:normal">{{ lg.venue }}</i> {{ (lg.amt||0)>=0?'多':'空' }} {{ lg.amt }} · upnl {{ lg.upnl ?? 'N/A' }}</div>
           <div class="two">
             <button class="mbtn w" @click.stop="openClose(r.symbol)">平组合…(两步确认)</button>
           </div>
@@ -48,8 +48,8 @@
     <!-- ③ 风控 -->
     <div class="body" v-show="tab==='risk'">
       <div class="mcard col" v-for="v in rs.venues || []" :key="v.venue">
-        <div class="row1"><b>{{ v.venue }}</b><span class="mch" :class="'m-'+v.mode">{{ v.mode }}</span>
-          <span class="grow" /><span class="dim2">{{ n(v.equity) }}U</span></div>
+        <div class="row1"><b :class="'vx-'+v.venue">{{ v.venue }}</b><span class="mch" :class="'m-'+v.mode">{{ v.mode }}</span>
+          <span class="grow" /><span class="dim2 amtx">{{ n(v.equity) }}U</span></div>
         <div class="dim2">{{ String(v.reason||'').split('|')[0].slice(0,44) }}</div>
       </div>
       <div class="mcard col">
@@ -62,9 +62,9 @@
     <!-- 审批已并入待办(V6.1 §8.2:不单独占常态空页签);Passkey 优先,TOTP 回退 -->
     <div class="body approval-inline" v-show="tab==='todo' && props2.length">
       <div class="mcard col" v-for="p in props2" :key="p.id">
-        <div class="row1"><b>{{ p.symbol }}</b><i class="pb">{{ p.product }}</i>
+        <div class="row1"><b style="color:var(--mix-gold,#F0B90B);font-weight:800">{{ p.symbol }}</b><i class="pb" :class="'px-'+String(p.product||'').split('.')[0].toLowerCase()">{{ p.product }}</i>
           <span class="grow" /><span class="dim2">{{ p.state==='COOLDOWN'?'冷却中':'待审批' }}</span></div>
-        <div class="dim2">名义 {{ p.target_notional }}U · {{ p.state==='COOLDOWN' ? '冷静期剩 '+Math.max(0,Math.ceil((p.cooldown_left||0)/60))+'min' : p.venue_long+'⟶'+p.venue_short }}</div>
+        <div class="dim2">持仓 {{ p.target_notional }}U · {{ p.state==='COOLDOWN' ? '冷静期剩 '+Math.max(0,Math.ceil((p.cooldown_left||0)/60))+'min' : p.venue_long+'⟶'+p.venue_short }}</div>
         <div class="two" v-if="p.state==='PENDING_APPROVAL'">
           <button class="mbtn primary" :disabled="!pkOk" @click="approvePasskey(p.id)"><FIcon name="lock" :size="12"/> Passkey 批准</button>
           <el-input v-model="apprCode[p.id]" placeholder="TOTP 回退" maxlength="6" size="small" style="max-width:110px" />

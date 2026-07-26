@@ -32,7 +32,7 @@
             <div v-for="o in oppsFiltered" :key="o.work_item_id" class="orow"
                  :class="{sel:selected===o.symbol}" @click="selected=o.symbol">
               <div class="or1">
-                <span class="sym">{{ o.symbol }} · {{ o.strategy_code }}</span>
+                <span class="sym"><b style="color:var(--mix-gold,#F0B90B);font-weight:800">{{ o.symbol }}</b> · <i :class="'px-'+String(o.strategy_code||'').split('.')[0].toLowerCase()" style="font-style:normal">{{ o.strategy_code }}</i></span>
                 <span class="sug">建议：{{ suggestOf(o) }}</span>
                 <b class="ev" :class="{neg:(o.expected_net_return||0)<0}">{{ evText(o) }}</b>
               </div>
@@ -75,7 +75,7 @@
             </div>
             <div v-for="p in posFiltered" :key="p.work_item_id" class="prow"
                  :class="{sel:selected===p.symbol}" @click="selected=p.symbol">
-              <span style="width:84px" class="t1b">{{ p.symbol }} ▸</span>
+              <span style="width:84px;color:var(--mix-gold,#F0B90B);font-weight:800" class="t1b">{{ p.symbol }} ▸</span>
               <span style="width:56px" class="t2b">{{ p.strategy_code }}</span>
               <span style="width:50px" :class="autoClass(p)">{{ autoCn(p.automation_mode) }}</span>
               <span style="width:92px" :class="stageClass(p)">{{ p.stage_detail || p.workflow_stage }}</span>
@@ -94,7 +94,7 @@
           <div class="whd"><b>风控墙</b><i>必须处理优先</i></div>
           <div class="rbody">
             <div v-if="p0" class="must">
-              <b class="mtitle">必须处理 · {{ p0.severity==='fatal'?'P0':'P1' }} {{ p0.venue }} {{ p0.rule }}</b>
+              <b class="mtitle">必须处理 · {{ p0.severity==='fatal'?'P0':'P1' }} <i :class="'vx-'+p0.venue" style="font-style:normal">{{ p0.venue }}</i> {{ p0.rule }}</b>
               <div class="qa"><i>发生了什么</i><span>{{ p0.title || p0.detail || 'N/A' }}</span></div>
               <div class="qa"><i>影响多少</i><span>{{ p0.detail || 'N/A' }}</span></div>
               <div class="qa"><i>系统已做</i><span>风险权威已按能力位限制该范围新增（{{ p0.state }}）</span></div>

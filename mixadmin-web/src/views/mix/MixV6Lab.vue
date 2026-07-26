@@ -160,14 +160,14 @@
           </div>
           <div class="tbody">
             <div v-for="p in projects" :key="p.project_id" class="trow" :class="{sel:sel?.project_id===p.project_id}" @click="pickRow(p)">
-              <span class="lc t1b" style="width:128px" :title="p.title">{{ p.project_id }} · {{ p.title }}</span>
+              <span class="lc t1b" style="width:128px;color:var(--mix-gold,#F0B90B);font-weight:700" :title="p.title">{{ p.project_id }} · {{ p.title }}</span>
               <span class="lc t2" style="width:104px">{{ p.chain_protocol || 'N/A' }}</span>
               <span class="lc" style="width:70px" :class="stageCls(p.stage)">{{ stageCn(p.stage) }}</span>
-              <span class="lc t2" style="width:56px">{{ sampleOf(p) }}</span>
+              <span class="lc amtx" style="width:56px">{{ sampleOf(p) }}</span>
               <span class="lc" style="width:118px" :class="resultCls(p)" :title="p.kind_note">{{ resultOf(p) }}</span>
-              <span class="lc t3" style="width:56px">{{ p.runs?p.runs+' 轮':'—' }}</span>
+              <span class="lc timex" style="width:56px">{{ p.runs?p.runs+' 轮':'—' }}</span>
               <span class="lc" style="width:64px" :class="evCls(p)">{{ p.evidence_gate?.coverage || '—' }}</span>
-              <span class="lc t3" style="width:66px">{{ freshOf(p) }}</span>
+              <span class="lc" style="width:66px" :class="String(freshOf(p)).includes('h前')||freshOf(p)==='实时'?'up':'t3'">{{ freshOf(p) }}</span>
               <span class="lc" style="width:96px" :class="verdictCls(p.latest_verdict)" :title="p.latest_verdict_reason">{{ verdictOf(p) }}</span>
               <!-- 操作列定宽最右,永不被挤出(遮挡课);判决入口补齐(命令白名单此前UI空转) -->
               <span class="lact">

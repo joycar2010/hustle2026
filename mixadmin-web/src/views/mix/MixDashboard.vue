@@ -179,11 +179,11 @@ const todo = computed(() => {
   ;(props2.value || []).forEach(pp => p2.push({ kind: 'proposal', id: pp.id, state: pp.state,
     title: `${pp.symbol} ${pp.product} 提案`,
     sub: pp.state === 'COOLDOWN' ? `冷静期剩 ${Math.max(0, Math.ceil((pp.cooldown_left||0)/60))}min`
-      : pp.state === 'PENDING_APPROVAL' ? `待二次认证 · 名义 ${pp.target_notional}U` : pp.state }))
+      : pp.state === 'PENDING_APPROVAL' ? `待二次认证 · 持仓 ${pp.target_notional}U` : pp.state }))
   ;(opps.value || []).filter(o => !o.blocked && !(props2.value||[]).some(pp => pp.symbol === o.symbol))
     .slice(0, 2).forEach(o => p2.push({ symbol: o.symbol,
       title: `开仓机会 ${o.symbol} C2.H · 风调E ${o.risk_adjusted_e_bps} bps`,
-      sub: `建议名义 ${o.target_notional_usdt}U · 生成 DRY_RUN 走审批链` }))
+      sub: `建议持仓 ${o.target_notional_usdt}U · 生成 DRY_RUN 走审批链` }))
   return { p0, p1, p2 }
 })
 // 组合表聚合→八卡(四采集件点亮)
@@ -213,7 +213,7 @@ const sumCards = computed(() => {
       note: nav.available_equity_usdt != null ? `风调可用 ${nav.available_equity_usdt} U` : NA },
     { k: '今日净PnL(费后)', v: pnl != null ? (pnl >= 0 ? '+' : '') + Number(pnl).toFixed(2) + ' U' : NA,
       vc: pnl >= 0 ? 'up' : 'down', note: 'Funding/Basis/费 拆分 N/A(逐组合账本待接)' },
-    { k: '总名义仓位', v: notional != null ? Math.round(notional).toLocaleString() + ' U' : NA,
+    { k: '总持仓', v: notional != null ? Math.round(notional).toLocaleString() + ' U' : NA,
       note: `${(pf.value.rows || []).length} 组合` },
     { k: '净Delta', v: agg.delta != null ? (agg.delta >= 0 ? '+' : '') + agg.delta + ' U' : NA,
       vc: Math.abs(agg.delta || 0) < 25 ? '' : 'down',

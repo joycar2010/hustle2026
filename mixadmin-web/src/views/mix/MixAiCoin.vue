@@ -46,15 +46,15 @@
         <div class="facts">
           <div v-for="f in FACTS" :key="f.k" class="frow">
             <span class="fl">{{ f.t }}</span>
-            <ValueCell :value="mval(f.k)" :state="mstate(f.k)" :suffix="f.sfx" :dp="f.dp" :reason="mreason(f.k)"/>
+            <span :class="fvCls(f.k)" style="display:contents"><ValueCell :value="mval(f.k)" :state="mstate(f.k)" :suffix="f.sfx" :dp="f.dp" :reason="mreason(f.k)"/></span>
             <span class="fsrc">{{ msrc(f.k) }}</span>
           </div>
         </div>
         <div class="vhead"><span>Venue</span><span>模式</span><span class="r">中价</span><span class="r">点差</span><span class="r">费%/d</span><span>鲜</span></div>
         <div v-for="r in va" :key="r.venue" class="vrow" :class="{stale: !r.fresh}">
-          <span><b>{{ r.venue }}</b></span><span :class="'m-'+r.mode">{{ r.mode }}</span>
-          <span class="r">{{ r.mid ?? '—' }}</span><span class="r">{{ r.spread_bps ?? '—' }}</span>
-          <span class="r">{{ r.funding_daily_pct ?? '—' }}</span><span><FIcon :name="r.fresh?'check':'x'" :size="11"/></span>
+          <span><b :class="'vx-'+r.venue">{{ r.venue }}</b></span><span :class="'m-'+r.mode">{{ r.mode }}</span>
+          <span class="r amtx">{{ r.mid ?? '—' }}</span><span class="r amtx">{{ r.spread_bps ?? '—' }}</span>
+          <span class="r" :class="(r.funding_daily_pct||0)>0?'up':((r.funding_daily_pct||0)<0?'dn':'')">{{ r.funding_daily_pct ?? '—' }}</span><span><FIcon :name="r.fresh?'check':'x'" :size="11"/></span>
         </div>
       </div>
 
@@ -78,11 +78,11 @@
         <!-- §7.3 快速研判:四步选项化,不暴露内部字段 -->
         <div v-if="noteMode==='quick'" class="quick">
           <div class="qsec"><i>① 当前阶段</i>
-            <div class="chips"><span v-for="o in Q_STAGE" :key="o" class="chip" :class="{on:quick.stage===o}" @click="quick.stage=o">{{ o }}</span></div></div>
+            <div class="chips"><span v-for="o in Q_STAGE" :key="o" class="chip cs" :class="{on:quick.stage===o}" @click="quick.stage=o">{{ o }}</span></div></div>
           <div class="qsec"><i>② 主要依据(多选)</i>
-            <div class="chips"><span v-for="o in Q_BASIS" :key="o" class="chip" :class="{on:quick.basis.includes(o)}" @click="tgl(quick.basis,o)">{{ o }}</span></div></div>
+            <div class="chips"><span v-for="o in Q_BASIS" :key="o" class="chip cb" :class="{on:quick.basis.includes(o)}" @click="tgl(quick.basis,o)">{{ o }}</span></div></div>
           <div class="qsec"><i>③ 主要风险(多选)</i>
-            <div class="chips"><span v-for="o in Q_RISK" :key="o" class="chip warn" :class="{on:quick.risks.includes(o)}" @click="tgl(quick.risks,o)">{{ o }}</span></div></div>
+            <div class="chips"><span v-for="o in Q_RISK" :key="o" class="chip cr" :class="{on:quick.risks.includes(o)}" @click="tgl(quick.risks,o)">{{ o }}</span></div></div>
           <div class="qsec"><i>④ 补充一句话(可选)</i>
             <el-input v-model="quick.note" size="small" placeholder="如:盯 8h 结算前费差变化"/></div>
           <div class="qbtns">
@@ -144,7 +144,7 @@
       <div class="pgrid">
         <el-form label-width="90px" size="small">
           <el-form-item label="标的"><b>{{ sym }}</b><i class="tag" style="margin-left:8px">研判 #{{ planDlg.caseId }}</i></el-form-item>
-          <el-form-item label="目标名义U"><el-input-number v-model="planDlg.notional" :min="0" style="width:100%" @change="loadPreview"/></el-form-item>
+          <el-form-item label="目标持仓U"><el-input-number v-model="planDlg.notional" :min="0" style="width:100%" @change="loadPreview"/></el-form-item>
           <el-form-item label="多腿venue"><el-input v-model="planDlg.venue_long" size="small" @change="loadPreview"/></el-form-item>
           <el-form-item label="空腿venue"><el-input v-model="planDlg.venue_short" size="small" @change="loadPreview"/></el-form-item>
         </el-form>
@@ -165,12 +165,18 @@
       </template>
     </el-dialog>
   </div>
-  <!-- Asset 360 抽屉 -->
-  <Asset360 v-model:open="a360Open" :symbol="a360Symbol" />
+  <!-- Asset 360 抽屉(MixToday 同款契约:el-drawer 包裹 + v-if 双闸 + :asset-id;
+       此前误用 v-model:open/:symbol 两个不存在的 prop → 裸面板常驻渲染 assetId=undefined="UNDEFINED"空表) -->
+  <el-drawer v-model="a360Open" :size="a360Fullscreen?'100%':'60%'" direction="rtl"
+             :show-close="false" :close-on-press-escape="true" :append-to-body="true"
+             :destroy-on-close="false" class="a360drawer">
+    <Asset360 v-if="a360Open && a360Symbol" :asset-id="a360Symbol" :fullscreen="a360Fullscreen"
+              @close="a360Open=false" @toggle-fullscreen="a360Fullscreen=!a360Fullscreen"/>
+  </el-drawer>
 </template>
 
 <script setup>
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
 import * as echarts from 'echarts'
@@ -237,6 +243,12 @@ const M = computed(() => ctx.value?.metrics || {})
 function mval(k) { return M.value[k]?.value }
 function mstate(k) { return M.value[k]?.state }
 function mreason(k) { return M.value[k]?.reason || '' }
+const _SIGNK = new Set(['funding_gap_daily_pct','funding_cap','funding_floor','candidate_ev_bps'])
+const _AMTK = new Set(['price','spread_min_bps','vol24h_usdt','oi_usdt','depth_buy_usdt','depth_sell_usdt'])
+function fvCls(k) {
+  if (_SIGNK.has(k)) { const v = Number(mval(k)); return v > 0 ? 'up' : (v < 0 ? 'dn' : '') }
+  return _AMTK.has(k) ? 'amtx' : ''
+}
 function msrc(k) { const s = M.value[k]?.source_status || ''; return { official_l1: '官方L1', binance_public: '币安公开', funding_feed: '费率源', instrument_spec: '合约表', opener: '决策服务' }[s] || s }
 
 function tgl(arr, v) { const i = arr.indexOf(v); i >= 0 ? arr.splice(i, 1) : arr.push(v) }
@@ -261,10 +273,12 @@ function scrollVenues() { venuesEl.value?.scrollIntoView({ behavior: 'smooth' })
 // Asset 360 抽屉
 const a360Open = ref(false)
 const a360Symbol = ref('')
+const a360Fullscreen = ref(false)
 function openAsset360(symbol) {
   if (!symbol || symbol === '—') return
-  a360Symbol.value = symbol
+  a360Symbol.value = String(symbol).toUpperCase()
   a360Open.value = true
+  a360Fullscreen.value = false
 }
 
 async function markAnomaly() {
@@ -356,17 +370,17 @@ async function loadK() {
       grid: [{ left: 58, right: 14, top: 10, height: '64%' }, { left: 58, right: 14, top: '80%', height: '14%' }],
       xAxis: [
         { type: 'category', data: norm.map(k => new Date(k.t).toLocaleString('zh', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })),
-          axisLine: { lineStyle: { color: '#262B33' } }, axisLabel: { color: '#5E6673', fontSize: 10 } },
+          axisLine: { lineStyle: { color: '#262B33' } }, axisLabel: { color: '#A2ADC0', fontSize: 10 } },
         { type: 'category', gridIndex: 1, data: norm.map(k => k.t), show: false },
       ],
-      yAxis: [{ scale: true, splitLine: { lineStyle: { color: '#1E2329' } }, axisLabel: { color: '#5E6673', fontSize: 10 } },
+      yAxis: [{ scale: true, splitLine: { lineStyle: { color: '#1E2329' } }, axisLabel: { color: '#C8D2E0', fontSize: 10.5 } },
         { gridIndex: 1, show: false }],
       dataZoom: [{ type: 'inside', xAxisIndex: [0, 1], start: 55, end: 100 }],
       tooltip: { trigger: 'axis', backgroundColor: '#181B21', borderColor: '#262B33', textStyle: { color: '#EAECEF', fontSize: 11 } },
       series: [
         { type: 'candlestick', data: norm.map(k => [k.o, k.c, k.l, k.h]),
           itemStyle: { color: '#0ECB81', color0: '#F6465D', borderColor: '#0ECB81', borderColor0: '#F6465D' } },
-        { type: 'bar', xAxisIndex: 1, yAxisIndex: 1, data: norm.map(k => k.v), itemStyle: { color: '#3a4150' } },
+        { type: 'bar', xAxisIndex: 1, yAxisIndex: 1, data: norm.map(k => ({ value: k.v, itemStyle: { color: k.c >= k.o ? '#0ECB8188' : '#F6465D88' } })) },
       ],
     })
     note.value = `${norm.length} 根 · 收 ${lastClose.value}`
@@ -389,6 +403,15 @@ onMounted(() => {
   if (q.plan) openPlan(Number(q.plan))   // 今日工作深链:研判完成的工作项直达生成计划
   mixApi.uxPageview('aicoin')
 
+})
+// 深链修复:页签存活时再次导航(今日工作·打开研判)只变 query 不重挂载——watch 路由切换研判对象
+watch(() => route.query, (q) => {
+  if (route.path !== '/mix/aicoin' || !q) return
+  let dirty = false
+  if (q.symbol && String(q.symbol).toUpperCase() !== sym.value) { sym.value = String(q.symbol).toUpperCase(); dirty = true }
+  if (q.product && PRODUCTS.includes(String(q.product)) && String(q.product) !== prod.value) { prod.value = String(q.product); dirty = true }
+  if (dirty) loadAll()
+  if (q.plan) openPlan(Number(q.plan))
 })
 onUnmounted(() => { ro && ro.disconnect(); chart && chart.dispose() })
 </script>
@@ -461,4 +484,10 @@ onUnmounted(() => { ro && ro.disconnect(); chart && chart.dispose() })
 .pgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .pv { background: var(--mix-panel, #12151A); border: 1px solid var(--mix-border, #262B33); border-radius: 8px; padding: 8px 12px;
   .pvh { font-size: 11px; font-weight: 700; color: var(--mix-t1, #EAECEF); margin-bottom: 4px; } }
+:deep(.a360drawer .el-drawer__body){padding:0;overflow:hidden}
+.up{color:#0ECB81!important}.dn{color:#F6465D!important}
+/* 研判chips分组色:阶段蓝/依据绿/风险红,选中实底 */
+.chip.cs{border-color:#4A9CFF66;color:#9CC3FF}.chip.cs.on{background:#4A9CFF22;color:#4A9CFF;border-color:#4A9CFF}
+.chip.cb{border-color:#0ECB8166;color:#7fd9b5}.chip.cb.on{background:#0ECB8122;color:#0ECB81;border-color:#0ECB81}
+.chip.cr{border-color:#F6465D66;color:#f08a95}.chip.cr.on{background:#F6465D22;color:#F6465D;border-color:#F6465D}
 </style>

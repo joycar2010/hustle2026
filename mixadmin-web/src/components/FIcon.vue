@@ -17,6 +17,7 @@ const props = defineProps({
 // 语义名 → SVG 几何(lucide 风格 24 网格)。circles 单列,paths 主体。
 const P = {
   check: ['M20 6 9 17l-5-5'],
+  zap: ['M13 2 3 14h9l-1 8 10-12h-9l1-8z'],
   x: ['M18 6 6 18M6 6l12 12'],
   warn: ['M12 3 2 20h20L12 3Z', 'M12 10v4', 'M12 17.5v.5'],
   alert: ['M12 8v5', 'M12 16.5v.5', 'M10.3 3.9 2 18a2 2 0 0 0 1.7 3h16.6a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z'],

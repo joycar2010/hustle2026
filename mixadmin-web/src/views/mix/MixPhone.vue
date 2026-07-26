@@ -12,12 +12,12 @@
     <!-- 待办 -->
     <div class="mbody" v-show="ptab==='todo'">
       <div v-if="p0" class="pcard p0c">
-        <b>P0 · {{ p0.venue }} {{ p0.title || p0.rule }}</b>
+        <b>P0 · <i :class="'vx-'+p0.venue" style="font-style:normal">{{ p0.venue }}</i> {{ p0.title || p0.rule }}</b>
         <span>{{ (p0.detail||'').slice(0,80) }}</span>
         <button class="pbtn danger" :disabled="stale||pausing" @click="pauseNew"><FIcon name="pause" :size="12"/> 暂停开新仓(减险·立即)</button>
       </div>
       <div v-for="w in abnormal" :key="w.work_item_id" class="pcard">
-        <b>{{ w.symbol }} · {{ w.stage_detail }}</b>
+        <b><i style="font-style:normal;color:var(--mix-gold,#F0B90B);font-weight:800">{{ w.symbol }}</i> · {{ w.stage_detail }}</b>
         <span>{{ w.next_action }}</span>
         <div class="prow2">
           <button v-for="a in w.allowed_actions" :key="a.code" class="pbtn" :class="{danger:a.kind==='danger'}"
@@ -48,7 +48,7 @@
     <!-- K线横屏全屏层 -->
     <div v-if="kl.open" class="klfull" @click.self="kl.open=false">
       <div class="klbar">
-        <b>{{ kl.symbol }}</b>
+        <b style="color:var(--mix-gold,#F0B90B);font-weight:800">{{ kl.symbol }}</b>
         <span class="klp"><i v-for="p in KPERIODS" :key="p.v" :class="{on:kl.period===p.v}" @click="kl.period=p.v;loadKline()">{{ p.t }}</i></span>
         <span class="klclose" @click="kl.open=false"><FIcon name="x" :size="18"/></span>
       </div>
@@ -61,7 +61,7 @@
     <!-- 持仓 -->
     <div class="mbody" v-show="ptab==='pos'">
       <div v-for="w in positions" :key="w.work_item_id" class="pcard" @click="psel=psel===w.work_item_id?'':w.work_item_id">
-        <b>{{ w.symbol }} · {{ w.strategy_code }} <i class="stg">{{ w.stage_detail }}</i>
+        <b><i style="font-style:normal;color:var(--mix-gold,#F0B90B)">{{ w.symbol }}</i> · {{ w.strategy_code }} <i class="stg">{{ w.stage_detail }}</i>
           <i v-if="w.risk_protection_state && w.risk_protection_state!=='NORMAL'" class="prot" :class="w.risk_protection_state"><FIcon name="shield" :size="9"/>{{ PROT_CN[w.risk_protection_state]||w.risk_protection_state }}</i></b>
         <span>投入 {{ kU(w.capital_reserved) }} · 已确认 {{ dvT(w.confirmed_pnl, w.data_state?.confirmed_pnl) }} · {{ w.next_deadline||'' }}</span>
         <span v-if="w.risk_protection_state && w.risk_protection_state!=='NORMAL'" class="dn">点差保护(shadow):真实退出 {{ w.closeout_pnl_net??'—' }}U · 预算余 {{ w.hard_loss_budget_remaining??'—' }}U</span>

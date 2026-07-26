@@ -51,17 +51,17 @@
           <div class="tbody">
             <template v-for="w in rows" :key="w.work_item_id">
               <div class="trow" :class="{sel:sel?.work_item_id===w.work_item_id}" @click="sel=w">
-                <span style="width:120px" class="t1b">{{ sel?.work_item_id===w.work_item_id?'▾':'▸' }} <b @click.stop="openAsset360(w.symbol)" style="cursor:pointer">{{ w.symbol }}</b></span>
-                <span style="width:64px" class="t2b">{{ w.strategy_code }}</span>
-                <span style="width:56px" class="t2">{{ srcCn(w.source) }}</span>
+                <span style="width:120px" class="t1b">{{ sel?.work_item_id===w.work_item_id?'▾':'▸' }} <b @click.stop="openAsset360(w.symbol)" style="cursor:pointer;color:var(--mix-gold,#F0B90B)">{{ w.symbol }}</b></span>
+                <span style="width:64px" class="t2b" :class="'px-'+String(w.strategy_code||'').split('.')[0].toLowerCase()">{{ w.strategy_code }}</span>
+                <span style="width:56px" :class="'sx-'+w.source">{{ srcCn(w.source) }}</span>
                 <span style="width:64px" :class="w.automation_mode==='AUTO'?'green':'amber'">{{ autoCn(w.automation_mode) }}</span>
                 <span style="width:108px" :class="stageCls(w)">{{ w.stage_detail || w.workflow_stage }}</span>
-                <span style="width:78px" class="t2">{{ kU(w.capital_reserved) }}</span>
-                <span style="width:120px" :class="w.confirmed_pnl!=null?(w.confirmed_pnl>=0?'green':'redtxt'):'t3'">
+                <span style="width:78px" class="t2 amtx">{{ kU(w.capital_reserved) }}</span>
+                <span style="width:120px" :class="w.confirmed_pnl!=null?(w.confirmed_pnl>=0?'green':'redtxt'):((w.expected_net_return||0)>0?'green':(w.expected_net_return||0)<0?'redtxt':'t3')">
                   {{ pnlOrEv(w) }}</span>
-                <span style="width:96px" class="t2">{{ w.next_deadline || 'N/A' }}</span>
-                <span style="width:100px" :class="w.risk_status?.level==='NORMAL'?'t3':'orange'">{{ w.risk_status?.level==='NORMAL'?'低':(w.risk_status?.reason||w.risk_status?.level||'N/A') }}</span>
-                <span style="width:96px" class="t2">{{ w.next_action || 'N/A' }}</span>
+                <span style="width:96px" class="timex">{{ w.next_deadline || '—' }}</span>
+                <span style="width:100px" :class="w.risk_status?.level==='NORMAL'?'t3':'orange'">{{ w.risk_status?.level==='NORMAL'?'低':(w.risk_status?.reason||w.risk_status?.level||'—') }}</span>
+                <span style="width:96px" class="t2">{{ w.next_action || '—' }}</span>
                 <span class="fill">
                   <PrimaryAction v-if="primaryOf(w)" :a="primaryOf(w)" sz="sm"
                                  :still-allowed="w.still_allowed" :blocking-reason="w.blocking_reason"
@@ -154,7 +154,7 @@
             <el-option v-for="p in ['C1','C2.H','C2.C','C3.S','C3.R','C4','C5','C6','O1']" :key="p" :value="p" :label="p"/>
           </el-select>
         </el-form-item>
-        <el-form-item label="目标名义U"><el-input-number v-model="np.notional" :min="0" style="width:100%"/></el-form-item>
+        <el-form-item label="目标持仓U"><el-input-number v-model="np.notional" :min="0" style="width:100%"/></el-form-item>
       </el-form>
       <p class="t3sm">手动模式不能绕过 净期望/额度/平台风险/借币保证金/多腿完整性 —— 提交后进 DRY_RUN 冷却+审批链,不直接下单。</p>
       <template #footer>
@@ -163,8 +163,13 @@
       </template>
     </el-dialog>
   </div>
-  <!-- Asset 360 抽屉 -->
-  <Asset360 v-model:open="a360Open" :symbol="a360Symbol" />
+  <!-- Asset 360 抽屉(MixToday 同款契约:el-drawer 包裹 + v-if 双闸 + :asset-id) -->
+  <el-drawer v-model="a360Open" :size="a360Fullscreen?'100%':'60%'" direction="rtl"
+             :show-close="false" :close-on-press-escape="true" :append-to-body="true"
+             :destroy-on-close="false" class="a360drawer">
+    <Asset360 v-if="a360Open && a360Symbol" :asset-id="a360Symbol" :fullscreen="a360Fullscreen"
+              @close="a360Open=false" @toggle-fullscreen="a360Fullscreen=!a360Fullscreen"/>
+  </el-drawer>
 </template>
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue'
@@ -250,13 +255,20 @@ const usedU = computed(() => {
   const s = (snap.value?.positions || []).reduce((a, w) => a + (Number(w.capital_reserved) || 0), 0)
   return s ? s.toFixed(0) : '0'
 })
-const quotaU = computed(() => 'N/A')
-const freeU = computed(() => 'N/A')
+// 额度=风险权威三口径NAV的可用权益(available=权益−名义20%预留−缓冲,risk-ledger发布);快照policy.nav直读
+const quotaU = computed(() => {
+  const v = snap.value?.policy?.nav?.available_equity_usdt
+  return v != null ? Number(v).toFixed(0) : 'N/A'
+})
+const freeU = computed(() => {
+  const v = snap.value?.policy?.nav?.available_equity_usdt
+  return v != null ? Math.max(0, Number(v) - Number(usedU.value || 0)).toFixed(0) : 'N/A'
+})
 const asofT = computed(() => snap.value?.as_of ? new Date(snap.value.as_of).toTimeString().slice(0, 8) : 'N/A')
 
 function autoCn(m) { return { AUTO: '自动', ASSISTED: '辅助', MANUAL: '手动' }[m] || 'N/A' }
 function srcCn(s) { return { opener: '顾问', proposal: '提案', manager: '内核', coin: 'C3引擎', repair: '修复' }[s] || s }
-function kU(v) { if (v == null) return 'N/A'; const n = Number(v); return n >= 1000 ? (n / 1000).toFixed(1) + 'K U' : n.toFixed(0) + ' U' }
+function kU(v) { if (v == null) return '—'; const n = Number(v); return n >= 1000 ? (n / 1000).toFixed(1) + 'K U' : n.toFixed(0) + ' U' }
 function pnlText(v) { return v == null ? 'N/A' : `${v >= 0 ? '+' : ''}${Number(v).toFixed(1)} U` }
 function pnlOrEv(w) {
   if (w.confirmed_pnl != null) return `已确认 ${pnlText(w.confirmed_pnl)}`
@@ -272,7 +284,8 @@ function tlCls(i) {
 const isC3 = computed(() => strat.value === 'C3')
 // 行内主操作=服务端 allowed_actions 的第一个 primary(无 primary 取第一个)——前端不猜
 function primaryOf(w) {
-  const acts = w.allowed_actions || []
+  // 去掉平仓预演(用户2026-07-19:小额持仓无需预演;C2走直接平仓,C1/C3走各自流程)
+  const acts = (w.allowed_actions || []).filter(a => a.code !== 'close_preview')
   return acts.find(a => a.kind === 'primary') || acts[0] || null
 }
 // V6.1 §3:按钮由服务端 allowed_actions 决定,前端只做动作分发,不猜可用性
@@ -305,10 +318,12 @@ const closePrev = ref({ open: false, symbol: '' })
 // Asset 360 抽屉
 const a360Open = ref(false)
 const a360Symbol = ref('')
+const a360Fullscreen = ref(false)
 function openAsset360(symbol) {
   if (!symbol) return
-  a360Symbol.value = symbol
+  a360Symbol.value = String(symbol).toUpperCase()
   a360Open.value = true
+  a360Fullscreen.value = false
 }
 
 function dispatchAct(a) {
@@ -319,7 +334,8 @@ function dispatchAct(a) {
     case 'opportunity_watch': return oppAct2(w, 'opportunity_watch')
     case 'opportunity_ignore': return oppAct2(w, 'opportunity_ignore')
     case 'view_basis': case 'view': techOpen.value = true; return
-    case 'proposal_approve': case 'proposal_reject': return router.push('/mix/dashboard')
+    case 'proposal_approve': return approveProposal(w)
+    case 'proposal_reject': return rejectProposal(w)
     case 'workitem_takeover': return takeover(w)
     case 'workitem_ack': return ack(w)
     case 'close_preview': closePrev.value = { open: true, symbol: w.symbol }; return
@@ -342,6 +358,31 @@ async function c3Close(w) {
     const r = await mixApi.coinAction(w.symbol, 'force_close')
     ElMessage.success(r?.note || '已提交 coin 权威执行')
   } catch (e) { ElMessage.error(e?.detail || e?.error || '被拒绝(coin 状态机权威校验)') }
+}
+// 提案审批原地闭环(与今日工作同款;此前只 router.push 跳中控台=断头路)
+function _pidOf(w) {
+  const m = String(w?.position_intent_id || '').match(/^dryrun:(\d+)$/)
+  return m ? Number(m[1]) : null
+}
+async function approveProposal(w) {
+  const pid = _pidOf(w)
+  if (!pid) { ElMessage.error('工作项无提案ID(position_intent_id)'); return }
+  try {
+    const { value } = await ElMessageBox.prompt(
+      `批准提案 #${pid}(${w.symbol})。APPROVED 仍是 shadow 终态,不会直接下单。\n输入 Authenticator 6位动态码:`,
+      '二次认证批准', { confirmButtonText: '批准', inputPattern: /^\d{6}$/, inputErrorMessage: '6位数字' })
+    await mixApi.proposalApprove(pid, value)
+    ElMessage.success(`提案 #${pid} 已批准(shadow 登记,武装另门控)`)
+  } catch (e) { if (e !== 'cancel') ElMessage.error(e?.detail || e?.error || '批准失败(动态码错误或状态已变)') }
+}
+async function rejectProposal(w) {
+  const pid = _pidOf(w)
+  if (!pid) { ElMessage.error('工作项无提案ID'); return }
+  try {
+    await ElMessageBox.confirm(`驳回提案 #${pid}(${w.symbol})?`, '驳回', { type: 'warning' })
+    await mixApi.proposalReject(pid)
+    ElMessage.success('已驳回')
+  } catch (e) { if (e !== 'cancel') ElMessage.error(e?.detail || e?.error || '驳回失败') }
 }
 async function oppSend(w) {
   // 提交三态:loading→服务端确认→成功;失败复位为 failed(可重试),严禁假成功迁移
@@ -408,17 +449,17 @@ async function createPlan() {
 .tscroll{flex:1;overflow:auto;min-height:0}
 .thead,.trow,.legrow{min-width:1040px}
 .thead span,.trow span{flex-shrink:0}
-.thead .fill,.trow .fill{flex-shrink:1}
-.thead{display:flex;align-items:center;height:24px;background:var(--mix-panel);border-bottom:1px solid var(--mix-border);position:sticky;top:0;z-index:1}
+.thead .fill,.trow .fill{flex-shrink:1;min-width:150px;flex:0 0 150px}
+.thead{display:flex;align-items:center;height:24px;background:var(--mix-panel);border-bottom:1px solid var(--mix-border);position:sticky;top:0;z-index:1;min-width:1050px}
 .thead span{font-size:8.5px;font-weight:700;color:var(--mix-t3);padding:0 7px;white-space:nowrap;overflow:hidden}
 .tbody{min-height:0}
-.trow{display:flex;align-items:center;height:32px;border-bottom:1px solid var(--mix-border);cursor:pointer}
+.trow{display:flex;align-items:center;height:32px;border-bottom:1px solid var(--mix-border);cursor:pointer;min-width:1050px}
 .trow span{font-size:9.5px;padding:0 7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .trow.sel{background:var(--mix-card2);border-left:2px solid var(--mix-blue)}
 .legrow{display:flex;align-items:center;height:26px;border-bottom:1px solid var(--mix-border);background:#00000022}
 .legrow span{font-size:9px;padding:0 7px 0 14px}
 .tfoot{font-size:8.5px;color:var(--mix-t3);padding:4px 10px;border-top:1px solid var(--mix-border)}
-.right{width:392px;flex:none;background:var(--mix-card);border:1px solid var(--mix-blue);border-radius:8px;display:flex;flex-direction:column;overflow:hidden}
+.right{width:336px;flex:none;background:var(--mix-card);border:1px solid var(--mix-blue);border-radius:8px;display:flex;flex-direction:column;overflow:hidden}
 .right.rempty{border-color:var(--mix-border);align-items:center;justify-content:center;color:var(--mix-t3);font-size:11px}
 .rhd{padding:8px 12px 6px;border-bottom:1px solid var(--mix-border)}
 .rh1{display:flex;align-items:center;justify-content:space-between}
@@ -467,4 +508,5 @@ async function createPlan() {
 @media (max-width:1500px){ .right{width:300px} .left{width:150px} }
 @media (max-width:1280px){ .right{display:none} }
 @media (max-width:1000px){ .left{display:none} }
+:deep(.a360drawer .el-drawer__body){padding:0;overflow:hidden}
 </style>

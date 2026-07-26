@@ -42,24 +42,28 @@
       <div v-if="viewMode==='list'" class="cols" :data-vtab="vtab" :data-focus="focusCol">
         <!-- 栏1·机会 -->
         <div class="col c-opp">
-          <div class="chd"><b>机会</b><i>候选 {{ snap?.counts?.candidates_raw ?? '—' }} → 过闸 {{ opps.length }}</i></div>
+          <div class="chd"><b>机会</b><a class="fllim" @click="editFlLimit" :title="'快线额度:单笔≤'+flLimit+'U 直接下单;点击修改(逐操作员)'"><FIcon name="zap" :size="10"/> {{ flLimit }}U</a><i>候选 {{ snap?.counts?.candidates_raw ?? '—' }} → 过闸 {{ opps.length }}</i></div>
           <div class="list" ref="oppList">
             <!-- 批A §6A.5B 机会紧凑行三行式:身份/路线容量/时间新鲜度 -->
             <div v-for="w in opps" :key="w.work_item_id" class="row tall opp3" :class="{sel:selId===w.work_item_id, submitting:rowState[w.work_item_id]==='loading'}"
                  @click="openItem(w)">
               <div class="r1">
                 <b class="sym" @click.stop="openAsset360(w.symbol)">{{ w.symbol }}</b>
-                <span class="prod">· {{ w.strategy_code }}</span>
+                <span class="prod" :class="pxCls(w.strategy_code)">· {{ w.strategy_code }}</span>
                 <span v-if="w.research_status && w.research_status!=='NOT_REQUIRED'" class="rs" :class="w.research_status">
                   研判{{ {PENDING:'待做',COMPLETED:'完成',EXPIRED:'过期'}[w.research_status]||'' }}</span>
                 <span class="fill"></span>
+                <button v-if="w.source==='opener' && String(w.route||'').includes('↔')" class="flbtn"
+                        :disabled="flBusy===w.work_item_id" @click.stop="fastOpen(w)"
+                        :title="`快线直通:额度内(${flLimit}U)免冷却免逐笔认证,四道机器闸毫秒级自动过`">
+                  <FIcon name="zap" :size="11"/> {{ flBusy===w.work_item_id ? '执行中…' : '直接开仓' }}</button>
                 <PrimaryAction v-if="primaryOf(w)" :a="primaryOf(w)" sz="sm"
                                :still-allowed="w.still_allowed" :blocking-reason="w.blocking_reason"
                                :state="rowState[w.work_item_id]||''" @run="(a)=>runAct(w,a)"/>
               </div>
               <div class="band">
-                <span class="bc"><i>路线</i><b>{{ w.route || '—' }}</b></span>
-                <span class="bc"><i>目标</i><b>{{ w.capital_reserved!=null ? fmtU(w.capital_reserved)+' U' : '—' }}</b></span>
+                <span class="bc"><i>路线</i><b><template v-for="(rv,ri) in String(w.route||'—').split('↔')" :key="ri"><i v-if="ri" class="rsep">↔</i><span :class="'vx-'+rv">{{ rv }}</span></template></b></span>
+                <span class="bc"><i>目标</i><b class="amtx">{{ w.capital_reserved!=null ? fmtU(w.capital_reserved)+' U' : '—' }}</b></span>
                 <span class="bc"><i>净期望</i><b class="ev" :class="(w.expected_net_return||0)>=0?'up':'dn'">{{ w.expected_net_return!=null ? evT(w) : '待计算' }}</b></span>
               </div>
               <div class="band dim">
@@ -82,7 +86,7 @@
                 <span v-if="w.account_legs?.length" class="expbtn" :class="{on:!!expRows[w.work_item_id]}"
                       @click.stop="toggleExp(w.work_item_id)">{{ expRows[w.work_item_id] ? '▾' : '▸' }}</span>
                 <b class="sym" @click.stop="openAsset360(w.symbol)">{{ w.symbol }}</b>
-                <span class="prod">· {{ w.strategy_code }}</span>
+                <span class="prod" :class="pxCls(w.strategy_code)">· {{ w.strategy_code }}</span>
                 <span class="st" :class="stCls(w)">{{ w.stage_detail || w.workflow_stage }}</span>
                 <!-- §6.3 点差保护=一等状态,不藏详情;shadow 评估,退出决策仍人工 -->
                 <span v-if="w.risk_protection_state && w.risk_protection_state!=='NORMAL'"
@@ -91,27 +95,30 @@
                   <FIcon name="shield" :size="10"/> {{ PROT_CN[w.risk_protection_state]||w.risk_protection_state }}</span>
                 <span class="fill"></span>
                 <span class="ddl">{{ w.next_deadline || '' }}</span>
+                <button v-if="canFastClose(w)" class="flcbtn" :disabled="flcBusy===w.work_item_id"
+                        @click.stop="fastClose(w)" title="快线直接平仓:两腿reduce-only真实平仓(减险,免额度/深度闸)">
+                  <FIcon name="zap" :size="11"/> {{ flcBusy===w.work_item_id ? '平仓中…' : '直接平仓' }}</button>
                 <PrimaryAction v-if="primaryOf(w)" :a="primaryOf(w)" sz="sm"
                                :still-allowed="w.still_allowed" :blocking-reason="w.blocking_reason"
                                :state="rowState[w.work_item_id]||''" @run="(a)=>runAct(w,a)"/>
               </div>
               <div class="band">
-                <span class="bc"><i>规模</i><b>{{ w.capital_reserved!=null ? fmtU(w.capital_reserved)+' U' : '—' }}</b></span>
-                <span class="bc"><i>净Δ</i><b>{{ ge(w).net_delta!=null ? fmtU(ge(w).net_delta) : '—' }}</b></span>
-                <span class="bc"><i>费差/日</i><b :class="(ge(w).gap_now_pct||0)>0?'up':''">{{ ge(w).gap_now_pct!=null ? fmt2(ge(w).gap_now_pct)+'%' : '—' }}</b></span>
+                <span class="bc"><i>规模</i><b class="amtx">{{ w.capital_reserved!=null ? fmtU(w.capital_reserved)+' U' : '—' }}</b></span>
+                <span class="bc"><i>净Δ</i><b :class="cls0(ge(w).net_delta)">{{ ge(w).net_delta!=null ? fmtU(ge(w).net_delta)+' U' : '—' }}</b></span>
+                <span class="bc"><i>费差/日</i><b :class="(ge(w).gap_now_pct||0)>0?'up':((ge(w).gap_now_pct||0)<0?'dn':'')">{{ ge(w).gap_now_pct!=null ? fmt2(ge(w).gap_now_pct)+'%' : '—' }}</b></span>
                 <span class="bc"><i>退出盈亏</i><b :class="cls0(ge(w).closeout_pnl_net)">{{ ge(w).closeout_pnl_net!=null ? fmt2(ge(w).closeout_pnl_net)+' U' : '—' }}</b></span>
                 <span class="bc"><i>已确认</i><b :class="cls0(w.confirmed_pnl)">{{ w.confirmed_pnl!=null ? fmt2(w.confirmed_pnl)+' U' : '—' }}</b></span>
               </div>
               <div class="band dim">
-                <span class="bc"><i>预算余</i><b>{{ ge(w).budget_remaining!=null ? fmt2(ge(w).budget_remaining)+' U' : '—' }}</b></span>
+                <span class="bc"><i>预算余</i><b class="amtx">{{ ge(w).budget_remaining!=null ? fmt2(ge(w).budget_remaining)+' U' : '—' }}</b></span>
                 <span class="bc"><i>最差强平</i><b :class="liqCls(ge(w).margin_min_dist_liq_pct)">{{ ge(w).margin_min_dist_liq_pct!=null ? fmtU(ge(w).margin_min_dist_liq_pct)+'%('+(ge(w).margin_worst_venue||'?')+')' : '—' }}</b></span>
                 <span class="bc grow"><i></i><b class="wh">{{ w.what_happened }}</b></span>
               </div>
               <!-- 展开=账户腿明细(§6A.5B:不跳页;venue符号/方向/数量/标记/浮盈/费率/强平/ADL) -->
               <div v-if="expRows[w.work_item_id] && w.account_legs?.length" class="legs" @click.stop>
-                <div class="leghd"><span>账户/腿</span><span>方向</span><span class="num">数量</span><span class="num">名义U</span><span class="num">标记价</span><span class="num">浮盈U</span><span class="num">费率%/d</span><span class="num">强平距%</span><span class="num">ADL</span></div>
+                <div class="leghd"><span>账户/腿</span><span>方向</span><span class="num">数量</span><span class="num">持仓U</span><span class="num">标记价</span><span class="num">浮盈U</span><span class="num">费率%/d</span><span class="num">强平距%</span><span class="num">ADL</span></div>
                 <div v-for="l in w.account_legs" :key="l.leg_id" class="legrow" :class="{ghost:l.data_state!=='PRESENT'}">
-                  <span :title="l.note||''">{{ l.account }} · {{ legCn(l.role) }}</span>
+                  <span :title="l.note||''"><b :class="'vx-'+(l.venue||l.account)">{{ l.account }}</b> · {{ legCn(l.role) }}</span>
                   <span :class="l.side==='LONG'?'up':'dn'">{{ l.side==='LONG'?'多':'空' }}</span>
                   <span class="num">{{ l.qty!=null ? fmtU(l.qty) : '—' }}</span>
                   <span class="num">{{ l.notional_usdt!=null ? fmtU(l.notional_usdt) : '—' }}</span>
@@ -126,7 +133,7 @@
             </div>
             <EmptyState v-if="!posShown.length" kind="none" :title="`「${queueLabel}」队列为空`" hint="点流程条其它分段查看"/>
             <!-- C4 期现交割持仓卡(独立数据链:/research/c4/positions,不占 V6 work_items 投影) -->
-            <C4Board/>
+            <C4Board @open-asset="openAsset360"/>
           </div>
         </div>
         <!-- 栏3·风险 -->
@@ -150,7 +157,7 @@
               <div class="rrow"><b>最差强平距离</b>
                 <span :class="liqCls(acctOverview.worst?.d)">{{ acctOverview.worst ? fmtU(acctOverview.worst.d)+'%('+(acctOverview.worst.v||'?')+'·'+acctOverview.worst.sym+')' : '—' }}</span></div>
               <div class="rrow"><b>硬亏预算余最小</b>
-                <span>{{ acctOverview.minBud ? fmt2(acctOverview.minBud.b)+' U('+acctOverview.minBud.sym+')' : '—' }}</span></div>
+                <span class="amtx">{{ acctOverview.minBud ? fmt2(acctOverview.minBud.b)+' U('+acctOverview.minBud.sym+')' : '—' }}</span></div>
               <div class="rrow"><b>真实退出盈亏合计</b>
                 <span :class="cls0(acctOverview.closeoutSum)">{{ acctOverview.closeoutSum!=null ? fmt2(acctOverview.closeoutSum)+' U' : '—' }}</span></div>
             </div>
@@ -161,6 +168,11 @@
             <div class="rrow" :class="{warn:abnN>0}"><b>账目核对 · {{ abnN }} 项待清</b>
               <span>{{ abnN? '见异常队列' : '账本投影无待清差异' }}</span></div>
             <div class="fillv"></div>
+            <div v-for="f in freezes" :key="f.scope" class="rrow warn frzrow">
+              <b>人工冻结中 · {{ f.scope.replace('GLOBAL:GLOBAL','全局') }}·{{ f.mode }} · 已{{ f.age_hours }}h</b>
+              <span>{{ f.expires_at ? '到期自动解除 '+f.expires_at.slice(5,16) : '无过期时间(超24h会跑马灯提醒)' }}
+                <a class="frzlift" @click="liftFreeze(f)">恢复 NORMAL</a></span>
+            </div>
             <button class="freeze" :disabled="pausing" @click="pauseNew"><FIcon name="pause" :size="12"/> 暂停开新仓（减险·立即）</button>
           </div>
         </div>
@@ -241,30 +253,30 @@
 </template>
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
 import { mixApi } from '../../api/mix'
 import Asset360 from '../../components/v62/Asset360.vue'
 import { useV6Snapshot } from '../../composables/useV6'
 import { useSelection } from '../../composables/useSelection'
 import V6StatusBar from '../../components/V6StatusBar.vue'
-import ProcessRail from '../../components/v62/ProcessRail.vue'
-import PrimaryAction from '../../components/v62/PrimaryAction.vue'
-import ValueCell from '../../components/v62/ValueCell.vue'
-import EmptyState from '../../components/v62/EmptyState.vue'
-import WorkTable from '../../components/v62/WorkTable.vue'
 import C4Board from '../../components/v62/C4Board.vue'
 import AutomationStrip from '../../components/v62/AutomationStrip.vue'
 import DailyBriefing from '../../components/v62/DailyBriefing.vue'
 import PlaybookBlock from '../../components/v62/PlaybookBlock.vue'
 import GuidanceRail from '../../components/v62/GuidanceRail.vue'
 import CoachMark from '../../components/v62/CoachMark.vue'
+import ProcessRail from '../../components/v62/ProcessRail.vue'
+import PrimaryAction from '../../components/v62/PrimaryAction.vue'
+import ValueCell from '../../components/v62/ValueCell.vue'
+import EmptyState from '../../components/v62/EmptyState.vue'
+import WorkTable from '../../components/v62/WorkTable.vue'
 import PartialRepayModal from '../../components/rules/PartialRepayModal.vue'
 import ClosePreviewDialog from '../../components/ClosePreviewDialog.vue'
 
 const route = useRoute()
 const router = useRouter()
-const { snap, stale, canOpen, ago, refetch } = useV6Snapshot()
+const { snap, stale, canOpen, isStrong, ago, refetch } = useV6Snapshot()
 const selst = useSelection('today')
 const vtab = ref('持仓')
 const queue = ref('全部')
@@ -362,15 +374,20 @@ const railSteps = computed(() => {
 function pickQueue(k) { queue.value = queue.value === k ? '全部' : k; if (k === '机会') vtab.value = '机会'; else vtab.value = '持仓' }
 const queueLabel = computed(() => queue.value)
 const queueNote = computed(() => queue.value === '全部' ? '进行中全量' : `已按「${queue.value}」过滤 · 点流程条取消`)
+const justClosed = ref(new Set())   // 乐观:刚平仓的wid立即隐藏,不等投影(20s)刷新
 const posShown = computed(() => {
-  let list = items.value.filter(w => w.workflow_stage !== 'DISCOVERED')
+  let list = items.value.filter(w => w.workflow_stage !== 'DISCOVERED' && !justClosed.value.has(w.work_item_id))
   if (queue.value !== '全部' && QUEUES[queue.value]) list = list.filter(w => QUEUES[queue.value].includes(w.workflow_stage))
   return list.sort((a, b) => (b.workflow_stage === 'RECONCILING') - (a.workflow_stage === 'RECONCILING'))
 })
 
 function evT(w) { const v = w.expected_net_return; return v == null ? '—' : `${v>=0?'+':''}${Number(v).toFixed(1)} bps/日` }
 function stCls(w) { return w.workflow_stage === 'RECONCILING' ? 'dn' : (w.workflow_stage === 'EXITING' ? 'amber' : 'up') }
-function primaryOf(w) { const a = w.allowed_actions || []; return a.find(x => x.kind === 'primary') || a[0] || null }
+function primaryOf(w) {
+  // 去掉平仓预演(用户2026-07-19:小额持仓无需预演,C2走⚡直接平仓,C1/C3走各自流程)
+  const a = (w.allowed_actions || []).filter(x => x.code !== 'close_preview')
+  return a.find(x => x.kind === 'primary') || a[0] || null
+}
 function openItem(w) { sel.value = w; selst.wi.value = w.work_item_id }
 function openWall(k) { window.open(`/wall/${k}?token=${localStorage.getItem('mix_token')||''}`, `wall-${k}`) }
 function deepRisk() { router.push({ path: '/mix/venuerisk' }) }
@@ -382,7 +399,8 @@ async function runAct(w, a) {
     case 'c3_partial_repay': repay.value = { open: true, symbol: w.symbol }; return
     case 'goto_risk_center': deepRisk(); return
     case 'view': case 'view_basis': openItem(w); return
-    case 'proposal_approve': case 'proposal_reject': router.push('/mix/dashboard'); return
+    case 'proposal_approve': approveProposal(w); return
+    case 'proposal_reject': rejectProposal(w); return
     // C2.P 人工研判(V6.2 PATCH-01):研判与生成计划都在 AiCoin 研判工作台完成
     case 'open_research': router.push({ path: '/mix/aicoin', query: { symbol: w.symbol } }); return
     case 'create_manual_plan':
@@ -402,9 +420,148 @@ async function runAct(w, a) {
   }
 }
 async function pauseNew() {
+  let ttl = null
+  try {
+    const { value } = await ElMessageBox.prompt(
+      '暂停开新仓(全局 NO_NEW_RISK,减险立即生效)。自动恢复时长(小时,留空=永久;永久超24h会提醒):',
+      '暂停开新仓', { confirmButtonText: '暂停', inputValue: '24',
+        inputPattern: /^\d*\.?\d*$/, inputErrorMessage: '小时数或留空' })
+    ttl = value && Number(value) > 0 ? Number(value) : null
+  } catch (e) { return }
   pausing.value = true
-  try { await mixApi.v6Command({ command_type: 'pause_new_risk', params: { reason: '今日工作:暂停新增' } }); ElMessage.success('已提交暂停新增(风险权威≤30s合并)') }
-  catch (e) { ElMessage.error(e?.detail || '失败') } finally { pausing.value = false }
+  try {
+    await mixApi.v6Command({ command_type: 'pause_new_risk',
+      params: { reason: '今日工作:暂停新增', ttl_hours: ttl } })
+    ElMessage.success(`已提交暂停新增${ttl ? `(${ttl}h后自动恢复)` : '(永久,超24h将提醒)'}`)
+    loadFreezes()
+  } catch (e) { ElMessage.error(e?.detail || '失败') } finally { pausing.value = false }
+}
+// 提案审批原地闭环(此前 proposal_approve 只 router.push 跳中控台=断头路,目标页无审批弹窗)
+function _pidOf(w) {
+  const m = String(w?.position_intent_id || '').match(/^dryrun:(\d+)$/)
+  return m ? Number(m[1]) : null
+}
+async function approveProposal(w) {
+  const pid = _pidOf(w)
+  if (!pid) { ElMessage.error('工作项无提案ID(position_intent_id),请在交易与核对·提案页处理'); return }
+  try {
+    if (isStrong.value) {
+      await ElMessageBox.confirm(`批准提案 #${pid}(${w.symbol})?APPROVED 仍是 shadow 终态,不会直接下单。`, '批准提案', { confirmButtonText: '批准' })
+      await mixApi.proposalApprove(pid, '')
+      ElMessage.success(`提案 #${pid} 已批准(shadow 登记,武装另门控)`)
+      refetch(); return
+    }
+    const { value } = await ElMessageBox.prompt(
+      `批准提案 #${pid}(${w.symbol})。APPROVED 仍是 shadow 终态,不会直接下单。\n输入 Authenticator 6位动态码:`,
+      '二次认证批准', { confirmButtonText: '批准', inputPattern: /^\d{6}$/, inputErrorMessage: '6位数字' })
+    await mixApi.proposalApprove(pid, value)
+    ElMessage.success(`提案 #${pid} 已批准(shadow 登记,武装另门控)`)
+    refetch()
+  } catch (e) { if (e !== 'cancel') ElMessage.error(e?.detail || e?.error || '批准失败(动态码错误或状态已变)') }
+}
+async function rejectProposal(w) {
+  const pid = _pidOf(w)
+  if (!pid) { ElMessage.error('工作项无提案ID'); return }
+  try {
+    await ElMessageBox.confirm(`驳回提案 #${pid}(${w.symbol})?`, '驳回', { type: 'warning' })
+    await mixApi.proposalReject(pid)
+    ElMessage.success('已驳回')
+    refetch()
+  } catch (e) { if (e !== 'cancel') ElMessage.error(e?.detail || e?.error || '驳回失败') }
+}
+// 快线直通(2026-07-19用户授权):额度内点击即真实下单;额度逐操作员自定义
+const flLimit = ref(50); const flBusy = ref('')
+async function loadFlLimit() {
+  try { flLimit.value = (await mixApi.fastlaneLimitGet())?.max_notional_usdt ?? 50 } catch (e) { /* 默认50 */ }
+}
+async function editFlLimit() {
+  try {
+    const { value } = await ElMessageBox.prompt(
+      `你的快线额度(单笔≤此值直接下单,免冷却/免逐笔认证;超额走DRY_RUN预演)。
+当前 ${flLimit.value}U,输入新额度(0-5000):`,
+      '快线额度设置', { inputValue: String(flLimit.value), inputPattern: /^\d+(\.\d+)?$/, inputErrorMessage: '数字' })
+    await mixApi.fastlaneLimitPut({ max_notional_usdt: Number(value) })
+    flLimit.value = Number(value)
+    ElMessage.success(`快线额度已设为 ${value}U`)
+  } catch (e) { if (e !== 'cancel') ElMessage.error(e?.detail || '保存失败') }
+}
+// 快线直接平仓(与开仓对称):HOLDING/EXITING 的C2类(有两腿venue)可一键真平
+const flcBusy = ref('')
+function fcLegs(w) {
+  // 从 account_legs 取多空腿平台(side_a/side_b 已废弃改用 account_legs)
+  const legs = w.account_legs || []
+  const lng = legs.find(l => String(l.side).toUpperCase() === 'LONG')
+  const sht = legs.find(l => String(l.side).toUpperCase() === 'SHORT')
+  return { vl: lng?.venue, vs: sht?.venue }
+}
+function canFastClose(w) {
+  if (!['HOLDING', 'EXITING'].includes(w.workflow_stage)) return false
+  const { vl, vs } = fcLegs(w)
+  if (vl && vs && vl !== vs) return true           // C2跨所双腿
+  if (String(w.strategy_code || '').startsWith('C1') && (w.account_legs || []).length >= 1) return true  // C1永续+理财腿
+  return false
+}
+async function fastClose(w) {
+  const isC1 = String(w.strategy_code || '').startsWith('C1')
+  const { vl, vs } = fcLegs(w)
+  const base = (w.symbol || '').replace(/USDT$/, '')
+  const desc = isC1 ? `${w.symbol}(C1:永续买回+理财赎回+现货卖)` : `${w.symbol}(${vl} × ${vs} 两腿reduce-only)`
+  try {
+    await ElMessageBox.confirm(
+      `⚡直接平仓 ${desc}
+真实平仓(减险方向,免额度/深度闸);${isC1?'理财腿FAST赎回可能数秒;':''}平后自动入账。确认?`,
+      '直接平仓', { confirmButtonText: '平仓', type: 'warning' })
+  } catch (e) { return }
+  flcBusy.value = w.work_item_id
+  try {
+    const payload = isC1
+      ? { symbol: w.symbol, work_item_id: w.work_item_id, product: 'C1', base_asset: base }
+      : { symbol: w.symbol, work_item_id: w.work_item_id, venue_long: vl, venue_short: vs }
+    const r = await mixApi.fastlaneClose(payload)
+    ElMessage.success(`已平仓:${w.symbol}${r.already_flat ? '(已是flat)' : ''}`)
+    // 乐观:立即隐藏该持仓行,不等投影(manager 20s)刷新;后端已真实平仓
+    justClosed.value = new Set([...justClosed.value, w.work_item_id])
+    refetch()
+    setTimeout(() => { const s2 = new Set(justClosed.value); s2.delete(w.work_item_id); justClosed.value = s2 }, 8000)
+  } catch (e) {
+    ElMessage.error(e?.detail || e?.error || '平仓被拒/失败')
+  } finally { flcBusy.value = '' }
+}
+async function fastOpen(w) {
+  const [vl, vs] = String(w.route || '').split('↔')
+  const cap = Math.min(Number(w.capital_reserved) || flLimit.value, flLimit.value)
+  let notional
+  try {
+    const { value } = await ElMessageBox.prompt(
+      `⚡快线直通 ${w.symbol}(${vl} 多 ↔ ${vs} 空)
+点击"开仓"即真实下单——免冷却、免逐笔认证;
+风险权威/额度/一档深度/黑名单四道机器闸自动过,任一不过即拒。
+每腿名义U(≤${flLimit.value}):`,
+      '直接开仓', { confirmButtonText: '开仓', inputValue: String(cap),
+        inputPattern: /^\d+(\.\d+)?$/, inputErrorMessage: '数字' })
+    notional = Number(value)
+  } catch (e) { return }
+  flBusy.value = w.work_item_id
+  try {
+    const r = await mixApi.fastlaneOpen({ symbol: w.symbol, venue_long: vl, venue_short: vs, notional_usdt: notional })
+    ElMessage.success(`已开仓:${w.symbol} ${r.qty}(~${r.notional_per_leg}U/腿) saga=${r.saga_id};manager已接管监护`)
+    refetch()
+  } catch (e) {
+    ElMessage.error(e?.detail || e?.error || '开仓被拒/失败')
+  } finally { flBusy.value = '' }
+}
+// 人工冻结可见性:防"按了忘了"(2026-07-18 #19 事故防呆)
+const freezes = ref([])
+async function loadFreezes() {
+  try { freezes.value = (await mixApi.riskSummary())?.manual_freezes || [] } catch (e) { freezes.value = [] }
+}
+async function liftFreeze(f) {
+  try {
+    await ElMessageBox.confirm(`解除 ${f.scope} 的 ${f.mode}(追加 NORMAL 覆盖,恢复新增能力)?`, '恢复 NORMAL', { type: 'warning' })
+    await mixApi.v6Command({ command_type: 'resume_normal', params: { reason: `今日工作:解除人工冻结(已${f.age_hours}h)` } })
+    ElMessage.success('已提交恢复(≤30s合并生效)')
+    setTimeout(loadFreezes, 3000)
+  } catch (e) { if (e !== 'cancel') ElMessage.error(e?.detail || '失败') }
 }
 // selection 恢复:URL wi/tab/queue
 watch(items, list => {
@@ -426,6 +583,8 @@ onMounted(() => {
   else if (vw === 'position') { focusCol.value = '持仓'; vtab.value = '持仓' }
   else if (vw === 'risk') { focusCol.value = '风险'; vtab.value = '风险' }
   mixApi.uxPageview('today')   // M5 收敛门槛数据:今日工作 vs 工作台使用量
+  loadFreezes(); setInterval(loadFreezes, 30000)  // 人工冻结章30s刷新
+  loadFlLimit()
   loadLabNote()
 })
 // ── 批A §6A:持仓紧凑行数据带 + 账户腿展开(展开态进 selection 会话层) ──
@@ -433,7 +592,8 @@ function ge(w) { return w.group_econ || {} }
 function fmtU(v) { const n = Number(v); return Math.abs(n) >= 1000 ? n.toLocaleString('en-US', { maximumFractionDigits: 0 }) : String(Math.round(n * 100) / 100) }
 function fmt2(v) { return Number(v).toFixed(2) }
 function cls0(v) { return v == null ? '' : (Number(v) >= 0 ? 'up' : 'dn') }
-function liqCls(d) { if (d == null) return ''; return d < 50 ? 'dn' : (d < 80 ? 'warn' : '') }
+function pxCls(code) { return 'px-' + String(code||'').split('.')[0].toLowerCase() }
+function liqCls(d) { if (d == null) return ''; return d < 50 ? 'dn' : (d < 80 ? 'warn' : 'up') }
 function legCn(r) { return ({ PERP_SHORT: '永续空', PERP_LONG: '永续多', SPOT_LONG: '现货多', BORROW_SPOT_SHORT: '借币空', PERP_LONG_HEDGE: '对冲多(主)' })[r] || r }
 const expRows = ref({ ...(selst.sess.value.expanded || {}) })
 function toggleExp(id) {
@@ -521,6 +681,15 @@ function dismissLab() {
 .bc i{font-style:normal;font-size:8.5px;color:var(--mix-t3);flex:none}
 .bc b{font-size:10.5px;color:var(--mix-t1);font-weight:600;font-variant-numeric:tabular-nums;overflow:hidden;text-overflow:ellipsis}
 .bc b.wh{font-weight:400;color:var(--mix-t3);font-size:9.5px}
+/* 符号色优先级修复:.bc b(0-1-1)/.band.dim .bc b(0-3-1)会压过单类.up/.dn(0-1-0)——
+   类名打上但颜色被覆盖="配色没变化"的根因;用!important一次压平 */
+.bc b.up,.band.dim .bc b.up{color:var(--mix-green)!important}
+.bc b.dn,.band.dim .bc b.dn{color:var(--mix-red)!important}
+.bc b.warn,.band.dim .bc b.warn{color:#FF8A3D!important}
+.bc b.bad,.band.dim .bc b.bad{color:var(--mix-red)!important}
+.legs span.up{color:var(--mix-green)!important}
+.legs span.dn{color:var(--mix-red)!important}
+.legs span.warn{color:#FF8A3D!important}
 .expbtn{flex:none;width:16px;text-align:center;color:var(--mix-t3);cursor:pointer;font-size:10px;border-radius:3px}
 .expbtn:hover,.expbtn.on{color:var(--mix-accent);background:var(--mix-card2)}
 .legs{margin-top:4px;border:1px solid var(--mix-border);border-radius:6px;background:var(--mix-panel);overflow:hidden;cursor:default}
@@ -543,7 +712,8 @@ function dismissLab() {
 .row.sel{background:var(--mix-card2);border-left:2px solid var(--mix-blue)}
 .row.bad{background:#F6465D0A}
 .row.submitting{opacity:.75}
-.sym{font-size:11px;color:var(--mix-t1);cursor:pointer;border-bottom:1px dashed transparent}
+.sym{font-size:11px;color:var(--mix-gold,#F0B90B);font-weight:800;cursor:pointer;border-bottom:1px dashed transparent}
+.rsep{color:var(--mix-t3);font-style:normal;margin:0 1px}
 .sym:hover{color:var(--mix-accent);border-bottom-color:var(--mix-accent)}
 .prod{font-size:11px;color:var(--mix-t2)}
 .ev{font-size:11px;font-weight:700}
@@ -563,6 +733,8 @@ function dismissLab() {
 .rrow span{font-size:8.5px;color:var(--mix-t3)}
 .rrow.warn b{color:#FF8A3D}
 .freeze{height:34px;border-radius:6px;background:#F6465D14;border:1px solid #F6465D66;color:var(--mix-red);font-size:11px;font-weight:700;cursor:pointer}
+.frzrow b{color:#FF8A3D}
+.frzlift{color:var(--mix-gold,#F0B90B);cursor:pointer;margin-left:6px;text-decoration:underline}
 .railrow{display:flex;align-items:center;gap:8px}
 .railfill{flex:1;min-width:0}
 .vswitch{flex:none;display:flex;background:var(--mix-panel);border:1px solid var(--mix-border);border-radius:6px;padding:2px}
@@ -605,4 +777,9 @@ function dismissLab() {
   .cols[data-vtab='风险'] .c-opp,.cols[data-vtab='风险'] .c-pos{display:none}
   .c-opp,.c-risk{width:100%}
 }
+.flbtn{height:24px;padding:0 10px;border-radius:5px;border:1px solid #F0B90B;background:#F0B90B;color:#111;font-size:10.5px;font-weight:800;cursor:pointer;white-space:nowrap}
+.flbtn:disabled{opacity:.6;cursor:wait}
+.fllim{margin-left:8px;font-size:10px;color:var(--mix-gold,#F0B90B);cursor:pointer;border:1px dashed #F0B90B66;border-radius:4px;padding:1px 6px}
+.flcbtn{height:24px;padding:0 10px;border-radius:5px;border:1px solid var(--mix-red,#F6465D);background:transparent;color:var(--mix-red,#F6465D);font-size:10.5px;font-weight:800;cursor:pointer;white-space:nowrap;margin-right:6px}
+.flcbtn:disabled{opacity:.6;cursor:wait}
 </style>

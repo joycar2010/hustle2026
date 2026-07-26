@@ -47,13 +47,13 @@
           <div class="card">
             <div class="chd2"><b>案件队列</b><span class="dimtxt">近20,lab_case 只追加</span></div>
             <div v-for="c in cases" :key="c.id" class="lrow">
-              <b>{{ c.symbol }}</b><span class="dimtxt">{{ c.stage || c.structure || '' }} · {{ (c.created_at||'').slice(5,16) }}</span>
+              <b style="color:var(--mix-gold,#F0B90B);font-weight:800">{{ c.symbol }}</b><span class="dimtxt">{{ c.stage || c.structure || '' }} · {{ (c.created_at||'').slice(5,16) }}</span>
               <span class="grow" /><span>{{ c.action }}</span>
             </div>
             <div v-if="!cases.length" class="dimtxt pad">无案件</div>
             <div class="chd2" style="padding-top:8px"><b>可借量监控 Top12</b></div>
             <div v-for="b in ov.borrowable_top || []" :key="b.sym" class="lrow">
-              <b>{{ b.sym }}</b><span class="grow" />
+              <b style="color:var(--mix-gold,#F0B90B);font-weight:800">{{ b.sym }}</b><span class="grow" />
               <span>可借 {{ b.max_borrowable }}</span><span class="dimtxt">息 {{ b.rate ?? 'N/A' }}%/d</span>
             </div>
           </div>
@@ -69,7 +69,7 @@
           <div v-if="!(ov.rows||[]).length" class="dimtxt pad">无在管 C3 组合</div>
           <template v-for="(r,i) in ov.rows" :key="i">
             <div class="lrow2" :class="{open: exp===i, warn2: STALE_ST.includes(r.status)}" @click="exp = exp===i ? -1 : i">
-              <span><b>{{ r.symbol }}</b></span><span>{{ r.sub || '—' }}</span>
+              <span><b style="color:var(--mix-gold,#F0B90B);font-weight:800">{{ r.symbol }}</b></span><span>{{ r.sub || '—' }}</span>
               <span><i class="lg" :class="'st-'+r.status">{{ r.status }}</i></span>
               <span class="r">{{ r.borrowed ?? 'N/A' }}</span><span class="r">{{ r.spot_sell ?? 'N/A' }}</span>
               <span class="r">{{ r.spot_buy ?? 'N/A' }}</span><span class="r">{{ r.futures_long ?? 'N/A' }}</span>

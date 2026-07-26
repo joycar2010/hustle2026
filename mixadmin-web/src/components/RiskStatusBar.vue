@@ -10,18 +10,25 @@
         平台模式 {{ d.worst_mode || 'STALE' }}<i v-if="d.worst_mode==='NORMAL'">·已核验</i>
         <i v-else-if="d.stale">·数据超龄 fail-closed</i>
       </span>
-      <span class="kv">行情 <b>N/A</b> · 账本 <b :class="{bad: d.stale}">{{ d.age_sec == null ? 'N/A' : d.age_sec + 's' }}</b> · 三源对账 <b>N/A</b></span>
+      <span class="kv">行情 <b :class="d.market_feed_age_sec>120?'bad':(d.market_feed_age_sec!=null?'up':'')">{{ d.market_feed_age_sec == null ? 'N/A' : d.market_feed_age_sec + 's' }}</b>
+        · 账本 <b :class="d.stale?'bad':(d.age_sec!=null?'up':'')">{{ d.age_sec == null ? 'N/A' : d.age_sec + 's' }}</b>
+        · 三源对账 <b :class="(d.recon?.breaks||0)>0?'bad':(d.recon?'up':'')" :title="d.recon ? `exec-recon ${d.recon.age_sec??'?'}s前` : ''">{{ d.recon == null ? 'N/A' : ((d.recon.breaks||0)>0 ? d.recon.breaks+'破' : (d.recon.matched??0)+'对·零破') }}</b></span>
       <span class="sep">┃</span>
       <span class="kv dim2">策略</span>
       <span v-for="s in stratTabs" :key="s.code" class="stag" :class="{off: s.dot==='off'}"
             :title="`${s.code} ${s.name} · ${s.modeText}`" @click="$router.push('/mix/strategy/'+s.code)">
-        <i class="dot" :class="s.dot"></i>{{ s.ccode }}
+        <i class="dot" :class="s.dot"></i><i style="font-style:normal" :class="s.dot==='off' ? '' : 'px-'+String(s.ccode||'').split('.')[0].toLowerCase()">{{ s.ccode }}</i>
       </span>
       <span class="sep">┃</span>
       <span class="wtab" :class="{on: tab==='lab'}" @click="openWall('market')">机会与LAB</span>
       <span class="wtab" :class="{on: tab==='exec'}" @click="$router.push('/mix/dashboard')">持仓与执行</span>
       <span class="wtab" :class="{on: tab==='risk'}" @click="$router.push('/mix/venuerisk')">风控与账务</span>
       <span class="grow" />
+      <span v-for="f in (d.manual_freezes||[])" :key="f.scope" class="frzchip"
+            :title="`${f.reason||''} · ${f.by}设置 · ${f.expires_at ? '到期'+f.expires_at.slice(5,16) : '无过期时间'}`"
+            @click="$router.push('/mix/venuerisk')">
+        人工冻结 {{ f.scope.replace('GLOBAL:GLOBAL','全局') }}·{{ f.mode }} · 已{{ f.age_hours }}h{{ f.expires_at ? '' : '·无过期' }}
+      </span>
       <span class="kv"><FIcon name="gear" :size="12"/> <b>{{ opName }}</b></span>
       <span class="kv clock"><b>{{ clock }}</b></span>
       <el-button size="small" type="danger" plain @click="freezeAll">冻结新增风险</el-button>
@@ -29,15 +36,15 @@
     <!-- 行2:七项风险摘要 + 受限venue文字告示(V5 §14.1) -->
     <div class="r2">
       <span class="p0chip" :class="{hot: p0Count>0}">P0待办 <b>{{ p0Count }}</b></span>
-      <span class="item">受限账户 <b :class="{bad: d.restricted_accounts>0}">{{ n(d.restricted_accounts) }}</b></span>
-      <span class="item">受限权益 <b :class="{bad: d.restricted_equity_usdt>0}">{{ n(d.restricted_equity_usdt) }}U</b></span>
-      <span class="item">风险调整可用权益 <b>{{ n(d.nav?.available_equity_usdt) }}U</b></span>
-      <span class="item">NAV折价 <b :class="{bad: (d.nav?.trapped_usdt||0)>0}">{{ n(d.nav?.trapped_usdt) }}U</b></span>
+      <span class="item">受限账户 <b :class="d.restricted_accounts>0?'bad':'up'">{{ n(d.restricted_accounts) }}</b></span>
+      <span class="item">受限权益 <b :class="d.restricted_equity_usdt>0?'bad':'up'">{{ n(d.restricted_equity_usdt) }}U</b></span>
+      <span class="item">风险调整可用权益 <b class="amtx">{{ n(d.nav?.available_equity_usdt) }}U</b></span>
+      <span class="item">NAV折价 <b :class="(d.nav?.trapped_usdt||0)>0?'bad':'up'">{{ n(d.nav?.trapped_usdt) }}U</b></span>
       <span class="item">最老pending提现 <b :class="{bad: (d.oldest_pending?.age_sec||0)>21600}">
         {{ d.oldest_pending?.age_sec ? fmtAge(d.oldest_pending.age_sec) + '·' + d.oldest_pending.venue : '无' }}</b></span>
-      <span class="item">24h提现成功率 <b>{{ d.wd_24h?.rate == null ? 'N/A(无样本)' : d.wd_24h.rate + '%' }}</b></span>
+      <span class="item">24h提现成功率 <b :title="d.wd_24h?.rate == null ? '提现罕见(仅Treasury手动),24h无记录=正常态非故障' : ''">{{ d.wd_24h?.rate == null ? '24h无提现' : d.wd_24h.rate + '%' }}</b></span>
       <span class="item">未复核条款 <b :class="{warn2: (d.unreviewed_terms||[]).length>0}">{{ (d.unreviewed_terms||[]).length }}</b></span>
-      <span class="item">最高Incident <b :class="{bad: !!d.top_incident}">{{ d.top_incident ? d.top_incident.venue + '·' + d.top_incident.title : '无' }}</b></span>
+      <span class="item">最高Incident <b :class="d.top_incident?'bad':'up'">{{ d.top_incident ? d.top_incident.venue + '·' + d.top_incident.title : '无' }}</b></span>
       <span v-if="notice" class="notice" :class="modeCls(notice.mode)">
         {{ notice.venue }} · {{ notice.mode }} — {{ short(notice.reason) }} · 暴露 {{ n(notice.equity) }}U · 新开仓已禁止
       </span>
@@ -90,9 +97,15 @@ async function load() {
 }
 async function freezeAll() {
   try {
-    await ElMessageBox.confirm('对全局追加 NO_NEW_RISK 覆盖(减险动作,立即生效;恢复须显式 NORMAL 覆盖+审计)?', '冻结新增风险', { type: 'warning', confirmButtonText: '冻结' })
-    await mixApi.riskOverrideAdd({ scope_type: 'GLOBAL', scope_key: 'GLOBAL', mode: 'NO_NEW_RISK', reason: '操作员手动冻结(状态条)' })
-    ElMessage.success('已追加全局 NO_NEW_RISK,risk-ledger ≤30s 合并生效')
+    const { value } = await ElMessageBox.prompt(
+      '对全局追加 NO_NEW_RISK 覆盖(减险动作,立即生效;恢复须显式 NORMAL 覆盖+审计)。\n'
+      + '自动解除时长(小时,留空=永久冻结;永久冻结超24h会跑马灯提醒防遗忘):',
+      '冻结新增风险', { type: 'warning', confirmButtonText: '冻结', inputValue: '24',
+        inputPattern: /^\d*\.?\d*$/, inputErrorMessage: '小时数或留空' })
+    const ttl = value && Number(value) > 0 ? Number(value) : null
+    await mixApi.riskOverrideAdd({ scope_type: 'GLOBAL', scope_key: 'GLOBAL', mode: 'NO_NEW_RISK',
+      reason: '操作员手动冻结(状态条)', ttl_hours: ttl })
+    ElMessage.success(`已追加全局 NO_NEW_RISK${ttl ? `(${ttl}h后自动解除)` : '(永久,超24h将提醒)'},≤30s合并生效`)
     load()
   } catch (e) { if (e !== 'cancel') ElMessage.error(e?.detail || e?.error || '失败') }
 }
@@ -154,5 +167,8 @@ onUnmounted(() => { timer && clearInterval(timer); clkTimer && clearInterval(clk
   &.bad { color: #F6465D; } &.warn2 { color: #F0B90B; } }
 .notice { font-weight: 700; padding: 2px 10px; border-radius: 5px; max-width: 40%;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.frzchip { font-weight: 800; font-size: 11px; padding: 2px 9px; border-radius: 5px; cursor: pointer;
+  background: rgba(255,138,61,.18); color: #FF8A3D; border: 1px solid #FF8A3D55;
+  white-space: nowrap; }
 .more { font-size: 11.5px; }
 </style>

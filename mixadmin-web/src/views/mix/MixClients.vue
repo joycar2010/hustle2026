@@ -22,7 +22,7 @@
         <span class="c-st">状态</span><span class="c-act">操作</span>
       </div>
       <div v-for="c in core" :key="c.client_id" class="row">
-        <span class="c-name"><b>{{ c.name }}</b></span>
+        <span class="c-name"><b style="color:var(--mix-gold,#F0B90B)">{{ c.name }}</b></span>
         <span class="c-portal">
           <i v-if="c.portal_bound" class="tag ok">已绑定 {{ c.access_grants }}</i>
           <i v-else class="tag off">未绑定</i>
@@ -45,7 +45,7 @@
     <div class="card" v-if="sma.length">
       <div class="chd"><b>SMA 大客户（独立账户）</b><span class="sub">独立 NAV,不使用共池份额</span></div>
       <div v-for="c in sma" :key="c.client_id" class="row">
-        <span class="c-name"><b>{{ c.name }}</b></span>
+        <span class="c-name"><b style="color:var(--mix-gold,#F0B90B)">{{ c.name }}</b></span>
         <span class="c-portal"><i class="tag" :class="c.portal_bound?'ok':'off'">{{ c.portal_bound?'已绑定':'未绑定' }}</i></span>
         <span class="c-num dim" style="grid-column:span 4">独立账户,不使用共池份额（NAV/流水在客户详情）</span>
         <span class="c-st"><i class="tag wait">演示占位</i></span>
@@ -62,7 +62,7 @@
         <span class="dim">{{ (r.created_at||'').slice(5,16) }}</span>
         <span>{{ nameOf(r.client_id) }}</span>
         <span><i class="tag" :class="r.request_type==='SUBSCRIBE'?'ok':'wait'">{{ r.request_type==='SUBSCRIBE'?'申购':'赎回' }}</i></span>
-        <span>{{ r.amount_usdt!=null ? r.amount_usdt+' U' : (r.units!=null ? r.units+' 份' : '—') }}</span>
+        <span class="amtx">{{ r.amount_usdt!=null ? r.amount_usdt+' U' : (r.units!=null ? r.units+' 份' : '—') }}</span>
         <span><i class="tag" :class="r.status==='POSTED'?'ok':r.status==='REVERSED'?'off':'wait'">{{ CR_ST[r.status]||r.status }}</i></span>
         <span class="dim ell">{{ r.external_flow_id || '—' }}</span>
         <span><el-button v-if="r.status==='POSTED' && r.posted_event_id" size="small" text type="danger" @click="doReverse(r)">冲正</el-button></span>
@@ -210,4 +210,5 @@ onMounted(() => { load(); loadCr() })
 .drow.head span:not(:first-child) { text-align: right; }
 .dim { color: var(--mix-t3, #5E6673); font-weight: 400; }
 .done { text-align: center; padding: 20px 0; b { color: #35b57c; } p { margin: 6px 0; font-size: 13px; color: var(--mix-t1, #EAECEF); } p.dim { font-size: 11px; color: var(--mix-t3, #5E6673); } }
+.crow .c-num, .fact b{color:#7DE3F4}
 </style>

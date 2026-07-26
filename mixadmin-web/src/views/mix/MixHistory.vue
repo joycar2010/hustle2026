@@ -13,9 +13,9 @@
         </div>
         <template v-for="c in combos" :key="c.symbol">
           <div class="crow" @click="comboOpen = comboOpen===c.symbol ? '' : c.symbol">
-            <span class="c-sym"><b>{{ comboOpen===c.symbol?'▾':'▸' }} {{ c.symbol }}</b></span>
+            <span class="c-sym"><b style="color:var(--mix-gold,#F0B90B)">{{ comboOpen===c.symbol?'▾':'▸' }} {{ c.symbol }}</b></span>
             <span class="c-n">{{ c.count }}</span>
-            <span class="c-v">{{ fmt(c.notional) }} U</span>
+            <span class="c-v amtx">{{ fmt(c.notional) }} U</span>
             <span class="c-v" :class="tone(c.funding)">{{ fmtS(c.funding) }}</span>
             <span class="c-v" :class="tone(c.fee)">{{ fmtS(c.fee) }}</span>
             <span class="c-v" :class="tone(c.profit)"><b>{{ fmtS(c.profit) }}</b></span>
@@ -25,7 +25,7 @@
           <div v-if="comboOpen===c.symbol" class="cdetail">
             <div v-for="r in c.rows" :key="r.source + r.source_id" class="cdr">
               <span>{{ (r.closed_at||'').slice(5,16) }}</span><span>{{ r.strategy }}</span>
-              <span>{{ fmt(r.notional) }} U</span>
+              <span class="amtx">{{ fmt(r.notional) }} U</span>
               <span :class="tone(r.profit)">{{ fmtS(r.profit) }}</span>
               <span class="dim2">{{ r.source }}</span>
             </div>
@@ -59,7 +59,7 @@
     <!-- 合计统计条（落袋口径） -->
     <div class="statbar">
       <span class="stat"><em>笔数</em><b>{{ stats.count ?? rows.length }}</b></span>
-      <span class="stat"><em>合计</em><b>{{ fmt(stats.notional) }} U</b></span>
+      <span class="stat"><em>合计</em><b class="amtx">{{ fmt(stats.notional) }} U</b></span>
       <span class="stat"><em>资金费</em><b :class="tone(stats.funding)">{{ fmtS(stats.funding) }}</b></span>
       <span class="stat"><em>手续费</em><b :class="tone(stats.fee)">{{ fmtS(stats.fee) }}</b></span>
       <span class="stat"><em>返佣</em><b :class="tone(stats.rebate)">{{ fmtS(stats.rebate) }}</b></span>
@@ -76,9 +76,9 @@
       </div>
       <div v-for="r in rows" :key="r.source + r.source_id" class="tr">
         <span><i class="sb" :style="{background: SC[r.strategy_code]}">{{ r.strategy_code }}</i></span>
-        <span class="sym">{{ r.symbol }}</span>
-        <span>{{ r.master_venue }}</span><span class="acct">{{ r.master_account }}</span>
-        <span>{{ r.hedge_venue }}</span><span class="acct">{{ r.hedge_account }}</span>
+        <span class="sym" style="color:var(--mix-gold,#F0B90B);font-weight:700">{{ r.symbol }}</span>
+        <span :class="'vx-'+r.master_venue">{{ r.master_venue }}</span><span class="acct">{{ r.master_account }}</span>
+        <span :class="'vx-'+r.hedge_venue">{{ r.hedge_venue }}</span><span class="acct">{{ r.hedge_account }}</span>
         <span class="r">{{ fmt(r.qty) }}</span><span class="r">{{ fmt(r.notional) }}</span>
         <span class="r" :class="tone(r.funding)">{{ fmtS(r.funding) }}</span>
         <span class="r" :class="tone(r.fee)">{{ fmtS(r.fee) }}</span>
@@ -100,8 +100,8 @@
         <span class="dimtxt">{{ facts.length }} 条事实 · 只读不可编辑 · 因果链 Intent→Order→Fill→Bill→Ledger→RECON→NAV</span>
       </div>
       <el-table :data="facts" size="small" stripe max-height="440">
-        <el-table-column v-for="col in factCols" :key="col" :prop="col" :label="col" show-overflow-tooltip min-width="90">
-          <template #default="{row}"><span :class="numCls(row[col])">{{ fmtCell(row[col]) }}</span></template>
+        <el-table-column v-for="col in factCols" :key="col" :label="col" show-overflow-tooltip min-width="90">
+          <template #default="{row}"><span :class="[fcCls(col, row[col]), numCls(row[col])]">{{ fmtCell(row[col]) }}</span></template>
         </el-table-column>
       </el-table>
       <div class="dimtxt" style="margin-top:6px">检索键:symbol / venue / owner / trace_id / saga_id / incident_id / maintenance_id;历史事实不可编辑,导出需脱敏。</div>
@@ -161,6 +161,16 @@ const combos = computed(() => {
 const FACTS = [{v:'orders',t:'专家·订单/成交'},{v:'bills',t:'专家·交易所账单'},{v:'ledger',t:'专家·归一账本'},
   {v:'proposals',t:'专家·交易意图(提案)'},{v:'maintenance',t:'专家·维护事件'},{v:'recon',t:'专家·账目核对断点'}]
 const facts = ref([]); const fsym = ref('')
+// 专家表通用着色:按列名语义(venue六色/symbol金/金额亮青/盈亏费率符号色/时间淡蓝)
+function fcCls(col, v) {
+  const c = String(col).toLowerCase()
+  if (c.includes('venue')) return 'vx-' + String(v || '').toLowerCase()
+  if (c === 'symbol' || c.endsWith('_symbol')) return 'symx'
+  if (/(pnl|profit|income|funding|fee|rebate|amount)/.test(c)) { const n = Number(v); return n > 0 ? 'up' : (n < 0 ? 'dn' : '') }
+  if (/(qty|notional|price|equity|usdt|units)/.test(c)) return 'amtx'
+  if (/(time|_at|ts|date)/.test(c)) return 'timex'
+  return ''
+}
 const factCols = computed(() => facts.value.length ? Object.keys(facts.value[0]) : [])
 const fmtCell = v => (v == null ? 'N/A' : typeof v === 'number' ? (Math.abs(v) < 1000 ? v.toFixed(4) : v.toFixed(2)) : String(v))
 const numCls = v => (typeof v === 'number' ? (v >= 0 ? 'up' : 'down') : '')
@@ -216,4 +226,5 @@ onMounted(load)
 .fbar { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; flex-wrap: wrap; }
 .dimtxt { color: var(--el-text-color-secondary); font-size: 10.5px; }
 .up { color: #0ECB81; } .down { color: #F6465D; }
+.symx{color:var(--mix-gold,#F0B90B);font-weight:700}
 </style>

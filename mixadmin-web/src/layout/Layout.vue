@@ -35,6 +35,9 @@
       </el-menu>
     </div>
     <div class="main-wrap">
+      <div v-if="newVerReady" class="upbanner" @click="doReload">
+        新版本已发布 — 点击刷新页面加载最新界面（当前标签页运行的是旧版本）
+      </div>
       <div class="topbar">
         <!-- 手机: 汉堡开抽屉; 桌面: 折叠侧栏 -->
         <el-icon class="hamburger" style="cursor:pointer;font-size:20px" @click="mnav=!mnav"><Expand/></el-icon>
@@ -192,7 +195,7 @@
             <div class="adv-top"><b>{{ a.name }}</b><span class="adv-cad">{{ a.cadence }}</span>
               <i class="adv-dot" :class="{bad:!a.online}"></i></div>
             <div class="adv-role">{{ a.role }}</div>
-            <div class="adv-text">{{ a.text }}</div>
+            <div class="adv-text" v-html="hlAdv(a.text)"></div>
           </div>
         </div>
         <div class="adv-foot">播报每 30s 刷新 · {{ advDnd ? '免打扰已开(不自动弹屏)' : '有新发言自动弹屏' }}</div>
@@ -227,7 +230,10 @@
           <el-tab-pane label="操作员登录" name="op">
             <el-input v-model="opForm.username" placeholder="账号" style="margin-bottom:10px"/>
             <el-input v-model="opForm.password" type="password" placeholder="密码" show-password @keyup.enter="gateOpLogin"  autocomplete="new-password"/>
+            <el-input v-if="needTotp" v-model="opForm.totp" placeholder="Authenticator 6位动态码" maxlength="6"
+                      style="margin-top:10px" @keyup.enter="gateOpLogin" autocomplete="one-time-code"/>
             <el-button type="primary" style="width:100%;margin-top:14px" @click="gateOpLogin">登 录</el-button>
+            <div v-if="needTotp" style="color:#909399;font-size:10.5px;margin-top:6px">该账号已启用登录二次认证(用户面板可绑定/重绑)</div>
           </el-tab-pane>
           <el-tab-pane label="超管令牌" name="admin">
             <el-input v-model="gateToken" type="password" placeholder="Admin Token" show-password style="margin-bottom:10px" @keyup.enter="gateAdminLogin"  autocomplete="new-password"/>
@@ -265,17 +271,21 @@ const menus=router.options.routes[0].children
 function tabIcon(path){ const r=menus.find(m=>('/'+m.path)===path); return (r&&r.meta&&r.meta.icon)||'Document' }
 // 操作员登录态 + 按权限(perms=逗号分隔模块key, '*'=全部)过滤菜单
 const op=ref({operator:'',role:'',perms:''})
-const opForm=ref({username:'',password:''})
+const opForm=ref({username:'',password:'',totp:''})
+const needTotp=ref(false)
 // 强制登录门控
 const authed=ref(false), gateTab=ref('op'), gateToken=ref(''), gateLicense=ref('')
 // Mix 登录门：三轨令牌(operator/只读/用户JWT)统一存 mix_token(与 api/mix.js 请求头同源)
 function computeAuthed(){ authed.value = !!op.value.operator || !!localStorage.getItem('mix_token') }
 async function gateOpLogin(){
-  try{ const r=await mixApi.login(opForm.value.username,opForm.value.password)
+  try{ const r=await mixApi.login(opForm.value.username,opForm.value.password,opForm.value.totp)
     localStorage.setItem('mix_token', r.access_token)
     op.value={operator:r.username,role:'USER',perms:'*'}
-    opForm.value={username:'',password:''}; computeAuthed(); loadTrainState(); ElMessage.success('登录成功: '+r.username) }
-  catch(e){ ElMessage.error(e?.detail||e?.error||'登录失败') }
+    opForm.value={username:'',password:'',totp:''}; needTotp.value=false; computeAuthed(); loadTrainState(); ElMessage.success('登录成功: '+r.username) }
+  catch(e){
+    if(e?.status===428 || String(e?.detail||'').includes('二次认证')){ needTotp.value=true; ElMessage.warning('请输入 Authenticator 6位动态码') }
+    else ElMessage.error(e?.detail||e?.error||'登录失败')
+  }
 }
 async function gateAdminLogin(){
   if(!gateToken.value) return ElMessage.warning('请输入令牌')
@@ -365,6 +375,20 @@ async function saveFeishu(){
 }
 // 全局跑马灯（Layout 自持一条 WS,所有页面可见;emoji 属消息文本,显示层剥离改用色点分级）
 const marqueeText=ref(''), wsOn=ref(false)
+// 部署自动感知:长开标签页持旧SPA运行时是惯犯(多次"看不到更新"事故)——
+// 每5min无缓存拉 index.html 比对入口chunk hash,变了=有新版本,弹顶栏提示条一键刷新
+const newVerReady = ref(false)
+let bootChunk = ''
+async function checkNewVersion(){
+  try{
+    const html = await (await fetch('/index.html?_='+Date.now(), {cache:'no-store'})).text()
+    const m = html.match(/assets\/index-[^"]+\.js/)
+    if(!m) return
+    if(!bootChunk){ bootChunk = m[0]; return }
+    if(m[0] !== bootChunk) newVerReady.value = true
+  }catch(e){ /* 网络抖动忽略 */ }
+}
+function doReload(){ location.reload() }
 const EMOJI_RE=/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}\u{200D}]/gu
 let wsClose=null
 function startMarquee(){
@@ -441,6 +465,13 @@ const aiTab=ref('chat')
 function aiToggle(){ aiOpen.value=!aiOpen.value; if(aiOpen.value && aiTab.value==='adv') advUnread.value=0 }
 // AI 顾问播报（分域顾问最新发言;有新发言自动弹屏,可免打扰）
 const advisors=ref([]), advUnread=ref(0)
+// 顾问播报关键数据高亮:LLM自由文本先转义(防注入)再包数字/百分比/bps/金额(金色)与币名(青色)
+function hlAdv(t){
+  const esc=String(t||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+  return esc
+    .replace(/([-+]?\d+(?:\.\d+)?\s*(?:bps|%|U|万U?|亿U?)(?:\/日|\/天|\/d)?)/g, '<b style="color:var(--mix-gold,#F0B90B)">$1</b>')
+    .replace(/([A-Z0-9]{2,12}(?:USDT)?)(?=[，。、,: ]|$)/g, (m,w)=>/^(USDT|OK|AI|LLM|API|LAB|P0|P1|P2|CEX|DEX|HL|C1|C2|C3|O1|R1|D1|D2|D3|D4)$/.test(w)?m:'<b style="color:#7DE3F4">'+w+'</b>')
+}
 const advDnd=ref(localStorage.getItem('mix_adv_dnd')==='1')
 let advSig=''
 function toggleDnd(){ advDnd.value=!advDnd.value; localStorage.setItem('mix_adv_dnd', advDnd.value?'1':'0'); ElMessage.info(advDnd.value?'顾问播报免打扰已开':'免打扰已关，有新发言会自动弹屏') }
@@ -484,7 +515,7 @@ async function aiSend(){
   }
   finally{ if(aiTimer){clearInterval(aiTimer);aiTimer=null} aiBusy.value=false; await nextTick(()=>{ if(aiBodyEl.value)aiBodyEl.value.scrollTop=aiBodyEl.value.scrollHeight }) }
 }
-onMounted(()=>{ setInterval(()=>{ clock.value=new Date().toTimeString().slice(0,8) },1000); restoreOp(); loadBrand(); startMarquee(); loadAdvisors(); setInterval(loadAdvisors, 30000); loadAiModels(); setInterval(loadAiModels, 60000); loadAiPushConf(); setInterval(loadAiPushConf, 120000)
+onMounted(()=>{ setInterval(()=>{ clock.value=new Date().toTimeString().slice(0,8) },1000); checkNewVersion(); setInterval(checkNewVersion, 300000); restoreOp(); loadBrand(); startMarquee(); loadAdvisors(); setInterval(loadAdvisors, 30000); loadAiModels(); setInterval(loadAiModels, 60000); loadAiPushConf(); setInterval(loadAiPushConf, 120000)
   window.addEventListener('mix-training-cert', loadTrainState) })   // 课目全过→签发认证→菜单即时收敛(无需重登)
 </script>
 <style scoped>
@@ -621,4 +652,6 @@ onMounted(()=>{ setInterval(()=>{ clock.value=new Date().toTimeString().slice(0,
 .login-card :deep(.el-input__inner){color:#EAECEF}
 .login-card :deep(.el-button--primary){background:#F0B90B;border-color:#F0B90B;color:#0B0E11;font-weight:700}
 .login-card :deep(.el-button--primary:hover){background:#FCD535;border-color:#FCD535}
+.upbanner{background:linear-gradient(90deg,#F0B90B22,#F0B90B11);border-bottom:1px solid #F0B90B66;color:#F0B90B;font-size:12px;font-weight:700;text-align:center;padding:6px 10px;cursor:pointer;animation:upblink 2s ease-in-out infinite}
+@keyframes upblink{50%{opacity:.65}}
 </style>

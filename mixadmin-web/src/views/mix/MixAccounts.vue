@@ -6,9 +6,9 @@
         <span class="hint">密钥永不显示 · 换钥/开提现/地址管理=cred-agent 永久 deny(纵深防御,不由 policy 放开)</span>
         <el-button size="small" @click="loadCustody" style="margin-left:auto">刷新</el-button></div>
       <el-table :data="custody" size="small" stripe>
-        <el-table-column label="Venue" width="90"><template #default="{row}"><b>{{ row.venue }}</b></template></el-table-column>
+        <el-table-column label="Venue" width="90"><template #default="{row}"><b :class="'vx-'+row.venue">{{ row.venue }}</b></template></el-table-column>
         <el-table-column label="托管模式" width="170"><template #default="{row}">{{ custodyLabel(row.custody_mode) }}</template></el-table-column>
-        <el-table-column label="权益U" width="90" align="right"><template #default="{row}">{{ row.equity ?? 'N/A' }}</template></el-table-column>
+        <el-table-column label="权益U" width="90" align="right"><template #default="{row}"><span class="amtx">{{ row.equity ?? '—' }}</span></template></el-table-column>
         <el-table-column label="读权限" width="70"><template #default="{row}"><span :class="row.probe_read?'ok':'bad'"><FIcon :name="row.probe_read?'check':'x'" :size="11"/></span></template></el-table-column>
         <el-table-column label="交易权限" width="80"><template #default="{row}"><span :class="row.probe_trade?'ok':'bad'"><FIcon :name="row.probe_trade?'check':'x'" :size="11"/></span></template></el-table-column>
         <el-table-column label="提现权限" width="140"><template #default="{row}"><span class="deny">{{ row.probe_withdraw }}</span></template></el-table-column>
@@ -58,7 +58,7 @@
             <b class="nm" :class="{off: reg[m.id]?.enabled===false}">{{ mv(m,'账户') || m.id }}</b>
             <i class="dot" :class="m.apiStatus" />
           </span>
-          <span class="c-venue">{{ m.venue }}</span>
+          <span class="c-venue" :class="'vx-'+m.venue">{{ m.venue }}</span>
           <span class="c-book" :class="'bk-'+(mv(m,'Book')||'TEST')">{{ mv(m,'Book')||'—' }}</span>
           <span class="c-cred">{{ mv(m,'凭证') || (m.platformType==='kms_wallet'?'钱包':'—') }}</span>
           <span class="c-mode">{{ mv(m,'模式') || '—' }}</span>
@@ -86,7 +86,7 @@
               <b class="nm sm" :class="{off: reg[c.id]?.enabled===false}">{{ mv(c,'账户') || c.id }}</b>
               <i class="dot" :class="c.apiStatus" />
             </span>
-            <span class="c-venue">{{ c.venue }}</span>
+            <span class="c-venue" :class="'vx-'+c.venue">{{ c.venue }}</span>
             <span class="c-book" :class="'bk-'+(mv(c,'Book')||'TEST')">{{ mv(c,'Book')||'—' }}</span>
             <span class="c-cred">{{ mv(c,'凭证') || (c.kind==='wallet'?'钱包':'—') }}</span>
             <span class="c-mode">{{ mv(c,'模式') || '—' }}</span>

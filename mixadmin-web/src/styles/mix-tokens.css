@@ -12,9 +12,9 @@
   --mix-card2: #20242C;       /* $card2 卡片-浮起 */
   --mix-border: #262B33;      /* $border */
   /* 文字三级 */
-  --mix-t1: #EAECEF;
-  --mix-t2: #848E9C;
-  --mix-t3: #5E6673;
+  --mix-t1: #F5F7FA;
+  --mix-t2: #A2ADC0;
+  --mix-t3: #7C8798;
   /* 涨跌（币安绿红，勿与策略色混用） */
   --mix-green: #0ECB81;
   --mix-red: #F6465D;
@@ -104,3 +104,39 @@ html.dark ::-webkit-scrollbar { width: 8px; height: 8px; }
 html.dark ::-webkit-scrollbar-thumb { background: rgba(240, 185, 11, .22); border-radius: 4px; }
 html.dark ::-webkit-scrollbar-thumb:hover { background: rgba(240, 185, 11, .4); }
 html.dark ::-webkit-scrollbar-track { background: transparent; }
+
+/* ── 六所固定色(专业量化惯例,一眼分辨腿归属;与VPT venue badge同色系) ── */
+.vx-binance { color: #F0B90B !important; }
+.vx-bybit { color: #FF8A3D !important; }
+.vx-okx { color: #4A9CFF !important; }
+.vx-gate { color: #A78BFA !important; }
+.vx-bitget { color: #2DD4BF !important; }
+.vx-hyperliquid { color: #F472B6 !important; }
+.vx-hl { color: #F472B6 !important; }
+/* 金额统一琥珀金、费差按符号红绿(配文字/数值,不只靠颜色) */
+.amtx { color: #7DE3F4 !important; font-weight: 700; font-variant-numeric: tabular-nums; }
+
+/* ── 全局语义色保障(!important:压过任何页面容器的 element+class 规则) ──
+   规约:币种=金 / 平台=vx-六色 / 金额=亮白amtx / 涨盈=up / 跌亏=dn|down / 告警=warn */
+span.up, b.up, i.up, em.up, td.up, a.up { color: var(--mix-green) !important; }
+span.dn, b.dn, i.dn, td.dn, span.down, td.down, span.redtxt, b.redtxt { color: var(--mix-red) !important; }
+span.green, b.green, td.green { color: var(--mix-green) !important; }
+span.warn, b.warn, i.warn, td.warn { color: #FF9F43 !important; }
+/* 产品/策略码色(C1/C2.x/C3.x/C4-6/O1→策略色系;来源等辅助文字随t2调亮) */
+.px-c1 { color: var(--s1) !important; }
+.px-c2 { color: #2DD4BF !important; }
+.px-c3 { color: var(--s3) !important; }
+.px-c4, .px-c5, .px-c6 { color: #FF9F43 !important; }
+.px-o1 { color: #E879F9 !important; }
+.px-r1, .px-d1, .px-d2, .px-d3, .px-d4 { color: var(--s6) !important; }
+
+/* 时间/截止=淡蓝;来源=分色;判决态 */
+.timex { color: #9CC3FF !important; }
+.sx-opener { color: #4A9CFF !important; } .sx-proposal { color: #F0B90B !important; }
+.sx-manager { color: #2DD4BF !important; } .sx-coin { color: #FF9F43 !important; }
+.sx-research { color: #A78BFA !important; } .sx-repair { color: #F6465D !important; }
+
+/* ValueCell 穿透:组件内固定色(--mix-t1)会挡住外层语义类——只对 PRESENT 态(无状态类)放行 */
+.up > .vc:not(.na):not(.nc):not(.wait):not(.stale):not(.err):not(.review) { color: var(--mix-green) !important; }
+.dn > .vc:not(.na):not(.nc):not(.wait):not(.stale):not(.err):not(.review) { color: var(--mix-red) !important; }
+.amtx > .vc:not(.na):not(.nc):not(.wait):not(.stale):not(.err):not(.review) { color: #7DE3F4 !important; }

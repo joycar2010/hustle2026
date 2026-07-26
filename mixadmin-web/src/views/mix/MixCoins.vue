@@ -58,7 +58,7 @@
     </div>
 
     <el-table :data="shown" size="small" stripe>
-      <el-table-column label="币种" width="90"><template #default="{row}"><b>{{ row.symbol }}</b></template></el-table-column>
+      <el-table-column label="币种" width="90"><template #default="{row}"><b style="color:var(--mix-gold,#F0B90B);font-weight:800">{{ row.symbol }}</b></template></el-table-column>
       <el-table-column label="状态" width="80">
         <template #default="{row}">
           <el-tag size="small" :type="stateTag(row.state)" :effect="row.state==='frozen'?'dark':'plain'">{{ stateLabel(row.state) }}</el-tag>

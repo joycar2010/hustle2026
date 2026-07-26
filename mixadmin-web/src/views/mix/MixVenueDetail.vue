@@ -2,7 +2,7 @@
   <div class="vdet">
     <RiskStatusBar />
     <div class="card">
-      <div class="chd"><b class="vn">{{ venue }}</b> 平台详情
+      <div class="chd"><b class="vn" :class="'vx-'+venue">{{ venue }}</b> 平台详情
         <span class="mch" :class="modeCls(d.policy?.mode)">{{ d.policy?.mode || 'N/A' }}</span>
         <span class="dim">incident_state {{ d.policy?.incident_state || 'N/A' }}
           · Tier {{ d.policy?.tier || '—' }}</span>
@@ -54,7 +54,7 @@
         <!-- ④敞口与仓位 -->
         <el-tab-pane label="敞口与仓位" name="exp">
           <div class="ovgrid">
-            <div class="okv"><span>在场名义</span><b>{{ n(d.policy?.exposure_notional) }}U</b></div>
+            <div class="okv"><span>在场持仓</span><b class="amtx">{{ n(d.policy?.exposure_notional) }}U</b></div>
             <div class="okv"><span>上限 / 预警比</span><b>{{ n(d.policy?.cap_usdt) }}U / {{ d.policy?.warn_ratio ?? '—' }}</b></div>
             <div class="okv"><span>模式历史(近50)</span><b>{{ (d.transitions||[]).length }} 条(下方)</b></div>
           </div>

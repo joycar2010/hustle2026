@@ -6,10 +6,10 @@
       <div class="col c1">
         <div class="card">
           <div class="chd2"><b>保证金压力</b><span class="grow" /><span class="dimtxt">平台父行+账户子行 · riskctl-v1</span></div>
-          <div class="mhead"><span>平台/账户</span><span class="r">权益U</span><span class="r">名义U</span><span class="r">距强平%</span><span>模式</span></div>
+          <div class="mhead"><span>平台/账户</span><span class="r">权益U</span><span class="r">持仓U</span><span class="r">距强平%</span><span>模式</span></div>
           <template v-for="v in rcVenues" :key="v.venue">
             <div class="mrow" :class="{bad: (v.min_dist_liq_pct ?? 999) < 25}">
-              <span><b>{{ v.venue }}</b><i class="dimtxt" v-if="v.cap_usdt"> 帽{{ n(v.cap_usdt) }}</i></span>
+              <span><b :class="'vx-'+v.venue">{{ v.venue }}</b><i class="dimtxt" v-if="v.cap_usdt"> 帽{{ n(v.cap_usdt) }}</i></span>
               <span class="r">{{ n(v.equity_usdt) }}</span>
               <span class="r">{{ n(v.gross_notional) }}</span>
               <span class="r">{{ v.min_dist_liq_pct!=null ? Math.round(v.min_dist_liq_pct) : 'N/A' }}</span>
@@ -29,7 +29,7 @@
           <div class="chd2"><b>ADL 面板</b><span class="grow" /><span class="dimtxt">≥4 档预警</span></div>
           <div v-if="!adlRows.length" class="dimtxt pad">无带 ADL 档位的持仓腿</div>
           <div v-for="(a,i) in adlRows" :key="i" class="lrow">
-            <b>{{ a.symbol }}</b><span class="dimtxt">{{ a.venue }}</span>
+            <b style="color:var(--mix-gold,#F0B90B)">{{ a.symbol }}</b><span :class="'vx-'+a.venue">{{ a.venue }}</span>
             <span class="grow" />
             <span :class="{bad: a.adl >= 4}">ADL {{ a.adl }}</span>
           </div>
@@ -69,7 +69,7 @@
           <div class="chd2"><b>冻结与干预历史</b><span class="grow" /><span class="dimtxt">模式转变(近10)</span></div>
           <div v-if="!transitions.length" class="dimtxt pad">无记录</div>
           <div v-for="(t,i) in transitions.slice(0,10)" :key="i" class="lrow">
-            <b>{{ t.venue }}</b>
+            <b :class="'vx-'+t.venue">{{ t.venue }}</b>
             <span class="mch sm" :class="'m2-'+t.before_mode">{{ t.before_mode }}</span>→
             <span class="mch sm" :class="'m2-'+t.after_mode">{{ t.after_mode }}</span>
             <span class="dimtxt">{{ String(t.reason||'').split('|')[0].slice(0,30) }} · {{ (t.recorded_at||'').slice(5,16) }}</span>
@@ -92,7 +92,7 @@
         <div class="card">
           <div class="chd2"><b>逐所权益</b></div>
           <div v-for="v in venues" :key="v.venue" class="lrow">
-            <b>{{ v.venue }}</b>
+            <b :class="'vx-'+v.venue">{{ v.venue }}</b>
             <span class="grow" />
             <span :class="{bad: (v.trapped_usdt||0)>0}">{{ n(v.equity) }} U{{ (v.trapped_usdt||0)>0 ? ` (折价 ${v.trapped_usdt})` : '' }}</span>
           </div>
@@ -101,7 +101,7 @@
           <div class="chd2"><b>资金流水</b><span class="grow" /><span class="dimtxt">提现事实(近20)</span></div>
           <div v-if="!flows.length" class="dimtxt pad">窗口内无提现记录</div>
           <div v-for="(f,i) in flows" :key="i" class="lrow">
-            <b>{{ f.venue }}</b><span>{{ f.asset }} {{ f.amount }}</span>
+            <b :class="'vx-'+f.venue">{{ f.venue }}</b><span>{{ f.asset }} <i class="amtx" style="font-style:normal">{{ f.amount }}</i></span>
             <span class="mch sm" :class="f.status==='CONFIRMED' ? 'okc2' : f.status==='PENDING' ? 'pend' : 'failc'">{{ f.status }}</span>
             <span class="grow" /><span class="dimtxt">{{ (f.initiated_at||'').slice(5,16) }}</span>
           </div>

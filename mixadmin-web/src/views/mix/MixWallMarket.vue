@@ -14,7 +14,7 @@
             <span class="c2"><i class="pbadge">C2.H</i></span>
             <span class="c3" :class="(o.risk_adjusted_e_bps??0)>0?'up':'down'">{{ bps(o) }}</span>
             <span class="c4">{{ o.target_notional_usdt ?? 'N/A' }}</span>
-            <span class="c5">{{ o.venue_long }}⟶{{ o.venue_short }}</span>
+            <span class="c5"><b :class="'vx-'+o.venue_long">{{ o.venue_long }}</b>⟶<b :class="'vx-'+o.venue_short">{{ o.venue_short }}</b></span>
             <span class="c6"><FIcon :name="o.blocked?'block':'check'" :size="12"/></span>
           </div>
           <div class="fold" v-if="skipped">未过硬闸 {{ skipped }} 项(容量/E/新鲜度/policy 不达标)</div>
@@ -32,7 +32,7 @@
           <div class="mini"><span>E 净期望(风调)</span><b :class="(cur?.risk_adjusted_e_bps??0)>0?'up':'down'">{{ cur ? bps(cur) + ' bps/日' : 'N/A' }}</b></div>
           <div class="mini"><span>容量(硬闸口径)</span><b>{{ cur?.target_notional_usdt != null ? cur.target_notional_usdt + ' U' : 'N/A' }}</b></div>
           <div class="mini"><span>信号半衰期</span><b>N/A</b><span class="dimtxt">E历史采样待接</span></div>
-          <div class="mini"><span>建议名义 / charge</span><b>{{ cur?.target_notional_usdt != null ? cur.target_notional_usdt + ' U' : 'N/A' }}</b><span class="dimtxt">charge {{ cur?.risk_charge_bps ?? 'N/A' }} bps</span></div>
+          <div class="mini"><span>建议持仓 / charge</span><b>{{ cur?.target_notional_usdt != null ? cur.target_notional_usdt + ' U' : 'N/A' }}</b><span class="dimtxt">charge {{ cur?.risk_charge_bps ?? 'N/A' }} bps</span></div>
         </div>
         <div class="chart">
           <div class="chd3">逐所资金费(按结算周期日化 %/d)</div>
@@ -40,7 +40,7 @@
             <div v-for="r in va" :key="r.venue" class="barcol" :title="`${r.venue} ${r.funding_daily_pct ?? 'N/A'}%/d`">
               <div class="barwrap"><div class="bar" :class="(r.funding_daily_pct||0)>=0?'pos':'neg'"
                 :style="{height: barH(r.funding_daily_pct)}"></div></div>
-              <span class="bl">{{ r.venue.slice(0,4) }}</span>
+              <span class="bl" :class="'vx-'+r.venue">{{ r.venue.slice(0,4) }}</span>
               <span class="bv" :class="(r.funding_daily_pct||0)>=0?'up':'down'">{{ r.funding_daily_pct ?? '—' }}</span>
             </div>
           </div>
@@ -49,7 +49,7 @@
           <div class="chd3">多所量价 / OI / 资金费</div>
           <div class="vhead"><span>Venue</span><span>模式</span><span class="r">中价</span><span class="r">点差bps</span><span class="r">资金费%/d</span><span class="r">周期h</span><span class="r">OI</span><span>新鲜</span></div>
           <div v-for="r in va" :key="r.venue" class="vrow" :class="{stale: !r.fresh}">
-            <span><b>{{ r.venue }}</b></span>
+            <span><b :class="'vx-'+r.venue">{{ r.venue }}</b></span>
             <span :class="'m-'+r.mode">{{ r.mode }}</span>
             <span class="r">{{ r.mid ?? 'N/A' }}</span>
             <span class="r">{{ r.spread_bps ?? 'N/A' }}</span>
