@@ -109,8 +109,12 @@
       <p class="dlgnote">授权 ≠ 操作权限:被授权的登录账号只能只读本客户组合收益,不获得任何操作能力。</p>
       <el-form label-width="120px" size="small">
         <el-form-item label="客户"><b>{{ grantDlg.name }}</b></el-form-item>
-        <el-form-item label="登录账号ID"><el-input-number v-model="grantDlg.subj" :min="1" style="width:100%"/>
-          <div class="hint">mix_users.id（操作员管理里可查登录账号）。该账号登录 user.hustle2026.xyz 门户即可查看本客户收益。</div></el-form-item>
+        <el-form-item label="登录账号">
+          <el-select v-model="grantDlg.subj" filterable placeholder="选择系统现有账号" style="width:100%">
+            <el-option v-for="u in systemUsers" :key="u.id"
+                       :label="`${u.operator} (ID:${u.id})`" :value="u.id"/>
+          </el-select>
+          <div class="hint">该账号登录 user.hustle2026.xyz 门户即可查看本客户收益。</div></el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="grantDlg.open=false">取消</el-button>
@@ -129,11 +133,19 @@ const clients = ref([]); const pool = ref({})
 const core = computed(() => clients.value.filter(c => c.client_type === 'CORE_POOL'))
 const sma = computed(() => clients.value.filter(c => c.client_type === 'SMA'))
 const grantDlg = ref({ open: false, id: null, name: '', subj: null })
+const systemUsers = ref([])
 async function load() {
   try { const r = await mixApi.clientsList(); clients.value = r.clients || []; pool.value = r.pool || {} }
   catch (e) { ElMessage.error(e?.detail || '加载失败') }
 }
-function openGrant(c) { grantDlg.value = { open: true, id: c.client_id, name: c.name, subj: null } }
+async function loadSystemUsers() {
+  try { const r = await mixApi.operatorsList(); systemUsers.value = r.operators || [] }
+  catch (e) { /* 降级:保留手输模式 */ }
+}
+function openGrant(c) {
+  grantDlg.value = { open: true, id: c.client_id, name: c.name, subj: null }
+  if (!systemUsers.value.length) loadSystemUsers()
+}
 // 申赎闭环
 const cap = ref({ open: false, step: 0, type: '', client_id: null, name: '', amount: 0, units: 0, reqId: null, dry: null, flow: '', busy: false, result: null })
 function openCapital(c, type) {

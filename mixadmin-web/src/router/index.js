@@ -16,7 +16,7 @@ const routes = [
     // ② 风险与账务
     { path:'mix/venuerisk', name:'mix-venuerisk', meta:{title:'风险事件',icon:'Warning',group:'风险与账务',ord:2.0}, component:()=>import('../views/mix/MixRiskCenter.vue') },
     { path:'mix/report', name:'mix-report', meta:{title:'资产收益',icon:'TrendCharts',group:'风险与账务',ord:2.1}, component:()=>import('../views/mix/MixReport.vue') },
-    { path:'mix/history', name:'mix-history', meta:{title:'交易与核对',icon:'History',group:'风险与账务',ord:2.2}, component:()=>import('../views/mix/MixHistory.vue') },
+    { path:'mix/history', name:'mix-history', meta:{title:'交易与核对',icon:'Histogram',group:'风险与账务',ord:2.2}, component:()=>import('../views/mix/MixHistory.vue') },
     // REV2 §4A.6:客户与份额(从操作员管理切开——客户资金权益≠操作权限)
     { path:'mix/clients', name:'mix-clients', meta:{title:'客户与份额',icon:'User',group:'风险与账务',ord:2.3}, component:()=>import('../views/mix/MixClients.vue') },
     // ③ 管理设置(默认折叠):两项

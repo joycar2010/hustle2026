@@ -7,9 +7,6 @@
     <AutomationStrip/>
     <!-- V6.2 R3 每日开班简报(§4.3):当天首次进入自动一次;无待办不庆祝 -->
     <DailyBriefing :snap="snap" :can-open="canOpen" @open-item="openItem"/>
-    <!-- V6.2 R3+ 浮动引导栏(§5.1L2)+首次聚光教程(§5.1L3,课程进度服务端记账) -->
-    <GuidanceRail @open-item="openItemById" @retour="tourOpen=true"/>
-    <CoachMark v-model="tourOpen" :steps="TOUR_STEPS" @done="tourDone"/>
     <div class="body">
       <div class="railrow">
         <ProcessRail class="railfill" :steps="railSteps" @pick="pickQueue"/>
@@ -22,6 +19,8 @@
         <button class="planbtn" @click="npOpen=true">＋ 手动计划</button>
         <!-- §9.2:训练通过后菜单收敛,入口迁到这里(仍可主动进入演练) -->
         <button v-if="trainOk" class="trainbtn" @click="$router.push('/mix/training')"><FIcon name="cap" :size="12"/> 训练/演练</button>
+        <!-- V6.2 R3+ 浮动引导栏内联版(从右下浮动球移到按钮行右侧,避免与AI客服重叠) -->
+        <GuidanceRail class="railinline" @open-item="openItemById" @retour="tourOpen=true"/>
       </div>
       <!-- LAB 提醒落点(V6.2:outbox 新 artifact→提醒;此前只在退役中控台,唯一日常入口反而看不见) -->
       <div class="labbar" v-if="labNote"><FIcon name="flask" :size="12"/> {{ labNote }} →
@@ -87,6 +86,8 @@
                       @click.stop="toggleExp(w.work_item_id)">{{ expRows[w.work_item_id] ? '▾' : '▸' }}</span>
                 <b class="sym" @click.stop="openAsset360(w.symbol)">{{ w.symbol }}</b>
                 <span class="prod" :class="pxCls(w.strategy_code)">· {{ w.strategy_code }}</span>
+                <!-- P2 修复:坑位行显示主账户/对冲账户 -->
+                <span v-if="accountsOf(w)" class="accts">{{ accountsOf(w) }}</span>
                 <span class="st" :class="stCls(w)">{{ w.stage_detail || w.workflow_stage }}</span>
                 <!-- §6.3 点差保护=一等状态,不藏详情;shadow 评估,退出决策仍人工 -->
                 <span v-if="w.risk_protection_state && w.risk_protection_state!=='NORMAL'"
@@ -249,6 +250,8 @@
         <el-button type="primary" :disabled="!np.symbol" @click="gotoResearch">去研判并生成计划 →</el-button>
       </template>
     </el-dialog>
+    <!-- V6.2 R3+ 首次聚光教程(§5.1L3,课程进度服务端记账) -->
+    <CoachMark v-model="tourOpen" :steps="TOUR_STEPS" @done="tourDone"/>
   </div>
 </template>
 <script setup>
@@ -595,6 +598,13 @@ function cls0(v) { return v == null ? '' : (Number(v) >= 0 ? 'up' : 'dn') }
 function pxCls(code) { return 'px-' + String(code||'').split('.')[0].toLowerCase() }
 function liqCls(d) { if (d == null) return ''; return d < 50 ? 'dn' : (d < 80 ? 'warn' : 'up') }
 function legCn(r) { return ({ PERP_SHORT: '永续空', PERP_LONG: '永续多', SPOT_LONG: '现货多', BORROW_SPOT_SHORT: '借币空', PERP_LONG_HEDGE: '对冲多(主)' })[r] || r }
+// P2 修复:提取账户信息显示(主账户/对冲账户)
+function accountsOf(w) {
+  const legs = w.account_legs || []
+  if (!legs.length) return ''
+  const accounts = [...new Set(legs.map(l => l.account).filter(Boolean))]
+  return accounts.length ? accounts.slice(0, 2).join('·') : ''
+}
 const expRows = ref({ ...(selst.sess.value.expanded || {}) })
 function toggleExp(id) {
   expRows.value = { ...expRows.value, [id]: !expRows.value[id] }
@@ -716,6 +726,7 @@ function dismissLab() {
 .rsep{color:var(--mix-t3);font-style:normal;margin:0 1px}
 .sym:hover{color:var(--mix-accent);border-bottom-color:var(--mix-accent)}
 .prod{font-size:11px;color:var(--mix-t2)}
+.accts{font-size:9px;color:var(--mix-t3);padding:1px 5px;border-radius:3px;background:var(--mix-card2);border:1px solid var(--mix-border)}
 .ev{font-size:11px;font-weight:700}
 .st{font-size:10.5px}
 .ddl{font-size:9.5px;color:var(--mix-t3)}
@@ -747,6 +758,10 @@ function dismissLab() {
 .trainbtn{flex:none;font-size:10.5px;padding:5px 10px;border-radius:6px;cursor:pointer;
   background:#4A9CFF14;border:1px solid #4A9CFF66;color:var(--mix-blue,#4A9CFF);font-weight:700}
 .trainbtn:hover{border-color:#F0B90B;color:#F0B90B}
+.railinline{flex:none;margin-left:8px}
+/* 覆盖GuidanceRail的fixed定位为relative内联 */
+:deep(.railinline .grail){position:relative;right:auto;bottom:auto;display:inline-block}
+:deep(.railinline .panel){bottom:auto;top:48px;right:0}
 .dw{display:flex;flex-direction:column;gap:10px}
 .dsec i{font-size:9.5px;color:var(--mix-t3);font-style:normal;font-weight:700}
 .dsec p{font-size:11.5px;color:var(--mix-t1);margin:3px 0 0;line-height:1.55}
