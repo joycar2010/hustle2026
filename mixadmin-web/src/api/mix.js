@@ -284,6 +284,10 @@ export const mixApi = {
   v6LabEvidence: (p = {}) => http6.get('/lab/evidence', { params: p }),
   v6LabVerdicts: () => http6.get('/lab/verdicts'),
   v6LabOutbox: () => http6.get('/lab/outbox'),
+  // ── V6.2 R2 自动回路监督面(只读;控制动作 R4 走统一 typed command) ──
+  automationSummary: () => http6.get('/automation/summary'),
+  automationLoops: () => http6.get('/automation/loops'),
+  automationTimeline: (id, limit = 50) => http6.get(`/automation/loops/${encodeURIComponent(id)}/timeline`, { params: { limit } }),
   v6LabSignals: (p = {}) => http6.get('/lab/signals', { params: p }),
   v6LabCommand: (b) => http6.post('/lab/commands', b),
   v6Training: () => http6.get('/training/courses'),

@@ -3,6 +3,8 @@
        一份快照/七段流程条/三视图(三栏|页签|墙聚焦)/行点击→右抽屉六段,全程不跳页。 -->
   <div class="today">
     <V6StatusBar :snap="snap" :stale="stale" :can-open="canOpen" :ago="ago"/>
+    <!-- V6.2 R2 自动运行状态条(§4.1 紧凑事实带):所有真钱自动回路首屏可见 -->
+    <AutomationStrip/>
     <div class="body">
       <div class="railrow">
         <ProcessRail class="railfill" :steps="railSteps" @pick="pickQueue"/>
@@ -245,6 +247,7 @@ import ValueCell from '../../components/v62/ValueCell.vue'
 import EmptyState from '../../components/v62/EmptyState.vue'
 import WorkTable from '../../components/v62/WorkTable.vue'
 import C4Board from '../../components/v62/C4Board.vue'
+import AutomationStrip from '../../components/v62/AutomationStrip.vue'
 import PartialRepayModal from '../../components/rules/PartialRepayModal.vue'
 import ClosePreviewDialog from '../../components/ClosePreviewDialog.vue'
 
