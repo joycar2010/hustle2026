@@ -3,14 +3,11 @@
     <div class="hd">
       <b>C4 期现交割 · 持有到期</b><i>现货多 + 交割空 · 基差硬锚</i>
       <span class="fill"></span>
-      <a class="pblink" @click="pbOpen = !pbOpen">原理 {{ pbOpen ? '▲' : '▼' }}</a>
       <i class="ts">数据源 R12-C4 + 采样器 · 30s 自刷</i>
     </div>
-    <!-- V6.2 R3+ 套利原理三层:C4 走独立数据链不经工作项抽屉,原理块在卡内自带 -->
-    <PlaybookBlock v-if="pbOpen" code="C4"/>
-    <div v-for="p in rows" :key="p.pos_id" class="prow" :class="{bad: p.missing}">
+    <div v-for="p in rows" :key="p.pos_id" class="prow" :class="{bad: p.missing, sel: sel && sel.pos_id===p.pos_id}">
       <div class="l1">
-        <b class="sym">{{ p.symbol }}</b>
+        <b class="sym clickable" @click="openPos(p)">{{ p.symbol }}</b>
         <span class="ven">· {{ p.venue }}</span>
         <span class="chip" :class="p.missing ? 'red' : 'ok'">{{ p.missing ? '交割腿缺失!' : '账实一致' }}</span>
         <span class="fill"></span>
@@ -26,6 +23,27 @@
     </div>
     <div v-if="!rows.length" class="empty">无 C4 持仓</div>
     <div class="ft">现货腿不入衍生品归并,净敞口/孤儿按 c4 账回补;liq&lt;20% 预警 &lt;10% 致命;执行=B机 c4_exec(两钥匙,平时 SHADOW)</div>
+
+    <!-- 与 C2.H 工作项同款右抽屉:点行内交易对打开(C4 独立数据链,六段式+原理三层) -->
+    <el-drawer v-model="drawerOpen" :title="(sel?.symbol||'')+' · C4'" size="440px" :append-to-body="true">
+      <div v-if="sel" class="dw">
+        <div class="dsec"><i>当前结论</i>
+          <p>持有到期(基差硬锚) · 剩 {{ sel.expiry_days != null ? sel.expiry_days + ' 天' : '—' }}
+            <span class="chip" :class="sel.missing ? 'red' : 'ok'">{{ sel.missing ? '交割腿缺失!' : '账实一致' }}</span></p></div>
+        <div class="dsec"><i>成本与预计收益</i>
+          <p>数量 {{ sel.ledger_qty }} · 实盘空腿 {{ sel.live_qty != null ? sel.live_qty : '—' }}<br/>
+             当前毛年化 <b :class="cls(sel.ann_pct)">{{ pct(sel.ann_pct) }}</b> ·
+             净/占用年化 <b :class="cls(sel.net_ann)">{{ pct(sel.net_ann) }}</b></p></div>
+        <div class="dsec"><i>平台与账户风险</i>
+          <p>venue:{{ sel.venue }} · 强平距 <b :class="liqCls(sel.dist_liq_pct)">{{ sel.dist_liq_pct != null ? n1(sel.dist_liq_pct) + '%' : '—' }}</b>
+            (&lt;20% 预警,&lt;10% 致命)</p></div>
+        <div class="dsec"><i>系统已经做了什么</i>
+          <p>R12-C4 监控在岗:强平线双阈值+到期&lt;7天预警;现货腿账面回补,净敞口/孤儿按 c4 账对账。</p></div>
+        <div class="dsec"><i>完成条件与下一步</i>
+          <p>默认持有到交割(settle 命令收尾);提前退出须过闸复核实时基差。执行=B机 c4_exec 人工 CLI(两钥匙,平时 SHADOW),本页无下单入口。</p></div>
+        <PlaybookBlock code="C4"/>
+      </div>
+    </el-drawer>
   </div>
 </template>
 
@@ -37,7 +55,9 @@ import { mixApi } from '../../api/mix'
 import PlaybookBlock from './PlaybookBlock.vue'
 
 const data = ref(null)
-const pbOpen = ref(false)
+const sel = ref(null)
+const drawerOpen = computed({ get: () => !!sel.value, set: v => { if (!v) sel.value = null } })
+function openPos (p) { sel.value = p }
 let timer = null
 
 async function load () {
@@ -73,13 +93,21 @@ function liqCls (x) { return x == null ? '' : (x < 10 ? 'red' : (x < 20 ? 'warn'
 .hd b { color: #e8c266; font-size: 13px; }
 .hd i { color: #8b8f98; font-size: 11px; font-style: normal; }
 .hd .ts { font-size: 10px; }
-.hd .pblink { color: #e8c266; font-size: 11px; cursor: pointer; }
 .fill { flex: 1; }
 .prow { padding: 6px 8px; border: 1px solid rgba(255,255,255,.07); border-radius: 6px;
         background: rgba(255,255,255,.02); margin-bottom: 6px; }
 .prow.bad { border-color: rgba(239,68,68,.55); background: rgba(239,68,68,.06); }
 .l1 { display: flex; align-items: center; gap: 6px; }
 .sym { color: #eef1f6; font-size: 13px; }
+.sym.clickable { cursor: pointer; }
+.sym.clickable:hover { color: #e8c266; text-decoration: underline; }
+.prow.sel { border-color: rgba(212,175,55,.55); }
+.dw { font-size: 12px; color: #B7BDC6; }
+.dsec { margin-bottom: 10px; }
+.dsec i { color: #848E9C; font-style: normal; display: block; margin-bottom: 3px; font-size: 11px; }
+.dsec p { margin: 0; line-height: 1.6; color: #EAECEF; }
+.dsec b.up { color: #0ECB81; } .dsec b.dn { color: #F6465D; }
+.dsec b.red { color: #ff6b6b; } .dsec b.warn { color: #F0B90B; } .dsec b.okc { color: #0ECB81; }
 .ven { color: #8b8f98; font-size: 11px; }
 .exp { color: #a9aeb8; font-size: 11px; }
 .chip { font-size: 10px; padding: 1px 7px; border-radius: 9px; }
