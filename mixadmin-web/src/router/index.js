@@ -9,7 +9,7 @@ const routes = [
     // ① 今日工作(合体页=唯一日常入口)
     { path:'mix/today', name:'mix-today', meta:{title:'今日工作',icon:'Calendar',group:'今日工作',ord:-1}, component:()=>import('../views/mix/MixToday.vue') },
     { path:'mix/training', name:'mix-training', meta:{title:'训练模式',icon:'Reading',group:'今日工作',ord:-0.5}, component:()=>import('../views/mix/MixTraining.vue') },
-    { path:'mix/dashboard', name:'mix-dashboard', meta:{hidden:true,title:'中控台（三分屏·迁移期）',icon:'Grid',group:'今日工作',ord:0}, component:()=>import('../views/mix/MixV6Console.vue') },
+    // R5 Phase 2(2026-07-26):旧中控已删除,引用已修复指向 /mix/work
     // N3 收敛曾把下面两项 hidden——用户 07-16 反馈「AiCoin工作台/人工双合约(新建手动计划)不见了」,恢复常驻菜单
     { path:'mix/workbench', name:'mix-workbench', meta:{title:'策略工作台（手动开仓）',icon:'Operation',group:'今日工作',ord:0.1}, component:()=>import('../views/mix/MixV6Workbench.vue') },
     { path:'mix/aicoin', name:'mix-aicoin', meta:{title:'AiCoin 研判工作台',icon:'DataAnalysis',group:'今日工作',ord:0.2}, component:()=>import('../views/mix/MixAiCoin.vue') },

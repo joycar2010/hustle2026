@@ -319,8 +319,8 @@ function toggleGroup(name){ const i=closedGroups.value.indexOf(name); if(i>=0)cl
 // 退出/更换: 清操作员会话 + 超管令牌, 门控重新弹出可换账号/令牌
 async function opLogout(){ localStorage.removeItem('mix_token'); localStorage.removeItem('qh_op_token'); localStorage.removeItem('qh_admin_token'); op.value={operator:'',role:'',perms:''}; computeAuthed(); ElMessage.success('已退出,请重新登录') }
 async function restoreOp(){ if(localStorage.getItem('mix_token')){ try{ const w=await mixApi.whoami(); op.value={operator:w.operator,role:w.role,perms:'*'}; loadTrainState() }catch(e){ localStorage.removeItem('mix_token') } } computeAuthed() }
-const tabs=ref([{path:'/mix/dashboard',title:'中控台（三分屏）'}])
-const activeTab=ref('/mix/dashboard')
+const tabs=ref([{path:'/mix/work',title:'今日工作'}])
+const activeTab=ref('/mix/work')
 function addTab(){
   const m=route.meta.title; if(!m)return
   if(!tabs.value.find(x=>x.path===route.path)) tabs.value.push({path:route.path,title:m})

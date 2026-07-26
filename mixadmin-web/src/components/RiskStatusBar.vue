@@ -21,7 +21,7 @@
       </span>
       <span class="sep">┃</span>
       <span class="wtab" :class="{on: tab==='lab'}" @click="openWall('market')">机会与LAB</span>
-      <span class="wtab" :class="{on: tab==='exec'}" @click="$router.push('/mix/dashboard')">持仓与执行</span>
+      <span class="wtab" :class="{on: tab==='exec'}" @click="$router.push('/mix/work?view=overview')">持仓与执行</span>
       <span class="wtab" :class="{on: tab==='risk'}" @click="$router.push('/mix/venuerisk')">风控与账务</span>
       <span class="grow" />
       <span v-for="f in (d.manual_freezes||[])" :key="f.scope" class="frzchip"
