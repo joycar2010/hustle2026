@@ -3,8 +3,11 @@
     <div class="hd">
       <b>C4 期现交割 · 持有到期</b><i>现货多 + 交割空 · 基差硬锚</i>
       <span class="fill"></span>
+      <a class="pblink" @click="pbOpen = !pbOpen">原理 {{ pbOpen ? '▲' : '▼' }}</a>
       <i class="ts">数据源 R12-C4 + 采样器 · 30s 自刷</i>
     </div>
+    <!-- V6.2 R3+ 套利原理三层:C4 走独立数据链不经工作项抽屉,原理块在卡内自带 -->
+    <PlaybookBlock v-if="pbOpen" code="C4"/>
     <div v-for="p in rows" :key="p.pos_id" class="prow" :class="{bad: p.missing}">
       <div class="l1">
         <b class="sym">{{ p.symbol }}</b>
@@ -31,8 +34,10 @@
 // 账面(c4_position)vs 实盘(risk-ledger R12-C4)vs 当前净年化(采样器)三方一屏。
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { mixApi } from '../../api/mix'
+import PlaybookBlock from './PlaybookBlock.vue'
 
 const data = ref(null)
+const pbOpen = ref(false)
 let timer = null
 
 async function load () {
@@ -68,6 +73,7 @@ function liqCls (x) { return x == null ? '' : (x < 10 ? 'red' : (x < 20 ? 'warn'
 .hd b { color: #e8c266; font-size: 13px; }
 .hd i { color: #8b8f98; font-size: 11px; font-style: normal; }
 .hd .ts { font-size: 10px; }
+.hd .pblink { color: #e8c266; font-size: 11px; cursor: pointer; }
 .fill { flex: 1; }
 .prow { padding: 6px 8px; border: 1px solid rgba(255,255,255,.07); border-radius: 6px;
         background: rgba(255,255,255,.02); margin-bottom: 6px; }

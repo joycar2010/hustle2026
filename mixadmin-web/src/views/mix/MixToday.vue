@@ -7,6 +7,9 @@
     <AutomationStrip/>
     <!-- V6.2 R3 每日开班简报(§4.3):当天首次进入自动一次;无待办不庆祝 -->
     <DailyBriefing :snap="snap" :can-open="canOpen" @open-item="openItem"/>
+    <!-- V6.2 R3+ 浮动引导栏(§5.1L2)+首次聚光教程(§5.1L3,课程进度服务端记账) -->
+    <GuidanceRail @open-item="openItemById" @retour="tourOpen=true"/>
+    <CoachMark v-model="tourOpen" :steps="TOUR_STEPS" @done="tourDone"/>
     <div class="body">
       <div class="railrow">
         <ProcessRail class="railfill" :steps="railSteps" @pick="pickQueue"/>
@@ -254,6 +257,8 @@ import C4Board from '../../components/v62/C4Board.vue'
 import AutomationStrip from '../../components/v62/AutomationStrip.vue'
 import DailyBriefing from '../../components/v62/DailyBriefing.vue'
 import PlaybookBlock from '../../components/v62/PlaybookBlock.vue'
+import GuidanceRail from '../../components/v62/GuidanceRail.vue'
+import CoachMark from '../../components/v62/CoachMark.vue'
 import PartialRepayModal from '../../components/rules/PartialRepayModal.vue'
 import ClosePreviewDialog from '../../components/ClosePreviewDialog.vue'
 
@@ -301,6 +306,34 @@ const protNote = computed(() => {
   const parts = Object.entries(c).filter(([k]) => k !== 'NORMAL').map(([k, v]) => `${PROT_CN[k] || k}${v}`)
   return parts.length ? parts.join(' · ') + '(shadow评估·退出仍人工)' : '在管组合退出估值全部在预算内'
 })
+
+// ── V6.2 R3+ 首次聚光教程(课程版本由服务端 guidance_template 管;完成才记进度,跳过不算) ──
+const tourOpen = ref(false)
+const tourVer = ref(1)
+const TOUR_STEPS = [
+  { selector: '.autostrip', title: '自动运行状态条', text: '所有真钱自动回路在这里首屏可见:武装状态、最近轮次、发布一致性。点"回路详情"能看每个回路的执行链和时间线。' },
+  { selector: '.railrow', title: '工作流程条', text: '机会→研判→执行→持有→核对的七段队列。点任一段过滤下方列表;异常永远置顶。' },
+  { selector: '.c-opp', title: '机会列表', text: '每行三段:身份、路线容量、净期望。点行打开右侧抽屉看六段事实与套利原理,唯一主动作在行尾。' },
+  { selector: '.planbtn', title: '手动计划', text: '所有产品的人工开仓从这里走:研判先行→DRY_RUN→审批,不存在绕闸的快捷下单。' },
+]
+async function initTour () {
+  try {
+    const p = await mixApi.guidanceProgress()
+    const cur = p?.curricula?.TODAY_TOUR || 1
+    tourVer.value = cur
+    const done = (p?.completed || []).some(r => r.scope === 'TODAY_TOUR' && r.curriculum_version >= cur)
+    if (!done) tourOpen.value = true
+  } catch (e) { /* 未登录/失败=不弹 */ }
+}
+onMounted(initTour)
+async function tourDone (completed) {
+  if (!completed) return   // §10:完成条件=走完,不是点过
+  try { await mixApi.guidanceComplete('TODAY_TOUR', tourVer.value) } catch (e) {}
+}
+function openItemById (id) {
+  const w = items.value.find(x => x.work_item_id === id || x.symbol === id)
+  if (w) openItem(w)
+}
 
 const items = computed(() => snap.value?.work_items || [])
 const opps = computed(() => items.value.filter(w => w.workflow_stage === 'DISCOVERED'))

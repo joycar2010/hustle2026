@@ -7,10 +7,11 @@
 from fastapi import APIRouter, Depends, HTTPException
 
 from ..deps import require_viewer
+from .. import datasources as ds
 
 router = APIRouter(tags=["v6-playbooks"])
 
-PLAYBOOK_VERSION = "pb-20260726-1"
+PLAYBOOK_VERSION = "pb-20260726-2"
 
 _PB = {
     "C1": {
@@ -97,10 +98,53 @@ _PB = {
 
 _DISCLAIMER = "以上为预期收益机制说明,不是无风险承诺;任何回路都可能亏损,以风控闸与退出纪律为准。"
 
+# §16 strategy_playbook 表:git 种子=权威,升 PLAYBOOK_VERSION 才覆盖(DB 端可临时补注记但会被新版盖)
+_DDL = """
+CREATE TABLE IF NOT EXISTS strategy_playbook(
+  product_code text PRIMARY KEY,
+  version text NOT NULL,
+  name text, plain text, earn_from text, lose_from text, exit_rule text, pro text,
+  disclaimer text,
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+"""
+_seeded = False
+
+
+async def _ensure(pool):
+    global _seeded
+    if _seeded or pool is None:
+        return
+    async with pool.acquire() as con:
+        await con.execute(_DDL)
+        for code, pb in _PB.items():
+            await con.execute(
+                """INSERT INTO strategy_playbook(product_code,version,name,plain,earn_from,
+                     lose_from,exit_rule,pro,disclaimer)
+                   VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)
+                   ON CONFLICT (product_code) DO UPDATE SET
+                     version=EXCLUDED.version, name=EXCLUDED.name, plain=EXCLUDED.plain,
+                     earn_from=EXCLUDED.earn_from, lose_from=EXCLUDED.lose_from,
+                     exit_rule=EXCLUDED.exit_rule, pro=EXCLUDED.pro,
+                     disclaimer=EXCLUDED.disclaimer, updated_at=now()
+                   WHERE strategy_playbook.version <> EXCLUDED.version""",
+                code, PLAYBOOK_VERSION, pb["name"], pb["plain"], pb["earn_from"],
+                pb["lose_from"], pb["exit_rule"], pb["pro"], _DISCLAIMER)
+    _seeded = True
+
 
 @router.get("/playbooks/{product_code}")
 async def get_playbook(product_code: str, _who=Depends(require_viewer)):
-    pb = _PB.get(product_code)
+    pool = await ds.pg_main()
+    await _ensure(pool)
+    if pool is not None:
+        async with pool.acquire() as con:
+            r = await con.fetchrow("SELECT * FROM strategy_playbook WHERE product_code=$1", product_code)
+        if r:
+            d = dict(r)
+            d["updated_at"] = str(d["updated_at"])
+            return d
+    pb = _PB.get(product_code)   # DB 不可用兜底:git 内置内容
     if not pb:
         raise HTTPException(404, f"无 {product_code} 的 playbook(编号以 product_catalog 为准)")
     return {"product_code": product_code, "version": PLAYBOOK_VERSION,

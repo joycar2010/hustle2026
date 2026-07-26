@@ -288,8 +288,14 @@ export const mixApi = {
   automationSummary: () => http6.get('/automation/summary'),
   automationLoops: () => http6.get('/automation/loops'),
   automationTimeline: (id, limit = 50) => http6.get(`/automation/loops/${encodeURIComponent(id)}/timeline`, { params: { limit } }),
-  // ── V6.2 R3 策略原理白话(版本化静态,随 git 发布) ──
+  // ── V6.2 R3 策略原理白话(版本化,git种子→strategy_playbook表) ──
   playbook: (code) => http6.get(`/playbooks/${encodeURIComponent(code)}`),
+  // ── V6.2 R3+ 操作引导契约(§8.3):cue投影/确认/稍后/课程进度 ──
+  guidanceActive: () => http6.get('/guidance/active'),
+  guidanceAck: (cueId) => http6.post(`/guidance/${encodeURIComponent(cueId)}/ack`, {}),
+  guidanceSnooze: (cueId, minutes = 60) => http6.post(`/guidance/${encodeURIComponent(cueId)}/snooze`, { minutes }),
+  guidanceProgress: () => http6.get('/guidance/progress'),
+  guidanceComplete: (scope, curriculum_version = 1) => http6.post('/guidance/progress/complete', { scope, curriculum_version }),
   v6LabSignals: (p = {}) => http6.get('/lab/signals', { params: p }),
   v6LabCommand: (b) => http6.post('/lab/commands', b),
   v6Training: () => http6.get('/training/courses'),
