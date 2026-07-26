@@ -1,0 +1,16 @@
+# /etc/systemd/system/mix-ws.service
+[Unit]
+Description=HustleCoin Mix WS hub (Rust, qh-ws-hub mode, port 8201)
+After=network.target
+
+[Service]
+User=ec2-user
+WorkingDirectory=/data/mix/backend
+EnvironmentFile=/data/mix/backend/.env
+ExecStart=/data/mix/bin/mix-ws-hub
+Restart=always
+RestartSec=3
+MemoryMax=512M
+
+[Install]
+WantedBy=multi-user.target

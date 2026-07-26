@@ -1,0 +1,16 @@
+# /etc/systemd/system/mix-backend.service
+[Unit]
+Description=HustleCoin Mix backend (FastAPI, port 8200)
+After=network.target
+
+[Service]
+User=ec2-user
+WorkingDirectory=/data/mix/backend
+EnvironmentFile=/data/mix/backend/.env
+ExecStart=/data/mix/backend/venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8200
+Restart=always
+RestartSec=3
+MemoryMax=1G
+
+[Install]
+WantedBy=multi-user.target

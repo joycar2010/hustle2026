@@ -1,0 +1,14 @@
+# /etc/systemd/system/mix-l1lite.service
+[Unit]
+Description=Mix l1lite on-demand L1 orderbook via WS (Asset360)
+After=network.target
+[Service]
+User=ec2-user
+WorkingDirectory=/data/mix/backend
+EnvironmentFile=/data/mix/backend/.env
+ExecStart=/data/mix/backend/venv/bin/python l1lite.py
+Restart=always
+RestartSec=5
+MemoryMax=256M
+[Install]
+WantedBy=multi-user.target
