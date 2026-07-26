@@ -49,9 +49,9 @@
       </el-radio-group>
       <div class="chips">
         <span class="chip" :class="{on:!strategy}" @click="strategy='';load()">全部</span>
-        <span v-for="c in ['S1','S2','S3','S4','S5','S6']" :key="c" class="chip"
-              :class="{on:strategy===c}" :style="strategy===c?{background:SC[c],color:'#0B0E11',borderColor:SC[c]}:{}"
-              @click="strategy=c;load()">{{ c }}</span>
+        <span v-for="c in PRODUCTS" :key="c.code" class="chip"
+              :class="{on:strategy===c.code}" :style="strategy===c.code?{background:c.colorBg,color:c.color,borderColor:c.color}:{}"
+              @click="strategy=c.code;load()">{{ c.ccode }}</span>
       </div>
       <el-button size="small" :loading="loading" @click="load">刷新</el-button>
     </div>
@@ -75,7 +75,7 @@
         <span>终态</span><span>开仓</span><span>平仓</span><span class="r">持仓h</span>
       </div>
       <div v-for="r in rows" :key="r.source + r.source_id" class="tr">
-        <span><i class="sb" :style="{background: SC[r.strategy_code]}">{{ r.strategy_code }}</i></span>
+        <span><i class="sb" :style="{background: prodColorBg(r.strategy_code), color: prodColor(r.strategy_code)}">{{ prodCode(r.strategy_code) }}</i></span>
         <span class="sym" style="color:var(--mix-gold,#F0B90B);font-weight:700">{{ r.symbol }}</span>
         <span :class="'vx-'+r.master_venue">{{ r.master_venue }}</span><span class="acct">{{ r.master_account }}</span>
         <span :class="'vx-'+r.hedge_venue">{{ r.hedge_venue }}</span><span class="acct">{{ r.hedge_account }}</span>
@@ -114,8 +114,13 @@
 import { computed, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { mixApi } from '../../api/mix'
+import { STRATEGY_META } from '../../components/PositionTable/types'
 
-const SC = { S1: '#4A9CFF', S2: '#F0B90B', S3: '#A78BFA', S4: '#2DD4BF', S5: '#FF9F43', S6: '#F472B6' }
+const PRODUCTS = Object.values(STRATEGY_META).filter(m => m.code)
+const prodCode = code => STRATEGY_META[code]?.ccode || code
+const prodColor = code => STRATEGY_META[code]?.color || '#F0B90B'
+const prodColorBg = code => STRATEGY_META[code]?.colorBg || 'rgba(240,185,11,.14)'
+
 const rows = ref([]); const stats = ref({}); const range = ref('30d'); const strategy = ref('')
 const customRange = ref(null); const loading = ref(false)
 const fmt = v => (v == null ? '—' : Number(v).toLocaleString(undefined, { maximumFractionDigits: 2 }))
