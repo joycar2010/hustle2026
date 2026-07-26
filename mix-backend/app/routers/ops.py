@@ -7,7 +7,7 @@ import asyncio
 import logging
 import datetime as dt
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from ..deps import require_viewer, require_operator, require_admin
 from .. import datasources as ds
@@ -1915,3 +1915,96 @@ async def c3r_ranking_board(_who=Depends(require_viewer)):
     except Exception:  # noqa: BLE001
         pass
     return out
+
+
+# ── 08-24 xv 放行素材:C 侧影子选择情报叠加(与 dd 的 xv capture readout 合并) ──
+# dd(~/xv/xv_release_readout.py, timer 2026-08-24 09:07 UTC)产出 capture=net/funding
+# 的真金/影子收益侧;本端点产出 C 侧的「选择质量」情报侧(C2.C 收敛信号 + C3.R 三率
+# 榜在观察窗内的持续性聚合)。放行决策时两侧合并:capture 证明「选对了赚不赚」,本侧
+# 证明「持续选得对不对」。纯只读、SHADOW、无执行消费者、不碰钱路。
+XV_CLOCK_START = "2026-07-25"   # 与 dd xv_release_readout CLOCK_START 对齐(30天观察钟起点)
+
+
+@router.get("/research/xv/release-overlay")
+async def xv_release_overlay(
+        days: int = Query(30, ge=1, le=120),
+        _who=Depends(require_viewer)):
+    """C2.C/C3.R 影子选择情报在观察窗内的聚合,供 08-24 xv 放行时与 dd 的 capture
+    readout 合并。两个窗口:since_clock(自 2026-07-25 观察钟)+ rolling(滚动 N 日)。
+    C2.C 侧=gap 高分位的持续性(选宽缺口选得稳不稳);C3.R 侧=三率净差的持续性。"""
+    pool = await ds.pg_main()
+    if pool is None:
+        raise HTTPException(503, "mix_main 不可达")
+
+    async def _c2c(where: str, *a):
+        # 每 symbol:样本数、平均分位、平均 z、最大/平均 gap、最新时间——按平均分位排序(持续宽缺口在前)
+        try:
+            return await pool.fetch(
+                "SELECT symbol, count(*) n, avg(pctile) avg_pctile, avg(zscore) avg_z, "
+                "max(gap_now_pct) max_gap, avg(gap_now_pct) avg_gap, max(ts)::text last_ts "
+                f"FROM c2c_signal_sample WHERE {where} GROUP BY symbol "
+                "HAVING count(*)>=3 ORDER BY avg(pctile) DESC NULLS LAST, avg(gap_now_pct) DESC LIMIT 25", *a)
+        except Exception as e:  # noqa: BLE001
+            log.warning("xv overlay c2c: %s", e)
+            return []
+
+    async def _c3r(where: str, *a):
+        try:
+            return await pool.fetch(
+                "SELECT coin, count(*) n, avg(net_daily_pct) avg_net, avg(rank) avg_rank, "
+                "min(rank) best_rank, max(net_daily_pct) max_net, max(ts)::text last_ts "
+                f"FROM c3r_ranking_sample WHERE {where} GROUP BY coin "
+                "HAVING count(*)>=3 ORDER BY avg(net_daily_pct) DESC NULLS LAST LIMIT 25", *a)
+        except Exception as e:  # noqa: BLE001
+            log.warning("xv overlay c3r: %s", e)
+            return []
+
+    def _rows(rs):
+        return [dict(r) for r in rs]
+
+    async def _cov(tbl):
+        try:
+            r = await pool.fetchrow(
+                f"SELECT count(*) n, min(ts)::text mn, max(ts)::text mx FROM {tbl}")
+            return {"samples": r["n"], "first_ts": r["mn"], "last_ts": r["mx"]}
+        except Exception:  # noqa: BLE001
+            return {"samples": 0, "first_ts": None, "last_ts": None}
+
+    # ⚠asyncpg:$1::date 会把参数按 date 对象编码(str 报 toordinal);须 $1::text::date 强制文本编码
+    clock_w = "ts >= $1::text::date"
+    roll_w = "ts >= now() - ($1 || ' days')::interval"
+
+    c2c_clock = _rows(await _c2c(clock_w, XV_CLOCK_START))
+    c2c_roll = _rows(await _c2c(roll_w, str(days)))
+    c3r_clock = _rows(await _c3r(clock_w, XV_CLOCK_START))
+    c3r_roll = _rows(await _c3r(roll_w, str(days)))
+
+    return {
+        "generated_for": "xv-release-2026-08-24",
+        "posture": "SHADOW / 只读 / 无执行消费者 / 不碰钱路",
+        "clock_start": XV_CLOCK_START,
+        "rolling_days": days,
+        "coverage": {
+            "c2c_signal_sample": await _cov("c2c_signal_sample"),
+            "c3r_ranking_sample": await _cov("c3r_ranking_sample"),
+        },
+        "c2c_selection": {  # C2.C 收敛信号:持续高分位宽缺口=选得稳
+            "since_clock": c2c_clock,
+            "rolling": c2c_roll,
+            "metric_note": "avg_pctile=gap 7日分位均值(越高越持续宽);avg_gap/max_gap=%;n=窗内样本数",
+        },
+        "c3r_selection": {  # C3.R 三率净差:持续高净差=借币场景选得稳
+            "since_clock": c3r_clock,
+            "rolling": c3r_roll,
+            "metric_note": "avg_net=日化净差%均值;best_rank=窗内最好名次;n=窗内样本数",
+        },
+        "merge_structure": {
+            "capture_side": "dd:~/xv/release_readout_0824(.json/.txt) — net/funding capture(收益侧)",
+            "selection_side": "本端点 — C2.C/C3.R 持续性(选择质量侧)",
+            "decision": "放行=两侧同时成立:capture 为正(赚) ∧ 选择持续性稳(不是偶然);"
+                        "任一侧不成立则继续观察或收窄。",
+        },
+        "decision_owner_note": "本叠加仅供 C 审批时人工研判;任何真金动作须用户盯盘放行,"
+                               "LAB(dd)永不持生产凭证,执行只在 B 机。",
+        "note": "样本 <3 的 symbol/coin 已过滤;窗口无数据时对应数组为空(非报错,属采样未积累)。",
+    }

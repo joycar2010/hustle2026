@@ -36,7 +36,35 @@ CREATE TABLE IF NOT EXISTS training_session (
         CHECK (state IN ('IN_PROGRESS','PASSED','FAILED')),
     steps JSONB NOT NULL DEFAULT '[]'::jsonb,
     started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    ended_at TIMESTAMPTZ)"""
+    ended_at TIMESTAMPTZ);
+CREATE TABLE IF NOT EXISTS training_course_publication (
+    course TEXT PRIMARY KEY,
+    published BOOLEAN NOT NULL,
+    changed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    changed_by TEXT NOT NULL DEFAULT '')"""
+
+
+def _default_published(course: str) -> bool:
+    """默认发布态:非 draft 课=默认已发布(现役 6/7 课);draft=True 的新人课默认隐藏。"""
+    c = COURSES.get(course) or {}
+    return not c.get("draft")
+
+
+async def _published_set(pool) -> set:
+    """当前已发布课目集合=默认发布态,叠加 training_course_publication 显式覆盖。
+    现役课无覆盖行→保持默认已发布;新人 draft 课经 publish 端点插行才转已发布。"""
+    pub = {k for k in COURSES if _default_published(k)}
+    try:
+        for r in await pool.fetch("SELECT course, published FROM training_course_publication"):
+            if r["course"] not in COURSES:
+                continue
+            if r["published"]:
+                pub.add(r["course"])
+            else:
+                pub.discard(r["course"])
+    except Exception as e:  # noqa: BLE001
+        log.warning("training publication read: %s", e)
+    return pub
 
 # ── 六课目(§八):场景快照 + 期望动作序列(状态机判定) ─────────────────────
 COURSES = {
@@ -89,6 +117,47 @@ COURSES = {
         "scenario": {"ledger": {"identity_ok": True, "unmapped": 0}},
         "expect": ["confirm_recon"],
         "expect_cn": ["点『确认账目核对通过』"],
+    },
+    # ── 新人入职轨(DRAFT/草稿:draft=True 默认隐藏,不进操作台课目列表、
+    #    不改现役认证阈值;SUPER_ADMIN 经 /training/courses/{course}/publish 逐课激活。
+    #    激活前端场景卡为未来步骤,当前隐藏不渲染) ──────────────────────────
+    "新人-系统总览": {
+        "title": "新人 · 系统总览", "order": 101, "draft": True, "track": "新人入职",
+        "brief": "先认识后动手:状态条 / 三面墙(风控·策略·执行) / 今日工作台各看什么",
+        "scenario": {"overview": {"walls": ["风控", "策略", "执行"], "workbench": "今日"}},
+        "expect": ["ack_overview"],
+        "expect_cn": ["确认已读懂系统总览(状态条+三面墙+工作台)"],
+    },
+    "新人-角色与边界": {
+        "title": "新人 · 角色与边界", "order": 102, "draft": True, "track": "新人入职",
+        "brief": "VIEWER<OPERATOR<SUPER_ADMIN;减险动作(撤单/减仓/还币/压停)永远可用,新增风险类命令须认证",
+        "scenario": {"roles": ["VIEWER", "OPERATOR", "SUPER_ADMIN"],
+                     "always_allowed": ["撤单", "减仓", "还币", "压停自动控制"]},
+        "expect": ["ack_roles"],
+        "expect_cn": ["确认理解角色分级与『减险恒可用 / 增险需认证』边界"],
+    },
+    "新人-武装纪律": {
+        "title": "新人 · 武装纪律(双钥匙)", "order": 103, "draft": True, "track": "新人入职",
+        "brief": "真钱自动控制=双钥匙:主控闸(control:enabled)+子闸(resume:authorized);链路=键入命令→Passkey→生成→双钥匙确认;绝不单方武装,须用户盯盘放行",
+        "scenario": {"chain": ["键入命令", "Passkey", "生成", "双钥匙确认"],
+                     "master_gate": "dcm:v6:automation:control:enabled",
+                     "resume_gate": "dcm:v6:automation:resume:authorized"},
+        "expect": ["ack_arming_chain"],
+        "expect_cn": ["确认理解武装双钥匙链路(命令→Passkey→生成→双钥匙;须盯盘放行)"],
+    },
+    "新人-应急压停演练": {
+        "title": "新人 · 应急压停演练", "order": 104, "draft": True, "track": "新人入职",
+        "brief": "压停(pause)属减险、手机可发、无需盯盘;演练一次对自动控制回路执行压停",
+        "scenario": {"loop": "phase-autopilot", "risk_class": "REDUCE_RISK", "mobile_allowed": True},
+        "expect": ["ack_pause_scene", "do_pause"],
+        "expect_cn": ["确认演练场景(自动控制回路需压停)", "执行『压停自动控制』(减险,不需盯盘放行)"],
+    },
+    "新人-证据分级": {
+        "title": "新人 · 证据分级", "order": 105, "draft": True, "track": "新人入职",
+        "brief": "事实分级:AUDIT_TABLE(持久事实表)高于 TEMP_OBSERVATION(临时观测);对外汇报按最高可得证据,不夸大",
+        "scenario": {"grades": ["AUDIT_TABLE", "TEMP_OBSERVATION"]},
+        "expect": ["ack_evidence"],
+        "expect_cn": ["确认理解证据分级(AUDIT_TABLE > TEMP_OBSERVATION,按最高可得证据汇报)"],
     },
 }
 
@@ -166,8 +235,11 @@ async def training_courses(who=Depends(require_viewer)):
         prog[r["course"]] = {"state": r["state"],
                              "steps": (json.loads(r["steps"]) if isinstance(r["steps"], str) else r["steps"])}
     cert = await is_certified(who["operator"])
+    pub = await _published_set(pool)   # 仅已发布课目进操作台;draft 新人课隐藏
     out = []
     for key, c in sorted(COURSES.items(), key=lambda kv: kv[1]["order"]):
+        if key not in pub:
+            continue
         p = prog.get(key) or {}
         out.append({"course": key, "title": c["title"], "order": c["order"], "brief": c["brief"],
                     "expect_cn": c["expect_cn"], "state": p.get("state") or "NOT_STARTED",
@@ -184,6 +256,8 @@ async def training_start(course: str, who=Depends(require_trainee)):
     if not c:
         raise HTTPException(404, "课目不存在")
     pool = await _pool()
+    if course not in await _published_set(pool):
+        raise HTTPException(409, "该课目未发布(草稿):需 SUPER_ADMIN 先激活方可练习")
     await pool.execute(
         "UPDATE training_session SET state='FAILED', ended_at=now() "
         "WHERE operator=$1 AND course=$2 AND state='IN_PROGRESS'", who["operator"], course)
@@ -222,10 +296,12 @@ async def training_action(course: str, body: dict, who=Depends(require_trainee))
         "WHERE id=$1", row["id"], json.dumps(steps), "PASSED" if done else "IN_PROGRESS")
     cert_granted = False
     if done:
-        passed = await pool.fetchval(
-            "SELECT count(DISTINCT course) FROM training_session WHERE operator=$1 AND state='PASSED'",
+        pub = await _published_set(pool)   # 认证阈值=已发布课数(现役=7,不受 draft 新人课影响)
+        rows_passed = await pool.fetch(
+            "SELECT DISTINCT course FROM training_session WHERE operator=$1 AND state='PASSED'",
             who["operator"])
-        if int(passed) >= len(COURSES):
+        passed = sum(1 for r in rows_passed if r["course"] in pub)
+        if int(passed) >= len(pub):
             await pool.execute(
                 "INSERT INTO training_certification(operator, version, scope, granted_by) "
                 "VALUES($1,$2,$3,'course-completion') ON CONFLICT DO NOTHING",
@@ -237,3 +313,62 @@ async def training_action(course: str, body: dict, who=Depends(require_trainee))
             "cert_granted": cert_granted,
             "note": ("✓ 课目通过" + (";六课目全部完成,已签发认证,生产新增风险命令已解锁" if cert_granted else "")
                      if done else f"✓ 第{idx+1}步正确")}
+
+
+# ── 课程治理:管理端目录预览 + 逐课发布/下架(SUPER_ADMIN) ───────────────────
+from ..deps import require_admin  # noqa: E402
+
+
+@router.get("/training/courses/catalog")
+async def training_catalog(admin=Depends(require_admin)):
+    """全量课目目录(含 draft 草稿),供管理端预览与激活;标注默认态/当前发布态/所属轨。
+    只读,不影响操作台课目列表。"""
+    pool = await _pool()
+    pub = await _published_set(pool)
+    ov = {}
+    try:
+        for r in await pool.fetch(
+                "SELECT course, published, changed_at::text, changed_by "
+                "FROM training_course_publication"):
+            ov[r["course"]] = {"published": r["published"],
+                               "changed_at": r["changed_at"], "changed_by": r["changed_by"]}
+    except Exception as e:  # noqa: BLE001
+        log.warning("catalog overrides: %s", e)
+    items = []
+    for key, c in sorted(COURSES.items(), key=lambda kv: kv[1]["order"]):
+        items.append({
+            "course": key, "title": c["title"], "order": c["order"],
+            "track": c.get("track") or "现役六课", "brief": c["brief"],
+            "expect_cn": c["expect_cn"], "steps": len(c["expect"]),
+            "is_draft_default": bool(c.get("draft")),
+            "default_published": _default_published(key),
+            "published": key in pub,
+            "override": ov.get(key),
+        })
+    published_n = sum(1 for it in items if it["published"])
+    return {"courses": items, "total": len(items), "published": published_n,
+            "cert_threshold": published_n,
+            "note": "认证阈值=当前已发布课目数;发布 draft 新人课将同步抬高新操作员的认证门槛,"
+                    "现役操作员持祖父认证不受影响。激活前请确认前端已有对应场景卡。"}
+
+
+@router.post("/training/courses/{course}/publish")
+async def training_publish(course: str, body: dict, admin=Depends(require_admin)):
+    """逐课发布/下架:写 training_course_publication 覆盖行。发布 draft 新人课=激活;
+    下架=移出操作台课目列表。此动作改变新操作员的认证门槛,故需 SUPER_ADMIN。"""
+    if course not in COURSES:
+        raise HTTPException(404, "课目不存在")
+    if "published" not in body:
+        raise HTTPException(400, "缺少 published 布尔字段")
+    published = bool(body["published"])
+    pool = await _pool()
+    await pool.execute(
+        "INSERT INTO training_course_publication(course, published, changed_by) VALUES($1,$2,$3) "
+        "ON CONFLICT (course) DO UPDATE SET published=EXCLUDED.published, "
+        "changed_at=now(), changed_by=EXCLUDED.changed_by",
+        course, published, admin.get("admin") or admin.get("operator") or "")
+    pub = await _published_set(pool)
+    return {"course": course, "published": course in pub,
+            "published_total": len(pub), "cert_threshold": len(pub),
+            "note": ("已激活:该课目进入操作台课目列表,新操作员认证门槛+1"
+                     if published else "已下架:该课目移出操作台课目列表")}
