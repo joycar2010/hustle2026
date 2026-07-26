@@ -11,7 +11,7 @@
  *    是主账号显示主账号、是子账户显示子账户，accountKind 徽章区分，前端不按名义归属推断。
  */
 
-export type StrategyCode = 'S1' | 'S2' | 'S3' | 'S4' | 'S5' | 'S6'
+export type StrategyCode = 'C1' | 'C2.H' | 'C2.C' | 'C2.P' | 'C3.S' | 'C3.R' | 'C4' | 'C5' | 'C6' | 'O1' | 'S1' | 'S2' | 'S3' | 'S4' | 'S5' | 'S6'
 
 /** 账户平台类型 —— 账户列表与 KMS 钱包并表的开关：操作菜单按此注入 */
 export type PlatformType = 'cex' | 'kms_wallet'
@@ -34,6 +34,18 @@ export interface StrategyMeta {
 }
 
 export const STRATEGY_META: Record<StrategyCode, StrategyMeta> = {
+  // C系列10产品（V6产品体系）
+  C1: { code: 'C1', ccode: 'C1', name: '期现收费', color: '#4A9CFF', colorBg: 'rgba(74,156,255,.12)', icon: 'scale' },
+  'C2.H': { code: 'C2.H', ccode: 'C2.H', name: '跨所费差', color: '#F0B90B', colorBg: 'rgba(240,185,11,.12)', icon: 'layers' },
+  'C2.C': { code: 'C2.C', ccode: 'C2.C', name: '事件折价', color: '#FF9F43', colorBg: 'rgba(255,159,67,.12)', icon: 'zap' },
+  'C2.P': { code: 'C2.P', ccode: 'C2.P', name: '人工研判', color: '#8B5CF6', colorBg: 'rgba(139,92,246,.12)', icon: 'user-check' },
+  'C3.S': { code: 'C3.S', ccode: 'C3.S', name: '借币点差', color: '#A78BFA', colorBg: 'rgba(167,139,250,.12)', icon: 'rotate-ccw' },
+  'C3.R': { code: 'C3.R', ccode: 'C3.R', name: '三率利差', color: '#2DD4BF', colorBg: 'rgba(45,212,191,.12)', icon: 'hand-coins' },
+  C4: { code: 'C4', ccode: 'C4', name: '期现交割', color: '#10B981', colorBg: 'rgba(16,185,129,.12)', icon: 'calendar-check' },
+  C5: { code: 'C5', ccode: 'C5', name: '双永续', color: '#EC4899', colorBg: 'rgba(236,72,153,.12)', icon: 'repeat' },
+  C6: { code: 'C6', ccode: 'C6', name: '双交割', color: '#06B6D4', colorBg: 'rgba(6,182,212,.12)', icon: 'calendar-days' },
+  O1: { code: 'O1', ccode: 'O1', name: '做量降费', color: '#F472B6', colorBg: 'rgba(244,114,182,.12)', icon: 'orbit' },
+  // S系列兼容映射（向后兼容旧数据）
   S1: { code: 'S1', ccode: 'C1', name: '期现收费', color: '#4A9CFF', colorBg: 'rgba(74,156,255,.12)', icon: 'scale' },
   S2: { code: 'S2', ccode: 'C2.H', name: '跨所费差', color: '#F0B90B', colorBg: 'rgba(240,185,11,.12)', icon: 'layers' },
   S3: { code: 'S3', ccode: 'C3.S', name: '借币点差', color: '#A78BFA', colorBg: 'rgba(167,139,250,.12)', icon: 'rotate-ccw' },

@@ -116,7 +116,18 @@ import { ElMessage } from 'element-plus'
 import { mixApi } from '../../api/mix'
 import { STRATEGY_META } from '../../components/PositionTable/types'
 
-const PRODUCTS = Object.values(STRATEGY_META).filter(m => m.code)
+const PRODUCTS = [
+  STRATEGY_META['C1'],
+  STRATEGY_META['C2.H'],
+  STRATEGY_META['C2.C'],
+  STRATEGY_META['C2.P'],
+  STRATEGY_META['C3.S'],
+  STRATEGY_META['C3.R'],
+  STRATEGY_META['C4'],
+  STRATEGY_META['C5'],
+  STRATEGY_META['C6'],
+  STRATEGY_META['O1'],
+]
 const prodCode = code => STRATEGY_META[code]?.ccode || code
 const prodColor = code => STRATEGY_META[code]?.color || '#F0B90B'
 const prodColorBg = code => STRATEGY_META[code]?.colorBg || 'rgba(240,185,11,.14)'
