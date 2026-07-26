@@ -288,6 +288,8 @@ export const mixApi = {
   automationSummary: () => http6.get('/automation/summary'),
   automationLoops: () => http6.get('/automation/loops'),
   automationTimeline: (id, limit = 50) => http6.get(`/automation/loops/${encodeURIComponent(id)}/timeline`, { params: { limit } }),
+  // ── V6.2 R3 策略原理白话(版本化静态,随 git 发布) ──
+  playbook: (code) => http6.get(`/playbooks/${encodeURIComponent(code)}`),
   v6LabSignals: (p = {}) => http6.get('/lab/signals', { params: p }),
   v6LabCommand: (b) => http6.post('/lab/commands', b),
   v6Training: () => http6.get('/training/courses'),

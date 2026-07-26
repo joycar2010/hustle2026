@@ -5,6 +5,8 @@
     <V6StatusBar :snap="snap" :stale="stale" :can-open="canOpen" :ago="ago"/>
     <!-- V6.2 R2 自动运行状态条(§4.1 紧凑事实带):所有真钱自动回路首屏可见 -->
     <AutomationStrip/>
+    <!-- V6.2 R3 每日开班简报(§4.3):当天首次进入自动一次;无待办不庆祝 -->
+    <DailyBriefing :snap="snap" :can-open="canOpen" @open-item="openItem"/>
     <div class="body">
       <div class="railrow">
         <ProcessRail class="railfill" :steps="railSteps" @pick="pickQueue"/>
@@ -188,6 +190,8 @@
               :state="sel.recovery_windows==null?'NOT_YET_AVAILABLE':undefined"/></p></div>
         <div class="dsec"><i>系统已经做了什么</i><p>{{ sel.system_did }}</p></div>
         <div class="dsec"><i>完成条件与下一步</i><p>{{ sel.completion_condition }}<br/>触发:{{ sel.next_trigger }}</p></div>
+        <!-- V6.2 R3 套利原理三层(§6):机制白话;当前实例数字由上方各段承担 -->
+        <PlaybookBlock :code="sel.strategy_code"/>
         <div class="dsec"><i>深链</i><p>
           <a class="dl" @click="$router.push({path:'/mix/history',query:{symbol:sel.symbol}})">交易与核对 →</a>
           <a class="dl" @click="deepRisk">风险事件 →</a>
@@ -248,6 +252,8 @@ import EmptyState from '../../components/v62/EmptyState.vue'
 import WorkTable from '../../components/v62/WorkTable.vue'
 import C4Board from '../../components/v62/C4Board.vue'
 import AutomationStrip from '../../components/v62/AutomationStrip.vue'
+import DailyBriefing from '../../components/v62/DailyBriefing.vue'
+import PlaybookBlock from '../../components/v62/PlaybookBlock.vue'
 import PartialRepayModal from '../../components/rules/PartialRepayModal.vue'
 import ClosePreviewDialog from '../../components/ClosePreviewDialog.vue'
 
