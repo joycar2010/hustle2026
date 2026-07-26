@@ -55,6 +55,7 @@ export const mixApi = {
   riskCashflows: () => http.get('/risk/cashflows'),
   riskSymbolAnalysis: (symbol) => http.get('/risk/symbol-analysis', { params: { symbol } }),
   riskLab: () => http.get('/risk/lab'),
+  c4Positions: () => http.get('/research/c4/positions'),
   c3Overview: () => http.get('/c3/overview'),
   c3Brief: (symbol) => http.get('/c3/brief', { params: { symbol } }),
   closePreview: (symbol) => http.get('/close-preview', { params: { symbol } }),

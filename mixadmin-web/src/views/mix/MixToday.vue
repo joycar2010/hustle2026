@@ -118,6 +118,8 @@
               </div>
             </div>
             <EmptyState v-if="!posShown.length" kind="none" :title="`「${queueLabel}」队列为空`" hint="点流程条其它分段查看"/>
+            <!-- C4 期现交割持仓卡(独立数据链:/research/c4/positions,不占 V6 work_items 投影) -->
+            <C4Board/>
           </div>
         </div>
         <!-- 栏3·风险 -->
@@ -242,6 +244,7 @@ import PrimaryAction from '../../components/v62/PrimaryAction.vue'
 import ValueCell from '../../components/v62/ValueCell.vue'
 import EmptyState from '../../components/v62/EmptyState.vue'
 import WorkTable from '../../components/v62/WorkTable.vue'
+import C4Board from '../../components/v62/C4Board.vue'
 import PartialRepayModal from '../../components/rules/PartialRepayModal.vue'
 import ClosePreviewDialog from '../../components/ClosePreviewDialog.vue'
 
