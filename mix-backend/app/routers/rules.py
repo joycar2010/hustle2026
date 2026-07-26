@@ -1,5 +1,6 @@
 """规则中心 —— 读：dcm engine_config 真值；写(P2)：代理 gateway engine_config API
 （令牌透传保留操作者身份，RBAC/武装联锁/confirm=ARM/审计全在 gateway），绝不直写引擎库。"""
+import json
 from fastapi import APIRouter, Query, Depends, Header, HTTPException
 from ..schemas import RulesResponse, RuleField
 from ..deps import require_operator, require_viewer, not_wired
@@ -307,6 +308,82 @@ async def rules_audit(scope_key: str, _who=Depends(require_viewer)):
     return [{"at": r["ts"].strftime("%m-%d %H:%M"), "user": r["operator"], "scope": scope_key,
              "field": f"{r['action']} {r['target']}".strip(), "change": str(r["result"])[:120]}
             for r in rows]
+
+
+# ==== opener 护栏配置(C2 自动开仓守卫:额度上限/深度硬闸/单币频率限制) ====
+
+@router.get("/opener")
+async def get_opener_guards(_who=Depends(require_viewer)):
+    """读 opener 护栏配置 + 当前快照(候选/在管名义/gate 状态)。
+    权威=dcm:exec:opener:guards(Redis JSON,operator 写);opener 每轮读并 overlay env 默认。"""
+    r = ds.rds()
+    if r is None:
+        raise HTTPException(503, "redis 未配置")
+    guards_raw = await r.get("dcm:exec:opener:guards")
+    guards = {}
+    if guards_raw:
+        try:
+            guards = json.loads(guards_raw)
+        except Exception:  # noqa: BLE001
+            pass
+    # opener 快照(含 gate 实时状态)
+    snap = await ds.get_json("dcm:exec:opener") or {}
+    gate = snap.get("gate") or {}
+    return {"guards": guards, "snapshot": {"ts": snap.get("ts"), "candidate_count": snap.get("candidate_count"),
+            "gate": gate}, "fields_meta": {
+        "depth_enforce": {"label": "深度硬闸", "type": "bool", "tip": "THIN 直接跳过(默认 ON)"},
+        "depth_k": {"label": "深度系数", "tip": "一档额须≥目标名义×K", "suffix": "x"},
+        "hold_hours": {"label": "持有窗口", "suffix": "小时", "tip": "funding 收益按持有窗折算"},
+        "fee_bps_per_fill": {"label": "单次成交费", "suffix": "bps"},
+        "est_roundtrip_cost_bps": {"label": "往返价差估计", "suffix": "bps"},
+        "min_net_daily_pct": {"label": "净日费率≥", "suffix": "%"},
+        "min_e_bps": {"label": "经济期望≥", "suffix": "bps"},
+        "max_notional_per_candidate_usdt": {"label": "单币额度上限", "suffix": "U"},
+        "max_total_armed_notional_usdt": {"label": "总额度上限", "suffix": "U"},
+        "max_concurrent_positions": {"label": "并发仓位上限", "suffix": "个"},
+        "per_symbol_cooldown_sec": {"label": "单币冷却", "suffix": "秒", "tip": "平仓后该币冷却期内不进候选"},
+    }}
+
+
+@router.put("/opener")
+async def put_opener_guards(body: dict, op=Depends(require_operator)):
+    """写 opener 护栏配置(差分 + 审计);opener 下一轮(60s)热读生效。"""
+    r = ds.rds()
+    if r is None:
+        raise HTTPException(503, "redis 未配置")
+    allowed = {"depth_enforce", "depth_k", "hold_hours", "fee_bps_per_fill", "est_roundtrip_cost_bps",
+               "min_net_daily_pct", "min_e_bps", "max_notional_per_candidate_usdt",
+               "max_total_armed_notional_usdt", "max_concurrent_positions", "per_symbol_cooldown_sec"}
+    guards_raw = await r.get("dcm:exec:opener:guards")
+    current = {}
+    if guards_raw:
+        try:
+            current = json.loads(guards_raw)
+        except Exception:  # noqa: BLE001
+            pass
+    changed = {}
+    for k, v in (body.get("guards") or {}).items():
+        if k not in allowed:
+            continue
+        if k == "depth_enforce":
+            v = bool(v)
+        elif k in ("max_concurrent_positions",):
+            v = int(v) if v not in (None, "") else None
+        else:
+            try:
+                v = float(v) if v not in (None, "") else None
+            except (TypeError, ValueError):
+                v = None
+        if current.get(k) != v:
+            changed[k] = v
+    if not changed:
+        return {"saved": False, "applied": [], "note": "无变更"}
+    merged = {**current, **changed}
+    await r.set("dcm:exec:opener:guards", json.dumps(merged, ensure_ascii=False))
+    await proxy.audit(op["operator"], op["role"], "rules.opener", "dcm:exec:opener:guards",
+                      changed, "ok")
+    return {"saved": True, "applied": list(changed), "hotReloadSec": 60,
+            "note": "opener 每轮(60s)读配置生效;深度/额度/频率三闸已 enforce"}
 
 
 @router.post("/dry-run")

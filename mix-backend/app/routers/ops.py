@@ -221,6 +221,147 @@ async def _upsert_instruments(pool, rows) -> int:
     return n
 
 
+async def _enrich_funding_meta(pool, venue: str) -> dict:
+    """补采 funding_interval_h/cap/floor + raw.onboardDate(§7.1 留空字段收口)。
+    权威 bulk 端点优先,自家 funding feed(dcm:feed:funding:{v} 实测 interval_h)兜底;
+    单所隔离,取不到=保持 NULL 诚实,绝不猜。cap/floor 口径=单期费率分数(0.02=2%/期)。"""
+    import httpx
+    import json as _json
+    n_int = n_cf = n_ob = 0
+
+    async def _set_int(iid, ih):
+        nonlocal n_int
+        await pool.execute("UPDATE instrument_spec SET funding_interval_h=$3, updated_at=now() "
+                           "WHERE venue=$1 AND instrument_id=$2", venue, iid, float(ih))
+        n_int += 1
+
+    async def _set_cf(iid, cap, flr):
+        nonlocal n_cf
+        await pool.execute("UPDATE instrument_spec SET cap=$3, floor=$4, updated_at=now() "
+                           "WHERE venue=$1 AND instrument_id=$2", venue, iid,
+                           float(cap) if cap is not None else None,
+                           float(flr) if flr is not None else None)
+        n_cf += 1
+
+    async def _set_ob(iid, ms):
+        nonlocal n_ob
+        await pool.execute(
+            "UPDATE instrument_spec SET raw=COALESCE(raw,'{}'::jsonb)||jsonb_build_object('onboardDate',$3::text), "
+            "updated_at=now() WHERE venue=$1 AND instrument_id=$2", venue, iid, str(int(ms)))
+        n_ob += 1
+
+    async with httpx.AsyncClient(timeout=25) as cli:
+        if venue == "binance":
+            # 默认8h(官方缺省),fundingInfo 只列例外(4h/1h+调整后cap/floor)
+            await pool.execute("UPDATE instrument_spec SET funding_interval_h=8 "
+                               "WHERE venue='binance' AND market_type='perp' AND funding_interval_h IS NULL")
+            fi = (await cli.get("https://fapi.binance.com/fapi/v1/fundingInfo")).json()
+            for s in (fi if isinstance(fi, list) else []):
+                iid = s.get("symbol")
+                if not iid:
+                    continue
+                if s.get("fundingIntervalHours"):
+                    await _set_int(iid, s["fundingIntervalHours"])
+                await _set_cf(iid, s.get("adjustedFundingRateCap"), s.get("adjustedFundingRateFloor"))
+            for url in ("https://fapi.binance.com/fapi/v1/exchangeInfo",
+                        "https://dapi.binance.com/dapi/v1/exchangeInfo"):
+                d = (await cli.get(url)).json()
+                for s in d.get("symbols", []):
+                    ob = s.get("onboardDate")
+                    if ob:
+                        await _set_ob(s["symbol"], ob)
+        elif venue == "bybit":
+            for cat in ("linear", "inverse"):
+                d = (await cli.get("https://api.bybit.com/v5/market/instruments-info"
+                                   f"?category={cat}")).json()
+                for s in (d.get("result", {}).get("list") or []):
+                    iid = s.get("symbol")
+                    if not iid:
+                        continue
+                    if s.get("fundingInterval"):
+                        await _set_int(iid, float(s["fundingInterval"]) / 60.0)
+                    up, lo = s.get("upperFundingRate"), s.get("lowerFundingRate")
+                    if up is not None or lo is not None:
+                        await _set_cf(iid, up, lo)
+                    if s.get("launchTime") and int(s.get("launchTime") or 0) > 0:
+                        await _set_ob(iid, s["launchTime"])
+        elif venue == "okx":
+            for it in ("SWAP", "FUTURES"):
+                d = (await cli.get("https://www.okx.com/api/v5/public/instruments"
+                                   f"?instType={it}")).json()
+                for s in (d.get("data") or []):
+                    if s.get("listTime") and int(s.get("listTime") or 0) > 0:
+                        await _set_ob(s["instId"], s["listTime"])
+        elif venue == "gate":
+            d = (await cli.get("https://api.gateio.ws/api/v4/futures/usdt/contracts")).json()
+            for s in (d or []):
+                iid = s.get("name")
+                if not iid:
+                    continue
+                if s.get("funding_interval"):
+                    await _set_int(iid, float(s["funding_interval"]) / 3600.0)
+                if s.get("funding_cap") is not None or s.get("funding_floor") is not None:
+                    await _set_cf(iid, s.get("funding_cap"), s.get("funding_floor"))
+                lt = s.get("launch_time") or s.get("create_time")
+                if lt and float(lt) > 0:
+                    await _set_ob(iid, float(lt) * 1000)
+        elif venue == "bitget":
+            for pt in ("USDT-FUTURES", "COIN-FUTURES"):
+                d = (await cli.get("https://api.bitget.com/api/v2/mix/market/contracts"
+                                   f"?productType={pt}")).json()
+                for s in (d.get("data") or []):
+                    iid = s.get("symbol")
+                    if not iid:
+                        continue
+                    fi_ = s.get("fundInterval") or s.get("fundingInterval")
+                    if fi_:
+                        await _set_int(iid, fi_)
+                    lt = s.get("launchTime")
+                    if lt and int(lt or 0) > 0:
+                        await _set_ob(iid, lt)
+        elif venue == "hyperliquid":
+            # HL 协议常量:每小时结算
+            await pool.execute("UPDATE instrument_spec SET funding_interval_h=1 "
+                               "WHERE venue='hyperliquid' AND market_type='perp'")
+            n_int += 1
+    # 兜底:自家 funding feed 实测 interval_h(覆盖 okx 等无 bulk 口径的所;只补 NULL 不覆盖权威值)
+    try:
+        feed = await ds.rds().hgetall(f"dcm:feed:funding:{venue}")
+        for k, v in (feed or {}).items():
+            sym = k.decode() if isinstance(k, bytes) else k
+            f = _json.loads(v)
+            ih = f.get("interval_h")
+            if not ih:
+                continue
+            base = sym[:-4] if sym.upper().endswith("USDT") else sym
+            await pool.execute(
+                "UPDATE instrument_spec SET funding_interval_h=$3, updated_at=now() "
+                "WHERE venue=$1 AND market_type='perp' AND linear_or_inverse='linear' "
+                "AND canonical_underlying=$2 AND funding_interval_h IS NULL", venue, base, float(ih))
+    except Exception:  # noqa: BLE001
+        pass
+    return {"interval_set": n_int, "capfloor_set": n_cf, "onboard_set": n_ob}
+
+
+@router.post("/system/instruments/enrich-funding")
+async def instruments_enrich_funding(body: dict, op=Depends(require_operator)):
+    """补采资金费元数据(interval/cap/floor/onboardDate)。venue=单所|all,逐所隔离。"""
+    pool = await ds.pg_main()
+    if pool is None:
+        raise HTTPException(503, "mix_main 未配置")
+    venue = str(body.get("venue") or "all").lower()
+    venues = ["binance", "bybit", "okx", "gate", "bitget", "hyperliquid"] if venue == "all" else [venue]
+    res, errs = {}, {}
+    for v in venues:
+        try:
+            res[v] = await _enrich_funding_meta(pool, v)
+        except Exception as e:  # noqa: BLE001
+            errs[v] = f"{e!r}"[:150]
+    await proxy.audit(op["operator"], op["role"], "instruments.enrich_funding", venue,
+                      {"res": res, "errs": errs}, "ok")
+    return {"ok": True, "enriched": res, "errors": errs}
+
+
 @router.post("/system/instruments/refresh")
 async def instruments_refresh(body: dict, op=Depends(require_operator)):
     """拉合约矩阵。venue=binance|bybit|okx|gate|bitget|hyperliquid|all。公开端点无需 key。"""
@@ -453,9 +594,11 @@ async def cr_post(rid: int, body: dict, op=Depends(require_operator)):
     pool = await ds.pg_main()
     if pool is None:
         raise HTTPException(503, "mix_main 未配置")
-    from .webauthn_auth import check_reauth_ticket
-    if not await check_reauth_ticket(op["operator"], str(body.get("reauth_ticket") or "")):
-        raise HTTPException(401, "过账须 Passkey 二次认证(reauth_ticket);先 WebAuthn 认证")
+    from ..deps import is_strong_session
+    if not is_strong_session(op):
+        from .webauthn_auth import check_reauth_ticket
+        if not await check_reauth_ticket(op["operator"], str(body.get("reauth_ticket") or "")):
+            raise HTTPException(401, "过账须 Passkey 二次认证(reauth_ticket);先 WebAuthn 认证")
     cr = await pool.fetchrow("SELECT * FROM capital_request WHERE id=$1", rid)
     if not cr:
         raise HTTPException(404, "申请不存在")
@@ -510,9 +653,11 @@ async def share_event_reverse(eid: int, body: dict, op=Depends(require_operator)
     pool = await ds.pg_main()
     if pool is None:
         raise HTTPException(503, "mix_main 未配置")
-    from .webauthn_auth import check_reauth_ticket
-    if not await check_reauth_ticket(op["operator"], str(body.get("reauth_ticket") or "")):
-        raise HTTPException(401, "更正须 Passkey 二次认证(reauth_ticket)")
+    from ..deps import is_strong_session
+    if not is_strong_session(op):
+        from .webauthn_auth import check_reauth_ticket
+        if not await check_reauth_ticket(op["operator"], str(body.get("reauth_ticket") or "")):
+            raise HTTPException(401, "更正须 Passkey 二次认证(reauth_ticket)")
     ev = await pool.fetchrow("SELECT investor_id, units, effective_nav_id, event_type FROM share_event WHERE id=$1", eid)
     if not ev:
         raise HTTPException(404, "事件不存在")
@@ -1604,3 +1749,169 @@ async def user_update(uid: int, body: dict, admin=Depends(require_admin)):
     await proxy.audit(admin["admin"], admin.get("role", ""), "user.update", f"uid:{uid}",
                       {k: body[k] for k in body if k != "password"}, "saved")
     return {"saved": True}
+
+
+@router.post("/system/statements/generate")
+async def statements_generate(body: dict, op=Depends(require_operator)):
+    """§4A 投资人对账单生成器 —— 只读投影快照,不重算/不动钱/不动份额/不碰 armed。
+    body: {period?:'INCEPTION', investor_id?:int(缺省=全体 units>0), dry_run?:bool}。
+    append-only:每次 version=max+1;dry_run=True 只返回将写入的 JSONB 不落库。
+    生成结果由投资人经 /portal/statements 只读查看 + confirm 确认。"""
+    pool = await ds.pg_main()
+    if pool is None:
+        raise HTTPException(503, "mix_main 未配置")
+    from .. import statement_gen as sg
+    period = (str(body.get("period") or "INCEPTION").strip() or "INCEPTION")
+    dry_run = bool(body.get("dry_run") or False)
+    only = body.get("investor_id")
+    targets = [int(only)] if only is not None else await sg.targets_with_units(pool)
+    results = []
+    for inv_id in targets:
+        if dry_run:
+            results.append({"investor_id": inv_id, "dry_run": True,
+                            "statement": await sg.build_statement(pool, inv_id, period)})
+            continue
+        res = await sg.persist_statement(pool, inv_id, period)
+        results.append(res)
+        if res.get("statement_id"):
+            await proxy.audit(op["operator"], op["role"], "statement.generate", str(inv_id),
+                              {"period": period, "version": res["version"], "equity": res.get("equity_usdt")},
+                              f"statement {res['statement_id']}")
+    return {"ok": True, "period": period, "dry_run": dry_run, "count": len(results), "results": results}
+
+
+@router.get("/research/c4/basis")
+async def c4_basis_board(_who=Depends(require_viewer)):
+    """C4 期现交割 measure 轨:最新交割合约年化基差快照(采样器每10min写
+    dcm:c4:basis:latest,ex=3600;无快照=stale 如实返回)。时序在 c4_basis_sample。"""
+    try:
+        raw = await ds.rds().get("dcm:c4:basis:latest")
+    except Exception:  # noqa: BLE001
+        raw = None
+    if raw:
+        return json.loads(raw)
+    return {"ts": None, "rows": [], "note": "采样器无快照(超1小时未产出=stale)"}
+
+
+@router.get("/research/c4/basis/history")
+async def c4_basis_history(days: int = 7, _who=Depends(require_viewer)):
+    """C4 观察期聚合:窗口内逐合约净年化(摊占用资本)的 p50/min/max/均值+样本数。
+    决策口径=看 p50 的持续性而非单次快照;净数已含保守费率线(fee_src 见快照)。"""
+    pool = await ds.pg_main()
+    if pool is None:
+        raise HTTPException(503, "mix_main 未配置")
+    days = max(1, min(int(days or 7), 60))
+    rows = await pool.fetch(
+        "SELECT venue,instrument_id,underlying, max(expiry) expiry, count(*) n, "
+        " round(avg(net_ann_capital_pct)::numeric,4) avg_net, "
+        " round((percentile_cont(0.5) WITHIN GROUP (ORDER BY net_ann_capital_pct))::numeric,4) p50_net, "
+        " round(min(net_ann_capital_pct)::numeric,4) min_net, "
+        " round(max(net_ann_capital_pct)::numeric,4) max_net, "
+        " round(avg(ann_pct)::numeric,4) avg_gross, max(ts) last_ts "
+        "FROM c4_basis_sample WHERE ts > now() - ($1||' days')::interval "
+        "AND net_ann_capital_pct IS NOT NULL "
+        "GROUP BY 1,2,3 ORDER BY p50_net DESC NULLS LAST LIMIT 200", str(days))
+    return {"window_days": days, "count": len(rows),
+            "note": "净=毛-费率线(保守默认可覆写dcm:c4:costcfg)再摊1+margin_ratio占用",
+            "rows": [{**{k: r[k] for k in ("venue", "instrument_id", "underlying", "n")},
+                      "expiry": r["expiry"].isoformat(),
+                      "avg_net": float(r["avg_net"]), "p50_net": float(r["p50_net"]),
+                      "min_net": float(r["min_net"]), "max_net": float(r["max_net"]),
+                      "avg_gross": float(r["avg_gross"]),
+                      "last_ts": r["last_ts"].isoformat()} for r in rows]}
+
+
+@router.get("/research/c4/positions")
+async def c4_positions_board(_who=Depends(require_viewer)):
+    """C4 持仓板(Redis 只读):risk-ledger status.c4(账面vs实盘vs liq距离/到期天数)
+    + 采样器当前净年化(所持合约)+ 执行器告警尾。今日工作台 UI 卡片接此数据源。"""
+    out = {"ts": None, "positions": [], "basis_now": [], "alerts": []}
+    try:
+        raw = await ds.rds().get("dcm:risk:status")
+        if raw:
+            d = json.loads(raw)
+            out["positions"] = d.get("c4") or []
+            out["ts"] = d.get("ts")
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        raw = await ds.rds().get("dcm:c4:basis:latest")
+        if raw:
+            s = json.loads(raw)
+            held = {p.get("symbol") for p in out["positions"]}
+            out["basis_now"] = [x for x in s.get("rows", []) if x.get("instrument_id") in held]
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        rows = await ds.rds().lrange("dcm:c4:alerts", 0, 9)
+        out["alerts"] = [json.loads(x) for x in rows]
+    except Exception:  # noqa: BLE001
+        pass
+    return out
+
+
+@router.get("/research/c5/basis")
+async def c5_basis_board(_who=Depends(require_viewer)):
+    """C5 永续-交割 measure:同所 perp vs 交割年化基差+浮动funding指示(dcm:c5:basis:latest,
+    采样器10min,ex=3600 无快照=stale)。候选闸=不含funding的硬边际。时序在 c5_basis_sample。"""
+    try:
+        raw = await ds.rds().get("dcm:c5:basis:latest")
+    except Exception:  # noqa: BLE001
+        raw = None
+    if raw:
+        return json.loads(raw)
+    return {"ts": None, "rows": [], "note": "采样器无快照(超1小时未产出=stale)"}
+
+
+@router.get("/research/c6/spreads")
+async def c6_spreads_board(_who=Depends(require_viewer)):
+    """C6 跨所同到期交割配对 measure:严格同margin类型+同结算资产才配对;
+    结算指数差风险未建模(dcm:c6:spread:latest)。时序在 c6_spread_sample。"""
+    try:
+        raw = await ds.rds().get("dcm:c6:spread:latest")
+    except Exception:  # noqa: BLE001
+        raw = None
+    if raw:
+        return json.loads(raw)
+    return {"ts": None, "rows": [], "note": "采样器无快照(超1小时未产出=stale)"}
+
+
+@router.get("/research/c2c/signal")
+async def c2c_signal_board(_who=Depends(require_viewer)):
+    """C2.C 收敛信号板(SHADOW/HOUSE_RND):gap_pct 7日分位+z-score,候选=高分位宽缺口。
+    数据源 dcm:c2c:signal(10min timer);时序在 c2c_signal_sample。无执行消费者。"""
+    try:
+        raw = await ds.rds().get("dcm:c2c:signal")
+    except Exception:  # noqa: BLE001
+        raw = None
+    out = {"ts": None, "rows": [], "note": "信号器无快照(超1小时未产出=stale)"}
+    if raw:
+        out = json.loads(raw)
+    try:
+        c = await ds.rds().get("dcm:c2c:candidates")
+        if c:
+            out["decisions"] = json.loads(c)
+    except Exception:  # noqa: BLE001
+        pass
+    return out
+
+
+@router.get("/research/c3r/ranking")
+async def c3r_ranking_board(_who=Depends(require_viewer)):
+    """C3.R 三率净差榜(lending-advisor 实时,日化%=|funding|+earn−borrow,单位已核):
+    engine-lending 已停服(Gate1 C3 Exit),本榜=advisor 信号面;时序在 c3r_ranking_sample。"""
+    try:
+        raw = await ds.rds().get("dcm:lending:ranking")
+    except Exception:  # noqa: BLE001
+        raw = None
+    out = {"ts": None, "top": [], "note": "lending-advisor 无快照(服务死/过龄)"}
+    if raw:
+        out = json.loads(raw)
+        out["note"] = "engine-lending已停服;本榜=lending-advisor实时信号(无执行);单位=日化%"
+    try:
+        c = await ds.rds().get("dcm:c3r:candidates")
+        if c:
+            out["candidates"] = json.loads(c)
+    except Exception:  # noqa: BLE001
+        pass
+    return out

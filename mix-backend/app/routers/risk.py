@@ -33,7 +33,7 @@ async def risk_overview(_who=Depends(require_viewer)):
     total_exposure = sum(float(v.get("exposure_notional") or 0) for v in venues.values())
     restricted_equity = sum(float(v.get("equity") or 0) for v in venues.values()
                             if v.get("mode") not in ("NORMAL",))
-    return {
+    out = {
         "stale": age > 90, "age_sec": age, "policy_version": pol.get("policy_version"),
         "global_mode": pol.get("global_mode", "NORMAL"),
         "capped_venues": pol.get("capped_venues") or [],
@@ -42,6 +42,25 @@ async def risk_overview(_who=Depends(require_viewer)):
         "restricted_equity_usdt": round(restricted_equity, 2),
         "venues": venues,
     }
+    # 人工冻结可见性:每 scope 最新未过期且非 NORMAL 的 override(状态条显示"已冻结N小时",防遗忘)
+    try:
+        pool = await ds.pg()
+        if pool is not None:
+            frz = await pool.fetch(
+                "SELECT * FROM (SELECT DISTINCT ON (scope_type, scope_key) scope_type, scope_key, mode, "
+                "reason, created_by, created_at, expires_at FROM risk_policy_override "
+                "WHERE expires_at IS NULL OR expires_at > now() "
+                "ORDER BY scope_type, scope_key, id DESC) t WHERE mode!='NORMAL'")
+            out["manual_freezes"] = [{
+                "scope": f"{r['scope_type']}:{r['scope_key']}", "mode": r["mode"],
+                "reason": r["reason"], "by": r["created_by"],
+                "since": r["created_at"].isoformat(),
+                "age_hours": round((time.time() - r["created_at"].timestamp()) / 3600, 1),
+                "expires_at": r["expires_at"].isoformat() if r["expires_at"] else None,
+            } for r in frz]
+    except Exception:  # noqa: BLE001
+        out["manual_freezes"] = []
+    return out
 
 
 @router.get("/risk/caps")
@@ -109,7 +128,20 @@ async def risk_override_add(body: dict, op=Depends(require_operator)):
     scope_key = str(body.get("scope_key") or ("GLOBAL" if scope_type == "GLOBAL" else "")).strip()
     if not scope_key:
         raise HTTPException(400, "scope_key 必填(GLOBAL 除外)")
-    expires_at = body.get("expires_at")   # ISO8601 或 null
+    # 过期机制:ttl_hours(数字,优先) 或 expires_at(ISO8601);到期后 risk-ledger 自动回落上一条未过期记录
+    import datetime as _dt
+    expires_at = None
+    ttl_h = body.get("ttl_hours")
+    if ttl_h:
+        try:
+            expires_at = _dt.datetime.now(_dt.timezone.utc) + _dt.timedelta(hours=float(ttl_h))
+        except (TypeError, ValueError):
+            raise HTTPException(400, "ttl_hours 须为数字(小时)")
+    elif body.get("expires_at"):
+        try:
+            expires_at = _dt.datetime.fromisoformat(str(body["expires_at"]).replace("Z", "+00:00"))
+        except ValueError:
+            raise HTTPException(400, "expires_at 须为 ISO8601")
     pool = await ds.pg()
     if pool is None:
         raise HTTPException(503, "dcm_main 不可达")
@@ -119,6 +151,7 @@ async def risk_override_add(body: dict, op=Depends(require_operator)):
         scope_type, scope_key, mode, str(body.get("reason") or "")[:300], expires_at, op["operator"])
     await proxy.audit(op["operator"], op["role"], "risk.override", f"{scope_type}:{scope_key}", body, mode)
     return {"saved": True, "scope": f"{scope_type}:{scope_key}", "mode": mode,
+            "expires_at": expires_at.isoformat() if expires_at else None,
             "note": "risk-ledger ≤30s 内合并生效"}
 
 
@@ -293,8 +326,44 @@ async def risk_summary(_who=Depends(require_viewer)):
         "exposure_notional", "cap_usdt", "tier", "haircut_pct", "trapped_usdt")},
         "withdrawal": wd.get(v)} for v, d in venues.items()]
     rows.sort(key=lambda r: (-_sev.get(r["mode"], 0), -(r.get("equity") or 0)))
+    # 人工冻结可见性(与 /risk/overview 同口径):状态条显示"已冻结N小时"防遗忘
+    freezes = []
+    if pool is not None:
+        try:
+            frz = await pool.fetch(
+                "SELECT * FROM (SELECT DISTINCT ON (scope_type, scope_key) scope_type, scope_key, mode, "
+                "reason, created_by, created_at, expires_at FROM risk_policy_override "
+                "WHERE expires_at IS NULL OR expires_at > now() "
+                "ORDER BY scope_type, scope_key, id DESC) t WHERE mode!='NORMAL'")
+            freezes = [{"scope": f"{r['scope_type']}:{r['scope_key']}", "mode": r["mode"],
+                        "reason": r["reason"], "by": r["created_by"],
+                        "age_hours": round((time.time() - r["created_at"].timestamp()) / 3600, 1),
+                        "expires_at": r["expires_at"].isoformat() if r["expires_at"] else None}
+                       for r in frz]
+        except Exception:  # noqa: BLE001
+            pass
+    # 行情/三源对账新鲜度(状态条行1此前硬编码N/A):行情=feed-cex心跳龄,三源对账=exec-recon快照
+    feed_age, recon = None, None
+    try:
+        hb = await ds.get_json("dcm:hb:feed-cex")
+        if hb and hb.get("ts"):
+            feed_age = int(time.time() - float(hb["ts"]))
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        rc = await ds.get_json("dcm:exec:recon")
+        if rc:
+            brk = rc.get("breaks")
+            recon = {"matched": rc.get("matched"),
+                     "breaks": len(brk) if isinstance(brk, list) else (brk or 0),
+                     "age_sec": int(time.time() - float(rc.get("ts") or 0)) if rc.get("ts") else None}
+    except Exception:  # noqa: BLE001
+        pass
     return {
         "stale": stale, "age_sec": age,
+        "market_feed_age_sec": feed_age,
+        "recon": recon,
+        "manual_freezes": freezes,
         "policy_epoch": (pol or {}).get("policy_epoch"), "policy_version": (pol or {}).get("policy_version"),
         "global_mode": (pol or {}).get("global_mode", "NORMAL"),
         "worst_mode": (worst or {}).get("mode", "NORMAL") if not stale else "STALE",
@@ -585,6 +654,18 @@ async def risk_symbol_analysis(symbol: str, _who=Depends(require_viewer)):
         except Exception:
             pass
         out.append(row)
+    try:
+        _c = symbol[:-4] if symbol.upper().endswith("USDT") else symbol
+        await ds.rds().setex(f"dcm:l1lite:want:{_c}", 900, "1")
+    except Exception:  # noqa: BLE001
+        pass
+    # 多所 OI(60s缓存,单所失败=None 诚实降级);并发拉不串行拖延迟
+    import asyncio as _aio
+    from .. import oi_feed
+    ois = await _aio.gather(*(oi_feed.get_oi(r["venue"], symbol, r["mid"]) for r in out))
+    for r, oi in zip(out, ois):
+        r["oi"] = oi.get("oi_usdt")
+        r["oi_base"] = oi.get("oi_base")
     return {"symbol": symbol, "venues": out}
 
 
@@ -592,8 +673,14 @@ async def risk_symbol_analysis(symbol: str, _who=Depends(require_viewer)):
 async def risk_lab(_who=Depends(require_viewer)):
     """屏1·LAB 卡:engine-lending shadow 决策账快照(HOUSE_RND,不进 CORE_POOL)。"""
     snap = await ds.get_json("dcm:engine:lending:positions") or {}
-    return {"mode": snap.get("mode", "shadow"), "would_hold": snap.get("would_hold") or [],
-            "slots": snap.get("slots"), "ts": snap.get("ts")}
+    if snap.get("would_hold"):
+        return {"mode": snap.get("mode", "shadow"), "would_hold": snap.get("would_hold") or [],
+                "slots": snap.get("slots"), "ts": snap.get("ts")}
+    # engine-lending 已停服(Gate1 C3 Exit)→ 回退 lending-advisor 实时榜(如实标注,不冒充引擎)
+    rank = await ds.get_json("dcm:lending:ranking") or {}
+    return {"mode": "advisor-ranking(engine-lending已停服)",
+            "would_hold": [x.get("coin") for x in (rank.get("top") or [])[:5]],
+            "slots": None, "ts": rank.get("ts")}
 
 
 @router.get("/c3/overview")
@@ -870,3 +957,39 @@ async def registry_asset_network(_who=Depends(require_viewer)):
     rows.sort(key=lambda x: (x["deposit"] is not False, x["withdraw"] is not False))
     return {"rows": rows[:200], "total": len(st or {}),
             "note": "任一网络可充/可提归并;持仓币提现关=下架/脱锚前兆(见平台风险)"}
+
+
+async def override_age_reminder_loop():
+    """人工冻结超时提醒:>24h 未解除且无过期时间的非 NORMAL override,每 6h 跑马灯提醒一次。
+    防"按了冻结忘了解除、次日满屏N/A找根因"复发(2026-07-18 #19 事故)。"""
+    import asyncio as _aio
+    import json as _json
+    import time as _t
+    await _aio.sleep(60)
+    while True:
+        try:
+            pool = await ds.pg()
+            r = ds.rds()
+            if pool is not None and r is not None:
+                rows = await pool.fetch(
+                    "SELECT * FROM (SELECT DISTINCT ON (scope_type, scope_key) scope_type, scope_key, "
+                    "mode, created_by, created_at, expires_at FROM risk_policy_override "
+                    "WHERE expires_at IS NULL OR expires_at > now() "
+                    "ORDER BY scope_type, scope_key, id DESC) t "
+                    "WHERE mode!='NORMAL' AND created_at < now() - interval '24 hours'")
+                for row in rows:
+                    scope = f"{row['scope_type']}:{row['scope_key']}"
+                    thr_key = f"mix:override:remind:{scope}"
+                    if await r.get(thr_key):
+                        continue
+                    age_h = round((_t.time() - row["created_at"].timestamp()) / 3600)
+                    exp = "无过期时间" if not row["expires_at"] else "有过期时间"
+                    msg = {"service": "mix-backend", "title": "人工冻结超时提醒",
+                           "content": f"{scope} 仍处 {row['mode']} 已 {age_h} 小时({exp},{row['created_by']}设置)。"
+                                      f"若非有意长期冻结,请到风险中心解除或补过期时间。",
+                           "level": "warn", "color": "orange", "blink": False}
+                    await r.publish("dcm:notify:broadcast", _json.dumps(msg, ensure_ascii=False))
+                    await r.setex(thr_key, 6 * 3600, "1")
+        except Exception:  # noqa: BLE001
+            pass
+        await _aio.sleep(3600)

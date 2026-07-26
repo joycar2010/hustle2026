@@ -15,6 +15,7 @@
 - 手机受限角色(OPERATOR_MOBILE_LIMITED)只允许减险/确认/暂停新增,禁开仓/改规则/恢复NORMAL。
 - 做不到的命令诚实 501,绝不假 202。
 """
+import asyncio
 import json
 import time
 import secrets
@@ -154,7 +155,11 @@ async def assets_search(q: str, limit: int = 20, _who=Depends(require_viewer)):
 @router.get("/assets/{asset_id}/360")
 async def asset360_snapshot(asset_id: str, _who=Depends(require_viewer)):
     """单币全景快照：跨平台价格/资金费/OI/充提/韩国/市值（A1-A3分批完成）。"""
-    return await asset360.build_asset360_snapshot(asset_id.upper())
+    aid = asset_id.strip().upper()
+    if not aid or aid in ("UNDEFINED", "NULL", "NONE"):
+        raise HTTPException(400, "asset_id 必填")
+    # 归一到 canonical(BTCUSDT→BTC):pos_detail 匹配/CoinGecko 映射/韩国市场都以 canonical 为键
+    return await asset360.build_asset360_snapshot(asset360._match_alias(aid))
 
 
 @router.get("/operator/workitems")
@@ -628,8 +633,11 @@ async def operator_commands(body: dict, x_device_session: str | None = Header(de
     try:
         if ctype == "pause_new_risk":
             from .maintenance import _risk_override
-            await _risk_override("NO_NEW_RISK", str(params.get("reason") or "V6命令:暂停新增"), op["operator"])
-            result = {"applied": "GLOBAL NO_NEW_RISK(经 risk_policy_override 权威通道)"}
+            ttl = params.get("ttl_hours")
+            await _risk_override("NO_NEW_RISK", str(params.get("reason") or "V6命令:暂停新增"),
+                                 op["operator"], ttl_hours=float(ttl) if ttl else None)
+            result = {"applied": "GLOBAL NO_NEW_RISK(经 risk_policy_override 权威通道)",
+                      "ttl_hours": ttl or None}
         elif ctype == "resume_normal":
             if urole == "OPERATOR_MOBILE_LIMITED":
                 raise HTTPException(403, "手机角色不能恢复 NORMAL")
@@ -809,6 +817,75 @@ async def legacy_compare(persist: bool = True, _who=Depends(require_viewer)):
     return run
 
 
+def _read_write_gauge() -> dict:
+    """§14.2 第二门槛度量:旧 C3.S 写接口零调用计量器(read-only).
+    由 root systemd timer(legacy-write-gauge)每小时扫 nginx 日志写出 /var/lib/mix/legacy_write_gauge.json;
+    本函数只读该文件,后端不 sudo、不碰 coin 引擎热路径。文件缺失=计量器未部署,如实回 available=False。"""
+    import json as _json, os as _os, datetime as _dt
+    p = "/var/lib/mix/legacy_write_gauge.json"
+    try:
+        with open(p) as f:
+            g = _json.load(f)
+        age_sec = None
+        ga = g.get("generated_at")
+        if ga:
+            try:
+                age_sec = (_dt.datetime.now(_dt.timezone.utc)
+                           - _dt.datetime.fromisoformat(ga)).total_seconds()
+            except Exception:  # noqa: BLE001
+                age_sec = None
+        return {"available": True, "stale": (age_sec is not None and age_sec > 7200),
+                "age_sec": age_sec,
+                "zero_call_streak_days": g.get("zero_call_streak_days", 0),
+                "gate_met": bool(g.get("gate_met")),
+                "days_remaining": g.get("days_remaining"),
+                "log_days_available": g.get("log_days_available"),
+                "note": g.get("note", "")}
+    except FileNotFoundError:
+        return {"available": False, "gate_met": False, "zero_call_streak_days": 0,
+                "note": "计量器未部署(缺 /var/lib/mix/legacy_write_gauge.json)"}
+    except Exception as e:  # noqa: BLE001
+        return {"available": False, "gate_met": False, "zero_call_streak_days": 0,
+                "note": f"计量器读取失败:{type(e).__name__}"}
+
+
+async def _decision_parity_panel(pool) -> dict:
+    """S1 决策级经济平价证据(read-only,读 c3s_ground_truth+c3s_shadow_decision)。
+    ⚠ 这【不是】零差异门:V6-enforce 背离老引擎(拒开负 E 仓)正是目的(V6 经济更严),
+    背离越多越好。此面板量化【切写的经济就绪度】:V6-enforce 会拒开哪些、纯 E 闸避损多少、
+    E 值复现保真度。自杀闸(配置冲突,两模式都拒)与 no_data(缺料不可判)不计入避损归因。"""
+    try:
+        rows = await pool.fetch(
+            "SELECT mode, gate, count(*) n, coalesce(sum(realized_pnl),0)::float pnl, "
+            "count(*) FILTER (WHERE e_match) em, "
+            "count(*) FILTER (WHERE e_stored IS NOT NULL) ek "
+            "FROM c3s_shadow_decision GROUP BY 1,2")
+    except Exception as e:  # noqa: BLE001
+        return {"available": False, "note": f"S1 决策表未就绪:{type(e).__name__}"}
+    if not rows:
+        return {"available": False, "note": "c3s_shadow_decision 空(S1 尚未回放)"}
+    agg: dict = {}
+    for r in rows:
+        m = agg.setdefault(r["mode"], {"gates": {}, "gate_pnl": {}, "e_match": 0,
+                                       "e_known": 0, "n": 0})
+        m["gates"][r["gate"]] = r["n"]
+        m["gate_pnl"][r["gate"]] = round(r["pnl"], 4)
+        m["e_match"] += r["em"]
+        m["e_known"] += r["ek"]
+        m["n"] += r["n"]
+    enf = agg.get("enforce", {})
+    e_avoided = enf.get("gate_pnl", {}).get("E", 0.0)      # 纯 E 闸拒开仓的老引擎实收(负=避损)
+    ek = enf.get("e_known", 0)
+    latest = await pool.fetchval("SELECT max(decided_at)::text FROM c3s_shadow_decision")
+    return {"available": True, "as_of": latest, "by_mode": agg,
+            "e_gate_avoided_pnl": round(e_avoided, 4),
+            "e_match_fidelity": f"{enf.get('e_match', 0)}/{ek}",
+            "note": "S1 决策级经济平价(零真钱)。V6-enforce 对老引擎的背离=预期(V6 经济更严),"
+                    "非零差异门。纯 E 闸(E≤0)拒开仓·老引擎已实现合计="
+                    f"{round(e_avoided, 4)}U(负值=切写后可避免的真实已实现亏损)。"
+                    "自杀闸/no_data 不计入避损归因;E 值逐字节复现保真度见 e_match_fidelity。"}
+
+
 @router.get("/operator/legacy/runs")
 async def legacy_runs(limit: int = 30, _who=Depends(require_viewer)):
     pool = await _pool()
@@ -822,5 +899,147 @@ async def legacy_runs(limit: int = 30, _who=Depends(require_viewer)):
             zero_streak += 1
         else:
             break
+    # §14.2 时钟按日历天:连续(无间断)且每天全部 run 零差异的 UTC 天数;没跑 compare 的天=无证据,断streak
+    days = await pool.fetch(
+        "SELECT (as_of AT TIME ZONE 'utc')::date d, max(diff_count) mx "
+        "FROM legacy_compare_run GROUP BY 1 ORDER BY 1 DESC")
+    import datetime as _dt
+    streak_days = 0
+    expect = _dt.datetime.utcnow().date()
+    for r in days:
+        if r["d"] not in (expect, expect - _dt.timedelta(days=1)) and streak_days == 0:
+            break  # 最新记录不在今天/昨天=时钟未在走
+        if streak_days > 0 and r["d"] != expect:
+            break  # 断天
+        if r["mx"] != 0:
+            break
+        streak_days += 1
+        expect = r["d"] - _dt.timedelta(days=1)
+    wg = _read_write_gauge()
+    dp = await _decision_parity_panel(pool)
+    diff_gate_met = streak_days >= 14
+    write_gate_met = bool(wg.get("gate_met"))
     return {"runs": out, "zero_diff_streak": zero_streak,
-            "gate_note": "淘汰门槛:连续14天(或全场景)零 P0/P1 差异+旧写接口14天零调用(§14.2)"}
+            "zero_diff_streak_days": streak_days,
+            "gate_days_required": 14,
+            "gate_days_remaining": max(0, 14 - streak_days),
+            # §14.2 两门槛并列 + AND(两者皆满才允许淘汰旧引擎写权威)
+            "gate1_diff_zero": {"met": diff_gate_met, "streak_days": streak_days,
+                                "remaining": max(0, 14 - streak_days)},
+            "gate2_write_zero_call": wg,
+            # S1 经济就绪证据(只读,非 AND 门 —— 背离是预期,量化避损)
+            "gate3_decision_parity_evidence": dp,
+            "batch_h_gate_met": diff_gate_met and write_gate_met,
+            "gate_note": "淘汰门槛(§14.2)= 连续14天零P0/P1差异 AND 旧写接口连续14天零调用;"
+                         "两门槛皆满才允许切换执行写权威。streak_days按UTC日历天计,当天无对比记录即断。"
+                         "注:旧coin-admin写接口在C已是302 stub(结构性零调用),真正阻塞切写的是"
+                         "V6 C3.S写/开仓路径尚未建成(仍为READONLY_SHADOW),非时钟。"
+                         "gate3 为 S1 决策级经济平价证据(只读·非 AND 门):量化 V6-enforce 切写后"
+                         "可避免的已实现亏损,是切写的经济就绪度佐证而非零差异闸。"}
+
+
+@router.get("/operator/legacy/write-transport")
+async def legacy_write_transport(_who=Depends(require_viewer)):
+    """S2 影子写路传输就绪度(只读)。展示 V6 C3.S 写者【双钥】状态、绞杀者桥存活、最近影子意图。
+    ⚠ 双钥皆需盯盘放行:钥1=注册表 C3.S.V6→ACTIVE_WRITE;钥2=Redis dcm:c3s:v6:armed=1。
+    本端点只读,不拨任何钥、不入队。double_key_armed=false 即写路被关死。"""
+    from .. import c3s_writer
+    pool = await _pool()
+    r = ds.rds()
+    try:
+        st = await c3s_writer.status(pool, r)
+    except Exception as e:  # noqa: BLE001
+        return {"available": False, "note": f"S2 传输状态读取失败:{type(e).__name__}: {e}"}
+    st["available"] = True
+    st["note"] = ("S2 传输管道已铺(信封1:1镜像 dcm:coin:cmd 白名单;coin 状态机+护栏仍权威;桥铸JWT)。"
+                  "double_key_armed=false 即写路关死;切活写=盯盘放行下同时翻两钥(注册表+armed)。")
+    return st
+
+
+@router.get("/operator/legacy/autopilot")
+async def legacy_autopilot(_who=Depends(require_viewer)):
+    """影子自主环(c3s_autopilot)对账面板(只读)。
+    V6 自主大脑全速跑活:读实时点差→独立算 E→三闸(信号·E·借币可借性)决策开/跳,
+    但【只写影子账本 c3s_autopilot_decision,物理无 emit】,与活着的老 coin 引擎并跑。
+    ⚠ 本面板量化 V6 自主决策与老引擎真实行为的一致性,零真钱;OPEN=V6 若掌权会真开的仓。"""
+    pool = await _pool()
+    r = ds.rds()
+    enabled = None
+    borrowable_now = None
+    if r is not None:
+        try:
+            enabled = str(await r.get("dcm:c3s:v6:autopilot")) == "1"
+            h = await r.hgetall("dcm:borrow:avail")
+            now = time.time()
+            cnt = 0
+            for _k, v in (h or {}).items():
+                try:
+                    d = json.loads(v)
+                    if float(d.get("amount") or 0) > 0 and (now - float(d.get("ts") or 0)) <= 3600:
+                        cnt += 1
+                except Exception:  # noqa: BLE001
+                    pass
+            borrowable_now = cnt
+        except Exception:  # noqa: BLE001
+            pass
+    try:
+        last = await pool.fetchrow("SELECT * FROM c3s_autopilot_cycle ORDER BY id DESC LIMIT 1")
+        tot = await pool.fetchval("SELECT count(*) FROM c3s_autopilot_cycle")
+    except Exception as e:  # noqa: BLE001
+        return {"available": False, "note": f"影子自主环表未就绪:{type(e).__name__}(服务或未启动)"}
+    if not last:
+        return {"available": False, "enabled": enabled, "note": "c3s_autopilot 尚无 cycle(服务未跑?)"}
+    last_age = time.time() - last["cycle_ts"].timestamp()
+    agg = await pool.fetchrow(
+        "SELECT count(*) FILTER(WHERE v6_decision='OPEN') v6_open, "
+        "count(*) FILTER(WHERE signal AND v6_gate='e_gate') skip_egate, "
+        "count(*) FILTER(WHERE signal AND v6_gate='borrow_unavail') skip_borrow, "
+        "count(*) FILTER(WHERE old_e IS NOT NULL) old_evals, "
+        "count(*) FILTER(WHERE e_parity) e_parity_ok "
+        "FROM c3s_autopilot_decision WHERE cycle_ts > now()-interval '24 hours'")
+    v6_opens = await pool.fetch(
+        "SELECT symbol, count(*) n, max(v6_e)::float max_e, max(cycle_ts)::text last "
+        "FROM c3s_autopilot_decision WHERE v6_decision='OPEN' AND cycle_ts > now()-interval '24 hours' "
+        "GROUP BY symbol ORDER BY n DESC LIMIT 20")
+    phantom = await pool.fetch(
+        "SELECT symbol, count(*) n, max(v6_e)::float max_e "
+        "FROM c3s_autopilot_decision WHERE signal AND v6_gate='borrow_unavail' "
+        "AND cycle_ts > now()-interval '24 hours' GROUP BY symbol ORDER BY n DESC LIMIT 12")
+    import decimal as _dec
+    def _norm(v):
+        if hasattr(v, "isoformat"):
+            return v.isoformat()
+        if isinstance(v, _dec.Decimal):
+            return float(v)
+        return v
+    return {
+        "available": True, "enabled": enabled,
+        "service_live": last_age < 120, "last_cycle_age_s": round(last_age, 1),
+        "cycles_total": tot, "borrowable_assets_now": borrowable_now,
+        "last_cycle": {k: _norm(v) for k, v in dict(last).items()},
+        "window_24h": {"v6_open": agg["v6_open"], "skip_egate": agg["skip_egate"],
+                       "skip_borrow": agg["skip_borrow"], "old_engine_evals": agg["old_evals"],
+                       "e_parity_ok": agg["e_parity_ok"]},
+        "v6_would_open": [dict(x) for x in v6_opens],
+        "phantom_blocked_by_borrow_gate": [dict(x) for x in phantom],
+        "note": ("V6 自主大脑三闸(信号·E·借币)决策,只写影子账本零真钱。"
+                 "phantom_blocked_by_borrow_gate=裸 E 闸会误判开、被借币可借性闸拦下的幻影单——"
+                 "影子环首日实证:高点差币多因无券可借(库存=0)才点差高。"
+                 "v6_would_open=V6 若掌写权会真开的仓,须与老引擎实开(S0 c3s_ground_truth)N 天对齐后方谈交接。")}
+
+
+async def legacy_compare_daily_loop():
+    """§14.2 时钟发条:每小时检查,当 UTC 日尚无对比记录时自动跑一次并落库。
+    幂等(先查当日有无记录),重启安全;人工触发的 compare 照常额外落行不冲突。"""
+    await asyncio.sleep(30)
+    while True:
+        try:
+            pool = await _pool()
+            n = await pool.fetchval(
+                "SELECT count(*) FROM legacy_compare_run "
+                "WHERE (as_of AT TIME ZONE 'utc')::date = (now() AT TIME ZONE 'utc')::date")
+            if not n:
+                await legacy_compare(persist=True, _who=None)
+        except Exception:  # noqa: BLE001
+            pass
+        await asyncio.sleep(3600)

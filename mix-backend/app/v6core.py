@@ -78,12 +78,25 @@ def _risk_of_legs(pol_venues: dict, venues: list[str]) -> dict:
 
 
 async def _confirmed_income() -> dict[str, float]:
-    """逐币已确认收益(income_records FUNDING/PNL/FEE 累加,net 口径与 pnl-recorder 一致)。"""
+    """逐币已确认收益(income_records FUNDING/PNL/FEE 累加,net 口径与 pnl-recorder 一致)。
+    ⚠列名=itype/amount(此前误写 income_type/income → UndefinedColumn 被静默 catch → 全表N/A)。"""
     rows = await ds.fetch(
-        "SELECT upper(symbol) AS s, round(sum(income)::numeric,2) AS v FROM income_records "
-        "WHERE income_type IN ('FUNDING','PNL','FEE','COMMISSION','REALIZED_PNL') "
+        "SELECT upper(symbol) AS s, round(sum(amount)::numeric,3) AS v FROM income_records "
+        "WHERE itype IN ('FUNDING','PNL','FEE','COMMISSION','REALIZED_PNL') "
         "GROUP BY upper(symbol)")
     return {r["s"]: float(r["v"]) for r in rows if r.get("s")}
+
+
+async def _opportunity_actions() -> dict[str, str]:
+    """机会动作消费(24h内每 symbol 最新一条):TO_WORKBENCH/WATCH/IGNORE。
+    此前只写 v6_opportunity_action 从不读 → 送入工作台按钮登记成功但投影永不流转="点了没反应"。"""
+    pool = await ds.pg_main()
+    if pool is None:
+        return {}
+    rows = await pool.fetch(
+        "SELECT DISTINCT ON (symbol) upper(symbol) AS s, action FROM v6_opportunity_action "
+        "WHERE created_at > now() - interval '24 hours' ORDER BY symbol, id DESC")
+    return {r["s"]: r["action"] for r in rows}
 
 
 async def build_work_items() -> list[dict]:
@@ -115,23 +128,40 @@ async def build_work_items() -> list[dict]:
             base["work_item_id"] = _wid(base["source"], base["symbol"], base["strategy_code"])
         return base
 
-    # ── 源1: opener 候选(shadow 决策服务)→ DISCOVERED ──────────────────
+    # ── 源1: opener 候选(shadow 决策服务)→ DISCOVERED;操作员动作驱动阶段流转 ──
     try:
+        oact = {}
+        try:
+            oact = await _opportunity_actions()
+        except Exception as e:  # noqa: BLE001
+            log.warning("wi opp actions: %s", e)
         op = await ds.get_json("dcm:exec:opener") or {}
         for c in (op.get("candidates") or [])[:20]:
             vl, vs = c.get("venue_long"), c.get("venue_short")
             risk = _risk_of_legs(pvenues, [v for v in (vl, vs) if v])
             blocked = _SEV.get(risk["level"], 0) >= _SEV["NO_NEW_RISK"]
+            sym_u = str(c.get("symbol") or "").upper()
+            act = oact.get(sym_u)
+            stage, detail = "DISCOVERED", "候选(过E闸)"
+            nxt = "受限:换腿或忽略" if blocked else "送入工作台"
+            auto = "AUTO"
+            if act == "TO_WORKBENCH":
+                stage, detail, auto = "REVIEW", "已送入工作台·待试算", "ASSISTED"
+                nxt = "工作台:研判/生成计划(DRY_RUN)"
+            elif act == "WATCH":
+                detail, nxt = "候选·观察中", "观察·费差变化再评"
+            elif act == "IGNORE":
+                detail, nxt = "已忽略(24h)", "已忽略"
             items.append(_mk(
                 source="opener", symbol=c.get("symbol"), strategy_code="C2.H",
-                workflow_template="C2_PERP_PERP", workflow_stage="DISCOVERED",
-                stage_detail="候选(过E闸)", automation_mode="AUTO",
+                workflow_template="C2_PERP_PERP", workflow_stage=stage,
+                stage_detail=detail, automation_mode=auto,
                 route=f"{vl}↔{vs}", physical_accounts=[vl, vs],
                 capital_reserved=c.get("target_notional_usdt"),
                 expected_net_return=c.get("risk_adjusted_e_bps") or c.get("e_bps"),
                 risk_status=risk,
-                next_action=("受限:换腿或忽略" if blocked else "送入工作台"),
-                next_deadline=None))
+                next_action=nxt,
+                next_deadline=_next_settle_utc()))
     except Exception as e:  # noqa: BLE001
         log.warning("wi opener: %s", e)
 
@@ -203,7 +233,7 @@ async def build_work_items() -> list[dict]:
             single = "SINGLE_LEG" in str(ps.get("action") or "")
             venues = [lg.get("venue") for lg in legs if lg.get("venue")]
             items.append(_mk(
-                source="manager", symbol=sym, strategy_code="C2.H",
+                source="manager", symbol=sym, strategy_code=str(ps.get("product") or "C2.H"),
                 workflow_template="DERIVATIVE_LONG_DERIVATIVE_SHORT",
                 workflow_stage=("RECONCILING" if single else "EXITING" if closing else "HOLDING"),
                 stage_detail=("单腿裸露!" if single else "平仓中" if closing else "持有·收费差"),
@@ -464,6 +494,14 @@ async def _attach_account_legs(items: list[dict]) -> None:
         if fs is not None:
             extra_econ["funding_short_daily_pct"] = fs
         it["account_legs"] = legs
+        # 投入回填:manager 快照不带 notional 的内核项从真实腿名义推(单边部署额=max(多,空));
+        # 取整U:capital_reserved 在 generation 签名内,随 mark 微动的小数会造成快照跳号
+        if not it.get("capital_reserved") and legs:
+            _ln = sum(l.get("notional_usdt") or 0 for l in legs if l.get("side") == "LONG")
+            _sn = sum(l.get("notional_usdt") or 0 for l in legs if l.get("side") == "SHORT")
+            _dep = max(_ln, _sn) or (_ln + _sn)
+            if _dep:
+                it["capital_reserved"] = int(round(_dep))
         it["group_econ"] = {
             **extra_econ,
             "agg_version": _LEG_AGG_VERSION,
@@ -476,7 +514,12 @@ async def _attach_account_legs(items: list[dict]) -> None:
             "margin_worst_venue": marg.get("worst_venue"),
             "protection_state": e.get("state"),
             "gross_notional": gross,
-            "net_delta": (mgr_syms.get(sym) or {}).get("delta"),
+            # 净Δ统一USDT口径:manager的delta是base数量(REV4课:XVG -123.33个≠-123U)→×mark换算;
+            # C2 pair无delta→回落两腿名义差
+            "net_delta": (lambda d, mk: round(float(d) * float(mk), 2)
+                          if d is not None and mk else extra_econ.get("notional_gap_usdt"))(
+                (mgr_syms.get(sym) or {}).get("delta"),
+                next((l.get("mark") for l in legs if l.get("mark")), None)),
             "leg_count": len(legs),
         }
 

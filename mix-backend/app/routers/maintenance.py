@@ -79,15 +79,19 @@ async def _log(pool, rid, stage, detail, actor=""):
         rid, stage, json.dumps(detail, ensure_ascii=False, default=str), actor)
 
 
-async def _risk_override(mode: str, reason: str, actor: str):
+async def _risk_override(mode: str, reason: str, actor: str, ttl_hours: float | None = None):
     """维护阶段→既有风险权威通道(dcm_main.risk_policy_override GLOBAL 追加,risk-ledger ≤30s 合并;
-    另发 dcm:risk:trigger 直通催重算)。绝不直接写 dcm:risk:policy。"""
+    另发 dcm:risk:trigger 直通催重算)。绝不直接写 dcm:risk:policy。ttl_hours=可选过期(防遗忘冻结)。"""
     pool = await ds.pg()
     if pool is None:
         raise HTTPException(503, "dcm_main 不可达,维护无法映射风险权威(拒绝启动,防止只挂公告不停手)")
+    expires = None
+    if ttl_hours:
+        import datetime as _dt
+        expires = _dt.datetime.now(_dt.timezone.utc) + _dt.timedelta(hours=float(ttl_hours))
     await pool.execute(
-        "INSERT INTO risk_policy_override(scope_type, scope_key, mode, reason, created_by) "
-        "VALUES('GLOBAL','GLOBAL',$1,$2,$3)", mode, reason[:200], actor)
+        "INSERT INTO risk_policy_override(scope_type, scope_key, mode, reason, created_by, expires_at) "
+        "VALUES('GLOBAL','GLOBAL',$1,$2,$3,$4)", mode, reason[:200], actor, expires)
     try:
         await ds.rds().publish("dcm:risk:trigger", json.dumps({"why": "maintenance", "mode": mode}))
     except Exception:  # noqa: BLE001
@@ -192,10 +196,12 @@ async def maintenance_start(body: dict, op=Depends(require_operator)):
                 "note": "已有活跃维护请求(幂等返回,不重复执行)"}
     if str(body.get("confirm_phrase") or "").strip() != CONFIRM_PHRASE:
         raise HTTPException(400, f"确认短语不符,须输入「{CONFIRM_PHRASE}」")
-    trow = await pool.fetchrow("SELECT secret, confirmed FROM operator_totp WHERE operator=$1", actor)
-    if trow and trow["confirmed"]:
-        if not _totp_verify(trow["secret"], str(body.get("totp_code") or "")):
-            raise HTTPException(403, "TOTP 验证码错误(已绑定二次认证的操作员必验)")
+    from ..deps import is_strong_session
+    if not is_strong_session(op):
+        trow = await pool.fetchrow("SELECT secret, confirmed FROM operator_totp WHERE operator=$1", actor)
+        if trow and trow["confirmed"]:
+            if not _totp_verify(trow["secret"], str(body.get("totp_code") or "")):
+                raise HTTPException(403, "TOTP 验证码错误(已绑定二次认证的操作员必验)")
     mtype = str(body.get("mtype") or "SITE_AND_DRAIN")
     if mtype not in ("SITE_ONLY", "SITE_AND_DRAIN"):
         raise HTTPException(400, "mtype 必须 SITE_ONLY|SITE_AND_DRAIN")
@@ -297,10 +303,12 @@ async def maintenance_recover(rid: int, body: dict, op=Depends(require_operator)
     row = await pool.fetchrow("SELECT * FROM maintenance_request WHERE id=$1", rid)
     if not row or row["state"] == "CLOSED":
         raise HTTPException(404, "无此活跃维护请求")
-    trow = await pool.fetchrow("SELECT secret, confirmed FROM operator_totp WHERE operator=$1", actor)
-    if trow and trow["confirmed"]:
-        if not _totp_verify(trow["secret"], str(body.get("totp_code") or "")):
-            raise HTTPException(403, "TOTP 验证码错误")
+    from ..deps import is_strong_session
+    if not is_strong_session(op):
+        trow = await pool.fetchrow("SELECT secret, confirmed FROM operator_totp WHERE operator=$1", actor)
+        if trow and trow["confirmed"]:
+            if not _totp_verify(trow["secret"], str(body.get("totp_code") or "")):
+                raise HTTPException(403, "TOTP 验证码错误")
     # 健康检查(真数据;fail 项如实列出)
     pol = await ds.get_json("dcm:risk:policy") or {}
     age = int(time.time() - float(pol.get("ts") or 0)) if pol else None

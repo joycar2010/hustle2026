@@ -34,9 +34,22 @@ def _jwt_decode(token: str | None) -> dict | None:
         p = jwt.decode(token, config.JWT_SECRET, algorithms=["HS256"])
         return {"operator": f"user:{p.get('username')}", "role": "VIEWER",
                 "uid": p.get("uid"), "urole": p.get("role", "user"), "kind": "mix_user",
-                "jti": p.get("jti")}
+                "jti": p.get("jti"), "sa": bool(p.get("sa"))}
     except Exception:  # noqa: BLE001
         return None
+
+
+def is_strong_session(who: dict | None) -> bool:
+    """会话已强认证判定(2026-07-19 拍板:超管免二次认证;操作员登录验过TOTP=sa=1则会话内免逐笔):
+    ①超管/operator令牌(dcm operators SUPER_ADMIN或operator级)=天然强认证;
+    ②mix用户JWT带 sa=1(登录时验过TOTP)=强认证;③其余=弱,须逐笔二次认证。"""
+    if not who:
+        return False
+    # operator 令牌(非 mix_user)且达 OPERATOR 以上 = 强(超管/操作员令牌登录本身即强凭证)
+    if who.get("kind") != "mix_user" and _ROLE_RANK.get(who.get("role"), 0) >= _ROLE_RANK["OPERATOR"]:
+        return True
+    # mix 用户 JWT 登录时验过 TOTP
+    return bool(who.get("sa"))
 
 
 async def _resolve_any(token: str | None) -> dict | None:

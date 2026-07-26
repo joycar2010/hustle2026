@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from .routers import aicoin, ledger, maintenance, proposal, positions, strategies, rules, accounts, misc, me, auth, history, ops, notify_center, credentials, ai, investor, risk, intents
-from .routers import v6ops, portal, lab, webauthn_auth, training, research
+from .routers import v6ops, portal, lab, webauthn_auth, training, research, fastlane
 
 app = FastAPI(title="HustleCoin Mix API", version="0.1.0")
 
@@ -36,7 +36,7 @@ for r in (positions.router, strategies.router, rules.router, accounts.router, mi
 
 # V6 契约(方案 §4/§8/§9/§13):operator/portal/lab 三命名空间 + WebAuthn
 API6 = "/api/v6"
-for r in (v6ops.router, portal.router, lab.router, training.router, research.router, intents.router):
+for r in (v6ops.router, portal.router, lab.router, training.router, research.router, intents.router, fastlane.router):
     app.include_router(r, prefix=API6)
 app.include_router(webauthn_auth.router, prefix=API)
 
@@ -65,6 +65,10 @@ async def _start_frames_publisher():
     asyncio.get_event_loop().create_task(_ops.investor_projection_loop())
     from .routers import investor as _inv  # noqa: E402  REV2 §4A 身份份额最小切分种子
     asyncio.get_event_loop().create_task(_inv.ensure_client_seed())
+    asyncio.get_event_loop().create_task(v6ops.legacy_compare_daily_loop())  # §14.2 时钟发条(每UTC日保底一跑)
+    asyncio.get_event_loop().create_task(risk.override_age_reminder_loop())  # 人工冻结>24h跑马灯提醒(防遗忘)
+    from . import asset360 as _a360  # noqa: E402
+    asyncio.get_event_loop().create_task(_a360.l1lite_mult_loop())  # l1lite 张→base乘数发布(gate/okx)
 
 
 @app.get(f"{API}/health")

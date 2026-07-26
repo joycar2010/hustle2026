@@ -295,6 +295,18 @@ async def _venue_rows(symbol: str) -> list[dict]:
         except Exception:  # noqa: BLE001
             pass
         out.append(row)
+    try:
+        _c = symbol[:-4] if symbol.upper().endswith("USDT") else symbol
+        await ds.rds().setex(f"dcm:l1lite:want:{_c}", 900, "1")
+    except Exception:  # noqa: BLE001
+        pass
+    # 多所 OI(与 /risk/symbol-analysis 同一 oi_feed,60s缓存,失败=None)
+    import asyncio as _aio
+    from .. import oi_feed
+    ois = await _aio.gather(*(oi_feed.get_oi(r["venue"], symbol, r["mid"]) for r in out))
+    for r, oi in zip(out, ois):
+        r["oi"] = oi.get("oi_usdt")
+        r["oi_base"] = oi.get("oi_base")
     return out
 
 
@@ -317,7 +329,8 @@ async def research_context(symbol: str = Query(...), product: str = Query("C2.P"
         "SELECT venue, funding_interval_h::float8 AS ih, cap::float8 AS cap, floor::float8 AS flr, "
         "raw->>'onboardDate' AS onboard FROM instrument_spec "
         "WHERE canonical_underlying=$1 AND market_type='perp' "
-        "ORDER BY (venue!='binance'), venue LIMIT 1", und)
+        "ORDER BY (venue!='binance'), (quote_asset!='USDT'), (linear_or_inverse!='linear'), venue "
+        "LIMIT 1", und)
     listed = None
     if spec and spec["onboard"]:
         try:
@@ -328,7 +341,8 @@ async def research_context(symbol: str = Query(...), product: str = Query("C2.P"
     fs = [v["funding_daily_pct"] for v in venues if v["funding_daily_pct"] is not None]
     gap = round(max(fs) - min(fs), 4) if len(fs) >= 2 else None
 
-    # 候选EV:opener 榜命中=PRESENT;未命中=WAITING_INPUT(产品/路线/金额定了才算,§4.3)
+    # 候选EV:opener 榜命中=PRESENT(权威口径);未命中=初步估算(费差-4×taker,72h窗,未含深度/滑点,
+    # 明确标 preliminary 不冒充权威 E;两口径都无数据才 WAITING_INPUT
     ev_env = dv(None, state="WAITING_INPUT", reason="EV_WAITING_PLAN", source="opener")
     try:
         cand = next((c for c in ((await ds.get_json("dcm:exec:opener") or {}).get("candidates") or [])
@@ -336,6 +350,12 @@ async def research_context(symbol: str = Query(...), product: str = Query("C2.P"
         if cand:
             ev_env = dv(cand.get("risk_adjusted_e_bps") or cand.get("e_bps"),
                         as_of=now_iso, source="opener")
+        elif gap is not None and gap > 0:
+            hold_days = 3.0
+            cost_bps = 4 * 5.0  # 4×taker 5bps;半点差/深度未计
+            prelim = round(gap * 100 * hold_days - cost_bps, 1)  # gap=%/日→bps×持有窗
+            ev_env = dv(prelim, as_of=now_iso, source="preliminary(费差×72h−4taker,未含深度)",
+                        reason="PRELIM_FUNDING_ONLY")
     except Exception:  # noqa: BLE001
         pass
 

@@ -226,8 +226,16 @@ def effective_actions(item: dict, caps: dict, can_open: bool, risk_capability: s
             _act("workitem_ack", "确认知悉"),
         ]
     elif stage == "REVIEW":
-        acts = [_act("proposal_approve", "二次认证批准", "primary"),
-                _act("proposal_reject", "驳回", "danger")]
+        # 只有真实提案(position_intent_id=dryrun:N)才发审批动作;opener送入工作台的REVIEW项
+        # 没有提案,下一步=研判→生成计划(否则"二次认证批准"按钮指向不存在的提案=断头路)
+        if str(item.get("position_intent_id") or "").startswith("dryrun:"):
+            acts = [_act("proposal_approve", "二次认证批准", "primary"),
+                    _act("proposal_reject", "驳回", "danger")]
+        else:
+            acts = [_act("open_research", "打开研判(试算前置)", "primary"),
+                    _act("create_manual_plan", "生成计划(DRY_RUN)", "normal",
+                         wired=False, reason="先完成研判,结论=『准备计划』后自动放开"),
+                    _act("opportunity_ignore", "忽略", "danger")]
     elif stage == "RESERVED":
         acts = [_act("view", "查看(已批准·试算终态,不下单)")]
     elif stage in ("EXECUTING", "HOLDING"):
@@ -294,10 +302,16 @@ def narrate(item: dict, acts: list) -> dict:
                      else "完成四步研判(阶段/依据/风险/结论)")
         trigger = "研判结论=准备计划 → 生成计划按钮放开"
     elif stage == "REVIEW":
-        what = f"提案已创建({detail}),经济快照已锁定"
-        did = "冷却期防冲动;到期自动转待审批"
-        done_when = "二次认证批准或驳回"
-        trigger = "冷却到期自动进入待审批"
+        if str(item.get("position_intent_id") or "").startswith("dryrun:"):
+            what = f"提案已创建({detail}),经济快照已锁定"
+            did = "冷却期防冲动;到期自动转待审批"
+            done_when = "二次认证批准或驳回"
+            trigger = "冷却到期自动进入待审批"
+        else:
+            what = f"候选已送入工作台({detail}),尚未生成提案"
+            did = "登记操作员意向;费差/风险持续跟踪中"
+            done_when = "完成研判并生成计划(DRY_RUN)"
+            trigger = "研判结论=准备计划 → 提案进入冷却/审批链"
     elif stage == "RESERVED":
         what = "提案已批准(试算终态,未下真单)"
         did = "记录人工意图;真实下单须专场放行(armed)"

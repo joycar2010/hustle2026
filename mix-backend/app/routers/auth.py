@@ -27,6 +27,7 @@ def hash_password(password: str, salt: str) -> str:
 class LoginBody(BaseModel):
     username: str
     password: str
+    totp_code: str | None = None   # 已绑定登录二次认证的账号必填
 
 
 async def _bearer_user(authorization: str | None = Header(default=None)) -> dict:
@@ -56,9 +57,27 @@ async def login(body: LoginBody):
     calc = hash_password(body.password, u["salt"])
     if not hmac.compare_digest(calc, u["password_hash"]):
         raise generic
+    # 登录TOTP(用户2026-07-19拍板:二次认证移到登录,会话内不再逐笔输码):
+    # 该用户名在 operator_totp 有已确认绑定→登录必须带6位码;JWT标记 sa=1(strong auth)
+    strong = False
+    try:
+        trow = await pool.fetchrow(
+            "SELECT secret, confirmed FROM operator_totp WHERE operator=$1", u["username"])
+        if trow and trow["confirmed"]:
+            code = str(getattr(body, "totp_code", None) or "").strip()
+            if not code:
+                raise HTTPException(428, "该账号已启用登录二次认证,请输入 Authenticator 6位动态码")
+            from .proposal import _totp_verify
+            if not _totp_verify(trow["secret"], code):
+                raise HTTPException(401, "动态码错误或已过期")
+            strong = True
+    except HTTPException:
+        raise
+    except Exception:  # noqa: BLE001
+        pass   # totp表不可达=按未绑定放行(绑定是增强不是锁死)
     import jwt
     now = dt.datetime.now(dt.timezone.utc)
-    token = jwt.encode({"uid": u["id"], "username": u["username"], "role": u["role"],
+    token = jwt.encode({"uid": u["id"], "username": u["username"], "role": u["role"], "sa": strong,
                         "iat": now, "exp": now + dt.timedelta(hours=config.JWT_TTL_HOURS)},
                        config.JWT_SECRET, algorithm="HS256")
     await pool.execute("UPDATE mix_users SET last_login=now() WHERE id=$1", u["id"])
@@ -69,8 +88,10 @@ async def login(body: LoginBody):
 @router.get("/auth/whoami")
 async def whoami(who=Depends(require_viewer)):
     """三轨令牌自省（mixadmin 登录门校验用）：operator 令牌/只读令牌/用户 JWT 均可。"""
+    from ..deps import is_strong_session
     return {"operator": who.get("operator"), "role": who.get("role"),
-            "kind": who.get("kind", "operator"), "uid": who.get("uid")}
+            "kind": who.get("kind", "operator"), "uid": who.get("uid"),
+            "strong_session": is_strong_session(who)}
 
 
 @router.get("/users/me")

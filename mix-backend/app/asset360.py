@@ -62,6 +62,22 @@ def _get_multiplier(sym: str) -> Decimal:
             return Decimal(v["multiplier"])
     return Decimal(1)
 
+# 全仓/逐仓能力静态表(交易所永续保证金模式支持,稳定事实,零API调用)
+# 六所主流永续均同时支持 cross+isolated;HL 只有 cross(逐仓叫 isolated margin 但按仓,标 both)
+_MARGIN_CAP = {
+    "binance": {"cross": True, "isolated": True},
+    "okx": {"cross": True, "isolated": True},
+    "bybit": {"cross": True, "isolated": True},
+    "gate": {"cross": True, "isolated": True},
+    "bitget": {"cross": True, "isolated": True},
+    "hyperliquid": {"cross": True, "isolated": True},
+}
+
+
+async def _margin_modes(venue: str, canonical: str) -> dict:
+    return _MARGIN_CAP.get(venue, {})
+
+
 # ══ §5 六所行情聚合（价格/OI/资金费归一 USD）═════════════════════════════
 async def _venue_markets(venue: str, canonical: str) -> dict:
     """单所单币市场快照：现货/永续价格、24h量、OI、资金费（归一日化%）。
@@ -96,10 +112,84 @@ async def _venue_markets(venue: str, canonical: str) -> dict:
                     break
         except Exception:  # noqa: BLE001
             pass
-    # TODO A1后续：补24h量/OI公开采集（币安/ticker/24hr、OKX/market/tickers）
+    # 无持仓且 funding feed 无 mark(如 okx)→ 回落 L1 中价
+    if mark_price is None and r:
+        try:
+            l1raw = await r.hget(f"dcm:feed:{venue}:perp", canonical + "USDT")
+            if l1raw:
+                l1 = json.loads(l1raw)
+                b, a = float(l1.get("bid") or 0), float(l1.get("ask") or 0)
+                if b > 0 and a > 0:
+                    mark_price = round((b + a) / 2, 8)
+        except Exception:  # noqa: BLE001
+            pass
+    # OI:oi_feed 多所采集(60s缓存,失败=None 诚实)
+    oi_usd = None
+    try:
+        from . import oi_feed
+        oi = await oi_feed.get_oi(venue, canonical + "USDT", mark_price)
+        oi_usd = oi.get("oi_usdt")
+    except Exception:  # noqa: BLE001
+        pass
+    # 一档盘口(l1lite 按需WS订阅;首次点击后数秒建订,miss=订阅建立中;HL无现货=不适用)
+    async def _l1(market):
+        if venue == "hyperliquid" and market == "spot":
+            return {"state": "NOT_APPLICABLE"}
+        try:
+            raw = await r.get(f"dcm:l1lite:{venue}:{market}:{canonical}") if r else None
+            if not raw:
+                return {"state": "NOT_CONNECTED", "reason": "SUBSCRIBING"}
+            d = json.loads(raw)
+            bid, ask = d.get("bid"), d.get("ask")
+            mid = (bid + ask) / 2 if bid and ask else None
+            # 张→base换算已下沉到 l1lite 发布端(乘数经 dcm:l1lite:mult hash),此处不再二次乘
+            bq = d.get("bq") or 0
+            aq = d.get("aq") or 0
+            return {"state": "PRESENT", "bid": bid, "ask": ask,
+                    "spread_bps": round((ask - bid) / mid * 10000, 2) if mid else None,
+                    "bid_usdt": round(bq * bid, 0) if bid else None,
+                    "ask_usdt": round(aq * ask, 0) if ask else None,
+                    "ts": d.get("ts")}
+        except Exception:  # noqa: BLE001
+            return {"state": "ERROR"}
+    spot_l1 = await _l1("spot")
+    perp_l1 = await _l1("perp")
+    # 24h成交量(l1lite ticker帧,USDT口径);现货无=—
+    async def _vol(market):
+        try:
+            raw = await r.get(f"dcm:l1lite:vol:{venue}:{market}:{canonical}") if r else None
+            if raw:
+                return json.loads(raw).get("vol_usdt")
+        except Exception:  # noqa: BLE001
+            pass
+        return None
+    spot_vol = await _vol("spot")
+    perp_vol = await _vol("perp")
+    # 全仓/逐仓能力(I1 instrument_spec position_mode;缺=六所永续几乎皆支持双模式,标 UNKNOWN)
+    cross_iso = await _margin_modes(venue, canonical)
+    # 充提通道状态(B机 io-monitor 采集,dcm:cex:io:{venue} hash;HL无=NOT_APPLICABLE)
+    dep_st = wd_st = None
+    if venue == "hyperliquid":
+        dep_st = wd_st = "NOT_APPLICABLE"
+    else:
+        try:
+            ioraw = await r.hget(f"dcm:cex:io:{venue}", canonical) if r else None
+            if ioraw:
+                io = json.loads(ioraw)
+                dep_st, wd_st = io.get("dep"), io.get("wd")
+        except Exception:  # noqa: BLE001
+            pass
     return {
         "venue": venue,
         "canonical": canonical,
+        "spot_l1": spot_l1,
+        "perp_l1": perp_l1,
+        "spot_vol_24h_usd": _mv(spot_vol, "PRESENT" if spot_vol else "NOT_CONNECTED", f"vol:{venue}", now_ts, "USD"),
+        "perp_vol_24h_usd": _mv(perp_vol, "PRESENT" if perp_vol else "NOT_CONNECTED", f"vol:{venue}", now_ts, "USD"),
+        "has_cross": _mv(cross_iso.get("cross"), "PRESENT" if cross_iso.get("cross") is not None else "UNKNOWN", "instrument_spec", now_ts),
+        "has_isolated": _mv(cross_iso.get("isolated"), "PRESENT" if cross_iso.get("isolated") is not None else "UNKNOWN", "instrument_spec", now_ts),
+        "deposit_status": _mv(dep_st, "PRESENT" if dep_st in ("OPEN", "CLOSED") else ("NOT_APPLICABLE" if dep_st == "NOT_APPLICABLE" else "NOT_CONNECTED"), f"io:{venue}", now_ts),
+        "withdraw_status": _mv(wd_st, "PRESENT" if wd_st in ("OPEN", "CLOSED") else ("NOT_APPLICABLE" if wd_st == "NOT_APPLICABLE" else "NOT_CONNECTED"), f"io:{venue}", now_ts),
         "spot_price": _mv(None, "NOT_CONNECTED", venue, None, "USD"),
         "perp_mark": _mv(mark_price, "PRESENT" if mark_price else "NOT_CONNECTED", venue,
                         acct.get("ts") or now_ts, "USD"),
@@ -117,7 +207,7 @@ async def _venue_markets(venue: str, canonical: str) -> dict:
         "funding_interval_h": _mv(funding_interval, "PRESENT" if funding_interval else "NOT_CONNECTED",
                                   f"funding:{venue}", now_ts, "hours"),
         "turnover_24h_usd": _mv(None, "NOT_CONNECTED", venue, None, "USD"),
-        "oi_usd": _mv(None, "NOT_CONNECTED", venue, None, "USD"),
+        "oi_usd": _mv(oi_usd, "PRESENT" if oi_usd else "NOT_CONNECTED", f"oi:{venue}", now_ts, "USD"),
     }
 
 # ══ §A2 充提网络状态（简化版：币级摘要，详细网络留 A5 优化） ═════════════
@@ -229,6 +319,31 @@ async def _korea_markets(canonical: str) -> list[dict]:
         log.warning(f"_korea_markets({canonical}) failed: {e}")
         return []
 
+
+_cg_search_cache: dict = {}
+
+
+async def _cg_search_id(canonical: str):
+    """CoinGecko /search 按symbol动态解析id(硬编码表只有16币的"流通市值未接入"根因);
+    24h缓存含负缓存;取symbol精确匹配里rank最高者。"""
+    hit = _cg_search_cache.get(canonical)
+    if hit and time.time() - hit[0] < 86400:
+        return hit[1]
+    cid = None
+    try:
+        import httpx
+        async with httpx.AsyncClient(timeout=8) as cli:
+            r = await cli.get("https://api.coingecko.com/api/v3/search", params={"query": canonical})
+            coins = [c for c in (r.json().get("coins") or [])
+                     if str(c.get("symbol", "")).upper() == canonical]
+            coins.sort(key=lambda c: c.get("market_cap_rank") or 10**9)
+            if coins:
+                cid = coins[0].get("id")
+    except Exception:  # noqa: BLE001
+        pass
+    _cg_search_cache[canonical] = (time.time(), cid)
+    return cid
+
 async def _global_market_cap(canonical: str) -> dict:
     """CoinGecko 市值+流通量（免费 50 calls/min）。"""
     try:
@@ -241,6 +356,8 @@ async def _global_market_cap(canonical: str) -> dict:
             "PEPE": "pepe", "SHIB": "shiba-inu", "ARB": "arbitrum", "OP": "optimism",
         }
         cg_id = cg_id_map.get(canonical)
+        if not cg_id:
+            cg_id = await _cg_search_id(canonical)
         if not cg_id:
             return {}
         async with httpx.AsyncClient(timeout=10) as cli:
@@ -261,12 +378,66 @@ async def _global_market_cap(canonical: str) -> dict:
         log.warning(f"_global_market_cap({canonical}) failed: {e}")
         return {}
 
+_ct_mult_cache: dict = {}
+
+
+async def _ct_mult(venue: str, canonical: str) -> float:
+    """张→base 乘数(gate=quanto_multiplier/okx=ctVal,存 instrument_spec.contract_multiplier),
+    1h 缓存,查不到=1(§7.1 铁律:张数不换算直接×价=虚高百倍,okx BTC 1张=0.01)。"""
+    key = (venue, canonical)
+    hit = _ct_mult_cache.get(key)
+    if hit and time.time() - hit[0] < 3600:
+        return hit[1]
+    m = 1.0
+    try:
+        pool = await ds.pg_main()
+        if pool is not None:
+            v = await pool.fetchval(
+                "SELECT contract_multiplier FROM instrument_spec WHERE venue=$1 "
+                "AND market_type='perp' AND canonical_underlying=$2 AND linear_or_inverse='linear' LIMIT 1",
+                venue, canonical)
+            if v:
+                m = float(v)
+    except Exception:  # noqa: BLE001
+        pass
+    _ct_mult_cache[key] = (time.time(), m)
+    return m
+
+
+async def l1lite_mult_loop():
+    """为 l1lite 发布张→base乘数(gate/okx perp):HSET dcm:l1lite:mult "{venue}:{CANON}"=mult。
+    l1lite 无PG,乘数权威=instrument_spec,由本loop按want集合每300s同步。"""
+    await asyncio.sleep(20)
+    while True:
+        try:
+            r = ds.rds()
+            pool = await ds.pg_main()
+            if r and pool is not None:
+                wants = []
+                async for k in r.scan_iter(match="dcm:l1lite:want:*", count=200):
+                    wants.append(k.split(":")[-1])
+                for canon in wants:
+                    for venue in ("gate", "okx"):
+                        m = await _ct_mult(venue, canon)
+                        await r.hset("dcm:l1lite:mult", f"{venue}:{canon}", m)
+        except Exception:  # noqa: BLE001
+            pass
+        await asyncio.sleep(300)
+
+
 async def build_asset360_snapshot(canonical: str) -> dict:
     """Asset360Snapshot 单币全景快照（§4契约）。
     A1阶段：身份映射+六所价格/资金费（复用REV4基建）；24h量/OI留后续批次。
     A2：充提网络状态；A3：韩国市场+市值。"""
     snapshot_id = f"a360_{canonical}_{int(time.time())}"
     generated_at = datetime.now(timezone.utc).isoformat()
+    # 登记 l1lite 按需订阅(want 键 TTL 900s;服务 5s 内建订,闲置 15min 自动退订)
+    try:
+        r0 = ds.rds()
+        if r0:
+            await r0.setex(f"dcm:l1lite:want:{canonical}", 900, "1")
+    except Exception:  # noqa: BLE001
+        pass
     # 并行拉六所市场
     venue_tasks = [_venue_markets(v, canonical) for v in _VENUES]
     venue_rows = await asyncio.gather(*venue_tasks, return_exceptions=True)
@@ -297,7 +468,11 @@ async def build_asset360_snapshot(canonical: str) -> dict:
                                  market_cap_data.get("source"), market_cap_data.get("source_time")),
         "reference_spot_price_usd": _mv(ref_price, "PRESENT" if ref_price else "NOT_CONNECTED",
                                        "six_venue_median", generated_at, "USD"),
-        "all_venue_oi_usd": _mv(None, "NOT_CONNECTED", None, None, "USD"),
+        "all_venue_oi_usd": _mv(
+            (lambda s: round(s, 0) if s else None)(
+                sum(v["oi_usd"]["value"] or 0 for v in venue_rows)),
+            "PRESENT" if any(v["oi_usd"]["value"] for v in venue_rows) else "NOT_CONNECTED",
+            "oi_feed(6venues)", generated_at, "USD"),
         "listed_venue_count": _mv(len(venue_rows), "PRESENT", "snapshot", generated_at),
         "korea_listed_count": _mv(len(korea_rows), "PRESENT", "snapshot", generated_at),
     }
@@ -311,8 +486,7 @@ async def build_asset360_snapshot(canonical: str) -> dict:
         "global_summary": global_summary,
         "venue_rows": venue_rows,
         "network_rows": network_rows,  # A2: 逐网络充提状态
-        "korea_rows": [],    # A3
-        "korea_rows": [],    # A3
+        "korea_rows": korea_rows,  # A3(修:此前键重复被空数组覆盖,算了白算)
         "quality_summary": {"coverage_pct": round(100 * len(venue_rows) / len(_VENUES), 1)},
     }
 
