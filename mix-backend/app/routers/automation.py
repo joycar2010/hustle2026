@@ -42,7 +42,7 @@ _SEED = [
     ("phase-autopilot", "相位自动开平仓", "B", "dcm-phase-autopilot.timer", "C1,C2.C",
      "AUTO_WRITER", "NEW_RISK", "ARMED", "每10分钟",
      "开=rpush dcm:exec:fastlane:req(C四闸预审→B runner 机器闸+Intent工厂+Saga);平=manager target=close;直接下单调用=0(R0逐行审计)",
-     "redis:dcm:phase:auto:log", "TEMP_OBSERVATION"),
+     "pg:dcm_main.autopilot_cycle_fact", "AUDIT_TABLE"),
     ("exec-autopilot", "L0 自动开仓层", "B", "dcm-exec-autopilot.service", "C2",
      "AUTO_WRITER", "NEW_RISK", "ARMED", "常驻循环",
      "单笔30U/日预算100U(2026-07-25用户授权);经 fastlane 统一链", "journald", "TEMP_OBSERVATION"),
@@ -100,6 +100,11 @@ async def _ensure(pool):
                      evidence_source,evidence_grade,registered_by)
                    VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'r0_audit_20260726')
                    ON CONFLICT (loop_id) DO NOTHING""", *row)
+        # R2-1:phase-autopilot 已由 redis 临时观测升为 dcm_main 持久事实流,证据升级为 AUDIT_TABLE
+        await con.execute(
+            "UPDATE automation_loop_registry SET evidence_source=$1, evidence_grade=$2 "
+            "WHERE loop_id='phase-autopilot' AND evidence_grade<>'AUDIT_TABLE'",
+            "pg:dcm_main.autopilot_cycle_fact", "AUDIT_TABLE")
     _seeded = True
 
 
@@ -206,9 +211,23 @@ async def automation_summary(_who=Depends(require_viewer)):
 async def automation_timeline(loop_id: str, limit: int = 50, _who=Depends(require_viewer)):
     limit = max(1, min(200, limit))
     if loop_id == "phase-autopilot":
+        # R2-1:优先读 dcm_main 持久事实流(AUDIT_TABLE);表空/不可读再回退 redis 临时观测
+        try:
+            dpool = await ds.pg()
+            if dpool is not None:
+                async with dpool.acquire() as con:
+                    rows = [dict(r) for r in await con.fetch(
+                        "SELECT to_char(ts,'YYYY-MM-DD\"T\"HH24:MI:SSOF') ts, cycle_id, kind, "
+                        "msg, armed FROM autopilot_cycle_fact ORDER BY id DESC LIMIT $1", limit)]
+                if rows:
+                    return {"loop_id": loop_id, "events": rows,
+                            "evidence_grade": "AUDIT_TABLE",
+                            "note": "dcm_main.autopilot_cycle_fact 持久事实流(R2-1 outbox)"}
+        except Exception:  # noqa: BLE001
+            pass
         return {"loop_id": loop_id, "events": await _phase_log(limit) or [],
                 "evidence_grade": "TEMP_OBSERVATION",
-                "note": "Redis 日志为临时观测源,证据不完整;正式链路见 §7.3"}
+                "note": "事实流暂无行,回退 Redis 临时观测源;正式链路见 §7.3"}
     if loop_id == "c3s-autopilot":
         pool = await ds.pg_main()
         try:
