@@ -17,7 +17,7 @@
       <span class="kv dim2">策略</span>
       <span v-for="s in stratTabs" :key="s.code" class="stag" :class="{off: s.dot==='off'}"
             :title="`${s.code} ${s.name} · ${s.modeText}`" @click="$router.push('/mix/strategy/'+s.code)">
-        <i class="dot" :class="s.dot"></i><i style="font-style:normal" :class="s.dot==='off' ? '' : 'px-'+String(s.ccode||'').split('.')[0].toLowerCase()">{{ s.ccode }}</i>
+        <i class="dot" :class="s.dot"></i><i style="font-style:normal" :style="prodStyle(s.code)">{{ s.ccode }}</i>
       </span>
       <span class="sep">┃</span>
       <span class="wtab" :class="{on: tab==='lab'}" @click="openWall('market')">机会与LAB</span>
@@ -88,6 +88,15 @@ const short = s => String(s || '').split('|')[0].slice(0, 42)
 const fmtAge = s => (s >= 3600 ? Math.floor(s / 3600) + 'h' : Math.floor(s / 60) + 'm')
 const modeCls = m => ({ NORMAL: 'ok', WATCH: 'watch', NO_NEW_RISK: 'nonew', REDUCE_ONLY: 'red',
   EXIT_ONLY: 'red', FROZEN: 'quar', QUARANTINED: 'quar', RECOVERY_WATCH: 'recov' }[m] || 'unknown')
+
+function prodStyle(code) {
+  const meta = META[code]
+  if (!meta) return {}
+  return {
+    color: meta.color,
+    background: meta.colorBg
+  }
+}
 
 function openWall(w) { window.open(`/wall/${w}?token=${localStorage.getItem('mix_token') || ''}`) }
 async function load() {
