@@ -1,7 +1,7 @@
 /* Quant Hedge Service Worker — 离线壳缓存
    铁律: 严格绕开一切实时接口 —— /api(REST) 与 /ws(WebSocket) 一律不拦、不缓存,直连网络。
    只缓存静态外壳(HTML/图标/manifest),保证离线能打开壳,实时数据永远走网络最新。 */
-const CACHE = 'qh-shell-v2';
+const CACHE = 'qh-shell-v5';
 const SHELL = [
   '/', '/dashboard',
   '/index.html',

@@ -1,0 +1,16 @@
+[Unit]
+Description=Go-View serve (dashboard designer backend, SQLite)
+After=network-online.target
+
+[Service]
+User=ubuntu
+WorkingDirectory=/opt/goview
+ExecStart=/opt/goview/goview-serve
+Restart=always
+RestartSec=3
+# 内存纪律: 交易机上的非关键服务, 硬上限+OOM优先牺牲(绝不威胁 quanthedge-api)
+MemoryMax=250M
+OOMScoreAdjust=500
+
+[Install]
+WantedBy=multi-user.target

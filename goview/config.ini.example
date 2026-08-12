@@ -1,0 +1,15 @@
+[server]
+port =<REDACTED>
+mode =<REDACTED>
+db_mode =<REDACTED>
+
+[mysql]
+host =<REDACTED>
+port =<REDACTED>
+user =<REDACTED>
+password =<REDACTED>
+database =<REDACTED>
+charset =<REDACTED>
+
+[sqlite]
+sqlite_path =<REDACTED>

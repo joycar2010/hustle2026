@@ -1,44 +1,69 @@
-# ===== QH 仓库 allowlist(白名单): 默认忽略一切, 仅显式放行源码/产物 =====
-# 安全命门: channels.json(飞书/admin令牌)、venv、密钥、所有 backup_*/*.bak、数据库dump、exe 一律不追踪
-/*
-!/.gitignore
-!/VERSION
-!/app.py
-!/connector.py
-!/engine.py
-!/migrate_p24.py
-!/migrate_p25.py
-!/migrate_p26.py
-!/web/
-!/admin/
-!/admin-src/
-!/qh_ws_hub/
-!/qhwww/
-!/client-src/
-# web(dashboard dist)排除杂物
-web/*.bak*
-web/backup_*
-# admin(qhadmin dist)排除 sourcemap
-admin/**/*.map
-# admin-src(qhadmin Vue 源)排除依赖与构建产物
-admin-src/node_modules/
-admin-src/dist/
-# rust hub 源: 排除 target 构建产物与备份
+# QH production backup branch.
+# Keep all production source and exact frontend artifacts unless explicitly
+# excluded below. Runtime secrets and plaintext databases must never be staged.
+
+# Local and build-only directories
+**/.git/
+**/.staging/
+**/__pycache__/
+**/.pytest_cache/
+**/node_modules/
+**/venv/
+**/.venv/
 qh_ws_hub/target/
-qh_ws_hub/**/*.bak*
-qh_ws_hub/*.bin.bak*
-# qhwww: 排除 56MB 安装包(不进 git)与备份
-qhwww/*.exe
-qhwww/*.bak*
-# C/S 客户端源: 排除构建产物与本地机密
+backend/geoip/
 client-src/bin/
 client-src/obj/
 client-src/publish/
 client-src/.vs/
-client-src/**/*.exe
-client-src/**/*.dll
-client-src/**/*.pdb
-# 全局: 数据库 dump 与备份目录绝不进 git
-backups/
-*.sql
-*.dump
+
+# Editor and operating-system noise
+**/.DS_Store
+**/Thumbs.db
+**/*.pyc
+**/*.pyo
+**/*.swp
+**/*.tmp
+
+# Secrets and private keys. Keep narrow exact rules so legitimate source names
+# containing words such as "secret" are not silently dropped.
+.env
+.env.*
+**/.env
+**/.env.*
+!**/.env.example
+channels.json
+**/channels.json
+*.pem
+**/*.pem
+*.key
+**/*.key
+id_rsa*
+**/id_rsa*
+*apikey*.txt
+**/*apikey*.txt
+*credential*.json
+**/*credential*.json
+
+# Plaintext databases and database exports. Only encrypted *.cms artifacts
+# under backups/ are permitted in this public repository.
+**/*.dump
+**/*.sql
+**/*.sql.gz
+**/*.rdb
+**/*.db
+**/*.db-*
+**/*.sqlite
+**/*.sqlite3
+**/*.bak
+**/*.backup
+
+# Historical backend backup files are excluded from the canonical expanded
+# source snapshot. Frontend deployment directories are intentionally not
+# filtered: every live file, including server-side *.bak_* files, is preserved.
+backend/backup_*
+backend/*.bak*
+qh_ws_hub/**/*.bak*
+
+# This is a source schema, not a production database export.
+!goview/src/goview-mysql.sql

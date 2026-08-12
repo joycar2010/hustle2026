@@ -1,0 +1,17 @@
+# This branch is a production recovery snapshot. Preserve every non-LFS file
+# byte-for-byte and disable all line-ending normalization.
+* -text
+
+# Large and binary production artifacts are stored with Git LFS.
+*.exe filter=lfs diff=lfs merge=lfs -text
+*.tar.zst filter=lfs diff=lfs merge=lfs -text
+*.tar.zst.cms filter=lfs diff=lfs merge=lfs -text
+qh_ws_hub/bin/* filter=lfs diff=lfs merge=lfs -text
+goview/goview-serve filter=lfs diff=lfs merge=lfs -text
+
+# Production frontend trees must remain byte-for-byte identical to the live
+# server; never apply Git text or line-ending normalization to them.
+web/** -text
+admin/** -text
+qhwww/** -text
+goview/web/** -text

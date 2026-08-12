@@ -139,7 +139,24 @@
   .modal-body .warn{color:var(--red)}
   .modal-foot{padding:16px 22px;border-top:1px solid var(--line);text-align:right}
 
+  /* 会员权益梯度 */
+  .tiers{display:grid;grid-template-columns:repeat(5,1fr);gap:14px}
+  .tier{background:var(--bg-1);border:1px solid var(--line);border-radius:14px;padding:20px 16px;position:relative;box-shadow:0 1px 3px rgba(8,17,58,.04)}
+  .tier.feat{border-color:var(--logo);box-shadow:0 0 0 1px rgba(46,139,214,.3),0 10px 30px rgba(46,139,214,.10)}
+  .tier-badge{position:absolute;top:-11px;left:50%;transform:translateX(-50%);background:var(--logo);color:#fff;font-size:11px;font-weight:800;padding:3px 10px;border-radius:999px;white-space:nowrap}
+  .tier-lv{font-size:26px;font-weight:900;letter-spacing:-.5px}
+  .tier-nm{font-size:15px;font-weight:700;color:var(--brand);margin:2px 0 12px}
+  .tier ul{list-style:none;display:grid;gap:8px}
+  .tier li{font-size:13px;color:var(--txt-2);line-height:1.6;padding-left:18px;position:relative}
+  .tier li::before{content:"✓";color:var(--green);font-weight:900;position:absolute;left:0;top:0}
+  .soon{display:inline-block;margin-left:5px;font-size:10px;font-weight:700;color:var(--logo);background:var(--teal-pale);border:1px solid rgba(46,139,214,.28);padding:0 6px;border-radius:999px;vertical-align:1px}
+  /* 积分邀请卡 */
+  .reward-card{text-align:center}
+  .reward-card .ic{margin:0 auto 14px}   /* 扁平图标徽章居中(卡片文字居中) */
+  .reward-card h3{font-size:16px;color:var(--brand);margin-bottom:8px}
+  .reward-card p{font-size:13px;color:var(--txt-2);line-height:1.6}
   @media (max-width:900px){
+    .tiers{grid-template-columns:repeat(2,1fr)}
     .g4{grid-template-columns:repeat(2,1fr)}
     .g3{grid-template-columns:repeat(2,1fr)}
     .ai{grid-template-columns:1fr;padding:28px}
@@ -147,13 +164,22 @@
     .nav-links{display:none}
     .nav-links.open{display:flex;flex-direction:column;align-items:flex-start;position:fixed;top:62px;left:0;right:0;background:var(--bg-1);border-bottom:1px solid var(--line);padding:16px 22px;gap:18px;z-index:39;box-shadow:0 12px 24px rgba(8,17,58,.14)}
     .burger{display:block}
+    /* 顶栏防错位: logo 尾部长描述隐藏, 只留图标+品牌名; nav 不换行, 三段各自收敛 */
+    nav{flex-wrap:nowrap;gap:8px}
+    .logo{font-size:16px;min-width:0;flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+    .logo-tail{display:none}
+    .nav-cta{flex:0 0 auto;gap:8px}
+    .nav-cta .btn{padding:8px 12px;font-size:13px;white-space:nowrap}
   }
   @media (max-width:600px){
-    .g4,.g3,.g2,.plans,.devices{grid-template-columns:1fr}
+    .g4,.g3,.g2,.plans,.devices,.tiers{grid-template-columns:1fr}
     .hero{padding:56px 0 46px}
     .hero h1{font-size:28px}
     .sec-head h2{font-size:25px}
     section{padding:48px 0}
+    /* 极窄: 登录按钮文案缩短防溢出 */
+    .logo .mark-img{height:28px}
+    .nav-cta .btn{padding:7px 10px;font-size:12px}
   }
 </style>
 </head>
@@ -162,16 +188,17 @@
 <header>
   <div class="wrap">
     <nav>
-      <a class="logo" href="#top"><img class="mark-img" src="/QHEDGELOGO-mid-single.png" alt="Quant Hedge" /> Quant Hedge <span class="azure">MT4+MT5</span> 多平台套利系统</a>
-      <div class="nav-links" onclick="this.classList.remove('open')">
+      <a class="logo" href="#top"><img class="mark-img" data-site="brand.logo" src="/QHEDGELOGO-mid-single.png" alt="Quant Hedge" /> <span class="logo-name" data-site="brand.platformName">Quant Hedge</span> <span class="azure logo-tail">MT4+MT5</span><span class="logo-tail"> 多平台套利系统</span></a>
+      <div class="nav-links" data-site="nav" onclick="this.classList.remove('open')">
         <a href="#features">核心功能</a>
         <a href="#devices">多端登录</a>
         <a href="#ai">AI 套利分析</a>
-        <a href="#modules">功能模块</a>
+        <a href="#member">会员权益</a>
+        <a href="#rewards">积分邀请</a>
         <a href="#plans">版本授权</a>
       </div>
       <div class="nav-cta">
-        <a class="btn btn-primary" href="https://qh.hustle2026.xyz" target="_blank">登录控制台</a>
+        <a class="btn btn-primary" data-site="btn:login" href="https://qh.hustle2026.xyz" target="_blank">登录控制台</a>
         <span class="burger" onclick="document.querySelector('.nav-links').classList.toggle('open')">☰</span>
       </div>
     </nav>
@@ -185,11 +212,11 @@
     <div class="wrap">
       <span class="tag">MT4 + MT5 多平台对冲量化系统</span>
       <h1>把专业对冲量化<br>装进<span>手机 · 平板 · PC</span></h1>
-      <p class="sub">MT4 / MT5 多平台主对冲锁仓，多坑位阶梯管理。断网、断电、弱网不稳定情况下，服务端引擎常驻，策略照样跑。一处授权，多端通用。</p>
-      <div class="slogan">简单 · 实用 · 高效 · 安全 · 稳定</div>
+      <p class="sub" data-site="hero.subtitle">MT4 / MT5 多平台主对冲锁仓，多坑位阶梯管理。断网、断电、弱网不稳定情况下，服务端引擎常驻，策略照样跑。一处授权，多端通用。</p>
+      <div class="slogan" data-site="hero.tagline">简单 · 实用 · 高效 · 安全 · 稳定</div>
       <div class="cta">
-        <a class="btn btn-primary" href="https://qh.hustle2026.xyz" target="_blank">▶ 立即打开控制台</a>
-        <a class="btn btn-ghost" href="#features">了解核心功能</a>
+        <a class="btn btn-primary" data-site="btn:login" href="https://qh.hustle2026.xyz" target="_blank">▶ 立即打开控制台</a>
+        <a class="btn btn-ghost" data-site="btn:learn" href="#features">了解核心功能</a>
       </div>
       <div class="trust">
         <div><b>MT4+MT5</b> 多平台对冲</div>
@@ -266,7 +293,7 @@
           <p>三栏专业布局（账户 / 行情策略 / 风控），网页与 C/S 客户端双选。</p>
           <div class="dl">
             <a class="btn btn-primary" href="https://qh.hustle2026.xyz" target="_blank">网页登录控制台</a>
-            <a class="btn btn-azure" href="/QuantHedge-Setup-1.1.0.exe" download style="margin-top:8px">⬇ 下载 Windows 客户端</a>
+            <a class="btn btn-azure" data-site="btn:download" href="/QuantHedge-Setup-1.1.0.exe" download style="margin-top:8px">⬇ 下载 Windows 客户端</a>
             <small>C/S 桌面客户端 · v1.1.0 · Windows</small>
           </div>
         </div>
@@ -350,6 +377,46 @@
   </section>
 
   <!-- PLANS -->
+  <!-- MEMBER TIERS -->
+  <section id="member">
+    <div class="wrap">
+      <div class="sec-head">
+        <span class="tag">会员成长体系</span>
+        <h2>等级越高，交易能力越强</h2>
+        <p>从免费体验到旗舰合伙人，五级会员逐级解锁对冲能力；订阅档位与累计成长值双轨升级，就高生效。</p>
+      </div>
+      <div class="tiers">
+        <div class="tier"><div class="tier-lv" style="color:#8a93aa">L0</div><div class="tier-nm">体验交易者</div>
+          <ul><li>试用体验</li><li>单对账户 · 单币种</li><li>AI分析每日1次</li></ul></div>
+        <div class="tier"><div class="tier-lv" style="color:#909399">L1</div><div class="tier-nm">基础对冲者</div>
+          <ul><li>解锁全自动进出场</li><li>多账户纳管 2 对<span class="soon">规划中</span></li><li>AI分析每日10次</li></ul></div>
+        <div class="tier feat"><span class="tier-badge">最受欢迎</span><div class="tier-lv" style="color:#2E8BD6">L2</div><div class="tier-nm">进阶交易者</div>
+          <ul><li>多账户纳管 3 对<span class="soon">规划中</span> · 多币种</li><li>移动端 + 极速档</li><li>2端同时登录</li></ul></div>
+        <div class="tier"><div class="tier-lv" style="color:#67C23A">L3</div><div class="tier-nm">专业套利者</div>
+          <ul><li>多账户纳管 5 对<span class="soon">规划中</span> · 无限币种</li><li>AI分析无限制</li><li>1v1技术支持</li></ul></div>
+        <div class="tier"><div class="tier-lv" style="color:#E6A23C">L4</div><div class="tier-nm">旗舰合伙人</div>
+          <ul><li>多账户纳管 8 对<span class="soon">规划中</span> · 极速优先</li><li>专属对接群</li><li>顶级代理分销特权</li></ul></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- POINTS & INVITE -->
+  <section id="rewards" style="background:linear-gradient(180deg,transparent,rgba(46,139,214,.05))">
+    <div class="wrap">
+      <div class="sec-head">
+        <span class="tag">积分 · 邀请</span>
+        <h2>交易即赚积分，邀请好友再返利</h2>
+        <p>对冲积分贯穿签到、交易、消费、邀请全流程，可兑权益、可抵现金；邀请好友双方得奖励。</p>
+      </div>
+      <div class="g4">
+        <div class="card reward-card"><div class="ic"><svg viewBox="0 0 24 24"><rect x="3" y="4.5" width="18" height="16" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="8" y1="2.5" x2="8" y2="6"/><line x1="16" y1="2.5" x2="16" y2="6"/><path d="M8.5 14.5l2 2 4-4"/></svg></div><h3>每日签到</h3><p>每日 +5 分，连签7天额外 +30，天天登录天天得。</p></div>
+        <div class="card reward-card"><div class="ic"><svg viewBox="0 0 24 24"><path d="M3 17l5-5 3.5 3.5L20 7"/><path d="M20 11V7h-4"/></svg></div><h3>消费返分</h3><p>订阅/内购每消费 1U 返 10 积分，年付一次性再赠 2000。</p></div>
+        <div class="card reward-card"><div class="ic"><svg viewBox="0 0 24 24"><rect x="3" y="8" width="18" height="12" rx="1.5"/><line x1="3" y1="8" x2="21" y2="8"/><line x1="12" y1="8" x2="12" y2="20"/><path d="M12 8C12 5 9 3 7.5 4.5S8 8 12 8zM12 8c0-3 3-5 4.5-3.5S16 8 12 8z"/></svg></div><h3>积分抵现</h3><p>100 积分 = 1 USDT，下单最高抵扣订单额 30%，还可兑 AI 次数/日卡。</p></div>
+        <div class="card reward-card"><div class="ic"><svg viewBox="0 0 24 24"><circle cx="8" cy="8" r="3"/><path d="M2.5 20a5.5 5.5 0 0 1 11 0"/><circle cx="17" cy="9.5" r="2.4"/><path d="M15 20a4.6 4.6 0 0 1 6.5-4.2"/></svg></div><h3>邀请返利</h3><p>好友激活试用得 +100 分，好友首次付费再返实付 10% 积分。</p></div>
+      </div>
+    </div>
+  </section>
+
   <section id="plans">
     <div class="wrap">
       <div class="sec-head">
@@ -410,10 +477,11 @@
       <div><span class="logo" style="font-size:16px"><img class="mark-img" src="/QHEDGELOGO-mid-single.png" alt="Quant Hedge" style="height:26px" /> Quant Hedge <span class="azure">MT4+MT5</span> 多平台套利系统</span></div>
       <div>多平台对冲量化系统 · 行情监控 / 主对冲锁仓 / 多坑位阶梯 / AI 套利分析</div>
     </div>
+    <div id="foot-qrs" style="display:flex;justify-content:center;gap:26px;flex-wrap:wrap;margin-top:22px"></div>
     <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--line);text-align:center;line-height:2.1;font-size:12px;color:var(--txt-3)">
-      <div>© 2026 Quant Hedge　保留所有权利 All Rights Reserved</div>
-      <div>客服邮箱：support@hustle2026.xyz　|　商务 / 客服 QQ：000000000　|　联系电话：+86 000-0000-0000　<span>（占位，待补）</span></div>
-      <div><a href="https://beian.miit.gov.cn" target="_blank" rel="noopener" style="color:var(--txt-3)">浙ICP备 0000000000 号-0</a>　|　浙公网安备 00000000000000 号　<span>（占位，待补）</span></div>
+      <div data-site="footer.copyright">© 2026 Quant Hedge　保留所有权利 All Rights Reserved</div>
+      <div data-site="footer.contact">客服邮箱：support@hustle2026.xyz　|　商务 / 客服 QQ：000000000　|　联系电话：+86 000-0000-0000　<span>（占位，待补）</span></div>
+      <div data-site="footer.beian"><a href="https://beian.miit.gov.cn" target="_blank" rel="noopener" style="color:var(--txt-3)">浙ICP备 0000000000 号-0</a>　|　浙公网安备 00000000000000 号　<span>（占位，待补）</span></div>
     </div>
   </div>
 </footer>
@@ -422,10 +490,10 @@
 <div id="agreement-mask" class="modal-mask" onclick="if(event.target===this)closeAgreement()">
   <div class="modal-box">
     <div class="modal-head">
-      <h3>软件服务协议</h3>
+      <h3 data-site="footer.agreementTitle">软件服务协议</h3>
       <button class="x" onclick="closeAgreement()">&times;</button>
     </div>
-    <div class="modal-body">
+    <div class="modal-body" id="agreement-body">
       <p class="lead">本协议由您（甲方，下称"用户"）与 Quant Hedge（乙方，qhwww.hustle2026.xyz 多平台对冲量化系统之提供方，下称"本平台"）共同订立。用户点击"我已阅读并知悉"或实际使用本服务，即视为已充分阅读、理解并同意本协议全部条款。</p>
 
       <h4>第一条　声明与承诺</h4>
@@ -539,6 +607,34 @@
       var j=await r.json(); if(j.conversation_id){__qwId=j.conversation_id;__qwSave();}
       qwPush('ai', j.reply||j.detail||'客服稍后联系您，如需快速对接请留下微信/手机。'); }
     catch(e){ qwPush('ai','网络繁忙，请稍后重试'); } }
+</script>
+<!-- ===== 官网内容配置(后台可改) 加载器: 读 /api/site/config?site=qhwww 填充DOM; 无配置=保持静态默认 ===== -->
+<script>
+(function(){
+  function get(o,path){ return String(path).split('.').reduce(function(a,k){return a&&a[k];},o); }
+  function apply(cfg){
+    try{
+      cfg=cfg||{}; var f=cfg.footer||{};
+      document.querySelectorAll('[data-site]').forEach(function(el){
+        var key=el.getAttribute('data-site'); if(!key)return;
+        if(key==='nav'){ var nav=cfg.nav||[]; if(nav.length){ el.innerHTML=nav.map(function(n){return '<a href="'+(n.anchor||'#')+'">'+(n.name||'')+'</a>';}).join(''); } return; }
+        if(key.indexOf('btn:')===0){ var b=(cfg.buttons||[]).find(function(x){return x.key===key.slice(4);}); if(b){ if(b.label)el.textContent=b.label; if(b.url)el.setAttribute('href',b.url);} return; }
+        if(key==='footer.contact'){ if(f.email||f.qq||f.phone){ el.textContent='客服邮箱：'+(f.email||'')+'　|　商务 / 客服 QQ：'+(f.qq||'')+'　|　联系电话：'+(f.phone||''); } return; }
+        if(key==='footer.beian'){ if(f.icp||f.police){ el.innerHTML='<a href="'+(f.icpUrl||'https://beian.miit.gov.cn')+'" target="_blank" rel="noopener" style="color:var(--txt-3)">'+(f.icp||'')+'</a>　|　'+(f.police||''); } return; }
+        var v=get(cfg,key); if(v==null||v==='')return;
+        if(el.tagName==='IMG'){ el.setAttribute('src',v); } else { el.textContent=v; }
+      });
+      // 底部二维码
+      var qrs=f.qrs||{}, box=document.getElementById('foot-qrs');
+      if(box){ var lbl={wechatOA:'微信公众号',wechatMini:'微信小程序',douyin:'抖音号',kuaishou:'快手号'}, html='';
+        ['wechatOA','wechatMini','douyin','kuaishou'].forEach(function(k){ if(qrs[k]){ html+='<div style="text-align:center"><img src="'+qrs[k]+'" alt="'+lbl[k]+'" style="width:96px;height:96px;object-fit:contain;border-radius:8px;background:#fff;padding:4px"/><div style="font-size:11px;color:var(--txt-3);margin-top:4px">'+lbl[k]+'</div></div>'; } });
+        box.innerHTML=html; }
+      // 服务协议正文(富文本, 后台设了才覆盖静态默认)
+      if(f.agreementHtml){ var ab=document.getElementById('agreement-body'); if(ab)ab.innerHTML=f.agreementHtml; }
+    }catch(e){}
+  }
+  fetch('/api/site/config?site=qhwww').then(function(r){return r.json();}).then(function(j){ if(j&&j.cfg)apply(j.cfg); }).catch(function(){});
+})();
 </script>
 </body>
 </html>

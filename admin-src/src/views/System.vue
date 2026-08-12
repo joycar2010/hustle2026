@@ -1,13 +1,29 @@
 <template>
   <div>
-    <!-- 顶部: 全局急停横幅 -->
+    <!-- 顶部: 维护态 + 全局急停横幅 -->
+    <el-alert v-if="sys&&sys.mode&&sys.mode.maintenance&&sys.mode.maintenance.on" type="error" :closable="false" show-icon style="margin-bottom:12px"
+      :title="'🛠️ 维护态生效中: '+(sys.mode.maintenance.title||'系统维护中')+(sys.mode.maintenance.block_login?' · 禁登录':'')+(sys.mode.maintenance.block_trading?' · 禁交易':'')+(sys.mode.maintenance.stop_strategy?' · 停策略':'')"/>
     <el-alert v-if="estopOn" type="error" :closable="false" show-icon
               title="全局急停生效中 — 所有用户自动进/出场已停, 无法重新武装" style="margin-bottom:12px"/>
+
+    <!-- 运行模式条(A2T 口径): 读取源 + 执行方式 -->
+    <el-card v-if="sys&&sys.mode" style="margin-bottom:12px" body-style="padding:10px 14px">
+      <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+        <span class="ch"><el-icon><Odometer/></el-icon> 运行模式</span>
+        <span>读取源: <el-tag size="small" :type="sys.mode.read_source==='a2t'?'warning':'primary'">{{sys.mode.read_label}}</el-tag>
+          <el-button size="small" text type="primary" @click="switchReadSource" style="margin-left:2px" title="切换读取数据源(纯云端A2T ↔ 内网桥优先)">切换</el-button></span>
+        <span>执行链路: <el-tag size="small" :type="sys.mode.active_mode==='api'?'warning':'primary'">{{sys.mode.exec_label}}</el-tag></span>
+        <span v-if="sys.a2t&&!sys.a2t.err">云端腿绑定:
+          <el-tag size="small" :type="sys.a2t.legs_bound&&sys.a2t.legs_bound.main?'success':'info'">主 {{sys.a2t.legs_bound&&sys.a2t.legs_bound.main?'已绑':'未绑'}}</el-tag>
+          <el-tag size="small" :type="sys.a2t.legs_bound&&sys.a2t.legs_bound.hedge?'success':'info'" style="margin-left:4px">对冲 {{sys.a2t.legs_bound&&sys.a2t.legs_bound.hedge?'已绑':'未绑'}}</el-tag></span>
+      </div>
+    </el-card>
 
     <!-- 全链路健康总览 -->
     <el-card style="margin-bottom:12px" body-style="padding:14px">
       <template #header><span class="ch"><el-icon><Monitor/></el-icon> 全链路运行监控</span>
         <span style="float:right">
+          <el-button size="small" type="primary" @click="openGoView" style="margin-right:8px"><el-icon style="margin-right:3px"><DataBoard/></el-icon>Go-View 数据大屏</el-button>
           <el-tag size="small" :type="autoRefresh?'success':'info'" style="margin-right:8px">{{autoRefresh?('自动刷新 '+refreshSec+'s'):'已暂停'}}</el-tag>
           <el-button size="small" @click="autoRefresh=!autoRefresh">{{autoRefresh?'暂停':'恢复'}}自动</el-button>
           <el-button size="small" @click="load">刷新</el-button>
@@ -15,12 +31,12 @@
         </span></template>
 
       <el-row :gutter="12" v-if="sys">
-        <el-col :span="4"><el-card class="stat-card" :class="cardCls(sys.bridges.main&&sys.bridges.main.ok)"><div class="l">主桥 8021</div>
-          <div class="v" :class="sys.bridges.main&&sys.bridges.main.ok?'up':'down'">{{sys.bridges.main&&sys.bridges.main.ok?'正常':'异常'}}</div>
-          <div class="s">{{sys.bridges.main&&sys.bridges.main.latency_ms!=null?sys.bridges.main.latency_ms+'ms':'—'}}</div></el-card></el-col>
-        <el-col :span="4"><el-card class="stat-card" :class="cardCls(sys.bridges.hedge&&sys.bridges.hedge.ok)"><div class="l">对冲桥 8001</div>
-          <div class="v" :class="sys.bridges.hedge&&sys.bridges.hedge.ok?'up':'down'">{{sys.bridges.hedge&&sys.bridges.hedge.ok?'正常':'异常'}}</div>
-          <div class="s">{{sys.bridges.hedge&&sys.bridges.hedge.latency_ms!=null?sys.bridges.hedge.latency_ms+'ms':'—'}}</div></el-card></el-col>
+        <el-col :span="4"><el-card class="stat-card" :class="cardCls(fraOk)"><div class="l">FRA·A2T 源站</div>
+          <div class="v" :class="fraOk?'up':'down'">{{fraVal}}</div>
+          <div class="s">{{fraSub}}</div></el-card></el-col>
+        <el-col :span="4"><el-card class="stat-card" :class="cardCls(a2tHealthy)"><div class="l">A2T 云端调用</div>
+          <div class="v" :class="a2tHealthy?'up':'down'">{{a2tVal}}</div>
+          <div class="s">{{a2tSub}}</div></el-card></el-col>
         <el-col :span="4"><el-card class="stat-card" :class="cardCls(engineFresh)"><div class="l">引擎循环</div>
           <div class="v" :class="engineFresh?'up':'down'">{{ageTxt(sys.engine.cycle_age)}}</div>
           <div class="s">对{{sys.engine.cycle?sys.engine.cycle.pairs||0:0}} · 单腿{{sys.engine.cycle?sys.engine.cycle.single_leg||0:0}}</div></el-card></el-col>
@@ -33,9 +49,6 @@
         <el-col :span="4"><el-card class="stat-card"><div class="l">真金 / 武装</div>
           <div class="v">{{sys.demo_mode?'演示':'真金'}}</div>
           <div class="s">进{{sys.auto?sys.auto.auto_entry_armed:0}} / 出{{sys.auto?sys.auto.auto_exit_armed:0}}</div></el-card></el-col>
-        <el-col :span="4"><el-card class="stat-card" :class="cardCls(fraOk)"><div class="l">FRA 代理 · A2T</div>
-          <div class="v" :class="fraOk?'up':'down'">{{fraVal}}</div>
-          <div class="s">{{fraSub}}</div></el-card></el-col>
       </el-row>
 
       <!-- 护栏闸状态 -->
@@ -149,6 +162,12 @@ const fraSub=computed(()=>{ const f=sys.value&&sys.value.fra; if(!f||!f.configur
   const rtt=(f.main&&f.main.latency_ms!=null)?('QH→FRA '+f.main.latency_ms+'ms'):'不可达'
   const armed=!!(f.main&&f.main.health&&f.main.health.trading_armed)
   return rtt+' · '+(armed?'已武装⚡':'未武装') })
+// A2T 云端调用监控(日滚动: calls=真实云端请求, hits=缓存命中省配额, 402=配额超限)
+const a2tHealthy=computed(()=>{ const a=sys.value&&sys.value.a2t; return !!(a&&!a.err&&(a.quota_402||0)===0) })
+const a2tVal=computed(()=>{ const a=sys.value&&sys.value.a2t; if(!a||a.err)return '—'
+  return (a.quota_402>0)?('402×'+a.quota_402):('调用 '+(a.calls||0)) })
+const a2tSub=computed(()=>{ const a=sys.value&&sys.value.a2t; if(!a||a.err)return a&&a.err?a.err:''
+  return '命中率 '+(a.hit_rate!=null?a.hit_rate+'%':'—')+' · 今日缓存省 '+(a.hits||0) })
 function cardCls(ok){ return ok?'':'stat-bad' }
 function connModeLbl(m){ return m==='api'?'API·Api2Trade':m==='bridge'?'Bridge云端':(m?m:'未设置') }
 function connExplain(r){
@@ -167,6 +186,14 @@ async function doEstop(){
     await api.estop(); ElMessage.success('全局急停已生效'); load() }catch(e){ if(e!=='cancel')ElMessage.error('急停失败') }
 }
 async function clearEstop(){ try{ await api.estopClear(); ElMessage.success('已解除急停'); load() }catch(e){ ElMessage.error('失败') } }
+function openGoView(){ window.open('/goview/', '_blank') }   // Go-View 低代码大屏(独立应用, 同域)
+async function switchReadSource(){
+  const cur=sys.value.mode.read_source, next=cur==='a2t'?'bridge':'a2t'
+  const lbl=next==='a2t'?'纯云端(A2T)':'内网桥优先'
+  try{ await ElMessageBox.confirm('将读取数据源切换为「'+lbl+'」。\n\na2t=登记即有数据/清除即停(纯云端); bridge=桥优先+熔断回退云端。\n执行链路不受影响。确认切换？','切换读取源',{type:'warning'})
+    await api.setReadSource(next); ElMessage.success('已切换读取源: '+lbl); load()
+  }catch(e){ if(e!=='cancel')ElMessage.error(e?.response?.data?.detail||'切换失败') }
+}
 // L5 活保型轮询: 可见性暂停 + 失败指数退避 + 前台/联网自愈(替代裸 setInterval)
 const live=useLiveRefresh(async()=>{ if(autoRefresh.value) await load() }, { interval: refreshSec*1000 })
 onMounted(()=>{ load(); loadAudit(); loadSsl(); live.start() })

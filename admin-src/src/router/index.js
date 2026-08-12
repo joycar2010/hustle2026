@@ -36,6 +36,6 @@ const routes = [
     { path:'recon', name:'recon', meta:{title:'跨用户对账',icon:'Files',group:'运维',ord:7}, component:()=>import('../views/Recon.vue') },
     // 成交记录已并入 跨用户对账(/recon 第二页签"成交记录·统计"); 旧 /deals 直达链接重定向兜底
     { path:'deals', redirect:'/recon' },
-  ]}
+  ]},
 ]
 export default createRouter({ history:createWebHistory(), routes })

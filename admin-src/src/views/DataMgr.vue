@@ -3,10 +3,18 @@
     <el-tabs v-model="tab" type="border-card">
       <!-- 版本管理(可推送 GitHub qh 分支) -->
       <el-tab-pane label="版本管理" name="version">
-        <el-descriptions :column="1" border size="small" v-if="ver">
-          <el-descriptions-item label="应用版本">{{ver.app_version}}</el-descriptions-item>
+        <el-descriptions :column="2" border size="small" v-if="ver">
+          <el-descriptions-item label="应用版本"><b style="color:var(--el-color-primary)">v{{ver.app_version}}</b>
+            <span style="color:#909399;font-size:11px;margin-left:6px">(每次 GitHub 推送自增)</span></el-descriptions-item>
+          <el-descriptions-item label="提交哈希">{{ver.git_hash}}<el-tag v-if="ver.git_branch" size="small" style="margin-left:6px">{{ver.git_branch}}</el-tag></el-descriptions-item>
+          <el-descriptions-item label="提交时间">{{(ver.git_time||'').slice(0,19)}}</el-descriptions-item>
+          <el-descriptions-item label="工作区状态">
+            <el-tag size="small" :type="ver.git_dirty?'warning':'success'">{{ver.git_dirty?('有未推送改动 '+(ver.git_dirty_n||0)+' 项'):'干净(已备份)'}}</el-tag>
+            <el-tag v-if="ver.ahead" size="small" type="warning" style="margin-left:6px">领先 origin {{ver.ahead}}</el-tag>
+            <el-tag v-if="ver.behind" size="small" type="danger" style="margin-left:6px">落后 origin {{ver.behind}}</el-tag>
+          </el-descriptions-item>
           <el-descriptions-item label="Python">{{ver.python}}</el-descriptions-item>
-          <el-descriptions-item label="当前提交">{{ver.git}}</el-descriptions-item>
+          <el-descriptions-item label="最新提交说明">{{ver.git_msg||'—'}}</el-descriptions-item>
         </el-descriptions>
 
         <el-divider>GitHub 推送 · qh 分支</el-divider>
@@ -34,6 +42,29 @@
       </el-tab-pane>
 
       <!-- 数据库 -->
+      <!-- 配置中心 -->
+      <el-tab-pane label="配置中心" name="config">
+        <el-alert type="info" :closable="false" show-icon style="margin-bottom:12px"
+          title="运行时热改配置(散在 Redis 的连接/A2T 目录参数收口于此)。env/数据库配置各有专页, 不在此中心。危险配置(读取源/执行方式)需 danger 能力。"/>
+        <el-table :data="configs" size="small" border>
+          <el-table-column prop="group" label="分组" width="70"/>
+          <el-table-column prop="label" label="配置项" width="150"/>
+          <el-table-column label="当前值" min-width="220"><template #default="s">
+            <span v-if="s.row.type!=='json'" style="font-family:monospace">{{s.row.value||'(默认 '+(s.row.default||'空')+')'}}</span>
+            <span v-else style="font-family:monospace;font-size:11px;color:#909399">{{s.row.value?(s.row.value.slice(0,60)+(s.row.value.length>60?'…':'')):'(空)'}}</span>
+          </template></el-table-column>
+          <el-table-column prop="apply" label="生效方式" width="140"/>
+          <el-table-column label="操作" width="90" fixed="right"><template #default="s"><el-button size="small" @click="editCfg(s.row)">编辑</el-button></template></el-table-column>
+        </el-table>
+        <el-dialog v-model="cfgDlg" :title="'编辑配置 — '+(curCfg.label||'')" width="560">
+          <div style="color:#909399;font-size:12px;margin-bottom:10px">{{curCfg.note}}</div>
+          <el-select v-if="curCfg.type==='enum'" v-model="cfgVal" style="width:220px"><el-option v-for="o in (curCfg.options||[])" :key="o" :value="o" :label="o"/></el-select>
+          <el-input v-else-if="curCfg.type==='json'" v-model="cfgVal" type="textarea" :rows="6" placeholder="JSON, 留空=删除该键回落默认"/>
+          <el-input v-else v-model="cfgVal" placeholder="留空=删除该键"/>
+          <template #footer><el-button @click="cfgDlg=false">取消</el-button><el-button type="primary" :loading="cfgSaving" @click="saveCfg">保存(热生效)</el-button></template>
+        </el-dialog>
+      </el-tab-pane>
+
       <el-tab-pane label="数据库管理" name="db">
         <el-row :gutter="12" v-if="dbStats">
           <el-col :span="8"><el-card class="stat-card"><div class="l">数据库大小</div><div class="v">{{dbStats.size}}</div></el-card></el-col>
@@ -173,6 +204,13 @@ import { Odometer, Connection, RefreshRight } from '@element-plus/icons-vue'
 import { api } from '../api'
 const tab=ref('version')
 const ver=ref(null), dbStats=ref(null), tables=ref([]), certs=ref([]), ws=ref(null)
+// 配置中心
+const configs=ref([]), cfgDlg=ref(false), curCfg=ref({}), cfgVal=ref(''), cfgSaving=ref(false)
+async function loadConfigs(){ try{ configs.value=(await api.configList()).configs||[] }catch(e){} }
+function editCfg(row){ curCfg.value={...row}; cfgVal.value=row.value||''; cfgDlg.value=true }
+async function saveCfg(){ cfgSaving.value=true
+  try{ await api.configSet(curCfg.value.key, cfgVal.value); ElMessage.success('已保存(热生效)'); cfgDlg.value=false; loadConfigs() }
+  catch(e){ ElMessage.error(e?.response?.data?.detail||'保存失败') } finally{ cfgSaving.value=false } }
 const tblDlg=ref(false), tblName=ref(''), tblCols=ref([]), tblRows=ref([])
 const sslDlg=ref(false), sslForm=ref({cert_name:'',domain_name:'',cert_content:'',key_content:''})
 // WS 面板派生态
@@ -228,7 +266,7 @@ async function a2tDel(row){ try{ await ElMessageBox.confirm('删除订阅配置�
 async function a2tTest(row){ a2tTesting.value=row.id; try{ const r=await api.a2tTest(row.id); ElMessage[r.expired?'warning':'success']('连通 · 延迟'+r.latency_ms+'ms · 账户'+r.accounts+'个'+(r.expired?' · ⚠订阅已过期':'')) }catch(e){ ElMessage.error(e?.response?.data?.detail||'测试失败') }finally{ a2tTesting.value=0 } }
 async function a2tViewAcc(row){ try{ const r=await api.a2tAccounts(row.id); a2tAccList.value=r.accounts||[]; a2tAccDlg.value=true }catch(e){ ElMessage.error(e?.response?.data?.detail||'加载失败') } }
 async function a2tCanary(){ a2tCanaryRun.value=true; try{ const r=await api.a2tCanary({id:a2tForm.value.id,n:10}); ElMessageBox.alert('延迟分布(ms): min '+r.min+' / p50 '+r.p50+' / p90 '+r.p90+' / max '+r.max+'\\n\\n结论: '+r.verdict,'Canary 结果 · N='+r.n,{type:r.p50<=300?'success':'warning'}) }catch(e){ ElMessage.error(e?.response?.data?.detail||'Canary 失败') }finally{ a2tCanaryRun.value=false } }
-onMounted(()=>{ loadVer(); loadDb(); loadSsl(); loadWs(); loadA2t() })
+onMounted(()=>{ loadVer(); loadDb(); loadSsl(); loadWs(); loadA2t(); loadConfigs() })
 </script>
 <style scoped>
 .ws-card-h{display:flex;align-items:center;gap:6px;font-size:13px;font-weight:600;color:var(--el-color-primary)}

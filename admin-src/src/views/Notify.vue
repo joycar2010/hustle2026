@@ -1,6 +1,33 @@
 <template>
   <div>
     <el-tabs v-model="tab" type="border-card">
+      <!-- 网站维护/系统全停 -->
+      <el-tab-pane name="maint">
+        <template #label><span class="tl"><el-icon><Warning/></el-icon> 网站维护/全停</span></template>
+        <el-alert :type="mt.on?'error':'success'" :closable="false" show-icon style="margin-bottom:14px"
+          :title="mt.on?('⚠ 维护态生效中'+(mt.block_login?' · 已禁登录':'')+(mt.block_trading?' · 已禁交易':'')+(mt.stop_strategy?' · 已停自动策略':'')):'系统正常运行中'"/>
+        <el-form label-width="130" style="max-width:560px">
+          <el-form-item label="维护总开关">
+            <el-switch v-model="mt.on" active-text="维护中" inactive-text="正常运行" @change="onMaintToggle"/>
+          </el-form-item>
+          <el-form-item label="停自动策略"><el-switch v-model="mt.stop_strategy" :disabled="!mt.on"/>
+            <span class="hint">开启维护时把所有用户自动进/出场归零(等同急停; 关闭维护不自动恢复策略)</span></el-form-item>
+          <el-form-item label="禁下单交易"><el-switch v-model="mt.block_trading" :disabled="!mt.on"/>
+            <span class="hint">拦截开仓/平仓/补腿/一键平仓(手动亦拦), 返回维护中提示</span></el-form-item>
+          <el-form-item label="禁登录(全站)"><el-switch v-model="mt.block_login" :disabled="!mt.on"/>
+            <span class="hint">非操作员一律挡在门外, 用户端显示全屏维护公告(操作后台不受影响)</span></el-form-item>
+          <el-form-item label="公告标题"><el-input v-model="mt.title" size="small" placeholder="系统维护中"/></el-form-item>
+          <el-form-item label="公告内容"><el-input v-model="mt.msg" type="textarea" :rows="2" placeholder="例: 系统升级维护, 预计30分钟, 感谢理解"/></el-form-item>
+          <el-form-item label="预计恢复时间"><el-input v-model="mt.until" size="small" placeholder="可选, ISO格式如 2026-07-09T12:00:00+00:00, 到点自动解除" style="width:320px"/></el-form-item>
+          <el-form-item>
+            <el-button type="danger" :loading="mtSaving" @click="saveMaint">保存维护设置</el-button>
+            <el-button type="warning" :loading="mtSaving" @click="fullHalt">一键维护全停</el-button>
+            <el-button v-if="mt.on" @click="clearMaint">解除维护</el-button>
+          </el-form-item>
+        </el-form>
+        <div class="hint" style="margin-top:6px">维护态存 Redis(重启不丢); 开启即自动向用户端跑马灯置顶维护公告。"一键维护全停"=三档全开。急停解除请到「系统管理」。</div>
+      </el-tab-pane>
+
       <!-- 飞书 -->
       <el-tab-pane name="feishu">
         <template #label><span class="tl"><el-icon><Bell/></el-icon> 飞书通知</span></template>
@@ -197,7 +224,31 @@
 import { ref, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
-const tab=ref('feishu')
+const tab=ref('maint')
+// ---- 网站维护/系统全停 ----
+const mt=ref({on:false,stop_strategy:true,block_trading:true,block_login:false,title:'系统维护中',msg:'',until:''}), mtSaving=ref(false)
+async function loadMaint(){ try{ const r=await api.maintenanceGet(); const m=r.maintenance||{}
+  mt.value={on:!!m.on,stop_strategy:m.stop_strategy!==false,block_trading:m.block_trading!==false,block_login:!!m.block_login,
+    title:m.title||'系统维护中',msg:m.msg||'',until:m.until||''} }catch(e){} }
+function onMaintToggle(v){ if(!v) clearMaint() }
+async function saveMaint(){
+  if(mt.value.on){ try{ await ElMessageBox.confirm('确认开启维护态？将按所选档位拦截用户端(禁登录/禁交易/停策略)并置顶维护公告。','开启维护',{type:'warning'}) }catch(e){ return } }
+  mtSaving.value=true
+  try{ await api.maintenanceSave({...mt.value}); ElMessage.success(mt.value.on?'维护态已开启':'已解除维护'); loadMaint() }
+  catch(e){ ElMessage.error(e?.response?.data?.detail||'保存失败') } finally{ mtSaving.value=false }
+}
+async function fullHalt(){
+  try{ await ElMessageBox.confirm('「一键维护全停」将同时: 停所有自动策略 + 禁下单 + 禁登录, 并置顶维护公告。确认执行？','维护全停',{type:'error',confirmButtonText:'全停'}) }catch(e){ return }
+  mt.value.on=true; mt.value.stop_strategy=true; mt.value.block_trading=true; mt.value.block_login=true
+  mtSaving.value=true
+  try{ await api.maintenanceSave({...mt.value}); ElMessage.success('维护全停已生效'); loadMaint() }
+  catch(e){ ElMessage.error(e?.response?.data?.detail||'保存失败') } finally{ mtSaving.value=false }
+}
+async function clearMaint(){
+  mtSaving.value=true
+  try{ await api.maintenanceSave({on:false}); mt.value.on=false; ElMessage.success('已解除维护'); loadMaint() }
+  catch(e){ ElMessage.error(e?.response?.data?.detail||'解除失败') } finally{ mtSaving.value=false }
+}
 const fs=ref({connected:false,error:''}), fsRecipient=ref('')
 const fscfg=ref({appid:'',secret:'',appid_set:false})
 async function saveFeishuCfg(){
@@ -277,9 +328,10 @@ function tryPlayKey(key){ if(!key||key==='none')return ElMessage.info('该模板
 async function doBroadcast(){ if(!bc.value.title)return ElMessage.warning('填标题')
   try{ await api.notifyBroadcast(bc.value); ElMessage.success('已广播'); bc.value.content='' }catch(e){ ElMessage.error(e?.response?.data?.detail||'失败') } }
 async function loadLogs(){ try{ logs.value=(await api.notifyLogs(logCh.value)).logs||[] }catch(e){} }
-onMounted(()=>{ loadFeishuStatus(); loadFsCfgStatus(); loadEmail(); loadTemplates(); loadLogs(); loadSounds() })
+onMounted(()=>{ loadMaint(); loadFeishuStatus(); loadFsCfgStatus(); loadEmail(); loadTemplates(); loadLogs(); loadSounds() })
 </script>
 <style scoped>
 .tl{display:inline-flex;align-items:center;gap:5px}
 .tl .el-icon{color:var(--el-color-primary)}
+.hint{font-size:11.5px;color:var(--el-text-color-secondary);margin-left:8px}
 </style>

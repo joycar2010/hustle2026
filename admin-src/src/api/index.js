@@ -16,6 +16,11 @@ export const api = {
   adminLegDealsSweep: () => http.post('/admin/leg_deals/sweep', {}, { headers: adminHeaders() }),
   params: (user) => http.get(`/params/${user}`),
   paramsSave: (row) => http.post('/params/save', { ...row, license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
+  // 参数下发优化: 批量下发 + 预设库
+  paramsBatch: (usernames, symbol, cfg) => http.post('/admin/params/batch', { usernames, symbol, cfg, license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
+  paramPresets: () => http.get('/admin/param_presets', { headers: adminHeaders() }),
+  paramPresetSave: (p) => http.post('/admin/param_preset/save', { ...p, license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
+  paramPresetDelete: (id) => http.post('/admin/param_preset/delete', { id, license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
   syncLast: () => http.get('/sync/last'),
   sync: (user, days=1) => http.post(`/bridge/sync/${user}?days=${days}`),
   // ── P0 内购/权益 ──
@@ -67,6 +72,10 @@ export const api = {
   siteRollback: (site, version_id) => http.post('/admin/site/rollback', { site, version_id, license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
   estop: () => http.post('/admin/system/estop', { confirm:true, license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
   estopClear: () => http.post('/admin/system/estop_clear', { license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
+  setReadSource: (read_source) => http.post('/admin/system/read_source', { read_source, license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
+  dvSummary: () => http.get('/admin/dv/summary', { headers: adminHeaders() }),
+  configList: () => http.get('/admin/config', { headers: adminHeaders() }),
+  configSet: (key, value) => http.post('/admin/config/set', { key, value, license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
   auditLog: (limit=100, action='') => http.get('/admin/audit', { params:{ limit, action } }),
   // ── P5 操作员体系 ──
   opLogin: (username, password) => http.post('/op/login', { username, password }),
@@ -111,6 +120,9 @@ export const api = {
   notifyTemplateSave: (t) => http.post('/admin/notify/template', { ...t, license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
   notifyTemplateDel: (id) => http.post('/admin/notify/template_del', { id, license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
   notifyBroadcast: (b) => http.post('/admin/notify/broadcast', { ...b, license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
+  // 网站维护/系统全停
+  maintenanceGet: () => http.get('/admin/notify/maintenance', { headers: adminHeaders() }),
+  maintenanceSave: (m) => http.post('/admin/notify/maintenance', { ...m, license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
   notifyLogs: (channel='', status='', limit=100) => http.get('/admin/notify/logs', { params:{ channel, status, limit }, headers: adminHeaders() }),
   notifySounds: () => http.get('/admin/notify/sounds', { headers: adminHeaders() }),
   notifySoundSave: (s) => http.post('/admin/notify/sound', { ...s, license_key: localStorage.getItem('qh_key')||'' }, { headers: adminHeaders() }),
