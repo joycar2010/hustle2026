@@ -9,7 +9,7 @@ from typing import Optional
 import psycopg2, psycopg2.extras, redis
 from trade_queue import RedisTradeQueue, TERMINAL_STATES as TRADE_QUEUE_TERMINAL_STATES
 
-QH_BUILD_ID = "hedge-pro-mt5-five-stage-latency-20260812.41"
+QH_BUILD_ID = "qh-mt5-latency-20260818.62"
 
 # P0.1: 全链路追踪模块
 from qh_command_tracer import (
@@ -37,6 +37,7 @@ _TRADE_QUEUE_DISPATCH_LIMIT = max(1, min(32, int(os.environ.get(
     "QH_TRADE_QUEUE_DISPATCH_CONCURRENCY", "20"
 ))))
 _TRADE_QUEUE_TASKS = {}
+_TRADE_QUEUE_FINALIZER_TASKS = {}
 _TRADE_QUEUE_WAKE = None
 _TRADE_QUEUE_LOOP_TASK = None
 _OPEN_SAGA_RECOVERY_TASKS = {}
@@ -47,6 +48,34 @@ _AUTO_SINGLE_LEG_CLOSE_LEASE_TTL = 45
 _PENDING_FINALIZER_TRUTH_BUDGET_SEC = max(0.25, min(5.0, float(os.environ.get(
     "QH_PENDING_FINALIZER_TRUTH_BUDGET_SEC", "1.5"
 ))))
+try:
+    _QUEUE_EXEC_GATE_TIMEOUT_SEC = max(0.20, min(0.80, float(
+        os.environ.get("QH_QUEUE_EXEC_GATE_TIMEOUT_SEC", "0.45"))))
+except (TypeError, ValueError):
+    _QUEUE_EXEC_GATE_TIMEOUT_SEC = 0.45
+_QUEUE_OWNER_PROOF_TTL_SEC = 4.0
+try:
+    _QUEUE_MARGIN_ACCOUNT_MAX_AGE_SEC = max(0.25, min(2.0, float(
+        os.environ.get(
+            "QH_QUEUE_MARGIN_ACCOUNT_SOURCE_MAX_AGE_MS",
+            os.environ.get("QH_QUEUE_MARGIN_ACCOUNT_MAX_AGE_MS", "1000"),
+        )) / 1000.0))
+except (TypeError, ValueError):
+    _QUEUE_MARGIN_ACCOUNT_MAX_AGE_SEC = 1.0
+try:
+    _QUEUE_MARGIN_ACCOUNT_BURST_MAX_AGE_SEC = max(2.0, min(8.0, float(
+        os.environ.get("QH_QUEUE_MARGIN_ACCOUNT_BURST_MAX_AGE_MS", "5000")
+    ) / 1000.0))
+except (TypeError, ValueError):
+    _QUEUE_MARGIN_ACCOUNT_BURST_MAX_AGE_SEC = 5.0
+try:
+    _QUEUE_MARGIN_ACCOUNT_ADMISSION_LEASE_SEC = max(0.05, min(1.0, float(
+        os.environ.get("QH_QUEUE_MARGIN_ACCOUNT_ADMISSION_LEASE_MS", "750")
+    ) / 1000.0))
+except (TypeError, ValueError):
+    _QUEUE_MARGIN_ACCOUNT_ADMISSION_LEASE_SEC = 0.75
+_QUEUE_MARGIN_ACCOUNT_CACHE = {}
+_QUEUE_MARGIN_ACCOUNT_READ_TASKS = {}
 try:
     _MANUAL_TRADE_BURST_WINDOW_SEC = max(0.05, min(0.75, float(
         os.environ.get("QH_MANUAL_TRADE_BURST_WINDOW_MS", "300")) / 1000.0))
@@ -267,7 +296,14 @@ def _frontend_telemetry_context(username, raw):
     if not authoritative or any(command_id not in authoritative
                                 for command_id in command_ids):
         return None
-    for command_id,batch_id in authoritative.items():
+    is_position_refresh=(raw.get("event")=="frontend_position_refresh_done")
+    if is_position_refresh and not command_ids:
+        return None
+    selected_commands=(command_ids if command_ids else list(authoritative))
+    terminal_states={"COMPLETED","FAILED","UNKNOWN","MANUAL_REVIEW",
+                     "SINGLE_LEG_EXPOSED"}
+    for command_id in selected_commands:
+        batch_id=authoritative[command_id]
         try:
             command=get_tracer().get_command(command_id)
         except Exception:
@@ -275,7 +311,10 @@ def _frontend_telemetry_context(username, raw):
         if (not command or str(command.get("username") or "")!=str(username) or
                 str(command.get("batch_id") or "")!=str(batch_id)):
             return None
-    return {"batch_ids":batch_ids,"command_ids":list(authoritative),
+        if (is_position_refresh and
+                str(command.get("status") or "").upper() not in terminal_states):
+            return None
+    return {"batch_ids":batch_ids,"command_ids":selected_commands,
             "client_started":False}
 
 def _frontend_telemetry_owned(username, raw):
@@ -299,6 +338,17 @@ def _trace_frontend_event(context, raw, received_at):
     elapsed=_frontend_elapsed_ms(raw.get("elapsed_ms"))
     tracer=get_tracer()
     for command_id in context.get("command_ids") or ():
+        if event=="frontend_position_refresh_done":
+            try:
+                command=tracer.get_command(command_id) or {}
+                terminal_value=command.get(TraceTimestamp.BROKER_TERMINAL_CONFIRMED)
+                terminal_key=_trace_timestamp_sort_key(terminal_value)
+                received_key=_trace_timestamp_sort_key(received_at)
+                if (terminal_key is not None and
+                        (received_key is None or received_key<terminal_key)):
+                    continue
+            except Exception:
+                continue
         _record_trace_timestamp_value_once(tracer,command_id,field,received_at)
         if elapsed is not None:
             _record_trace_timestamp_value_once(
@@ -1489,6 +1539,16 @@ def _user_exec_conn(username):
     if not _exec_per_user_on() or not username: return EXEC
     c=_user_bridge_conn(username)
     return c if c is not None else EXEC
+
+def _user_authoritative_bridge_conn(username):
+    """Return only the scoped bridge allowed to prove a recovered position.
+
+    Recovery must never fall back to the process-global EXEC connector: a
+    matching ticket from another account is not proof of this user's live pair.
+    """
+    if not username or not _exec_per_user_on():
+        return None
+    return _user_bridge_conn(username)
 async def _leg_status_safe(leg):
     try: return await leg.status()
     except Exception as e: return {"connected":False,"error":e.__class__.__name__}
@@ -1912,6 +1972,24 @@ def _reg_roles_bust():
         bcache=globals().get("_BRIDGE_CLIENTS_CACHE")
         if bcache is not None: bcache.update({"ts":0.0,"data":None})
     except Exception: pass
+    try:
+        acache=globals().get("_QUEUE_MARGIN_ACCOUNT_CACHE")
+        if acache is not None: acache.clear()
+    except Exception: pass
+    try:
+        atasks=globals().get("_QUEUE_MARGIN_ACCOUNT_READ_TASKS")
+        if atasks is not None: atasks.clear()
+    except Exception: pass
+    try:
+        tcache=globals().get("_BRIDGE_TICK_MEMORY")
+        if tcache is not None: tcache.clear()
+    except Exception: pass
+    try:
+        pcache=globals().get("_USER_POSITION_CACHE")
+        if pcache is not None: pcache.clear()
+        pversions=globals().get("_USER_POSITION_VERSIONS")
+        if pversions is not None: pversions.clear()
+    except Exception: pass
 
 def _auto_loop_running(username=None):
     """Return an armed automatic loop for one user or for the whole system."""
@@ -2014,9 +2092,9 @@ async def _probe_conn_health_user(username, uconn):
     async def _once():
         try:
             if hasattr(uconn, "both_status"):
-                st=await uconn.both_status()
+                st=await uconn.both_status(execution_probe=True)
             else:
-                st={"main":await uconn.status(),"hedge":None}
+                st={"main":await uconn.status(execution_probe=True),"hedge":None}
             def _ok(value):
                 if value is None:
                     return None
@@ -2107,12 +2185,13 @@ async def _exec_owner_reason(username):
         # successful status snapshot so ownership validation does not issue the same
         # two bridge requests twice for every click.
         _now=_t_conn.time(); _health=_CONN_HEALTH_USER_CACHE.get(username)
-        _status_all=(_health.get("st") if (_health and _health.get("ok") and (_now-_health.get("ts",0))<1.0) else None)
+        _status_all=(_health.get("st") if (_health and _health.get("ok") and
+                     (_now-_health.get("ts",0))<_QUEUE_OWNER_PROOF_TTL_SEC) else None)
         if not isinstance(_status_all,dict):
             async def _owner_status(_r):
                 leg=getattr(uconn,_r,None)
                 if leg is None: return {"connected":False,"error":"bridge_url_missing"}
-                try: return await leg.status()
+                try: return await leg.status(execution_probe=True)
                 except Exception as ex: return {"connected":False,"error":ex.__class__.__name__}
             _main_st,_hedge_st=await _aio.gather(_owner_status("main"),_owner_status("hedge"))
             _status_all={"main":_main_st,"hedge":_hedge_st}
@@ -2182,6 +2261,146 @@ async def _exec_owner_gate(username):
     r=await _exec_owner_reason(username)
     if r: raise HTTPException(409, r)
 
+def _queue_connection_consistency(username):
+    """Validate immutable routing facts without a database read per slot."""
+    rows=_reg_rows_for(username)
+    if set(rows or {})!={"main","hedge"}:
+        return False,"主/对冲账户登记不完整"
+    modes={str((rows.get(role) or {}).get("conn_mode") or "bridge").strip().lower()
+           for role in ("main","hedge")}
+    if len(modes)!=1:
+        return False,"主/对冲连接方式不一致"
+    if next(iter(modes))!="bridge":
+        return False,"当前执行方式不是 bridge"
+    return True,rows
+
+async def _queue_exec_gate_probe(username):
+    """Bounded fail-closed health and account-owner proof for queue workers.
+
+    Generic bridge reads retry for up to twenty seconds. A durable queue job
+    must never enter that retry chain before its broker POST: one dispatch
+    wave performs one status read, bounded by the queue gate budget, and all
+    slots share the result. Account ownership is security-sensitive, so a
+    legacy health snapshot is reused for at most one second even though pure
+    connectivity checks may use a longer cache elsewhere.
+    """
+    started=_t_conn.monotonic()
+    if not _exec_per_user_on():
+        raise HTTPException(
+            409,"账号级执行路由未启用，已 fail-closed 拒绝交易")
+    consistent,rows=_queue_connection_consistency(username)
+    if not consistent:
+        raise HTTPException(409,str(rows)+", 已 fail-closed 拒绝执行")
+    conn=_user_exec_conn(username)
+    if _user_bridge_conn(username) is None:
+        raise HTTPException(409,"账户未配置专属执行桥，已拒绝交易")
+    now=_t_conn.time(); cached=_CONN_HEALTH_USER_CACHE.get(username)
+    status=(cached.get("st") if (cached and cached.get("ok") and
+            now-float(cached.get("ts") or 0)<_QUEUE_OWNER_PROOF_TTL_SEC)
+            else None)
+    source="health_cache"
+    if not isinstance(status,dict):
+        source="bounded_probe"
+        async def _probe():
+            if hasattr(conn,"both_status"):
+                return await conn.both_status(execution_probe=True)
+            main=await conn.status(execution_probe=True)
+            return {"main":main,"hedge":None}
+        try:
+            status=await _aio.wait_for(
+                _probe(),timeout=_QUEUE_EXEC_GATE_TIMEOUT_SEC)
+        except _aio.TimeoutError:
+            _CONN_HEALTH_USER_CACHE[username]={
+                "ts":_t_conn.time(),"ok":False,
+                "st":{"err":"queue_health_timeout"}}
+            raise HTTPException(
+                409,"执行桥健康检查超过 %dms，未发送交易命令"%
+                int(_QUEUE_EXEC_GATE_TIMEOUT_SEC*1000))
+        except Exception as ex:
+            _CONN_HEALTH_USER_CACHE[username]={
+                "ts":_t_conn.time(),"ok":False,
+                "st":{"err":ex.__class__.__name__}}
+            raise HTTPException(409,"执行桥不可达，未发送交易命令")
+        status_ok=all(
+            isinstance(status.get(role),dict) and
+            bool((status.get(role) or {}).get("connected")) and
+            "error" not in (status.get(role) or {})
+            for role in ("main","hedge"))
+        _CONN_HEALTH_USER_CACHE[username]={
+            "ts":_t_conn.time(),"ok":status_ok,"st":status}
+        if not status_ok:
+            raise HTTPException(409,"执行桥双腿未连接，未发送交易命令")
+
+    for role,label in (("main","主"),("hedge","对冲")):
+        expected=str((rows.get(role) or {}).get("login") or "").strip()
+        leg_status=status.get(role) if isinstance(status,dict) else None
+        actual=str((leg_status or {}).get("account") or "").strip()
+        if (not isinstance(leg_status,dict) or
+                not leg_status.get("connected") or "error" in leg_status):
+            raise HTTPException(409,label+"腿执行桥未连接，未发送交易命令")
+        if not expected or not actual:
+            raise HTTPException(409,label+"腿账户归属无法验证，未发送交易命令")
+        if expected!=actual:
+            raise HTTPException(
+                409,"%s腿桥账户(%s)与登记(%s)不符，拒绝执行"%
+                (label,actual,expected))
+    return {"source":source,
+            "elapsed_ms":int((_t_conn.monotonic()-started)*1000),
+            "checked_mono":_t_conn.monotonic()}
+
+async def _queue_exec_gate(job, username):
+    """Await this claim wave's shared, short-lived execution proof."""
+    task=(job or {}).get("_worker_exec_gate_task") if isinstance(job,dict) else None
+    created=(job or {}).get("_worker_exec_gate_created_mono") if isinstance(job,dict) else None
+    bound_user=str((job or {}).get("_worker_exec_gate_username") or "")
+    try: age=_t_conn.monotonic()-float(created)
+    except (TypeError,ValueError): age=999.0
+    if (task is None or not hasattr(task,"__await__") or
+            bound_user!=str(username or "") or age<0 or age>1.0):
+        return await _queue_exec_gate_probe(username)
+    return await _aio.shield(task)
+
+async def _queue_exec_leg_gate(job, username, role):
+    """Bounded owner proof for an emergency exact-ticket single-leg close."""
+    if role not in ("main","hedge"):
+        raise HTTPException(400,"INVALID_CLOSE_LEG")
+    if not _exec_per_user_on() or _user_bridge_conn(username) is None:
+        raise HTTPException(409,"账户未启用专属执行桥，未发送平仓命令")
+    consistent,rows=_queue_connection_consistency(username)
+    if not consistent:
+        raise HTTPException(409,str(rows)+", 未发送平仓命令")
+    conn=_user_exec_conn(username); leg=getattr(conn,role,None)
+    if leg is None:
+        raise HTTPException(409,"目标腿执行桥未配置，未发送平仓命令")
+    expected=str((rows.get(role) or {}).get("login") or "").strip()
+    status=None; cached=_CONN_HEALTH_USER_CACHE.get(username)
+    if (cached and _t_conn.time()-float(cached.get("ts") or 0)<
+            _QUEUE_OWNER_PROOF_TTL_SEC and
+            isinstance(cached.get("st"),dict)):
+        candidate=(cached.get("st") or {}).get(role)
+        if (isinstance(candidate,dict) and candidate.get("connected") and
+                "error" not in candidate):
+            status=candidate
+    if status is None:
+        try:
+            status=await _aio.wait_for(
+                leg.status(execution_probe=True),
+                timeout=_QUEUE_EXEC_GATE_TIMEOUT_SEC)
+        except _aio.TimeoutError:
+            raise HTTPException(
+                409,"目标腿健康检查超过 %dms，未发送平仓命令"%
+                int(_QUEUE_EXEC_GATE_TIMEOUT_SEC*1000))
+        except Exception:
+            raise HTTPException(409,"目标腿执行桥不可达，未发送平仓命令")
+    actual=str((status or {}).get("account") or "").strip()
+    if not (status or {}).get("connected") or "error" in (status or {}):
+        raise HTTPException(409,"目标腿执行桥未连接，未发送平仓命令")
+    if not expected or not actual:
+        raise HTTPException(409,"目标腿账户归属无法验证，未发送平仓命令")
+    if expected!=actual:
+        raise HTTPException(409,"目标腿桥账户与登记不符，拒绝执行")
+    return conn
+
 async def _exec_leg_gate(username, leg):
     """Validate only the target leg for an exact-ticket emergency close."""
     rows=_reg_rows_for(username)
@@ -2196,7 +2415,7 @@ async def _exec_leg_gate(username, leg):
     status=None
     for _attempt in range(2):
         try:
-            status=await legobj.status()
+            status=await legobj.status(execution_probe=True)
             if status.get("connected") and "error" not in status: break
         except Exception:
             status=None
@@ -2629,9 +2848,7 @@ async def _engine_loop():
             for t in tmpls:
                 cycle["pairs"]+=1
                 user=t["username"]
-                closed,why=ENG.market_closed(
-                    weekend_guard=t.get("weekend_guard",True),
-                    weekend_sat=t.get("weekend_sat"),weekend_sun=t.get("weekend_sun"))
+                closed,why=_market_closed_for_template(t)
                 market_state={"closed":closed,"why":why}
                 R.hset(RNS+"engine:market:user",user,json.dumps(market_state))
                 fluct_state={"paused":False,"amp":None,"reason":"off"}
@@ -3098,8 +3315,14 @@ async def _auto_exit_loop():
                 if R.set(RNS+"conn:autoexit_warn:"+user,"1",nx=True,ex=300):
                     _push_alert("warn","自动平仓暂停: %s"%_blk,user)
                 continue
-            # P1-b enforce: 循环级三闸(auto_close总闸→run_window休市可手平→market_closed避免休市单腿)统一走 policy
-            if POL.exit_loop_verdict(t,_bj_hm())[0]: continue
+            if not t.get("auto_close"):
+                continue
+            _schedule_blocked,_schedule_gate,_schedule_why=_trade_schedule_verdict(
+                t,"close",automatic=True)
+            if _schedule_blocked:
+                _publish_auto_exit_decisions(
+                    user,mode,[],blocked=_schedule_gate)
+                continue
             hedge_sym=ENG.map_hedge_symbol(sym,t.get("hedge_symbol")) or sym
             decision_conn=_user_exec_conn(user)
             try: both=await decision_conn.both_positions()
@@ -3275,12 +3498,13 @@ async def _auto_entry_loop():
                 if R.set(RNS+"conn:autoentry_warn:"+user,"1",nx=True,ex=300):
                     _push_alert("warn","自动进单暂停: %s"%_blk,user)
                 continue
-            # 运行时段/进单时段闸(北京): 运行时段外→系统不进单; 进单时段外→不开仓(手动/自动一致)
-            if POL.gate_window(t,"run",_bj_hm())[0]: continue
-            if POL.gate_window(t,"entry",_bj_hm())[0]: continue
-            # 休市/周末闸 — P1-b enforce: 统一走 policy
-            closed,_why=POL.gate_market_closed(t)
-            if closed: continue
+            _schedule_blocked,_schedule_gate,_schedule_why=_trade_schedule_verdict(
+                t,"open",automatic=True)
+            if _schedule_blocked:
+                R.set(RNS+"auto_entry:decisions:"+user,json.dumps({
+                    "ts":_dt.datetime.utcnow().isoformat(),"mode":mode,
+                    "items":[],"blocked":_schedule_gate},ensure_ascii=False))
+                continue
             ladders=int(t.get("ladders") or 0) or 0
             if ladders<=0: continue
             decision_conn=_user_exec_conn(user)
@@ -3852,31 +4076,70 @@ def _slotop_key(username, symbol, slot):
 
 _SLOT_REVIEW_ACTIVE=frozenset((
     "UNKNOWN","MANUAL_REVIEW","SINGLE_LEG_EXPOSED","RECONCILING","SUBMITTED"))
+_SLOT_REVIEW_TERMINAL=frozenset(("COMPLETED","FAILED"))
 _ACCOUNT_REVIEW_LOCAL={}
 
 def _slotreview_key(username, symbol, slot):
     return RNS+"slotreview:%s:%s:%d"%((username or "").strip(),symbol,int(slot))
 
+def _completed_open_quarantine_key(job_id):
+    return RNS+"tradeq:completed-open-quarantine:"+str(job_id or "")
+
+def _completed_open_quarantine_index_key(username):
+    scope=str(username or "").strip() or "__global__"
+    return RNS+"tradeq:completed-open-quarantine-account:"+scope
+
 def _slot_review_record(username, symbol, slot):
     """Return an unresolved durable review latch, clearing reconciled commands lazily."""
     try:
-        raw=R.get(_slotreview_key(username,symbol,slot))
+        key=_slotreview_key(username,symbol,slot)
+        raw=R.get(key)
         if raw:
             if isinstance(raw,bytes): raw=raw.decode("utf-8","replace")
             record=json.loads(raw)
             if not isinstance(record,dict):
                 return {"state":"MANUAL_REVIEW","reason":"invalid review latch"}
             command_id=str(record.get("command_id") or "")
+            job_id=str(record.get("job_id") or "")
             if command_id:
                 try:
                     command=get_tracer().get_command(command_id)
                 except Exception:
                     command=None
                 status=str((command or {}).get("status") or "").upper()
-                if status and status not in _SLOT_REVIEW_ACTIVE:
-                    R.delete(_slotreview_key(username,symbol,slot))
-                    _ACCOUNT_REVIEW_LOCAL.pop(
-                        ((username or "").strip(),str(symbol),int(slot)),None)
+                if status in _SLOT_REVIEW_TERMINAL:
+                    # Another command may install a latch after the read above.
+                    # Clear only the exact terminal record we inspected.
+                    script="""
+                    local raw=redis.call('get',KEYS[1])
+                    if not raw then return 0 end
+                    local ok,c=pcall(cjson.decode,raw)
+                    if not ok or type(c) ~= 'table' or
+                       string.match(raw,'^%s*(.)') ~= '{' then return -1 end
+                    if type(c.command_id) ~= 'string' or c.command_id == '' or
+                       type(c.job_id) ~= 'string' or c.job_id == '' then return -3 end
+                    if c.command_id ~= ARGV[1] or
+                       c.job_id ~= ARGV[2] then return -2 end
+                    return redis.call('del',KEYS[1])
+                    """
+                    cleared=int(R.eval(script,1,key,command_id,job_id) or 0)==1
+                    if cleared or R.get(key) is None:
+                        _ACCOUNT_REVIEW_LOCAL.pop(
+                            ((username or "").strip(),str(symbol),int(slot)),None)
+                    else:
+                        # Do not recurse while a malformed/foreign halt keeps
+                        # the exact latch protected. Return the inspected latch
+                        # so callers remain fail-closed without a loop.
+                        latest=R.get(key)
+                        if isinstance(latest,bytes):
+                            latest=latest.decode("utf-8","replace")
+                        try:
+                            latest_record=json.loads(latest) if latest else None
+                        except Exception:
+                            latest_record=None
+                        return (latest_record if isinstance(latest_record,dict)
+                                else {"state":"MANUAL_REVIEW",
+                                      "reason":"review latch cleanup unavailable"})
                 else:
                     # An unresolved broker outcome must never unlock merely because an old
                     # release wrote this key with a TTL.
@@ -3918,22 +4181,216 @@ def _set_slot_review(username, symbol, slot, state, command_id=None, job_id=None
     except Exception:
         return False
 
-def _clear_slot_review(username, symbol, slot, command_id=None):
+def _ensure_matching_slot_review(username, symbol, slot, state, command_id,
+                                 job_id, reason=""):
+    """Persist one exact review latch without overwriting another command."""
+    state=str(state or "").upper(); command_id=str(command_id or "").strip()
+    job_id=str(job_id or "").strip(); slot=int(slot or 0)
+    if (slot<1 or state not in ("UNKNOWN","MANUAL_REVIEW","SINGLE_LEG_EXPOSED") or
+            not command_id or not job_id):
+        return False
+    record={"username":username,"symbol":symbol,"slot":slot,"state":state,
+            "command_id":command_id,"job_id":job_id,
+            "reason":str(reason or state)[:300],
+            "created_at":_dt.datetime.utcnow().isoformat()}
+    encoded=json.dumps(record,ensure_ascii=False,separators=(",",":"),default=str)
+    key=_slotreview_key(username,symbol,slot)
+    script="""
+    local current=redis.call('get',KEYS[1])
+    if current then
+        local ok,c=pcall(cjson.decode,current)
+        if not ok or type(c) ~= 'table' or
+           string.match(current,'^%s*(.)') ~= '{' or
+           type(c.command_id) ~= 'string' or c.command_id == '' or
+           type(c.job_id) ~= 'string' or c.job_id == '' or
+           c.command_id ~= ARGV[1] or
+           c.job_id ~= ARGV[2] then return -1 end
+    end
+    redis.call('set',KEYS[1],ARGV[3])
+    redis.call('persist',KEYS[1])
+    return 1
+    """
     try:
-        key=_slotreview_key(username,symbol,slot)
-        if command_id:
-            record=_slot_review_record(username,symbol,slot)
-            if record and str(record.get("command_id") or "") not in ("",str(command_id)):
-                return False
-        deleted=bool(R.delete(
-            key,RNS+"auto_entry:slot_halt:%s:%s:%d"%(
-                (username or "").strip(),symbol,int(slot))))
-        local_key=((username or "").strip(),str(symbol),int(slot))
-        existed=local_key in _ACCOUNT_REVIEW_LOCAL
-        _ACCOUNT_REVIEW_LOCAL.pop(local_key,None)
-        return bool(deleted or existed)
+        if int(R.eval(script,1,key,command_id,job_id,encoded) or 0)!=1:
+            return False
+        raw=R.get(key)
+        if isinstance(raw,bytes): raw=raw.decode("utf-8","replace")
+        stored=json.loads(raw) if raw else None
+        if (not isinstance(stored,dict) or
+                str(stored.get("command_id") or "")!=command_id or
+                str(stored.get("job_id") or "")!=job_id or
+                str(stored.get("state") or "").upper()!=state):
+            return False
+        _ACCOUNT_REVIEW_LOCAL[((username or "").strip(),str(symbol),slot)]=stored
+        return True
     except Exception:
         return False
+
+def _clear_slot_review(username, symbol, slot, command_id=None):
+    """CAS-clear only latches still owned by ``command_id``.
+
+    This helper is used by older terminal paths that do not retain a queue job
+    id.  A read followed by ``DELETE`` is unsafe here: another command can
+    install a new latch between those operations.  Validate both Redis values
+    and perform the deletes in one script; malformed and identity-less legacy
+    records deliberately remain for manual review.
+    """
+    try:
+        command_id=str(command_id or "").strip()
+        key=_slotreview_key(username,symbol,slot)
+        local_key=((username or "").strip(),str(symbol),int(slot))
+        script="""
+        local raw=redis.call('get',KEYS[1])
+        local halt=redis.call('get',KEYS[2])
+        if not raw and not halt then return 0 end
+        if ARGV[1] == '' then return -1 end
+        if raw then
+            local ok,c=pcall(cjson.decode,raw)
+            if not ok or type(c) ~= 'table' or
+               string.match(raw,'^%s*(.)') ~= '{' or
+               type(c.command_id) ~= 'string' or c.command_id == '' or
+               c.command_id ~= ARGV[1] then return -2 end
+        end
+        if halt then
+            local hok,h=pcall(cjson.decode,halt)
+            if not hok or type(h) ~= 'table' or
+               string.match(halt,'^%s*(.)') ~= '{' then return -3 end
+            local halt_command=h.command_id
+            if h.detail ~= nil then
+                if type(h.detail) ~= 'table' or
+                   string.sub(cjson.encode(h.detail),1,1) ~= '{' then return -4 end
+                halt_command=halt_command or h.detail.command_id
+            end
+            if type(halt_command) ~= 'string' or halt_command == '' or
+               halt_command ~= ARGV[1] then return -5 end
+        end
+        -- No write occurs until both current values pass identity validation.
+        if raw then redis.call('del',KEYS[1]) end
+        if halt then redis.call('del',KEYS[2]) end
+        return 1
+        """
+        result=int(R.eval(script,2,key,
+            RNS+"auto_entry:slot_halt:%s:%s:%d"%(
+                (username or "").strip(),symbol,int(slot)),command_id) or 0)
+        if result<0:
+            return False
+        # Clearing an already-absent exact latch is idempotent.  Local cache
+        # state is discarded only after Redis proves there is no conflict.
+        _ACCOUNT_REVIEW_LOCAL.pop(local_key,None)
+        return True
+    except Exception:
+        return False
+
+def _clear_matching_slot_review(username, symbol, slot, command_id, job_id=None):
+    """CAS-clear only the review and halt created by one exact open saga."""
+    try:
+        command_id=str(command_id or "").strip()
+        job_id=str(job_id or "").strip()
+        if not command_id or not job_id:
+            return False
+        key=_slotreview_key(username,symbol,slot)
+        script="""
+        local raw=redis.call('get',KEYS[1])
+        if raw then
+            local ok,c=pcall(cjson.decode,raw)
+            if not ok or type(c) ~= 'table' or
+               string.match(raw,'^%s*(.)') ~= '{' or
+               type(c.command_id) ~= 'string' or c.command_id == '' or
+               type(c.job_id) ~= 'string' or c.job_id == '' or
+               c.command_id ~= ARGV[1] or
+               c.job_id ~= ARGV[2] then return -1 end
+        end
+        local halt=redis.call('get',KEYS[2])
+        if halt then
+            local hok,h=pcall(cjson.decode,halt)
+            if not hok or type(h) ~= 'table' or
+               string.match(halt,'^%s*(.)') ~= '{' then return -2 end
+            local halt_command=h.command_id
+            local halt_job=h.job_id
+            if h.detail ~= nil then
+                if type(h.detail) ~= 'table' or
+                   string.sub(cjson.encode(h.detail),1,1) ~= '{' then return -5 end
+                halt_command=halt_command or h.detail.command_id
+                halt_job=halt_job or h.detail.job_id or h.detail.queue_job_id
+            end
+            if type(halt_command) ~= 'string' or halt_command == '' or
+               type(halt_job) ~= 'string' or halt_job == '' then return -6 end
+            if halt_command ~= ARGV[1] then return -3 end
+            if halt_job ~= ARGV[2] then return -4 end
+        end
+        -- Every read and identity check completed before the first write.
+        if raw then redis.call('del',KEYS[1]) end
+        if halt then redis.call('del',KEYS[2]) end
+        if raw or halt then return 1 end
+        return 0
+        """
+        result=int(R.eval(script,2,key,RNS+"auto_entry:slot_halt:%s:%s:%d"%(
+            (username or "").strip(),symbol,int(slot)),command_id,job_id) or 0)
+        if result==0:
+            _ACCOUNT_REVIEW_LOCAL.pop(
+                ((username or "").strip(),str(symbol),int(slot)),None)
+            return True
+        if result!=1:
+            return False
+        _ACCOUNT_REVIEW_LOCAL.pop(((username or "").strip(),str(symbol),int(slot)),None)
+        return True
+    except Exception:
+        return False
+
+def _completed_open_quarantine_record(username):
+    """Return only account/global completed-open quarantine risk."""
+    scope=(username or "").strip()
+    if not scope:
+        return {"state":"MANUAL_REVIEW","reason":"missing account review scope"}
+    try:
+        # A completed-open quarantine means broker truth exists but its local
+        # account/slot suffix cannot yet be trusted.  A scoped record blocks
+        # that account; an unscoped or malformed record blocks every account
+        # until an operator repairs its immutable identity.
+        for quarantine_scope in ("",scope):
+            index_key=_completed_open_quarantine_index_key(quarantine_scope)
+            for raw_job_id in R.smembers(index_key) or ():
+                job_id=(raw_job_id.decode("utf-8","replace")
+                        if isinstance(raw_job_id,bytes) else str(raw_job_id))
+                quarantine_key=_completed_open_quarantine_key(job_id)
+                raw=R.get(quarantine_key)
+                if raw is None:
+                    # Remove a stale index member only if the marker is still
+                    # absent at the same Redis atomic boundary.
+                    R.eval("""
+                        if redis.call('exists',KEYS[1]) == 0 then
+                            redis.call('srem',KEYS[2],ARGV[1])
+                            if redis.call('scard',KEYS[2]) == 0 then
+                                redis.call('del',KEYS[2])
+                            end
+                            return 1
+                        end
+                        return 0
+                    """,2,quarantine_key,index_key,job_id)
+                    continue
+                if isinstance(raw,bytes): raw=raw.decode("utf-8","replace")
+                try: quarantine=json.loads(raw)
+                except (TypeError,ValueError): quarantine=None
+                if not isinstance(quarantine,dict):
+                    return {"username":scope,"state":"MANUAL_REVIEW",
+                            "risk_source":"completed_open_quarantine",
+                            "reason":"completed open quarantine unavailable"}
+                quarantine_user=str(quarantine.get("username") or "").strip()
+                if quarantine_user not in ("",scope):
+                    return {"username":scope,"state":"MANUAL_REVIEW",
+                            "risk_source":"completed_open_quarantine",
+                            "reason":"completed open quarantine index conflict"}
+                record=dict(quarantine)
+                record["username"]=quarantine_user or scope
+                record["state"]="MANUAL_REVIEW"
+                record["risk_source"]="completed_open_quarantine"
+                record.setdefault("reason","completed open identity quarantine")
+                return record
+        return None
+    except Exception:
+        return {"username":scope,"state":"MANUAL_REVIEW",
+                "risk_source":"completed_open_quarantine",
+                "reason":"completed open quarantine unavailable"}
 
 def _account_review_record(username):
     """Return any unresolved account risk; unreadable review state fails closed."""
@@ -3941,6 +4398,10 @@ def _account_review_record(username):
     if not scope:
         return {"state":"MANUAL_REVIEW","reason":"missing account review scope"}
     try:
+        quarantine=_completed_open_quarantine_record(scope)
+        if quarantine:
+            return quarantine
+
         for key,record in list(_ACCOUNT_REVIEW_LOCAL.items()):
             if key[0]!=scope:
                 continue
@@ -3997,6 +4458,14 @@ def _assert_slot_review_clear(username, symbol, slot):
     if record:
         raise HTTPException(409,"RECONCILIATION_REQUIRED: 坑 %d %s，禁止重复开仓/平仓"%(
             int(slot),record.get("state") or "MANUAL_REVIEW"))
+    return True
+
+def _assert_account_open_clear(username):
+    """Reject new exposure while an account/global quarantine is unresolved."""
+    record=_completed_open_quarantine_record(username)
+    if record:
+        raise HTTPException(
+            409,"RECONCILIATION_REQUIRED: 账号存在已成交开仓身份隔离，禁止继续开仓")
     return True
 
 def _authoritative_single_leg_review_close(username, symbol, item, review):
@@ -4362,15 +4831,22 @@ def _trace_leg_bridge_ack(tracer, command_id, leg, result):
     """Record only an explicit durable Agent/Bridge admission response."""
     try:
         result=result if isinstance(result,dict) else {}
+        trace=result.get("trace") if isinstance(result.get("trace"),dict) else {}
+        state=str(result.get("state") or "").upper()
+        durable_value=_timestamp_from_epoch_ns(trace.get("agent_wal_durable_ns"))
         if not (result.get("accepted") is True and result.get("pending") is True and
                 result.get("unknown") is not True and
-                str(result.get("state") or "").upper() in
-                ("PENDING","SENDING","DISPATCHING")):
+                state in ("ADMITTED","PENDING","CLAIMED","SENDING","DISPATCHING")):
+            return False
+        # ADMITTED/CLAIMED prove only an in-memory phase unless the bridge also
+        # supplies the committed WAL timestamp. Never turn a bare early state
+        # into an ACK merely because the HTTP request returned successfully.
+        if state in ("ADMITTED","CLAIMED") and not durable_value:
             return False
         field=(TraceTimestamp.BRIDGE_ACK_MAIN if leg=="main"
                else TraceTimestamp.BRIDGE_ACK_HEDGE)
-        trace=result.get("trace") if isinstance(result.get("trace"),dict) else {}
-        ack_value=_timestamp_from_epoch_ns(trace.get("agent_wal_durable_ns"))
+        ack_value=_timestamp_from_epoch_ns(
+            trace.get("qh_http_response_ns")) or durable_value
         if ack_value:
             _record_trace_timestamp_value_once(tracer,command_id,field,ack_value)
         else:
@@ -4950,6 +5426,37 @@ def _release_slot_op(username, symbol, slot, token):
         # Do not perform a non-atomic get/delete fallback. The TTL will safely release it.
         return False
 
+def _release_slot_resources(username, symbol, slot, token):
+    """Release a command's Redis slot lock and visual busy marker atomically.
+
+    A late broker/recovery callback may finish after a newer command acquired
+    the same slot.  Clearing ``slotbusy`` before the token CAS creates a race:
+    the old callback can make the newer command look idle.  Keep both keys in
+    one Lua transaction and only remove them when the current ``slotop`` still
+    contains this command's token.  A token-less callback has no ownership
+    proof and must not clear either resource.
+    """
+    if not token:
+        return False
+    scope=((username or "").strip()+":") if username else ""
+    busykey=RNS+"slotbusy:"+scope+symbol
+    script="""
+    -- qh_atomic_release_slot_resources
+    if redis.call('get', KEYS[1]) ~= ARGV[1] then
+        return 0
+    end
+    redis.call('del', KEYS[1])
+    redis.call('zrem', KEYS[2], ARGV[2])
+    return 1
+    """
+    try:
+        return bool(R.eval(script,2,_slotop_key(username,symbol,slot),
+                           busykey,str(token),str(int(slot))))
+    except Exception:
+        # Never fall back to a separate delete: a newer token may have won
+        # between the read and cleanup.  The slot TTL remains the safe bound.
+        return False
+
 def _assign_display_slot(mapkey, ownerkey, ticket, candidate):
     """Assign a provisional display slot without racing an authoritative owner write."""
     script="""
@@ -5125,8 +5632,67 @@ def _busy_slots(symbol, username=None):
         return [int(x) for x in (R.zrangebyscore(bk,now,"+inf") or [])]
     except Exception: return []
 
+def _busy_slot_state(symbol, username=None):
+    """Return busy slots plus their authoritative queue action when available."""
+    slots=_busy_slots(symbol,username)
+    actions={}
+    if not username or not slots:
+        return slots,actions
+    tokens={}
+    try:
+        values=R.mget([_slotop_key(username,symbol,slot) for slot in slots])
+        for slot,value in zip(slots,values):
+            if isinstance(value,bytes): value=value.decode("utf-8","replace")
+            if value not in (None,""): tokens[int(slot)]=str(value)
+    except Exception:
+        tokens={}
+    try:
+        if getattr(TRADE_QUEUE,"redis",None) is R:
+            for job in TRADE_QUEUE.slot_states(username,symbol,slots):
+                slot=int(job.get("slot") or 0); kind=str(job.get("kind") or "")
+                if slot not in slots or kind not in ("open","close"):
+                    continue
+                job_token=str(job.get("slot_token") or "")
+                if job_token and tokens.get(slot) and job_token!=tokens[slot]:
+                    continue
+                actions[str(slot)]=kind
+    except Exception:
+        pass
+    for slot,token in tokens.items():
+        key=str(slot)
+        if key in actions:
+            continue
+        if token.endswith(":close") or token.startswith("queue:preflight:"):
+            actions[key]="close"
+        elif token.endswith(":open"):
+            actions[key]="open"
+    return slots,actions
+
+
+def _cached_user_position_projection(username, max_age=15.0):
+    """Return a recent complete UI base for terminal ticket projection.
+
+    Broker terminal handlers already publish exact open overlays and close
+    tombstones.  Reapplying those local deltas to the last trusted per-leg
+    snapshot avoids a second cross-region status/positions round-trip at the
+    moment the queue becomes terminal.  The caller keeps projection requests
+    Redis/local-only when this base is missing or old; it must never turn a
+    terminal repaint into another native bridge read.
+    """
+    now=_t_conn.monotonic(); positions={}; versions={}
+    for leg in ("main","hedge"):
+        cached=_USER_POSITION_CACHE.get((str(username or ""),leg))
+        if (not cached or len(cached)<2 or
+                now-float(cached[0])>max(0.0,float(max_age))):
+            return None
+        positions[leg]=cached[1]
+        versions[leg]=(cached[2] if len(cached)>2 else None)
+    return positions,versions
+
+
 @app.get("/api/engine/legs", dependencies=[Depends(require_optional_subject)])
-async def engine_legs(username:str="", x_license: str = Header(default="")):
+async def engine_legs(username:str="", projection:bool=False,
+                      x_license: str = Header(default="")):
     """双腿状态+持仓+忙坑。**P1 账户卡按用户隔离**(2026-07-21):
        带 username 时, 用户登记账户==全局执行桥账户→数据真属于他(正常显示); 不匹配→标未接入执行桥
        (显登记信息但余额/连接置空)+清空该腿持仓(绝不串显别人数据); 未登记→未登记态。
@@ -5145,8 +5711,63 @@ async def engine_legs(username:str="", x_license: str = Header(default="")):
                 # No per-user bridge: use only that user's registered A2T legs,
                 # never the process-global CONN.
                 ucon=_strict_user_read_conn(username)
+            if projection and ucon is None:
+                busy_slots,busy_actions=_busy_slot_state(
+                    "XAUUSD",username)
+                return {"status":{},"positions":{},
+                        "position_versions":{},
+                        "position_projection":True,
+                        "projection_available":False,
+                        "busy_slots":busy_slots,
+                        "busy_actions":busy_actions}
             if ucon is not None:
+                if projection:
+                    cached_projection=_cached_user_position_projection(username)
+                    if cached_projection is not None:
+                        upos,usnap=cached_projection
+                        try:
+                            upos=_normalize_position_legs(upos)
+                            upos=_filter_closed_tickets(upos,"XAUUSD",username)
+                            upos=_merge_open_position_overlays(
+                                upos,"XAUUSD",username,usnap)
+                            upos=_normalize_position_legs(upos)
+                            upos=_annotate_slots(upos,"XAUUSD",username)
+                        except Exception:
+                            # Projection is an optimization only. Never emit a
+                            # partial local view when its normalization fails.
+                            cached_projection=None
+                        if cached_projection is not None:
+                            busy_slots,busy_actions=_busy_slot_state(
+                                "XAUUSD",username)
+                            return {"status":{},"positions":upos,
+                                    "position_versions":usnap,
+                                    "position_projection":True,
+                                    "projection_available":True,
+                                    "busy_slots":busy_slots,
+                                    "busy_actions":busy_actions}
+                    # projection=true is a strict local-read contract.  The
+                    # browser already has its last trusted table and the batch
+                    # record owns terminal truth, so an unavailable base is
+                    # represented explicitly instead of falling through to
+                    # status()/positions() on the trading terminal.
+                    busy_slots,busy_actions=_busy_slot_state(
+                        "XAUUSD",username)
+                    return {"status":{},"positions":{},
+                            "position_versions":{},
+                            "position_projection":True,
+                            "projection_available":False,
+                            "busy_slots":busy_slots,
+                            "busy_actions":busy_actions}
                 ust={}; upos={"main":[],"hedge":[]}; usnap={}
+                # One UI poll should consume one complete pair snapshot.
+                # Sharing this bounded read prevents concurrent close clicks
+                # from fanning out into duplicate bridge position requests.
+                # The per-leg fallback below preserves the existing
+                # fail-closed behavior when the pair read is unavailable.
+                _shared_positions_task=_aio.create_task(
+                    _read_both_positions_cached(
+                        ucon, username=username, max_age=0.75,
+                        authoritative=False))
                 async def _read_user_leg(_r):
                     reg=rows.get(_r); regl=str((reg or {}).get("login") or "").strip()
                     legobj=getattr(ucon,_r,None)
@@ -5157,7 +5778,15 @@ async def engine_legs(username:str="", x_license: str = Header(default="")):
                     cache_key=(username,_r)
                     async def _positions_with_health():
                         try:
-                            raw=await legobj.positions()
+                            try:
+                                pair_raw=await _aio.shield(_shared_positions_task)
+                                if not isinstance(pair_raw,dict) or _r not in pair_raw:
+                                    raise RuntimeError("pair snapshot missing leg")
+                                raw=pair_raw.get(_r)
+                            except Exception:
+                                # A shared read is an optimization, not a new
+                                # failure mode. Fall back to this leg only.
+                                raw=await legobj.positions()
                             if _position_snapshot_stale(raw):
                                 return False,[],_position_snapshot_version(raw),"snapshot_stale"
                             # MT4 and MT5 bridge legs share the same versioned
@@ -5175,8 +5804,17 @@ async def engine_legs(username:str="", x_license: str = Header(default="")):
                             return accepted,positions,version,(None if accepted else "snapshot_regression")
                         except Exception as ex:
                             return False,[],None,ex.__class__.__name__
+                    async def _bounded(coro, fallback):
+                        try:
+                            return await _aio.wait_for(
+                                coro,timeout=_UI_LEG_READ_TIMEOUT)
+                        except Exception as ex:
+                            return fallback(ex)
                     s,pos_result=await _aio.gather(
-                        _leg_status_safe(legobj),_positions_with_health()
+                        _bounded(_leg_status_safe(legobj),lambda ex:{
+                            "connected":False,"error":ex.__class__.__name__}),
+                        _bounded(_positions_with_health(),lambda ex:(
+                            False,[],None,ex.__class__.__name__)),
                     )
                     pos_ok,positions,version,pos_error=pos_result
                     conn_ok=bool(s.get("connected")) and "error" not in s
@@ -5208,8 +5846,9 @@ async def engine_legs(username:str="", x_license: str = Header(default="")):
                     upos=_normalize_position_legs(upos)
                     upos=_annotate_slots(upos,"XAUUSD",username)
                 except Exception: pass
+                busy_slots,busy_actions=_busy_slot_state("XAUUSD",username)
                 return {"status":ust,"positions":upos,"position_versions":usnap,
-                        "busy_slots":_busy_slots("XAUUSD",username)}
+                        "busy_slots":busy_slots,"busy_actions":busy_actions}
         st = await CONN.both_status() if hasattr(CONN,"both_status") else {"main":await CONN.status(),"hedge":None}
         pos = await CONN.both_positions() if hasattr(CONN,"both_positions") else {"main":await CONN.positions(),"hedge":None}
         pos = _normalize_position_legs(pos)
@@ -5241,7 +5880,9 @@ async def engine_legs(username:str="", x_license: str = Header(default="")):
                 pos=_normalize_position_legs(pos)
                 pos=_annotate_slots(pos,"XAUUSD",username)
             except Exception: pass
-            return {"status":st,"positions":pos,"busy_slots":_busy_slots("XAUUSD",username)}
+            busy_slots,busy_actions=_busy_slot_state("XAUUSD",username)
+            return {"status":st,"positions":pos,"busy_slots":busy_slots,
+                    "busy_actions":busy_actions}
         # ---- 无 username: 原全局逻辑 ----
         try:
             reg=_reg_roles()
@@ -9149,6 +9790,7 @@ async def cmd_close_all(r:CmdReq):
     actor=_actor(r.license_key)
     if not r.confirm: raise HTTPException(400,"二次确认未通过(confirm=true)")
     _maint_block_trading()   # 维护态禁下单前置闸
+    _enforce_trade_schedule(_load_tmpl(r.username,"XAUUSD"),"close",automatic=False)
     await _conn_gate_exec(r.username)   # P0: 按用户桥判健康(修 hedge_pro 被 no123 桥误伤)
     await _exec_owner_gate(r.username)   # 多用户串账墙: 登记账户须==执行桥账户
     items=await _collect_close_items(r.username,"XAUUSD",profit_only=False)
@@ -9219,6 +9861,7 @@ async def cmd_close_profit(r:CmdReq):
     actor=_actor(r.license_key)
     if not r.confirm: raise HTTPException(400,"二次确认未通过")
     _maint_block_trading()
+    _enforce_trade_schedule(_load_tmpl(r.username,"XAUUSD"),"close",automatic=False)
     await _conn_gate_exec(r.username)
     await _exec_owner_gate(r.username)
     items=await _collect_close_items(r.username,"XAUUSD",profit_only=True)
@@ -9384,6 +10027,40 @@ def _entry_capacity_reservation_keys(username):
     return (RNS+"entry_capacity:reservations:"+scope,
             RNS+"entry_capacity:reservation_expiry:"+scope,
             RNS+"entry_capacity:epoch:"+scope)
+
+def _entry_capacity_reserved_slots(username, symbol, exclude_id=None):
+    """Return slots owned by live capacity reservations.
+
+    A dispatched open keeps its capacity reservation permanently until broker
+    truth is terminal.  The transient ``slotop`` lock may expire earlier, so
+    admission must also treat the reservation's intended slot as occupied.
+    """
+    keys=_entry_capacity_reservation_keys(username)
+    now_ms=int(_t_conn.time()*1000)
+    active_ids=R.zrangebyscore(keys[1],now_ms,"+inf") or []
+    occupied=set(); excluded=str(exclude_id or "")
+    for raw_id in active_ids:
+        reservation_id=(raw_id.decode("utf-8","replace")
+                        if isinstance(raw_id,bytes) else str(raw_id))
+        if reservation_id==excluded:
+            continue
+        raw=R.hget(keys[0],reservation_id)
+        if not raw:
+            continue
+        if isinstance(raw,bytes):
+            raw=raw.decode("utf-8","replace")
+        try: record=json.loads(raw)
+        except (TypeError,ValueError):
+            raise RuntimeError("invalid capacity reservation")
+        if (str(record.get("username") or "")!=(username or "").strip() or
+                str(record.get("symbol") or "")!=str(symbol or "")):
+            continue
+        try: slot=int(record.get("slot") or 0)
+        except (TypeError,ValueError):
+            raise RuntimeError("invalid capacity reservation slot")
+        if slot>0:
+            occupied.add(slot)
+    return occupied
 
 def _entry_capacity_hold_failure_key(username):
     return RNS+"entry_capacity:hold_failures:"+((username or "").strip())
@@ -9749,13 +10426,28 @@ def _entry_result_capacity_violation(res):
 def _halt_auto_entry(username, reason, detail=None):
     """Latch account-wide faults globally and slot risks only to their slot."""
     if not username: return
-    detail=detail if isinstance(detail,dict) else {}
+    detail=dict(detail) if isinstance(detail,dict) else {}
+    command_id=str(detail.get("command_id") or "").strip()
+    job_id=str(detail.get("job_id") or detail.get("queue_job_id") or "").strip()
+    # Most asynchronous callers already know the command but older paths did
+    # not copy its durable queue identity into the halt.  Resolve only that
+    # exact tracer record; an unavailable identity stays empty and therefore
+    # cannot later be guessed or automatically cleared.
+    if command_id and not job_id:
+        try:
+            job_id=str((get_tracer().get_command(command_id) or {}).get(
+                "queue_job_id") or "").strip()
+        except Exception:
+            job_id=""
+    detail["command_id"]=command_id
+    detail["job_id"]=job_id
     try: slot=int(detail.get("slot") or 0)
     except (TypeError,ValueError): slot=0
     slot_scoped=(slot>0 and reason in (
         "single_leg_exposed","slotowner_persist_failed"))
     payload={"ts":_dt.datetime.utcnow().isoformat(),"username":username,"reason":reason,
              "scope":("slot" if slot_scoped else "account"),"slot":slot or None,
+             "command_id":command_id,"job_id":job_id,
              "detail":detail}
     try:
         if slot_scoped:
@@ -9798,6 +10490,11 @@ async def _count_filled_slots(symbol="XAUUSD"):
 
 _POSITION_READ_RETRY_DELAYS=(0.05,)
 _POSITION_READ_ATTEMPT_TIMEOUT=0.45
+try:
+    _UI_LEG_READ_TIMEOUT=max(0.20,min(0.80,float(os.environ.get(
+        "QH_UI_LEG_READ_TIMEOUT_SEC","0.55"))))
+except (TypeError,ValueError):
+    _UI_LEG_READ_TIMEOUT=0.55
 
 async def _read_position_leg(legobj, authoritative=False):
     """Read a leg, requesting broker truth when the connector supports it."""
@@ -9857,6 +10554,38 @@ async def _read_both_positions_with_retry(conn, authoritative=False):
             await _aio.sleep(_POSITION_READ_RETRY_DELAYS[attempt])
     raise last_error
 
+async def _read_both_positions_cached(conn, username=None, max_age=0.75,
+                                      authoritative=False):
+    """Return the last complete pair snapshot while a UI poll is converging.
+
+    The execution preflight continues to use ``authoritative=True`` and never
+    consumes this cache.  UI/occupancy callers can therefore avoid a second
+    cross-region read when several slots are closed together.
+    """
+    # Scope the short UI cache to the user and current per-leg route. Strict
+    # fallback connectors are rebuilt on each request, so id(conn) defeats
+    # the cache. Including both base URLs prevents a bridge re-registration
+    # from consuming the previous route's snapshot inside the TTL.
+    def _route_identity(leg):
+        if leg is None:
+            return ""
+        base=str(getattr(leg,"base","") or "").strip()
+        if base:
+            return base
+        return "%s:%s"%(leg.__class__.__name__,
+                        str(getattr(leg,"role","") or ""))
+    key=(str(username or ""), bool(authoritative),
+         _route_identity(getattr(conn,"main",None)),
+         _route_identity(getattr(conn,"hedge",None)))
+    now=_t_conn.monotonic()
+    cached=_USER_POSITION_CACHE.get(("both",key))
+    if cached and now-float(cached[0])<=float(max_age):
+        return cached[1]
+    pos=await _read_both_positions_with_retry(conn,authoritative=authoritative)
+    if pos is not None:
+        _USER_POSITION_CACHE[("both",key)]=(_t_conn.monotonic(),pos,None)
+    return pos
+
 async def _occupied_slots(symbol="XAUUSD", username=None, include_positions=False,
                           authoritative=False):
     """当前已占坑号 set(经稳定坑号映射; 支持跳空)。取不到→None(fail-closed)。多租户: username→读该用户腿。"""
@@ -9897,6 +10626,8 @@ def _durable_occupied_slots(symbol, username, ladders):
                     slot=int(raw_slot or 0)
                     if 1<=slot<=limit:
                         occupied.add(slot)
+        occupied.update(slot for slot in _entry_capacity_reserved_slots(
+            username,symbol) if 1<=slot<=limit)
         for job in TRADE_QUEUE.slot_states(
                 username,symbol,range(1,limit+1)):
             state=str(job.get("state") or "UNKNOWN").upper()
@@ -10005,6 +10736,145 @@ def _bj_hm():
     """当前北京时间 分钟数(0..1439)。"""
     n=_dt.datetime.utcnow()+_dt.timedelta(hours=8)
     return n.hour*60+n.minute
+
+_TRADE_CLOSED_MESSAGES={
+    "open":"休市中，禁止开仓!",
+    "close":"休市中，禁止平仓!",
+}
+
+def _trade_job_is_automatic(job):
+    """Only normal strategy jobs obey configured automation windows."""
+    if not isinstance(job,dict):
+        return False
+    payload=job.get("payload") if isinstance(job.get("payload"),dict) else {}
+    source=str(job.get("source") or payload.get("source") or "").strip().lower()
+    return source in ("auto","auto_entry","auto_exit") or payload.get("auto") is True
+
+def _market_closed_for_template(t, now_utc=None, include_configured=True):
+    """Apply the real XAU session first, then user-configured extra closures.
+
+    ``weekend_sat/weekend_sun`` retain their legacy database meaning
+    (True=allow).  The UI exposes the inverse, intuitive meaning (ON=closed).
+    User switches may therefore make the calendar stricter, but cannot open a
+    physically closed CME session and leak a quote-gate diagnostic to users.
+    """
+    kwargs={}
+    if now_utc is not None:
+        kwargs["now_utc"]=now_utc
+    closed,why=ENG.market_closed(
+        weekend_guard=True,weekend_sat=None,weekend_sun=None,**kwargs)
+    if closed:
+        return True,why
+    if not include_configured:
+        return False,why
+    return ENG.market_closed(
+        weekend_guard=bool((t or {}).get("weekend_guard",True)),
+        weekend_sat=(t or {}).get("weekend_sat"),
+        weekend_sun=(t or {}).get("weekend_sun"),**kwargs)
+
+def _trade_schedule_verdict(t, action, automatic=False, now_utc=None):
+    """Return (blocked, gate, internal_reason) from one clock snapshot.
+
+    Automatic opening obeys the system run window and the entry window.
+    Automatic closing obeys the system run window; the entry-only window must
+    not lock a risk-reducing exit.  Manual opening keeps its entry-window rule,
+    while manual closing is limited only by the actual market session.
+    """
+    action="close" if action=="close" else "open"
+    now=now_utc
+    if now is None:
+        now=_dt.datetime.now(_dt.timezone.utc)
+    elif now.tzinfo is None:
+        now=now.replace(tzinfo=_dt.timezone.utc)
+    bj=now.astimezone(_dt.timezone(_dt.timedelta(hours=8)))
+    now_min=bj.hour*60+bj.minute
+    # The Saturday/Sunday switches are automation controls.  Manual risk
+    # reduction must remain available whenever the broker's real session is
+    # open, even when an automatic weekend closure is configured.
+    closed,why=_market_closed_for_template(
+        t,now,include_configured=bool(automatic))
+    if closed:
+        return True,"market_closed",str(why or "closed")
+    if automatic:
+        blocked,why=_strict_schedule_window_gate(t,"run",now_min)
+        if blocked:
+            return True,"run_window",str(why or "run_window")
+    if action=="open":
+        blocked,why=_strict_schedule_window_gate(t,"entry",now_min)
+        if blocked:
+            return True,"entry_window",str(why or "entry_window")
+    return False,None,"open"
+
+def _trade_schedule_exception(action, gate, internal_reason, automatic=False):
+    action="close" if action=="close" else "open"
+    if gate=="market_closed":
+        message=_TRADE_CLOSED_MESSAGES[action]
+        code="MARKET_CLOSED"
+    elif automatic:
+        message="当前不在自动交易时间，禁止自动%s!"%("平仓" if action=="close" else "开仓")
+        code="AUTO_TRADE_WINDOW_CLOSED"
+    else:
+        message="当前不在进单时间，禁止开仓!"
+        code="ENTRY_WINDOW_CLOSED"
+    ex=HTTPException(409,message)
+    ex.qh_error_code=code
+    ex.qh_error_action=action
+    ex.qh_internal_reason=str(internal_reason or gate or "blocked")
+    return ex
+
+def _enforce_trade_schedule(t, action, automatic=False, now_utc=None):
+    blocked,gate,why=_trade_schedule_verdict(
+        t,action,automatic=automatic,now_utc=now_utc)
+    if blocked:
+        raise _trade_schedule_exception(action,gate,why,automatic=automatic)
+    return {"gate":"open","action":action,"automatic":bool(automatic)}
+
+def _enforce_current_trade_schedule(username, symbol, action, automatic=False):
+    """Re-read only the schedule at the broker dispatch boundary."""
+    current=_load_tmpl(username,symbol)
+    if not current:
+        ex=HTTPException(409,"交易参数不存在，未发送%s命令"%("平仓" if action=="close" else "开仓"))
+        ex.qh_error_code="TRADE_CONFIG_MISSING"
+        ex.qh_error_action="close" if action=="close" else "open"
+        raise ex
+    _enforce_trade_schedule(current,action,automatic=automatic)
+    return current
+
+def _enforce_actual_market_session(action, now_utc=None):
+    """Guard manual recovery commands without applying automation controls."""
+    closed,why=_market_closed_for_template(
+        {},now_utc,include_configured=False)
+    if closed:
+        raise _trade_schedule_exception(action,"market_closed",why,automatic=False)
+    return {"gate":"open","action":action,"automatic":False}
+
+def _time_window_error(start, end, label):
+    """Reject partial or malformed HH:MM pairs instead of silently allowing all day."""
+    start=str(start or "").strip(); end=str(end or "").strip()
+    if not start and not end:
+        return None
+    def valid(value):
+        try:
+            if len(value)!=5 or value[2] != ":": return False
+            hour=int(value[:2]); minute=int(value[3:])
+            return 0<=hour<=23 and 0<=minute<=59
+        except (TypeError,ValueError):
+            return False
+    if not start or not end or not valid(start) or not valid(end):
+        return "%s须同时填写有效时间(HH:MM)"%label
+    return None
+
+def _strict_schedule_window_gate(t, which, now_min):
+    """Fail closed for legacy/dirty rows as well as newly saved settings."""
+    t=t or {}
+    start=t.get("%s_win_start"%which)
+    end=t.get("%s_win_end"%which)
+    label="自动运行时间" if which=="run" else "进单时间"
+    error=_time_window_error(start,end,label)
+    if error:
+        return True,"%s_window_invalid:%s"%(which,error)
+    return POL.gate_window(t,which,now_min)
+
 def _in_window(start, end, now_min=None):
     """时间窗判定(北京 "HH:MM"): 空/未设→True; 支持跨零点(start>end)。start==end→True(视为全天)。"""
     def _p(s):
@@ -10220,7 +11090,8 @@ def _allow_provisional_display_rebind(symbol, bindings, slot, username):
 
 def _reserve_slot(symbol, res, slot, username=None, grace_sec=60,
                   allow_provisional_display_rebind=False,
-                  suppress_failure_side_effects=False):
+                  suppress_failure_side_effects=False,
+                  command_id=None, job_id=None):
     """定向开仓后写 ticket→坑号预留(供 _annotate_slots 尊重目标坑而非自动分配最小空缺)。
        票用 order(市价单 position 票); api 模式票不符时 _annotate_slots 回落最小空缺, graceful。"""
     bindings=[]
@@ -10332,6 +11203,10 @@ def _reserve_slot(symbol, res, slot, username=None, grace_sec=60,
                 "tickets":bindings,"error":ex.__class__.__name__,
                 "reason":str(ex)[:160],
                 "ts":_dt.datetime.utcnow().isoformat()}
+        if command_id:
+            detail["command_id"]=str(command_id)
+        if job_id:
+            detail["job_id"]=str(job_id)
         try:
             R.setex(RNS+"slotowner:persist_error:"+(username or "global"),86400,
                     json.dumps(detail,ensure_ascii=False,default=str))
@@ -10347,7 +11222,8 @@ def _reserve_slot(symbol, res, slot, username=None, grace_sec=60,
 
 async def _reserve_slot_with_recovery(symbol, res, slot, username=None,
                                       grace_sec=60,
-                                      allow_provisional_display_rebind=False):
+                                      allow_provisional_display_rebind=False,
+                                      command_id=None, job_id=None):
     """Retry local ownership persistence before exposing a filled pair to review."""
     # Broker fills are already authoritative here.  A short async retry window
     # absorbs Redis contention and the positions annotator race without
@@ -10360,6 +11236,7 @@ async def _reserve_slot_with_recovery(symbol, res, slot, username=None,
             symbol, res, slot, username, grace_sec=grace_sec,
             allow_provisional_display_rebind=allow_provisional_display_rebind,
             suppress_failure_side_effects=attempt < len(delays) - 1,
+            command_id=command_id,job_id=job_id,
         )
         if saved:
             if attempt:
@@ -10369,6 +11246,86 @@ async def _reserve_slot_with_recovery(symbol, res, slot, username=None,
                     pass
             return True
     return False
+
+
+def _repair_recovered_pair_slotowner(symbol, bindings, slot, username=None,
+                                     allow_provisional_display_rebind=False):
+    """Atomically restore both owner and display rows for one recovered pair.
+
+    UNKNOWN recovery must never infer a missing leg from a visual slot map.
+    This helper accepts only two distinct, exact tickets and performs the
+    owner-conflict check plus both owner/map writes in one Redis script.  An
+    ownerless display collision may be removed only when the caller has already
+    proved that it belongs to another recoverable saga.
+    """
+    if not username or not isinstance(bindings, dict):
+        return False
+    tickets={}
+    for leg in ("main", "hedge"):
+        value=bindings.get(leg)
+        if isinstance(value, dict):
+            value=value.get("order") or value.get("deal") or value.get("ticket")
+        ticket=_exact_positive_int(value)
+        if ticket is None:
+            return False
+        tickets[leg]=str(ticket)
+    target_slot=_exact_positive_int(slot)
+    if target_slot is None or tickets["main"]==tickets["hedge"]:
+        return False
+    try:
+        keys=[
+            _slotowner_key("main",symbol,username),
+            _slotmap_key("main",symbol,username),
+            _slotowner_key("hedge",symbol,username),
+            _slotmap_key("hedge",symbol,username),
+            _entry_capacity_reservation_keys(username)[2],
+        ]
+        script="""
+        -- qh_atomic_recovered_pair_owner_repair
+        local slot=ARGV[3]
+        local allow_display_rebind=ARGV[4] == '1'
+        local changed=0
+        for pair=0,1 do
+            local owner_key=KEYS[pair*2+1]
+            local map_key=KEYS[pair*2+2]
+            local ticket=ARGV[pair+1]
+            local existing=redis.call('hget',owner_key,ticket)
+            if existing and existing ~= slot then return -1 end
+            local owners=redis.call('hgetall',owner_key)
+            for i=1,#owners,2 do
+                if owners[i] ~= ticket and owners[i+1] == slot then return -2 end
+            end
+            local mapped=redis.call('hget',map_key,ticket)
+            if mapped and mapped ~= slot then return -3 end
+            if existing ~= slot or mapped ~= slot then changed=1 end
+            local displays=redis.call('hgetall',map_key)
+            for i=1,#displays,2 do
+                if displays[i] ~= ticket and displays[i+1] == slot then
+                    if not allow_display_rebind or
+                       redis.call('hexists',owner_key,displays[i]) == 1 then
+                        return -4
+                    end
+                    redis.call('hdel',map_key,displays[i])
+                    changed=1
+                end
+            end
+        end
+        for pair=0,1 do
+            local ticket=ARGV[pair+1]
+            redis.call('hset',KEYS[pair*2+1],ticket,slot)
+            redis.call('hset',KEYS[pair*2+2],ticket,slot)
+        end
+        if changed == 1 then redis.call('incr',KEYS[5]) end
+        return 1
+        """
+        result=int(R.eval(
+            script,len(keys),*(keys+[tickets["main"],tickets["hedge"],
+                                    str(int(target_slot)),
+                                    "1" if allow_provisional_display_rebind else "0"])
+        ) or 0)
+        return result==1
+    except Exception:
+        return False
 
 def _release_slot(symbol, leg, ticket, username=None):
     if not ticket: return False
@@ -10531,7 +11488,11 @@ async def _assert_live_tickets(username, symbol, expected, conn=None, expected_s
         await _aio.sleep(_POSITION_READ_RETRY_DELAYS[attempt])
     raise last_failure
 
-_SUBSECOND_DEFAULT_USERS = frozenset(("no123", "hedge_pro"))
+# MT4 jj456 uses the same controlled low-latency profile as no123.  The
+# profile removes only the configured inter-leg sleep; the connector still
+# waits for the first leg's authoritative terminal result before dispatching
+# the peer leg, so adding an account here cannot turn a pair into a burst.
+_SUBSECOND_DEFAULT_USERS = frozenset(("no123", "hedge_pro", "jj456", "lei789"))
 _SUBSECOND_MT5_DEFAULT_USERS = frozenset(("hedge_pro",))
 
 
@@ -10551,6 +11512,23 @@ def _subsecond_user(username):
     return str(username or "").strip() in allowed
 
 
+def _eager_ordered_ack_user(username):
+    """Enable ordered ACK overlap for the controlled subsecond accounts.
+
+    The first configured leg must still cross its durable Agent WAL boundary
+    before the peer request is sent.  Broker terminal confirmation is then
+    concurrent, with the exact-ticket single-leg guard owning compensation.
+    Keep a separate environment allow-list so operations can fall back to the
+    terminal barrier without disabling the rest of the turbo profile.
+    """
+    normalized=str(username or "").strip()
+    configured=os.environ.get("QH_EAGER_ORDERED_ACK_USERS")
+    raw=(configured if configured is not None else
+         "no123,jj456,lei789")
+    allowed={x.strip() for x in raw.split(",") if x.strip()}
+    return bool(normalized in allowed and _subsecond_user(normalized))
+
+
 def _subsecond_mt5_user(username):
     """Return whether a configured low-latency user is an MT5 account.
 
@@ -10559,11 +11537,7 @@ def _subsecond_mt5_user(username):
     the MT5 burst admission path for a single slot.
     """
     normalized=str(username or "").strip()
-    configured=os.environ.get("QH_SUBSECOND_MT5_USERS")
-    raw=(configured if configured is not None else
-         ",".join(sorted(_SUBSECOND_MT5_DEFAULT_USERS)))
-    allowed={x.strip() for x in raw.split(",") if x.strip()}
-    if normalized not in allowed or not _subsecond_user(normalized):
+    if not _subsecond_mt5_guard_user(normalized):
         return False
     try:
         rows=_reg_rows_for(normalized)
@@ -10590,6 +11564,20 @@ def _subsecond_mt5_user(username):
             return False
     return True
 
+def _subsecond_mt5_guard_user(username):
+    """Resolve the MT5 session-circuit identity without routing/database I/O.
+
+    Admission still validates both registered legs through
+    ``_subsecond_mt5_user`` before dispatch. Terminal and restart paths use
+    this configured identity so a cold routing cache cannot add latency.
+    """
+    normalized=str(username or "").strip()
+    configured=os.environ.get("QH_SUBSECOND_MT5_USERS")
+    raw=(configured if configured is not None else
+         ",".join(sorted(_SUBSECOND_MT5_DEFAULT_USERS)))
+    allowed={x.strip() for x in raw.split(",") if x.strip()}
+    return bool(normalized in allowed and _subsecond_user(normalized))
+
 def _trade_bool(value):
     """Normalize Redis scalar flags and native booleans consistently."""
     if value is True:
@@ -10597,6 +11585,54 @@ def _trade_bool(value):
     if value is False or value is None:
         return False
     return str(value).strip().lower() in ("1", "true", "yes", "on")
+
+def _entry_session_guard_key(username):
+    return RNS+"entry_session_guard:"+str(username or "").strip()
+
+def _entry_session_guard_active(username):
+    """Keep MT5 opens terminal-first after either broker rejects a session."""
+    if not _subsecond_mt5_guard_user(username):
+        return False
+    try:
+        return bool(R.get(_entry_session_guard_key(username)))
+    except Exception:
+        # Losing the safety circuit must never promote an MT5 entry to burst.
+        return True
+
+def _mt5_session_stabilization_active(username, automatic=False, now_utc=None):
+    """Use terminal-first entry just after the daily/weekly XAU reopen."""
+    if not _subsecond_mt5_guard_user(username):
+        return False
+    try:
+        minutes=max(0,min(60,int(os.environ.get(
+            "QH_MT5_SESSION_STABILIZE_MINUTES","10"))))
+    except (TypeError,ValueError):
+        minutes=10
+    if minutes<=0:
+        return False
+    now=now_utc or _dt.datetime.now(_dt.timezone.utc)
+    if now.tzinfo is None:
+        now=now.replace(tzinfo=_dt.timezone.utc)
+    try:
+        from zoneinfo import ZoneInfo
+        central=now.astimezone(ZoneInfo("America/Chicago"))
+    except Exception:
+        # Production has tzdata; an unavailable timezone database is a reason
+        # to retain the safer terminal barrier for automatic MT5 entries.
+        return True
+    # Sunday is the weekly reopen. Monday-Thursday are daily maintenance
+    # reopens. Friday has no evening reopen and Saturday is fully closed.
+    if central.weekday() not in (6,0,1,2,3):
+        return False
+    minute=central.hour*60+central.minute
+    return 17*60<=minute<17*60+minutes
+
+def _mt5_entry_terminal_barrier(username, automatic=False, now_utc=None):
+    return bool(
+        _entry_session_guard_active(username) or
+        _mt5_session_stabilization_active(
+            username,automatic=automatic,now_utc=now_utc)
+    )
 
 def _entry_tick_cache_ms(username, manual_targeted=False, burst_admission=False):
     """Use pushed quotes for manual admission; the EA still refreshes at OrderSend."""
@@ -10608,6 +11644,18 @@ def _entry_tick_cache_ms(username, manual_targeted=False, burst_admission=False)
     except (TypeError,ValueError):
         return 2000
 
+def _open_leg_explicit_not_filled(row):
+    """Return true only for broker no-fill proof or a durable unsent marker."""
+    row=row if isinstance(row,dict) else {}
+    if row.get("not_sent") and row.get("dispatch_durable") is False:
+        return True
+    return bool(
+        row.get("not_filled") is True and
+        str(row.get("certainty") or "").upper()=="NOT_FILLED" and
+        str(row.get("truth_confirmed") or "").lower() in ("not_filled","no_fill")
+    )
+
+
 def _pair_pending(res):
     res=res or {}; compensation=res.get("compensation") or {}
     durable_open_intent=bool(
@@ -10618,11 +11666,7 @@ def _pair_pending(res):
             res.get(leg) is None or (
                 isinstance(res.get(leg),dict) and
                 (res.get(leg) or {}).get("dispatch_started") is False and
-                str((res.get(leg) or {}).get("truth_confirmed") or "").lower()
-                    not in ("not_filled","no_fill") and
-                (res.get(leg) or {}).get("not_filled") is not True and
-                not ((res.get(leg) or {}).get("not_sent") and
-                     (res.get(leg) or {}).get("dispatch_durable") is False)
+                not _open_leg_explicit_not_filled(res.get(leg))
             )
             for leg in ("main","hedge")
         )
@@ -10655,14 +11699,7 @@ def _open_pair_explicit_no_fill(res):
         return not any(_resolved_leg_ok(res,leg) for leg in ("main","hedge"))
     for leg in ("main","hedge"):
         row=res.get(leg) if isinstance(res.get(leg),dict) else {}
-        explicit_status=(
-            str(row.get("truth_confirmed") or "").lower()=="not_filled" and
-            (str(row.get("src") or "").lower()=="order-status" or
-             row.get("not_sent") is True)
-        )
-        explicit_unsent=bool(
-            row.get("not_sent") and row.get("dispatch_durable") is False)
-        if not (explicit_status or explicit_unsent):
+        if not _open_leg_explicit_not_filled(row):
             return False
     return True
 
@@ -10809,11 +11846,14 @@ def _memory_bridge_tick_snapshot(leg, symbol, max_age_ms=500, username=None, rol
         key=(_bridge_tick_cache_id(leg,username,role),str(symbol))
         entry=_BRIDGE_TICK_MEMORY.get(key)
         if not isinstance(entry,dict): return None
-        age_ms=(_t_conn.monotonic()-float(entry.get("stored_mono")))*1000
+        transport_age=(_t_conn.monotonic()-float(entry.get("stored_mono")))*1000
+        age_ms=max(0.0,float(entry.get("source_age_ms") or 0.0))+transport_age
         if age_ms<0 or age_ms>=max(0,float(max_age_ms)): return None
         tick=dict(entry.get("tick") or {})
         if tick.get("bid") is None or tick.get("ask") is None: return None
-        tick.update({"from_cache":True,"age_ms":age_ms,"memory_cache":True})
+        tick.update({"from_cache":True,"age_ms":age_ms,"memory_cache":True,
+                     "snapshot_source":entry.get("snapshot_source") or
+                     tick.get("snapshot_source") or "qh_memory"})
         return tick
     except Exception:
         return None
@@ -10821,13 +11861,20 @@ def _memory_bridge_tick_snapshot(leg, symbol, max_age_ms=500, username=None, rol
 def _store_bridge_tick_snapshot(bridge_id, symbol, tick):
     if not isinstance(tick,dict) or tick.get("bid") is None or tick.get("ask") is None:
         return
+    try: source_age_ms=max(0.0,float(tick.get("age_ms") or 0.0))
+    except (TypeError,ValueError): source_age_ms=0.0
+    snapshot_source=str(tick.get("snapshot_source") or
+                        ("upstream_cache" if tick.get("from_cache") else "broker"))
     _BRIDGE_TICK_MEMORY[(str(bridge_id),str(symbol))]={
-        "tick":dict(tick),"stored_mono":_t_conn.monotonic()}
+        "tick":dict(tick),"stored_mono":_t_conn.monotonic(),
+        "source_age_ms":source_age_ms,"snapshot_source":snapshot_source}
     try:
         key="bridge:%s:tick:%s"%(bridge_id,symbol)
         R.hset(key,mapping={"symbol":tick.get("symbol") or symbol,
                             "bid":tick.get("bid"),"ask":tick.get("ask"),
                             "time":tick.get("time") or 0,
+                            "source_age_ms":source_age_ms,
+                            "snapshot_source":snapshot_source,
                             "pushed_at":_dt.datetime.utcnow().isoformat()})
         R.expire(key,2)
     except Exception: pass
@@ -10848,13 +11895,15 @@ def _cached_bridge_tick_snapshot(leg, symbol, max_age_ms=500, username=None, rol
         if not pushed_at:
             return None
         pushed_time=datetime.fromisoformat(str(pushed_at).replace("Z","+00:00"))
-        age_ms=(datetime.utcnow()-pushed_time.replace(tzinfo=None)).total_seconds()*1000
+        transport_age=(datetime.utcnow()-pushed_time.replace(tzinfo=None)).total_seconds()*1000
+        age_ms=transport_age+max(0.0,float(snapshot.get("source_age_ms") or 0.0))
         if age_ms<0 or age_ms>=max(0,float(max_age_ms)):
             return None
         return {
             "symbol":snapshot.get("symbol"),"bid":float(snapshot.get("bid",0)),
             "ask":float(snapshot.get("ask",0)),"time":int(snapshot.get("time",0)),
             "from_cache":True,"age_ms":age_ms,
+            "snapshot_source":snapshot.get("snapshot_source") or "qh_redis",
         }
     except Exception:
         return None
@@ -10875,45 +11924,21 @@ async def _get_tick_with_fallback(leg, symbol, max_age_ms=500, username=None, ro
         leg,symbol,max_age_ms=max_age_ms,username=username,role=role)
     if cached is not None:
         return cached
-    from datetime import datetime
-
-    try:
-        # 确定bridge_id (从leg的base URL判断)
-        bridge_id = _bridge_tick_cache_id(leg,username,role)
-
-        key = f"bridge:{bridge_id}:tick:{symbol}"
-        snapshot = R.hgetall(key)
-
-        if snapshot:
-            # 检查快照年龄
-            pushed_at = snapshot.get('pushed_at')
-            if pushed_at:
-                try:
-                    pushed_time = datetime.fromisoformat(pushed_at.replace('Z', '+00:00'))
-                    age_ms = (datetime.utcnow() - pushed_time.replace(tzinfo=None)).total_seconds() * 1000
-
-                    if age_ms < max_age_ms:
-                        # 快照新鲜,直接返回
-                        return {
-                            'symbol': snapshot.get('symbol'),
-                            'bid': float(snapshot.get('bid', 0)),
-                            'ask': float(snapshot.get('ask', 0)),
-                            'time': int(snapshot.get('time', 0)),
-                            'from_cache': True,
-                            'age_ms': age_ms
-                        }
-                except Exception:
-                    pass  # 时间解析失败,回退到实时查询
-    except Exception:
-        pass  # Redis读取失败,回退到实时查询
 
     # 快照不存在或过期,回退到实时查询
     try:
         tick = await leg._get(f"/mt5/tick/{symbol}")
         if tick:
+            tick=dict(tick)
+            try: source_age_ms=max(0.0,float(tick.get("age_ms") or 0.0))
+            except (TypeError,ValueError): return None
+            # A bridge can deliberately serve an old snapshot while the native
+            # owner is reserved. Preserve its age and fail the strategy gate.
+            if source_age_ms>=max(0.0,float(max_age_ms)):
+                return None
             _store_bridge_tick_snapshot(_bridge_tick_cache_id(leg,username,role),symbol,tick)
-            tick['from_cache'] = False
-            tick['age_ms'] = 0
+            tick['from_cache'] = bool(tick.get('from_cache'))
+            tick['age_ms'] = source_age_ms
         return tick
     except Exception:
         return None
@@ -10922,6 +11947,238 @@ def _queue_worker_position_task(job):
     """Return the in-memory snapshot task attached to this dispatch wave."""
     task=(job or {}).get("_worker_positions_task") if isinstance(job,dict) else None
     return task if task is not None and hasattr(task,"__await__") else None
+
+def _queue_worker_tick_task(job):
+    """Return the shared quote read attached to this open dispatch wave."""
+    task=(job or {}).get("_worker_ticks_task") if isinstance(job,dict) else None
+    return task if task is not None and hasattr(task,"__await__") else None
+
+def _queue_worker_account_task(job):
+    """Return the shared margin/account read for this dispatch wave."""
+    task=(job or {}).get("_worker_accounts_task") if isinstance(job,dict) else None
+    return task if task is not None and hasattr(task,"__await__") else None
+
+def _queue_margin_account_identity_signature(username, accounts):
+    """Bind an account snapshot to the currently registered two-leg logins."""
+    consistent,rows=_queue_connection_consistency(username)
+    if not consistent or not isinstance(accounts,dict):
+        return None
+    signature=[]
+    for role in ("main","hedge"):
+        expected=str((rows.get(role) or {}).get("login") or "").strip()
+        account=accounts.get(role)
+        if not expected or not isinstance(account,dict):
+            return None
+        actual=str(account.get("login") or account.get("account") or "").strip()
+        if actual!=expected:
+            return None
+        signature.append((role,expected))
+    return tuple(signature)
+
+def _queue_margin_account_source_age(accounts):
+    """Return the oldest bridge snapshot age, or None for stale/invalid truth."""
+    if not isinstance(accounts,dict):
+        return None
+    source_age=0.0
+    for role in ("main","hedge"):
+        account=accounts.get(role)
+        if not isinstance(account,dict) or account.get("account_snapshot_stale") is True:
+            return None
+        try:
+            role_age=max(0.0,float(
+                account.get("account_snapshot_age_ms") or 0.0))/1000.0
+        except (TypeError,ValueError):
+            return None
+        source_age=max(source_age,role_age)
+    return source_age
+
+def _queue_margin_account_signature(username, accounts):
+    """Require fresh source truth once, before opening a bounded burst cache."""
+    signature=_queue_margin_account_identity_signature(username,accounts)
+    source_age=_queue_margin_account_source_age(accounts)
+    if (signature is None or source_age is None or
+            source_age>_QUEUE_MARGIN_ACCOUNT_MAX_AGE_SEC):
+        return None
+    return signature
+
+def _queue_margin_account_cached(username, signature=None, admission_ids=None):
+    cached=_QUEUE_MARGIN_ACCOUNT_CACHE.get(str(username or ""))
+    if not isinstance(cached,dict):
+        return None
+    data=cached.get("data")
+    current_signature=_queue_margin_account_identity_signature(username,data)
+    if (not current_signature or cached.get("signature")!=current_signature or
+            (signature is not None and signature!=current_signature)):
+        return None
+    try:
+        now=_t_conn.monotonic()
+        local_age=max(0.0,now-float(cached.get("ts") or 0.0))
+        source_age=max(0.0,float(cached.get("source_age") or 0.0))
+    except (TypeError,ValueError):
+        return None
+    if local_age+source_age>_QUEUE_MARGIN_ACCOUNT_BURST_MAX_AGE_SEC:
+        return None
+    out={role:dict(data.get(role) or {}) for role in ("main","hedge")}
+    if isinstance(admission_ids,(str,int)):
+        admission_ids=(admission_ids,)
+    job_ids=sorted({
+        str(value) for value in (admission_ids or ()) if str(value or "")
+    })
+    if job_ids:
+        # The strict cache check above is the admission boundary.  A job that
+        # crosses the five-second burst edge while finishing its already
+        # running preflight may use this exact generation for one short lease;
+        # a job arriving after expiry cannot obtain this proof.
+        out["_qh_margin_admission"]={
+            "generation":str(cached.get("generation") or ""),
+            "job_ids":job_ids,
+            "issued_mono":now,
+            "deadline_mono":now+_QUEUE_MARGIN_ACCOUNT_ADMISSION_LEASE_SEC,
+        }
+    return out
+
+def _queue_margin_account_store(username, accounts, signature):
+    source_age=_queue_margin_account_source_age(accounts)
+    if (not signature or source_age is None or
+            source_age>_QUEUE_MARGIN_ACCOUNT_MAX_AGE_SEC):
+        return None
+    data={role:dict(accounts.get(role) or {}) for role in ("main","hedge")}
+    stored_mono=_t_conn.monotonic()
+    _QUEUE_MARGIN_ACCOUNT_CACHE[str(username or "")]={
+        "ts":stored_mono,"source_age":source_age,
+        "generation":"%x:%x"%(int(stored_mono*1000000000),id(data)),
+        "signature":signature,"data":data,"reservations":{},
+    }
+    return {role:dict(data[role]) for role in ("main","hedge")}
+
+async def _queue_margin_account_refresh(username, conn):
+    """Perform one shared native read; retry only transient transport failures."""
+    last_error=None
+    for _attempt in range(2):
+        try:
+            accounts=await _aio.wait_for(
+                conn.both_accounts(),timeout=_QUEUE_EXEC_GATE_TIMEOUT_SEC)
+            signature=_queue_margin_account_signature(username,accounts)
+            if signature is None:
+                raise RuntimeError("margin account identity or freshness mismatch")
+            stored=_queue_margin_account_store(username,accounts,signature)
+            if stored is None:
+                raise RuntimeError("margin account identity or freshness mismatch")
+            return stored
+        except Exception as ex:
+            last_error=ex
+            cached=_queue_margin_account_cached(username)
+            if cached is not None:
+                return cached
+            # Retrying a deterministic login/freshness failure adds another
+            # 450ms but cannot repair the snapshot. Transport failures retain
+            # the existing single bounded retry for cold-start resilience.
+            if (isinstance(ex,RuntimeError) and
+                    "identity or freshness mismatch" in str(ex)):
+                break
+    raise last_error or RuntimeError("margin account snapshot unavailable")
+
+async def _queue_margin_accounts(username, conn, admission_ids=None):
+    """Reuse one identity-bound snapshot and one native read across an open burst."""
+    username=str(username or "")
+    cached=_queue_margin_account_cached(
+        username,admission_ids=admission_ids)
+    if cached is not None:
+        return cached
+    task=_QUEUE_MARGIN_ACCOUNT_READ_TASKS.get(username)
+    if task is None or not hasattr(task,"__await__") or task.done():
+        task=_aio.create_task(_queue_margin_account_refresh(username,conn))
+        _QUEUE_MARGIN_ACCOUNT_READ_TASKS[username]=task
+    try:
+        refreshed=await _aio.shield(task)
+        signature=_queue_margin_account_identity_signature(username,refreshed)
+        admitted=_queue_margin_account_cached(
+            username,signature=signature,admission_ids=admission_ids)
+        if admitted is None:
+            raise RuntimeError("margin account identity or freshness mismatch")
+        return admitted
+    finally:
+        if (task.done() and
+                _QUEUE_MARGIN_ACCOUNT_READ_TASKS.get(username) is task):
+            _QUEUE_MARGIN_ACCOUNT_READ_TASKS.pop(username,None)
+
+def _queue_margin_account_prepare(username, accounts, template, queue_job):
+    """Apply earlier burst reservations and prepare this job's local claim."""
+    if accounts is None or isinstance(accounts,Exception):
+        return accounts,None
+    username=str(username or "")
+    passed_signature=_queue_margin_account_identity_signature(username,accounts)
+    cached_accounts=_queue_margin_account_cached(username,passed_signature)
+    cached=_QUEUE_MARGIN_ACCOUNT_CACHE.get(username)
+    reservation_id=str((queue_job or {}).get("job_id") or "")
+    if (cached_accounts is None and passed_signature is not None and
+            isinstance(cached,dict) and reservation_id):
+        admission=accounts.get("_qh_margin_admission")
+        if isinstance(admission,dict):
+            try:
+                admitted=(
+                    str(admission.get("generation") or "")==
+                        str(cached.get("generation") or "") and
+                    reservation_id in set(admission.get("job_ids") or ()) and
+                    _t_conn.monotonic()<=float(admission.get("deadline_mono") or 0.0) and
+                    passed_signature==cached.get("signature") and
+                    _queue_margin_account_identity_signature(
+                        username,cached.get("data"))==passed_signature
+                )
+            except (TypeError,ValueError):
+                admitted=False
+            if admitted:
+                cached_accounts={
+                    role:dict((cached.get("data") or {}).get(role) or {})
+                    for role in ("main","hedge")}
+    if (passed_signature is None or cached_accounts is None or
+            not isinstance(cached,dict)):
+        return RuntimeError("margin account identity or burst freshness mismatch"),None
+    reservations=cached.setdefault("reservations",{})
+    if not isinstance(reservations,dict):
+        return RuntimeError("margin reservation state invalid"),None
+    reserved={"main":0.0,"hedge":0.0}
+    for existing_id,record in reservations.items():
+        if str(existing_id)==reservation_id or not isinstance(record,dict):
+            continue
+        for role in ("main","hedge"):
+            try: reserved[role]+=max(0.0,float(record.get(role) or 0.0))
+            except (TypeError,ValueError):
+                return RuntimeError("margin reservation state invalid"),None
+    adjusted={role:dict(cached_accounts.get(role) or {})
+              for role in ("main","hedge")}
+    for role in ("main","hedge"):
+        raw=(adjusted.get(role) or {}).get("margin_free")
+        try: adjusted[role]["margin_free"]=float(raw)-reserved[role]
+        except (TypeError,ValueError): pass
+    if not reservation_id:
+        return adjusted,None
+    claim={"reservation_id":reservation_id,"_cache":cached,
+           "main":max(0.0,float((template or {}).get("margin_reserve_main") or 0.0)),
+           "hedge":max(0.0,float((template or {}).get("margin_reserve_hedge") or 0.0))}
+    return adjusted,claim
+
+def _queue_margin_account_commit_reservation(username, claim):
+    """Commit a passed margin gate to the exact in-memory snapshot generation."""
+    if not isinstance(claim,dict):
+        return True
+    username=str(username or "")
+    cached=claim.get("_cache"); reservation_id=str(claim.get("reservation_id") or "")
+    if (not reservation_id or not isinstance(cached,dict) or
+            _QUEUE_MARGIN_ACCOUNT_CACHE.get(username) is not cached):
+        return False
+    signature=_queue_margin_account_identity_signature(username,cached.get("data"))
+    if not signature or signature!=cached.get("signature"):
+        return False
+    reservations=cached.setdefault("reservations",{})
+    if not isinstance(reservations,dict):
+        return False
+    reservations[reservation_id]={
+        "main":max(0.0,float(claim.get("main") or 0.0)),
+        "hedge":max(0.0,float(claim.get("hedge") or 0.0)),
+        "ts":_t_conn.monotonic(),
+    }
+    return True
 
 async def _execute_open_pair_job(r:OpenPairReq, command_id=None, pair_rid=None,
                                  actor_override=None, slot_token_override=None,
@@ -10948,13 +12205,17 @@ async def _execute_open_pair_job(r:OpenPairReq, command_id=None, pair_rid=None,
             raise HTTPException(400,"direction 必须为 reverse 或 forward")
         if not r.confirm: raise HTTPException(400,"二次确认未通过(confirm=true)")
         _maint_block_trading()   # 维护态禁下单前置闸
-        await _conn_gate_exec(r.username)   # P0: 按用户桥判健康(修 hedge_pro 被 no123 桥误伤)
-        await _exec_owner_gate(r.username)   # 多用户串账墙: 登记账户须==执行桥账户
-        tracer.record_timestamp(command_id, TraceTimestamp.AUTH_GATE_DONE)  # P0-A q01
         t=_load_tmpl(r.username, r.symbol)
         if not t: raise HTTPException(404,"参数模板未找到")
-        if POL.gate_window(t,"entry",_bj_hm())[0]:   # 进单时段闸(北京) — P1-b enforce
-            raise HTTPException(409,"当前不在进单时段(%s-%s 北京)，已拒绝开仓"%(t.get("entry_win_start") or "?", t.get("entry_win_end") or "?"))
+        _automatic_job=_trade_job_is_automatic(queue_job)
+        _enforce_trade_schedule(t,"open",automatic=_automatic_job)
+        if queue_job_id:
+            gate_proof=await _queue_exec_gate(queue_job,r.username)
+            tracer.update_field(command_id,"queue_exec_gate",gate_proof)
+        else:
+            await _conn_gate_exec(r.username)
+            await _exec_owner_gate(r.username)
+        tracer.record_timestamp(command_id, TraceTimestamp.AUTH_GATE_DONE)  # P0-A q01
         # 坑位数(红框): 本次开几个坑。兼容旧 qty(整数化)。
         slots=int(r.slots or 0)
         if slots<=0 and r.qty and r.qty>0: slots=int(round(r.qty))
@@ -10981,17 +12242,21 @@ async def _execute_open_pair_job(r:OpenPairReq, command_id=None, pair_rid=None,
             _queue_batch_size>1))
         mode=(t.get("entry_mode") or "main_first"); speed=(t.get("speed_mode") or "fast")
         if mode not in ("concurrent","main_first","hedge_first"): mode="main_first"
-        if _subsecond_user(r.username) or _queue_burst_hint:
-            # NO123 must never dispatch the IC leg until the hedge broker has
-            # confirmed its fill. Turbo removes only the artificial inter-leg
-            # sleep; the broker-terminal barrier remains mandatory.
+        if _subsecond_user(r.username):
+            # Turbo removes only the artificial inter-leg sleep; the
+            # broker-terminal barrier remains mandatory.  no123/hedge_pro
+            # retain their established hedge-first safety order.  jj456 keeps
+            # its configured main_first/hedge_first order while receiving the
+            # same low-latency timing budget.
+            speed="turbo"
+            if str(r.username or "").strip() in ("no123", "hedge_pro"):
+                mode="hedge_first"
+        elif _queue_burst_hint:
             mode="hedge_first"; speed="turbo"
         legmap={"reverse":("sell","buy"),"forward":("buy","sell")}
         # ── 前置读取并行化: 占坑/双腿账户/双腿tick 同时发起(原为串行冷调用, 跨洲链路累计 ~2.5s) ──
         _rm=float(t.get("margin_reserve_main") or 0); _rh=float(t.get("margin_reserve_hedge") or 0)
-        async def _safe_coro(coro):
-            try: return await coro
-            except Exception as e: return e
+        _pb=float(t.get("predict_budget") or 0)
         _ucn=_user_exec_conn(r.username)   # Preflight truth must match the connector that will execute.
         _target=int(r.slot or 0)
         _queue_proof=_queue_preflight_evidence(
@@ -11000,7 +12265,11 @@ async def _execute_open_pair_job(r:OpenPairReq, command_id=None, pair_rid=None,
         if _queue_proof is None and _occ_task is None:
             _occ_task=_aio.create_task(_occupied_slots(
                 r.symbol,r.username,include_positions=True,authoritative=True))
-        _accs_task=_aio.create_task(_safe_coro(_ucn.both_accounts())) if ((_rm>0 or _rh>0) and hasattr(_ucn,"both_accounts")) else None
+        _accs_task=_queue_worker_account_task(queue_job)
+        if (_accs_task is None and (_rm>0 or _rh>0 or _pb>0) and
+                hasattr(_ucn,"both_accounts")):
+            _accs_task=_aio.create_task(_queue_margin_accounts(
+                r.username,_ucn,admission_ids=[queue_job_id] if queue_job_id else None))
         async def _tick_pair():
             cache_ms=_entry_tick_cache_ms(
                 r.username,manual_targeted,burst_admission=_queue_burst_hint)
@@ -11013,7 +12282,9 @@ async def _execute_open_pair_job(r:OpenPairReq, command_id=None, pair_rid=None,
                 return await _aio.gather(one(_ucn.main,main_sym,"main"),
                                          one(_h,hedge_sym,"hedge"))
             return (await one(_ucn.main,main_sym,"main"), None)
-        _tick_task=_aio.create_task(_tick_pair())
+        _tick_task=_queue_worker_tick_task(queue_job)
+        if _tick_task is None:
+            _tick_task=_aio.create_task(_tick_pair())
         # 已占坑号(gap-aware): 支持坑号跳空
         if _queue_proof is not None:
             occ={int(value) for value in _queue_proof["occupied_slots"]}
@@ -11021,7 +12292,7 @@ async def _execute_open_pair_job(r:OpenPairReq, command_id=None, pair_rid=None,
             tracer.update_field(command_id,"position_preflight","queue_proof")
         else:
             try:
-                occ,_entry_positions=await _occ_task
+                occ,_entry_positions=await _aio.shield(_occ_task)
             except HTTPException:
                 raise
             except Exception as ex:
@@ -11071,9 +12342,13 @@ async def _execute_open_pair_job(r:OpenPairReq, command_id=None, pair_rid=None,
         if _flb:
             raise HTTPException(409,"数据波动过大暂停入场: %s(近%d条幅度>阈值%.2f)"%(_flw,_mc,_bd))
         # 保证金预留闸 + 智能预判预算闸(批33功能3) — P1-b enforce: 判定统一走 policy, 文案/状态码原样
-        _pb=float(t.get("predict_budget") or 0)
         if _rm>0 or _rh>0 or _pb>0:
-            _accs=(await _accs_task) if _accs_task is not None else None
+            try:
+                _accs=(await _aio.shield(_accs_task)) if _accs_task is not None else None
+            except Exception as ex:
+                _accs=ex
+            _accs,_margin_claim=_queue_margin_account_prepare(
+                r.username,_accs,t,queue_job)
             _mb,_mw=POL.gate_margin_budget(t,_accs,fail_closed=True,hedge_requires_leg=True,hedge_exists=(getattr(_ucn,"hedge",None) is not None))
             if _mb:
                 if _mw=="margin_read_fail_closed":
@@ -11084,14 +12359,25 @@ async def _execute_open_pair_job(r:OpenPairReq, command_id=None, pair_rid=None,
                     raise HTTPException(409,"对冲账户保证金不足预留, 拒绝开仓: %s"%_mw)
                 _eq=float(((_accs.get("main") or {}).get("equity")) or 0)
                 raise HTTPException(409,"智能预判: 主账户净值 %.2f < 预算 %.2f, 暂不可开仓"%(_eq,_pb))
+            if not _queue_margin_account_commit_reservation(
+                    r.username,_margin_claim):
+                raise HTTPException(
+                    502,"账户保证金快照在开仓前已切换，未发送开仓命令")
         # 开仓点差(testgo pos_open_ledger 思路): 批前取一次双腿 tick 算 spreadAtExecution(前置并行任务取回)
         entry_spread=None; _mt=_ht=None
         try:
-            _mt,_ht=await _tick_task
+            _mt,_ht=await _aio.shield(_tick_task)
             if _mt and _ht and _mt.get("bid") is not None and _ht.get("ask") is not None:
                 if r.direction=="reverse": entry_spread=round(float(_ht["ask"])-float(_mt["bid"]),4)   # 对冲ASK-主BID
                 else:                      entry_spread=round(float(_mt["ask"])-float(_ht["bid"]),4)   # 主ASK-对冲BID
         except Exception: pass
+        if (queue_job_id and
+                (not isinstance(_mt,dict) or not isinstance(_ht,dict) or
+                 _mt.get("bid") is None or _mt.get("ask") is None or
+                 _ht.get("bid") is None or _ht.get("ask") is None)):
+            raise HTTPException(
+                502,"双腿行情在 %dms 预算内不可用，未发送开仓命令"%
+                int(_QUEUE_EXEC_GATE_TIMEOUT_SEC*1000))
         # 行情新鲜度闸(V1.1移植): 报价冻结/桥半开→陈旧价开仓, fail-closed 409
         _stq=await _quote_stale(_mt,_ht,_ucn,r.username)
         tracer.record_timestamp(command_id, TraceTimestamp.PREFLIGHT_COMPLETE)  # P0-A q02
@@ -11155,6 +12441,8 @@ async def _execute_open_pair_job(r:OpenPairReq, command_id=None, pair_rid=None,
             slot_lock_handoff=False
             try:
                 await _trade_queue_wait_open_turn(queue_job)
+                _enforce_current_trade_schedule(
+                    r.username,r.symbol,"open",automatic=_automatic_job)
                 _assert_slot_review_clear(r.username,r.symbol,slot_no)
                 if _queue_proof is not None and _queue_preflight_evidence(
                         queue_job,"open",r.username,r.symbol,slot_no) is None:
@@ -11215,6 +12503,8 @@ async def _execute_open_pair_job(r:OpenPairReq, command_id=None, pair_rid=None,
                       "pair_rid":pair_rid,"mode":mode,"speed":speed,
                       "main_dev":_main_dev,"hedge_dev":_hedge_dev,
                       "temporal_burst_admission":_temporal_burst_admission}
+                _enforce_current_trade_schedule(
+                    r.username,r.symbol,"open",automatic=_automatic_job)
                 if queue_job_id:
                     tracer.update_field(command_id,"pair_request_id",pair_rid)
                     tracer.update_field(command_id,"main_request_id",str(pair_rid)+"m")
@@ -11239,33 +12529,37 @@ async def _execute_open_pair_job(r:OpenPairReq, command_id=None, pair_rid=None,
                 _batch_size=1
                 try: _batch_size=max(1,int((queue_job or {}).get("batch_size") or 1))
                 except (TypeError,ValueError): pass
-                # The MT5 bridge has one native worker per account, but its
-                # two independently registered terminals can accept the pair
-                # together.  Reuse the durable burst saga for a lone
-                # hedge_pro slot as well: the finalizer still waits for both
-                # exact request ids and the existing compensation path handles
-                # an explicit one-leg rejection.  MT4/no123 keeps the prior
-                # ordered path, and multi-slot batches keep their own burst
-                # admission regardless of account.
+                # MT5 keeps its simultaneous burst path. MT4 ordered modes use
+                # a narrower optimization: the configured first leg crosses a
+                # durable Agent ACK before the peer is admitted, then both
+                # broker terminal outcomes are confirmed concurrently.
+                _terminal_first_open=bool(
+                    _subsecond_mt5 and _mt5_entry_terminal_barrier(
+                        r.username,automatic=_automatic_job))
                 _burst_admission=bool(
-                    queue_job_id and (_batch_size>1 or _temporal_burst_admission or
-                                      (_subsecond_mt5 and _batch_size==1)))
+                    queue_job_id and _subsecond_mt5 and not _terminal_first_open and
+                    (_batch_size>1 or _temporal_burst_admission or
+                     _batch_size==1))
+                _eager_ordered_ack=bool(
+                    queue_job_id and not _burst_admission and not _terminal_first_open and
+                    mode in ("main_first","hedge_first") and
+                    _eager_ordered_ack_user(r.username))
+                _dispatch_only=bool(_burst_admission or _eager_ordered_ack)
                 _ctx["batch_size"]=_batch_size
                 _ctx["burst_admission"]=_burst_admission
+                _ctx["eager_ordered_ack"]=_eager_ordered_ack
+                _ctx["terminal_first_open"]=_terminal_first_open
                 _ctx["burst_cohort"]=(queue_job or {}).get("burst_cohort")
                 _ctx["burst_depth"]=(queue_job or {}).get("burst_depth") or _batch_size
                 _saga_hook=(_trade_queue_saga_phase_hook(queue_job_id,_ctx)
                             if queue_job_id and (_subsecond_user(r.username) or
                                                  _burst_admission) else None)
-                # Batch jobs own independent slot locks and reservations.  Let
-                # the connector admit both legs together so the QH worker does
-                # not add a first-leg terminal barrier to every slot.  The MT5
-                # bridge still serializes calls per terminal account.
                 res=await _exec_open_pair(r.direction, main_sym, hedge_sym, slot_mv, slot_hv, mode, speed, username=r.username, command_id=command_id,
                                           main_dev=_main_dev, hedge_dev=_hedge_dev,
                                           pair_rid=pair_rid,async_accept=bool(queue_job_id),
-                                          dispatch_only=_burst_admission,
+                                          dispatch_only=_dispatch_only,
                                           burst_admission=_burst_admission,
+                                          eager_ordered_ack=_eager_ordered_ack,
                                           phase_hook=_saga_hook)
                 details.append(res)
                 if _pair_pending(res):
@@ -11274,8 +12568,22 @@ async def _execute_open_pair_job(r:OpenPairReq, command_id=None, pair_rid=None,
                     account_token=res.pop("_account_op_token",None)
                     _ctx["account_token"]=account_token
                     if queue_job_id:
-                        _trade_queue_mark_dispatching(queue_job_id,res,_ctx)
-                    _aio.create_task(_finalize_pending_open(command_id,res,_ctx))
+                        if not _trade_queue_mark_dispatching(
+                                queue_job_id,res,_ctx):
+                            # Broker ACK crossed the dispatch boundary. The
+                            # finalizer now exclusively owns this slot even if
+                            # the ACK snapshot could not be persisted here.
+                            slot_lock_handoff=True
+                            _schedule_trade_queue_finalizer(
+                                "open_pair",command_id,res,_ctx)
+                            terminal_error=HTTPException(
+                                503,"AGENT_ACK_PERSIST_FAILED: 成交状态待恢复，禁止重试")
+                            terminal_error.qh_terminal_state="UNKNOWN"
+                            terminal_error.qh_result=res
+                            terminal_error.qh_finalizer_handoff=True
+                            raise terminal_error
+                    _schedule_trade_queue_finalizer(
+                        "open_pair",command_id,res,_ctx)
                     slot_lock_handoff=True
                     return JSONResponse(status_code=202,content={"ok":True,"accepted":True,"state":"DISPATCHING",
                         "command_id":command_id,"status_url":"/api/command/"+command_id,"detail":res})
@@ -11304,7 +12612,8 @@ async def _execute_open_pair_job(r:OpenPairReq, command_id=None, pair_rid=None,
                     opened+=1
                     _slip_snap(r.direction,"open",_cap_at(_mt,_ht,r.direction,"open"),slot_no,_leg_tickets(res.get("main")),thr=_lb)   # 执行滑点决策快照(ticket精确键+逐单阈值)
                     owner_saved=await _reserve_slot_with_recovery(
-                        r.symbol,res,slot_no,r.username)
+                        r.symbol,res,slot_no,r.username,
+                        command_id=command_id,job_id=queue_job_id)
                     if not owner_saved:
                         ownership_review=True
                     _remember_open_positions(r.symbol,hedge_sym,r.direction,res,slot_no,r.username,slot_mv,slot_hv)
@@ -11344,7 +12653,8 @@ async def _execute_open_pair_job(r:OpenPairReq, command_id=None, pair_rid=None,
                 # 恰一腿成 = 裸空, 留痕+告警+停止(绝不自动反开)
                 naked_leg="hedge" if (mok and not hok) else "main"
                 _halt_auto_entry(r.username,"single_leg_exposed",{"slot":slot_no,
-                    "symbol":r.symbol,"naked":naked_leg,"res":res})
+                    "symbol":r.symbol,"naked":naked_leg,"res":res,
+                    "command_id":command_id,"job_id":queue_job_id})
                 try:
                     c=db(); cur=c.cursor(); cur.execute("SELECT id FROM users WHERE username=%s",(r.username,)); u=cur.fetchone()
                     cur.execute("INSERT INTO naked_alerts(user_id,leg,detail) VALUES(%s,%s,%s)",(u[0] if u else None, naked_leg, json.dumps(res))); c.close()
@@ -11360,8 +12670,7 @@ async def _execute_open_pair_job(r:OpenPairReq, command_id=None, pair_rid=None,
                 raise terminal_error
             finally:
                 if not slot_lock_handoff:
-                    _clear_slot_busy(r.symbol,slot_no,r.username)
-                    _release_slot_op(r.username,r.symbol,slot_no,slot_token)
+                    _release_slot_resources(r.username,r.symbol,slot_no,slot_token)
         _record_trace_timestamp_once(tracer,command_id,TraceTimestamp.PAIR_JOIN_DONE)      # P0-A q11
         _record_trace_timestamp_once(tracer,command_id,TraceTimestamp.LEDGER_COMMITTED)    # P0-A q12
         _audit(r.username,actor,"open_pair",{"opened":opened,"to_open":to_open,"filled_before":filled,"ladders":ladders,"mode":mode,"skipped":skipped},False,"opened:%s:%dslots"%(r.direction,opened))
@@ -11383,12 +12692,12 @@ async def _execute_open_pair_job(r:OpenPairReq, command_id=None, pair_rid=None,
                 queue_job.get("_broker_dispatch_started") and
                 not getattr(he,"qh_terminal_state",None)):
             he.qh_terminal_state="UNKNOWN"
-        if (queue_job_id and isinstance(queue_job,dict) and
-                not queue_job.get("_broker_dispatch_started")):
-            _release_entry_capacity_reservation(r.username,queue_job_id)
-        elif queue_job_id:
-            _hold_entry_capacity_reservation(r.username,queue_job_id)
         terminal_state=str(getattr(he,"qh_terminal_state","FAILED"))
+        if queue_job_id:
+            if terminal_state in ("UNKNOWN","MANUAL_REVIEW","SINGLE_LEG_EXPOSED"):
+                _hold_entry_capacity_reservation(r.username,queue_job_id)
+            else:
+                _release_entry_capacity_reservation(r.username,queue_job_id)
         tracer.update_status(command_id,getattr(CommandStatus,terminal_state,CommandStatus.FAILED))
         tracer.update_field(command_id, "failure_reason", str(he.detail))
         tracer.record_timestamp(command_id, TraceTimestamp.HTTP_SENT)
@@ -11459,16 +12768,17 @@ class RepairLegReq(BaseModel):
     symbol:str="XAUUSD"; direction:str="reverse"; leg:str="hedge"; volume:float=0.0; slot:int=0
 
 async def _dispatch_repair_leg(leg_obj, truth_leg, sym, volume, side, direction, leg, rid, username=None):
-    from connector import _is_unknown_exc, order_status_probe, verify_leg_open
+    from connector import (_is_unknown_exc, _normalize_explicit_not_filled,
+                           order_status_probe, verify_leg_open)
     try:
         deviation=None
         try:
             tick=await leg_obj._get("/mt5/tick/"+sym)
             deviation=_dev_for_price((tick or {}).get("bid"))
         except Exception: pass
-        res=await leg_obj.open_order(
+        res=_normalize_explicit_not_filled(await leg_obj.open_order(
             sym,volume,side,comment="QH-%s-%s#%s"%(direction,leg,rid),
-            request_id=rid+leg[0],deviation=deviation)
+            request_id=rid+leg[0],deviation=deviation))
         if isinstance(res,dict) and res.get("pending"):
             terminal=await order_status_probe(leg_obj,rid+leg[0],tries=600,delay=0.05)
             if terminal and terminal.get("ok"): return terminal
@@ -11502,6 +12812,7 @@ async def cmd_repair_leg(r:RepairLegReq):
     if not (r.volume and r.volume>0): raise HTTPException(400,"volume 须>0")
     if r.slot<1: raise HTTPException(400,"slot 须为原单腿持仓的有效坑号")
     _maint_block_trading()   # 维护态禁下单前置闸
+    _enforce_actual_market_session("open")
     await _conn_gate_exec(r.username)   # P0: 按用户桥判健康
     await _exec_owner_gate(r.username)   # 多用户串账墙
     t=_load_tmpl(r.username, r.symbol)
@@ -11521,6 +12832,7 @@ async def cmd_repair_leg(r:RepairLegReq):
     account_token="repair:%s"%_rid
     _begin_account_op(r.username,account_token)
     try:
+        _enforce_actual_market_session("open")
         truth_leg=getattr(_user_conn(r.username),r.leg,None)
         res=await _dispatch_repair_leg(
             leg_obj,truth_leg,sym,r.volume,side,r.direction,r.leg,_rid,r.username)
@@ -11532,7 +12844,7 @@ async def cmd_repair_leg(r:RepairLegReq):
         "单腿修复: 补开%s腿 %s %s %.2f手 %s"%("主" if r.leg=="main" else "对冲",sym,side,r.volume,"成功" if ok else "失败"),r.username)
     if not ok: raise HTTPException(502,"补腿未成交: %s"%json.dumps(res)[:180])
     ownership_review=not await _reserve_slot_with_recovery(
-        r.symbol,{r.leg:res},r.slot,r.username)
+        r.symbol,{r.leg:res},r.slot,r.username,command_id="repair:"+_rid)
     _remember_open_positions(r.symbol,hedge_sym,r.direction,{r.leg:res},r.slot,r.username,
                              r.volume if r.leg=="main" else None,
                              r.volume if r.leg=="hedge" else None)
@@ -11602,8 +12914,15 @@ async def _execute_close_pair_job(r:ClosePairReq, command_id=None, pair_rid=None
         tracer.update_field(command_id,"failure_reason","SLOT_REQUIRED")
         raise HTTPException(400,"slot 须为原持仓的有效坑号")
     _maint_block_trading()   # 维护态禁下单前置闸
-    await _conn_gate_exec(r.username)   # P0: 按用户桥判健康(修 hedge_pro 被 no123 桥误伤)
-    await _exec_owner_gate(r.username)   # 多用户串账墙: 登记账户须==执行桥账户
+    _automatic_job=_trade_job_is_automatic(queue_job)
+    t=_enforce_current_trade_schedule(
+        r.username,r.symbol,"close",automatic=_automatic_job)
+    if queue_job_id:
+        gate_proof=await _queue_exec_gate(queue_job,r.username)
+        tracer.update_field(command_id,"queue_exec_gate",gate_proof)
+    else:
+        await _conn_gate_exec(r.username)
+        await _exec_owner_gate(r.username)
     exec_conn=_user_exec_conn(r.username)
     expected_tickets={"main":r.main_ticket,"hedge":r.hedge_ticket}
     _queue_proof=_queue_preflight_evidence(
@@ -11614,7 +12933,7 @@ async def _execute_close_pair_job(r:ClosePairReq, command_id=None, pair_rid=None
         shared_task=_queue_worker_position_task(queue_job)
         if shared_task is not None:
             try:
-                shared_positions=await shared_task
+                shared_positions=await _aio.shield(shared_task)
             except HTTPException:
                 raise
             except Exception as ex:
@@ -11627,7 +12946,7 @@ async def _execute_close_pair_job(r:ClosePairReq, command_id=None, pair_rid=None
         _position_verified_mono=_t_conn.monotonic()
     else:
         tracer.update_field(command_id,"position_preflight","queue_proof")
-    t=_load_tmpl(r.username, r.symbol)
+    t=t or _load_tmpl(r.username, r.symbol)
     hedge_sym=ENG.map_hedge_symbol(r.symbol, (t or {}).get("hedge_symbol")) or r.symbol
     xmode=((t or {}).get("exit_mode") or "concurrent"); speed=((t or {}).get("speed_mode") or "fast")
     if xmode not in ("concurrent","main_first","hedge_first"): xmode="concurrent"
@@ -11638,6 +12957,11 @@ async def _execute_close_pair_job(r:ClosePairReq, command_id=None, pair_rid=None
         # artificial leg delay; the pending finalizer still verifies every
         # ticket and auto-converges a surviving peer through the existing
         # exact-ticket repair path.
+        xmode="concurrent"; speed="turbo"
+    elif _subsecond_user(r.username):
+        # Exact-ticket closes are independent and idempotent on MT4 as well.
+        # Concurrent dispatch removes the configured leg-order tail without
+        # weakening ticket identity or terminal verification.
         xmode="concurrent"; speed="turbo"
     if DEMO_MODE:
         _audit(r.username,actor,"close_pair",{"symbol":r.symbol,"exit_mode":xmode,"main_side":r.main_side,"hedge_side":r.hedge_side},True,"demo:not_sent")
@@ -11712,6 +13036,8 @@ async def _execute_close_pair_job(r:ClosePairReq, command_id=None, pair_rid=None
                                        exec_conn,expected_slot=r.slot,
                                        authoritative=True)
             tracer.update_field(command_id,"position_preflight","dispatch_refresh")
+        _enforce_current_trade_schedule(
+            r.username,r.symbol,"close",automatic=_automatic_job)
         if queue_job_id:
             tracer.update_field(command_id,"pair_request_id",pair_rid)
             tracer.update_field(command_id,"main_request_id",str(pair_rid)+"m")
@@ -11731,8 +13057,7 @@ async def _execute_close_pair_job(r:ClosePairReq, command_id=None, pair_rid=None
         if (dispatch_intent_persisted and isinstance(ex,HTTPException) and
                 not getattr(ex,"qh_terminal_state",None)):
             ex.qh_terminal_state="UNKNOWN"
-        _clear_slot_busy(r.symbol,r.slot,r.username)
-        _release_slot_op(r.username,r.symbol,r.slot,slot_token)
+        _release_slot_resources(r.username,r.symbol,r.slot,slot_token)
         raise
     if _pair_pending(res):
         tracer.update_status(command_id,CommandStatus.SUBMITTED)
@@ -11740,8 +13065,17 @@ async def _execute_close_pair_job(r:ClosePairReq, command_id=None, pair_rid=None
         account_token=res.pop("_account_op_token",None)
         _ctx["account_token"]=account_token
         if queue_job_id:
-            _trade_queue_mark_dispatching(queue_job_id,res,_ctx)
-        _aio.create_task(_finalize_pending_close(command_id,res,_ctx))
+            if not _trade_queue_mark_dispatching(queue_job_id,res,_ctx):
+                _schedule_trade_queue_finalizer(
+                    "close_pair",command_id,res,_ctx)
+                terminal_error=HTTPException(
+                    503,"AGENT_ACK_PERSIST_FAILED: 平仓状态待恢复，禁止重试")
+                terminal_error.qh_terminal_state="UNKNOWN"
+                terminal_error.qh_result=res
+                terminal_error.qh_finalizer_handoff=True
+                raise terminal_error
+        _schedule_trade_queue_finalizer(
+            "close_pair",command_id,res,_ctx)
         return JSONResponse(status_code=202,content={"ok":True,"accepted":True,"state":"DISPATCHING",
             "command_id":command_id,"status_url":"/api/command/"+command_id,"detail":res})
     try:
@@ -11750,7 +13084,8 @@ async def _execute_close_pair_job(r:ClosePairReq, command_id=None, pair_rid=None
             ("main",mt if mok else None),("hedge",ht if hok else None)),r.username)
         if mok != hok:
             _halt_auto_entry(r.username,"single_leg_exposed",{"slot":r.slot,
-                "symbol":r.symbol,"res":res,"op":"close"})
+                "symbol":r.symbol,"res":res,"op":"close",
+                "command_id":command_id,"job_id":queue_job_id})
             tracer.update_status(command_id,CommandStatus.SINGLE_LEG_EXPOSED)
             tracer.update_field(command_id,"failure_reason","single_leg_exposed")
             _push_alert("err","按对平仓仅一腿成功，已停止自动进单，需人工处理",r.username)
@@ -11782,8 +13117,7 @@ async def _execute_close_pair_job(r:ClosePairReq, command_id=None, pair_rid=None
         tracer.record_timestamp(command_id,TraceTimestamp.HTTP_SENT)
         return {"ok":True,"demo":False,"command_id":command_id,"detail":res,"msg":"已按对平仓 主腿%s/对冲腿%s"%(r.main_side,r.hedge_side)}
     finally:
-        _clear_slot_busy(r.symbol,r.slot,r.username)
-        _release_slot_op(r.username,r.symbol,r.slot,slot_token)
+        _release_slot_resources(r.username,r.symbol,r.slot,slot_token)
 
 def _trade_queue_mark_dispatch_intent(job_id, context):
     """Persist the broker-call boundary before any request can leave QH."""
@@ -11911,24 +13245,34 @@ def _trade_queue_release_slot(job):
         username=job.get("username")
         symbol=job.get("symbol") or "XAUUSD"
         token=job.get("slot_token")
-        # Do not clear a newer operation's visual lock when a stale queue task
-        # finishes.  The Redis token is the ownership check; legacy jobs with
-        # no token retain the previous best-effort cleanup behavior.
-        try:
-            owned=(not token or R.get(_slotop_key(username,symbol,slot)) == str(token))
-        except Exception:
-            owned=not token
-        if owned:
-            _clear_slot_busy(symbol,slot,username)
-        _release_slot_op(username,symbol,slot,token)
+        _release_slot_resources(username,symbol,slot,token)
 
 
 def _trade_queue_response(batch, jobs, message):
+    # Return the exact ticket identities selected during close admission so a
+    # browser can keep only those slots usable while a bridge snapshot is
+    # briefly degraded.  This is UI-scoped evidence; the worker still runs
+    # authoritative account/slot/ticket validation before dispatch.
+    ticket_proofs=[]
+    for job in jobs or ():
+        payload=job.get("payload") if isinstance(job,dict) else None
+        if not isinstance(payload,dict):
+            continue
+        proof={"slot":int(job.get("slot") or payload.get("slot") or 0)}
+        if str(payload.get("op") or job.get("op") or "") == "close_pair":
+            proof.update({"main_ticket":payload.get("main_ticket"),
+                          "hedge_ticket":payload.get("hedge_ticket")})
+        elif str(payload.get("op") or job.get("op") or "") == "close_leg":
+            proof.update({"leg":payload.get("leg"),"ticket":payload.get("ticket")})
+        if (proof.get("main_ticket") or proof.get("hedge_ticket") or
+                proof.get("ticket")):
+            ticket_proofs.append(proof)
     return JSONResponse(status_code=202,content={
         "ok":True,"accepted":True,"state":"QUEUED","batch_id":batch["batch_id"],
         "status_url":"/api/trade_queue/batch/"+batch["batch_id"],
         "total":len(jobs),"slots":[int(job.get("slot") or 0) for job in jobs],
-        "command_ids":[job.get("command_id") for job in jobs],"msg":message,
+        "command_ids":[job.get("command_id") for job in jobs],
+        "ticket_proofs":ticket_proofs,"msg":message,
     })
 
 
@@ -12198,12 +13542,11 @@ async def _enqueue_open_batch(r, _admission_lease=None):
         finally:
             _release_trade_admission(client_request_id,lease)
     _maint_block_trading()
+    _assert_account_open_clear(r.username)
     t=_load_tmpl(r.username,r.symbol)
     if not t:
         raise HTTPException(404,"参数模板未找到")
-    if POL.gate_window(t,"entry",_bj_hm())[0]:
-        raise HTTPException(409,"当前不在进单时段(%s-%s 北京)，已拒绝开仓"%(
-            t.get("entry_win_start") or "?",t.get("entry_win_end") or "?"))
+    _enforce_trade_schedule(t,"open",automatic=False)
     ladders=int(t.get("ladders") or 0)
     if not 1<=ladders<=20:
         raise HTTPException(409,"对冲参数配置中的进单量无效，须为 1..20")
@@ -12272,10 +13615,10 @@ async def _enqueue_open_batch(r, _admission_lease=None):
             command_ids.append(command_id)
             slot_token="queue:%s:open"%command_id
             if not _acquire_slot_op(r.username,r.symbol,slot,slot_token,ttl=180):
-                if targeted:
-                    raise HTTPException(409,"坑 %d 正在排队或执行，本次未重复受理"%slot)
                 tracer.update_status(command_id,CommandStatus.FAILED)
                 tracer.update_field(command_id,"failure_reason","slot_lock_unavailable")
+                if targeted:
+                    raise HTTPException(409,"坑 %d 正在排队或执行，本次未重复受理"%slot)
                 continue
             locked.append((slot,slot_token))
             _mark_slot_busy(r.symbol,slot,ttl=180,username=r.username)
@@ -12305,8 +13648,7 @@ async def _enqueue_open_batch(r, _admission_lease=None):
                 tracer.update_field(command_id,"failure_reason","queue_admission_abort:%s"%ex.__class__.__name__)
             except Exception: pass
         for slot,token in locked:
-            _clear_slot_busy(r.symbol,slot,r.username)
-            _release_slot_op(r.username,r.symbol,slot,token)
+            _release_slot_resources(r.username,r.symbol,slot,token)
         raise
 
 
@@ -12357,6 +13699,19 @@ async def _enqueue_open_items(username, symbol, actor, items, source="auto_entry
     """Queue prequalified, explicitly slotted automatic entries as one batch."""
     if not items:
         return None
+    _assert_account_open_clear(username)
+    t=_load_tmpl(username,symbol)
+    if not t:
+        return None
+    try:
+        _enforce_trade_schedule(t,"open",automatic=True)
+    except HTTPException:
+        return None
+    try:
+        ladders=max(1,int(t.get("ladders") or 1))
+        durable_occupied=_durable_occupied_slots(symbol,username,ladders)
+    except HTTPException:
+        return None
     from connector import _gen_rid
     tracer=get_tracer(); jobs=[]; locked=[]
     try:
@@ -12364,14 +13719,19 @@ async def _enqueue_open_items(username, symbol, actor, items, source="auto_entry
             slot=int(item.get("slot") or 0); direction=item.get("direction")
             if slot<1 or direction not in ("reverse","forward"):
                 continue
+            if slot in durable_occupied:
+                continue
             if _slot_review_record(username,symbol,slot):
                 continue
             command_id=tracer.create_command(CommandType.OPEN_PAIR,username,symbol,direction=direction,
                 metadata={"slot":slot,"source":"trade_queue","auto":True})
             slot_token="queue:%s:open"%command_id
             if not _acquire_slot_op(username,symbol,slot,slot_token,ttl=180):
+                tracer.update_status(command_id,CommandStatus.FAILED)
+                tracer.update_field(command_id,"failure_reason","slot_lock_unavailable")
                 continue
             locked.append((slot,slot_token)); _mark_slot_busy(symbol,slot,ttl=180,username=username)
+            durable_occupied.add(slot)
             payload=dict(item); payload["intended_slot"]=slot
             jobs.append({"op":"open_pair","slot":slot,"symbol":symbol,"command_id":command_id,
                 "pair_rid":_gen_rid(),"slot_token":slot_token,"payload":payload,"actor":actor})
@@ -12381,7 +13741,7 @@ async def _enqueue_open_items(username, symbol, actor, items, source="auto_entry
         return batch,prepared
     except Exception:
         for slot,token in locked:
-            _clear_slot_busy(symbol,slot,username); _release_slot_op(username,symbol,slot,token)
+            _release_slot_resources(username,symbol,slot,token)
         raise
 
 
@@ -12671,6 +14031,8 @@ async def _enqueue_close_items(username, symbol, actor, items, source="manual",
                 client_request_id=client_request_id,_admission_lease=lease)
         finally:
             _release_trade_admission(client_request_id,lease)
+    _enforce_trade_schedule(
+        _load_tmpl(username,symbol),"close",automatic=(source=="auto_exit"))
     from connector import _gen_rid
     tracer=get_tracer(); jobs=[]; locked=[]; preflight=[]; command_ids=[]; review_blocked=[]
     batch_id=client_request_id or _gen_rid()
@@ -12729,8 +14091,7 @@ async def _enqueue_close_items(username, symbol, actor, items, source="manual",
             except Exception:
                 pass
         for slot,token in locked:
-            _clear_slot_busy(symbol,slot,username)
-            _release_slot_op(username,symbol,slot,token)
+            _release_slot_resources(username,symbol,slot,token)
         raise
 
 
@@ -12794,7 +14155,12 @@ async def _execute_queued_close_leg(job):
     if not prelocked and not _acquire_slot_op(username,symbol,slot,slot_token,ttl=180):
         raise HTTPException(409,"STALE_SLOT_LOCK: slot %d belongs to a newer operation"%slot)
     _mark_slot_busy(symbol,slot,ttl=90,username=username)
-    _maint_block_trading(); exec_conn=await _exec_leg_gate(username,leg)
+    _maint_block_trading()
+    _automatic_job=_trade_job_is_automatic(job)
+    t=_enforce_current_trade_schedule(
+        username,symbol,"close",automatic=_automatic_job)
+    exec_conn=await _queue_exec_leg_gate(
+        job,username,leg)
     expected_tickets={leg:ticket}
     queue_proof=_queue_preflight_evidence(
         job,"close",username,symbol,slot,expected_tickets=expected_tickets)
@@ -12804,7 +14170,7 @@ async def _execute_queued_close_leg(job):
         shared_task=_queue_worker_position_task(job)
         if shared_task is not None:
             try:
-                shared_positions=await shared_task
+                shared_positions=await _aio.shield(shared_task)
             except HTTPException:
                 raise
             except Exception as ex:
@@ -12815,7 +14181,7 @@ async def _execute_queued_close_leg(job):
             username,symbol,expected_tickets,exec_conn,expected_slot=slot,
             positions=shared_positions,authoritative=True)
         position_verified_mono=_t_conn.monotonic()
-    t=_load_tmpl(username,symbol); hedge_sym=ENG.map_hedge_symbol(symbol,(t or {}).get("hedge_symbol")) or symbol
+    t=t or _load_tmpl(username,symbol); hedge_sym=ENG.map_hedge_symbol(symbol,(t or {}).get("hedge_symbol")) or symbol
     leg_symbol=symbol if leg=="main" else hedge_sym
     tracer=get_tracer(); command_id=job["command_id"]
     tracer.update_field(command_id,"pair_request_id",pair_rid)
@@ -12835,6 +14201,8 @@ async def _execute_queued_close_leg(job):
             username,symbol,expected_tickets,exec_conn,expected_slot=slot,
             authoritative=True)
         tracer.update_field(command_id,"position_preflight","dispatch_refresh")
+    _enforce_current_trade_schedule(
+        username,symbol,"close",automatic=_automatic_job)
     ctx={"username":username,"actor":job.get("actor") or username,"leg":leg,
          "command_id":command_id,
          "ticket":ticket,"side":payload.get("side") or "buy",
@@ -12862,8 +14230,17 @@ async def _execute_queued_close_leg(job):
         raise
     if _pair_pending(res):
         tracer.update_status(command_id,CommandStatus.SUBMITTED)
-        _trade_queue_mark_dispatching(job["job_id"],res,ctx)
-        _aio.create_task(_finalize_pending_leg_close(command_id,res,ctx))
+        if not _trade_queue_mark_dispatching(job["job_id"],res,ctx):
+            _schedule_trade_queue_finalizer(
+                "close_leg",command_id,res,ctx)
+            terminal_error=HTTPException(
+                503,"AGENT_ACK_PERSIST_FAILED: 单腿平仓状态待恢复，禁止重试")
+            terminal_error.qh_terminal_state="UNKNOWN"
+            terminal_error.qh_result=res
+            terminal_error.qh_finalizer_handoff=True
+            raise terminal_error
+        _schedule_trade_queue_finalizer(
+            "close_leg",command_id,res,ctx)
         return JSONResponse(status_code=202,content={"ok":True,"accepted":True,
             "command_id":command_id,"state":"DISPATCHING"})
     try:
@@ -12922,6 +14299,46 @@ async def _await_trade_queue_terminal(job, timeout=75.0):
         _set_slot_review(job.get("username"),job.get("symbol") or "XAUUSD",job.get("slot"),
                          "UNKNOWN",job.get("command_id"),job_id,reason)
     return current
+
+
+def _schedule_trade_queue_finalizer(operation, command_id, result, context):
+    """Keep the broker-terminal task alive after dispatcher capacity is freed."""
+    context=dict(context or {})
+    job_id=str(context.get("queue_job_id") or "")
+    key=job_id or (str(command_id or "")+":"+str(operation or ""))
+    if not key:
+        return None
+    existing=_TRADE_QUEUE_FINALIZER_TASKS.get(key)
+    if existing is not None and not existing.done():
+        return existing
+    finalizer={
+        "open_pair":_finalize_pending_open,
+        "close_pair":_finalize_pending_close,
+        "close_leg":_finalize_pending_leg_close,
+    }.get(str(operation or ""))
+    if finalizer is None:
+        raise ValueError("unknown trade finalizer: %s"%operation)
+
+    async def run():
+        return await finalizer(command_id,result,context)
+
+    task=_aio.create_task(run())
+    task._qh_trade_job_id=job_id
+    task._qh_trade_command_id=str(command_id or "")
+    task._qh_trade_kind=("open" if operation=="open_pair" else "close")
+    _TRADE_QUEUE_FINALIZER_TASKS[key]=task
+    def cleanup(done):
+        if _TRADE_QUEUE_FINALIZER_TASKS.get(key) is done:
+            _TRADE_QUEUE_FINALIZER_TASKS.pop(key,None)
+        try: done.result()
+        except _aio.CancelledError: pass
+        except Exception as ex:
+            try:
+                R.setex(RNS+"tradeq:error",60,
+                        "finalizer:%s:%s"%(ex.__class__.__name__,str(ex)[:180]))
+            except Exception: pass
+    task.add_done_callback(cleanup)
+    return task
 
 
 def _open_ownership_recovery_snapshot(job, body=None):
@@ -13023,6 +14440,7 @@ async def _run_trade_queue_job(job):
             payload=_validate_close_items([close_input])[0]
             job=dict(job); job["payload"]=payload
         if op=="open_pair":
+            _assert_account_open_clear(job["username"])
             req=OpenPairReq(username=job["username"],confirm=True,
                 direction=payload.get("direction"),symbol=job.get("symbol") or "XAUUSD",
                 slots=1,slot=int(job.get("slot") or 0))
@@ -13093,8 +14511,16 @@ async def _run_trade_queue_job(job):
                                finished_at=_dt.datetime.utcnow().isoformat())
             _trade_queue_release_slot(job)
         else:
-            await _await_trade_queue_terminal(job)
+            # The durable DISPATCHING snapshot and strong-referenced finalizer
+            # now own terminal confirmation. Release only dispatcher capacity;
+            # slot locks/capacity holds stay with the finalizer and recovery.
+            return
     except HTTPException as ex:
+        if getattr(ex,"qh_finalizer_handoff",False):
+            # The broker ACK and exact request ids are already in the
+            # strong-referenced finalizer. It alone owns terminal state,
+            # review publication and slot cleanup from this point onward.
+            return
         reason=str(ex.detail)
         terminal_state=str(getattr(ex,"qh_terminal_state","FAILED") or "FAILED").upper()
         if terminal_state not in TRADE_QUEUE_TERMINAL_STATES:
@@ -13103,15 +14529,25 @@ async def _run_trade_queue_job(job):
             tracer.update_status(
                 command_id,getattr(CommandStatus,terminal_state,CommandStatus.FAILED))
             tracer.update_field(command_id,"failure_reason",reason)
+            if getattr(ex,"qh_error_code",None):
+                tracer.update_field(command_id,"policy_gate",str(ex.qh_error_code))
+                tracer.update_field(
+                    command_id,"policy_internal_reason",
+                    str(getattr(ex,"qh_internal_reason","") or "blocked"))
         if job.get("op")=="open_pair":
             if terminal_state in ("UNKNOWN","MANUAL_REVIEW","SINGLE_LEG_EXPOSED"):
                 _hold_entry_capacity_reservation(job.get("username"),job_id)
             else:
                 _release_entry_capacity_reservation(job.get("username"),job_id)
         failure_result=getattr(ex,"qh_result",None)
+        queue_error={"status":ex.status_code,"detail":reason}
+        if getattr(ex,"qh_error_code",None):
+            queue_error["code"]=str(ex.qh_error_code)
+        if getattr(ex,"qh_error_action",None):
+            queue_error["action"]=str(ex.qh_error_action)
         TRADE_QUEUE.finish(job_id,terminal_state,
                            result=(failure_result if isinstance(failure_result,dict) else None),
-                           error={"status":ex.status_code,"detail":reason})
+                           error=queue_error)
         if terminal_state in ("UNKNOWN","MANUAL_REVIEW","SINGLE_LEG_EXPOSED"):
             _set_slot_review(job.get("username"),job.get("symbol") or "XAUUSD",job.get("slot"),
                              terminal_state,command_id,job_id,reason)
@@ -13174,13 +14610,18 @@ def _trade_queue_recovery_result(job, context):
             return None
         main_side,hedge_side=(("sell","buy") if direction=="reverse" else
                               ("buy","sell"))
-        burst=(_trade_bool(context.get("burst_admission")) or
+        mt5_burst=_subsecond_mt5_user(job.get("username") or context.get("username"))
+        terminal_first=_trade_bool(context.get("terminal_first_open"))
+        burst=bool(mt5_burst and not terminal_first and (
+               _trade_bool(context.get("burst_admission")) or
                _trade_bool(context.get("temporal_burst_admission")) or
-               int(context.get("batch_size") or job.get("batch_size") or 1)>1)
+               int(context.get("batch_size") or job.get("batch_size") or 1)>1))
         result={"direction":direction,"mode":mode,"main":None,"hedge":None,
                 "main_ok":False,"hedge_ok":False,"request_id":rid,
                 "op":"open","ordered_ack":True,"dispatch_only":burst,
                 "burst_admission":burst,"saga_durable":True,
+                "eager_ordered_ack":_trade_bool(
+                    context.get("eager_ordered_ack")),
                 "saga_phase":str(job.get("saga_phase") or "PAIR_INTENT"),
                 "leg_contexts":{
                     "main":{"symbol":context.get("symbol"),
@@ -13289,22 +14730,31 @@ def _pending_finalizer_budget(ctx=None):
                   int(context.get("burst_depth") or 1))
     except (TypeError,ValueError):
         depth=1
-    burst=(_trade_bool(context.get("burst_admission")) or
+    operation=str(context.get("op") or "")
+    is_open=(bool(context.get("direction")) and
+             not context.get("main_ticket") and not context.get("hedge_ticket"))
+    mt4_ordered_open=bool(is_open and not _subsecond_mt5_user(
+        context.get("username")))
+    terminal_first_open=_trade_bool(context.get("terminal_first_open"))
+    burst=(not mt4_ordered_open and not terminal_first_open and (
+           _trade_bool(context.get("burst_admission")) or
            _trade_bool(context.get("temporal_burst_admission")) or
-           (int(context.get("batch_size") or 1)>1))
+           (int(context.get("batch_size") or 1)>1)))
     job_id=str(context.get("queue_job_id") or "")
     if job_id:
         try:
             job=TRADE_QUEUE.get_job(job_id) or {}
-            burst=bool(burst or _trade_bool(job.get("temporal_burst_admission")) or
-                       int(job.get("batch_size") or 1)>1)
+            burst=bool(burst or (not mt4_ordered_open and not terminal_first_open and (
+                       _trade_bool(job.get("temporal_burst_admission")) or
+                       int(job.get("batch_size") or 1)>1)))
             depth=max(depth,int(job.get("batch_size") or 1),
                       int(job.get("burst_depth") or 1))
             cohort_key=str(context.get("burst_cohort") or
                            job.get("burst_cohort") or "")
             if cohort_key:
                 depth=max(depth,int(R.llen(cohort_key+":jobs") or 0))
-                burst=bool(burst or depth>1)
+                burst=bool(burst or (not mt4_ordered_open and
+                                     not terminal_first_open and depth>1))
             batch_id=str(job.get("batch_id") or "")
             if batch_id:
                 batch=TRADE_QUEUE.batch_status(batch_id) or {}
@@ -13334,15 +14784,28 @@ def _pending_open_truth_reserve(total_budget):
     return min(budget*0.80,min(0.75,max(0.35,budget*0.30)))
 
 
-def _pending_close_truth_reserve(total_budget):
-    """Reserve most of a short close budget for exact-ticket position truth."""
+def _pending_close_truth_reserve(total_budget, ctx=None):
+    """Reserve a small tail for exact-ticket truth after Agent status.
+
+    The MT5 bridge owns a serialized native call.  Giving positions truth the
+    old 60% reserve caused a 542-850ms Agent call to be classified UNKNOWN
+    before its terminal result could be read.  MT4 brokers now also need about
+    0.9-1.05s for a normal terminal result, so the old 60% split forced them
+    into a slower positions recovery at 0.6s.  Keep only a bounded truth tail.
+    """
     try:
         budget=max(0.0,float(total_budget))
     except (TypeError,ValueError):
         budget=0.0
     if budget<=0:
         return 0.0
-    return min(budget*0.80,min(1.0,max(0.50,budget*0.60)))
+    context=ctx if isinstance(ctx,dict) else {}
+    if _subsecond_mt5_user(context.get("username")):
+        # MT5 order_send is ~0.54s in production. Keep a 0.45s exact-ticket
+        # tail in the 1.5s finalizer budget so a slow status read cannot force
+        # a false UNKNOWN before the broker terminal result is visible.
+        return min(budget*0.80, max(0.35, min(0.45, budget*0.35)))
+    return min(budget*0.80,max(0.25,min(0.35,budget*0.20)))
 
 
 def _open_saga_finalizer_lease_key(job_id):
@@ -13376,6 +14839,37 @@ def _release_open_saga_finalizer_lease(job_id, token):
         # Never delete a lease without an atomic ownership check. Its TTL is
         # the fail-safe when Redis scripting is temporarily unavailable.
         return False
+
+def _defer_completed_open_repair(command_id, delay=0.5):
+    """Retry one terminal queue suffix without spending broker truth attempts."""
+    key="completed:"+str(command_id or "")
+    existing=_OPEN_SAGA_RECOVERY_TASKS.get(key)
+    if existing is not None and not existing.done():
+        return existing
+    async def run():
+        backoff=max(0.25,float(delay))
+        # 0.5+1+2+4+5*35 > the 180s lease/slot TTL fail-safe.
+        for _attempt in range(40):
+            await _aio.sleep(backoff)
+            command=get_tracer().get_command(command_id) or {}
+            job_id=str(command.get("queue_job_id") or "")
+            job=TRADE_QUEUE.get_job(job_id) if job_id else None
+            if (not isinstance(job,dict) or
+                    str(job.get("state") or "").upper()!="COMPLETED"):
+                return
+            if await _repair_completed_open_saga(command_id,command,job):
+                return
+            backoff=min(5.0,backoff*2.0)
+    try:
+        task=_aio.create_task(run())
+        _OPEN_SAGA_RECOVERY_TASKS[key]=task
+        def cleanup(done):
+            if _OPEN_SAGA_RECOVERY_TASKS.get(key) is done:
+                _OPEN_SAGA_RECOVERY_TASKS.pop(key,None)
+        task.add_done_callback(cleanup)
+        return task
+    except Exception:
+        return None
 
 
 def _schedule_open_saga_recovery(command_id, result, context, delay=0.25):
@@ -13527,6 +15021,8 @@ def _schedule_close_pair_review_recovery(command_id, result, context, delay=0.5)
 
 async def _recover_trade_queue():
     tracer=get_tracer()
+    if not _index_completed_open_quarantines():
+        raise RuntimeError("completed open quarantine index unavailable")
     for username in TRADE_QUEUE.accounts():
         for job in (TRADE_QUEUE.processing(username) or []):
             if not job:
@@ -13566,7 +15062,8 @@ async def _recover_trade_queue():
                         _schedule_close_pair_review_recovery(
                             command_id,result,context,delay=0.0)
                     else:
-                        _aio.create_task(finalize(command_id,result,context))
+                        _schedule_trade_queue_finalizer(
+                            op,command_id,result,context)
                     continue
 
             if state=="EXECUTING":
@@ -13611,6 +15108,75 @@ async def _recover_trade_queue():
         result=_trade_queue_recovery_result(job,context)
         if command_id and result:
             _schedule_open_saga_recovery(command_id,result,context,delay=0.0)
+
+    # COMPLETED queue truth can still be missing local ownership/tracer suffix
+    # after a process crash.  Redis job hashes are retained for the queue TTL,
+    # so rediscover these exact jobs without consuming generic manual-review
+    # retry budget or sending a second broker open.
+    redis_client=getattr(TRADE_QUEUE,"redis",None)
+    namespace=str(getattr(TRADE_QUEUE,"namespace",RNS+"tradeq:"))
+    if redis_client is not None:
+        try:
+            for raw_key in redis_client.scan_iter(match=namespace+"job:*",count=100):
+                key=(raw_key.decode("utf-8","replace")
+                     if isinstance(raw_key,bytes) else str(raw_key))
+                job=TRADE_QUEUE.get_job(key[len(namespace+"job:"):])
+                if (not isinstance(job,dict) or
+                        str(job.get("op") or "")!="open_pair" or
+                        str(job.get("state") or "").upper()!="COMPLETED"):
+                    continue
+                command_id=str(job.get("command_id") or "")
+                command=tracer.get_command(command_id) if command_id else None
+                if not command:
+                    # The queue is the durable source of terminal identity.
+                    # Rebuild a validated tracer envelope before deciding
+                    # whether the pair is live or already consumed.  A missing
+                    # 24-hour tracer alone is not evidence of account risk.
+                    command=_completed_open_command_from_job(job)
+                    if (command is None or
+                            not _materialize_completed_open_command(command)):
+                        _quarantine_completed_open_job(
+                            command_id,job,"completed open terminal identity invalid")
+                        continue
+                    command=tracer.get_command(command_id) or command
+                identity=_completed_open_review_identity(command_id,command,job)
+                if identity is None:
+                    _quarantine_completed_open_job(
+                        command_id,job,"completed open identity invalid at restart")
+                    continue
+                status=str(command.get("status") or "").upper()
+                slot=_exact_positive_int(job.get("slot"))
+                review=(_slot_review_record(
+                    str(job.get("username") or "").strip(),
+                    str(job.get("symbol") or "XAUUSD"),slot)
+                        if slot else None)
+                quarantine=redis_client.get(
+                    _completed_open_quarantine_key(job.get("job_id")))
+                if status=="COMPLETED" and not review and not quarantine:
+                    continue
+                if quarantine:
+                    payload=_completed_open_saga_repair_payload(
+                        command_id,command,job)
+                    if payload is None:
+                        continue
+                    # Never expose an unlatched interval. Bind the exact slot
+                    # review before retiring the broader account quarantine.
+                    if not _ensure_matching_slot_review(
+                            payload["username"],payload["symbol"],payload["slot"],
+                            "MANUAL_REVIEW",command_id,payload["job_id"],
+                            "completed saga quarantine recovery pending"):
+                        continue
+                    if not _clear_completed_open_quarantine(
+                            payload["job_id"],command_id,payload["username"]):
+                        continue
+                if command_id:
+                    _defer_completed_open_repair(command_id,delay=0.0)
+        except Exception as ex:
+            try:
+                R.setex(RNS+"tradeq:completed-open-recovery-scan-error",300,
+                        ex.__class__.__name__+":"+str(ex)[:240])
+            except Exception:
+                pass
 
     # A terminal close-pair review can contain one broker-confirmed survivor.
     # Resume its exact-ticket risk close after every QH restart.
@@ -13665,7 +15231,9 @@ def _trade_queue_job_task_active(job_id):
     wanted=str(job_id or "")
     if not wanted:
         return False
-    for tasks in list(_TRADE_QUEUE_TASKS.values()):
+    task_groups=list(_TRADE_QUEUE_TASKS.values())+[
+        set(_TRADE_QUEUE_FINALIZER_TASKS.values())]
+    for tasks in task_groups:
         for task in list(tasks):
             if (not task.done() and
                     str(getattr(task,"_qh_trade_job_id","") or "")==wanted):
@@ -13674,10 +15242,12 @@ def _trade_queue_job_task_active(job_id):
 
 
 def _trade_queue_command_task_active(command_id, command=None):
-    """Match an in-process dispatcher by command id or its durable job id."""
+    """Match an in-process dispatcher/finalizer by command or durable job id."""
     wanted_command=str(command_id or "")
     wanted_job=str((command or {}).get("queue_job_id") or "")
-    for tasks in list(_TRADE_QUEUE_TASKS.values()):
+    task_groups=list(_TRADE_QUEUE_TASKS.values())+[
+        set(_TRADE_QUEUE_FINALIZER_TASKS.values())]
+    for tasks in task_groups:
         for task in list(tasks):
             if task.done():
                 continue
@@ -13699,10 +15269,74 @@ def _consume_worker_snapshot_error(task):
         pass
 
 
-def _attach_trade_queue_worker_position_tasks(username, jobs):
-    """Share one broker position read across each newly claimed dispatch wave."""
+def _attach_trade_queue_worker_wave_tasks(username, jobs):
+    """Share health, positions and quotes across one account claim wave."""
+    jobs=list(jobs or ())
+    if jobs:
+        gate_task=_aio.create_task(_queue_exec_gate_probe(username))
+        gate_task.add_done_callback(_consume_worker_snapshot_error)
+        gate_created=_t_conn.monotonic()
+        for job in jobs:
+            job["_worker_exec_gate_task"]=gate_task
+            job["_worker_exec_gate_username"]=username
+            job["_worker_exec_gate_created_mono"]=gate_created
+    open_groups={}
+    for job in jobs:
+        if str(job.get("kind") or "")!="open":
+            continue
+        payload=job.get("payload") if isinstance(job.get("payload"),dict) else {}
+        symbol=str(job.get("symbol") or "XAUUSD")
+        direction=str(payload.get("direction") or "")
+        open_groups.setdefault((symbol,direction),[]).append(job)
+    for (symbol,_direction),group in open_groups.items():
+        try:
+            template=_load_tmpl(username,symbol) or {}
+            hedge_symbol=(ENG.map_hedge_symbol(
+                symbol,template.get("hedge_symbol")) or symbol)
+            conn=_user_exec_conn(username); hedge=getattr(conn,"hedge",None)
+            manual_targeted=any(
+                (job.get("payload") or {}).get("manual_targeted") is True
+                for job in group)
+            burst_hint=any(
+                _trade_bool(job.get("temporal_burst_admission")) or
+                int(job.get("batch_size") or 1)>1 for job in group)
+            cache_ms=_entry_tick_cache_ms(
+                username,manual_targeted,burst_admission=burst_hint)
+            async def one(leg,sym,role,_cache_ms=cache_ms,
+                          _username=username):
+                try:
+                    return await _get_tick_with_fallback(
+                        leg,sym,max_age_ms=_cache_ms,
+                        username=_username,role=role)
+                except Exception:
+                    return None
+            async def pair(_hedge=hedge,_conn=conn,_symbol=symbol,
+                           _hedge_symbol=hedge_symbol,_one=one):
+                if _hedge is None:
+                    return (await _one(_conn.main,_symbol,"main"),None)
+                return await _aio.gather(
+                    _one(_conn.main,_symbol,"main"),
+                    _one(_hedge,_hedge_symbol,"hedge"))
+            tick_task=_aio.create_task(_aio.wait_for(
+                pair(),timeout=_QUEUE_EXEC_GATE_TIMEOUT_SEC))
+            tick_task.add_done_callback(_consume_worker_snapshot_error)
+            for job in group:
+                job["_worker_ticks_task"]=tick_task
+            needs_accounts=any(float(template.get(name) or 0)>0 for name in (
+                "margin_reserve_main","margin_reserve_hedge","predict_budget"))
+            if needs_accounts and hasattr(conn,"both_accounts"):
+                account_admission_ids=[str(job.get("job_id") or "") for job in group]
+                account_task=_aio.create_task(
+                    _queue_margin_accounts(
+                        username,conn,admission_ids=account_admission_ids))
+                account_task.add_done_callback(_consume_worker_snapshot_error)
+                for job in group:
+                    job["_worker_accounts_task"]=account_task
+        except Exception:
+            continue
+
     groups={}
-    for job in (jobs or ()):
+    for job in jobs:
         payload=job.get("payload") if isinstance(job,dict) else None
         if not isinstance(payload,dict) or isinstance(payload.get("_queue_preflight"),dict):
             continue
@@ -13766,15 +15400,18 @@ async def _trade_queue_dispatch_once():
         capacity=account_limit-len(tasks)
         if capacity<=0:
             continue
-        # A queued close must reach the Agent's durable ACK barrier before any
-        # not-yet-started open for the same account is released.
-        if any(getattr(task,"_qh_trade_kind",None)=="close" for task in tasks):
-            continue
         depths=queued_depths.get(username) or {}
         try: close_depth=max(0,int(depths.get("close") or 0))
         except (TypeError,ValueError): close_depth=0
         try: open_depth=max(0,int(depths.get("open") or 0))
         except (TypeError,ValueError): open_depth=0
+        active_close=any(
+            getattr(task,"_qh_trade_kind",None)=="close" for task in tasks)
+        # Keep claiming risk-reducing closes while an earlier close reaches
+        # its durable ACK. Only queued opens wait; ACKed close finalizers no
+        # longer consume this dispatcher set.
+        if active_close and close_depth<=0:
+            continue
         if close_depth<=0 and open_depth<=0:
             continue
         # Review latches are enforced against the exact target slot at open
@@ -13784,7 +15421,7 @@ async def _trade_queue_dispatch_once():
         claimed=await _aio.to_thread(
             _claim_wave,username,dispatch_count)
         worked=bool(claimed) or worked
-        _attach_trade_queue_worker_position_tasks(username,claimed)
+        _attach_trade_queue_worker_wave_tasks(username,claimed)
         for job in claimed:
             task=_aio.create_task(_run_trade_queue_job_guarded(job))
             task._qh_trade_kind=job.get("kind")
@@ -14006,6 +15643,15 @@ def params_save(r:ParamSave):
     _assert_subject(r.username,r.license_key or "")
     if isinstance(r.ladders,bool) or not 1<=int(r.ladders)<=20:
         raise HTTPException(400,"进单量(阶梯)须为整数 1..20")
+    for start_name,end_name,label in (
+            ("entry_win_start","entry_win_end","进单时间"),
+            ("run_win_start","run_win_end","自动运行时间")):
+        start=str(getattr(r,start_name) or "").strip()
+        end=str(getattr(r,end_name) or "").strip()
+        error=_time_window_error(start,end,label)
+        if error:
+            raise HTTPException(400,error)
+        setattr(r,start_name,start); setattr(r,end_name,end)
     c=db(); cur=c.cursor()
     cur.execute("SELECT id FROM users WHERE username=%s",(r.username,)); u=cur.fetchone()
     if not u: c.close(); raise HTTPException(404,"user not found")
@@ -14228,6 +15874,11 @@ def _param_validate(cfg):
     if cfg.get("entry_mode") not in ("concurrent","main_first","hedge_first"): e.append("进单模式非法")
     if cfg.get("exit_mode") not in ("concurrent","main_first","hedge_first"): e.append("出单模式非法")
     if cfg.get("speed_mode") not in ("normal","fast","turbo"): e.append("速度模式非法")
+    for start_name,end_name,label in (
+            ("entry_win_start","entry_win_end","进单时间"),
+            ("run_win_start","run_win_end","自动运行时间")):
+        error=_time_window_error(cfg.get(start_name),cfg.get(end_name),label)
+        if error: e.append(error)
     return e
 def _params_upsert(cur, user_id, symbol, cfg, actor="batch"):
     """按 _PARAM_FIELDS 全列 UPDATE→无则 INSERT(dict 驱动)。
@@ -15490,14 +17141,15 @@ async def _reconcile_pair_close(main_ticket, hedge_ticket, truth, exc):
 async def _exec_open_pair(direction, main_sym, hedge_sym, mv, hv, mode, speed, username=None,
                           main_dev=None, hedge_dev=None, command_id=None, pair_rid=None,
                           async_accept=False, phase_hook=None, dispatch_only=False,
-                          burst_admission=False):
+                          burst_admission=False,eager_ordered_ack=False):
     return await _exec_open_pair_unlocked(
         direction,main_sym,hedge_sym,mv,hv,mode,speed,username=username,
         main_dev=main_dev,hedge_dev=hedge_dev,command_id=command_id,
         pair_rid=pair_rid,async_accept=async_accept,phase_hook=phase_hook,
-        dispatch_only=dispatch_only,burst_admission=burst_admission)
+        dispatch_only=dispatch_only,burst_admission=burst_admission,
+        eager_ordered_ack=eager_ordered_ack)
 
-async def _exec_open_pair_unlocked(direction, main_sym, hedge_sym, mv, hv, mode, speed, username=None, main_dev=None, hedge_dev=None, command_id=None, pair_rid=None, async_accept=False, phase_hook=None, dispatch_only=False, burst_admission=False):
+async def _exec_open_pair_unlocked(direction, main_sym, hedge_sym, mv, hv, mode, speed, username=None, main_dev=None, hedge_dev=None, command_id=None, pair_rid=None, async_accept=False, phase_hook=None, dispatch_only=False, burst_admission=False,eager_ordered_ack=False):
     from connector import _gen_rid
     rid=pair_rid or _gen_rid()        # stable Pair id; legs append m/h end-to-end
     if command_id:
@@ -15538,6 +17190,7 @@ async def _exec_open_pair_unlocked(direction, main_sym, hedge_sym, mv, hv, mode,
             truth=truth, rid=rid, main_dev=main_dev, hedge_dev=hedge_dev,
             ordered_ack=bool(async_accept or _subsecond_user(username)),phase_hook=phase_hook,
             dispatch_only=dispatch_only,burst_admission=burst_admission,
+            eager_ordered_ack=eager_ordered_ack,
         )
         # P0-A b08: Bridge返回
         if command_id:
@@ -15551,6 +17204,7 @@ async def _exec_open_pair_unlocked(direction, main_sym, hedge_sym, mv, hv, mode,
                 if _h.get('order'): _tr.update_field(command_id,'hedge_ticket',str(_h['order']))
             except Exception: pass
     _entry_capacity_latch_result(username,res,"broker_result")
+    _update_mt5_entry_session_guard(username,res)
     _note_exec_flags(res,"开仓",username)
     return res
 async def _exec_close_pair(main_sym, hedge_sym, mside, hside, mv, hv, mode, speed,
@@ -15587,7 +17241,22 @@ async def _exec_close_pair_unlocked(main_sym, hedge_sym, mside, hside, mv, hv, m
                     _push_alert("err","FRA配对平仓结果未知(%s)且真相源核对未果, 请立即人工核对双腿持仓!"%e.__class__.__name__,username)
                     raise HTTPException(502,"FRA 配对平仓结果未知(%s)且真相源核对未果: 请人工核对持仓, 勿立即重试"%e.__class__.__name__)
     if res is None:
-        res=await _user_exec_conn(username).close_pair(main_sym, hedge_sym, mside, hside, mv, hv, mode=mode, speed=speed, main_ticket=main_ticket, hedge_ticket=hedge_ticket, truth=truth, rid=rid, ordered_ack=async_accept, burst_admission=burst_admission)
+        async def _trace_close_dispatch(leg):
+            if not command_id:
+                return
+            try:
+                tracer=get_tracer()
+                field=(TraceTimestamp.BRIDGE_SENT_MAIN if leg=="main"
+                       else TraceTimestamp.BRIDGE_SENT_HEDGE)
+                _record_trace_timestamp_once(tracer,command_id,field)
+            except Exception:
+                pass
+        res=await _user_exec_conn(username).close_pair(
+            main_sym, hedge_sym, mside, hside, mv, hv,
+            mode=mode, speed=speed, main_ticket=main_ticket,
+            hedge_ticket=hedge_ticket, truth=truth, rid=rid,
+            ordered_ack=async_accept, burst_admission=burst_admission,
+            dispatch_hook=_trace_close_dispatch)
     if command_id:
         try:
             _tr=get_tracer()
@@ -15612,9 +17281,72 @@ def _open_compensation_succeeded(result):
                 compensation.get("ok") and compensation.get("closed") and
                 compensation.get("ticket"))
 
+_MARKET_CLOSED_RETCODES=frozenset((132,10018,10044))
+
+def _terminal_result_market_closed(value):
+    """Recognize MT4/MT5 closure responses without exposing broker fields."""
+    pending=[value]; seen=set()
+    while pending:
+        current=pending.pop()
+        if isinstance(current,dict):
+            marker=id(current)
+            if marker in seen: continue
+            seen.add(marker)
+            for key,item in current.items():
+                name=str(key or "").lower()
+                if name in ("retcode","trade_retcode","return_code"):
+                    try:
+                        if int(item) in _MARKET_CLOSED_RETCODES:
+                            return True
+                    except (TypeError,ValueError):
+                        pass
+                if isinstance(item,(dict,list,tuple)):
+                    pending.append(item)
+                elif name in ("error","detail","comment","message","reason","code"):
+                    text=str(item or "").strip().lower()
+                    if ("market_closed" in text or "market closed" in text or
+                            "session_closed" in text or "session closed" in text or
+                            "trade_retcode_market_closed" in text or
+                            "市场关闭" in text or "休市" in text):
+                        return True
+                    if name=="code":
+                        try:
+                            if int(text) in _MARKET_CLOSED_RETCODES:
+                                return True
+                        except (TypeError,ValueError):
+                            pass
+        elif isinstance(current,(list,tuple)):
+            pending.extend(current)
+    return False
+
+def _update_mt5_entry_session_guard(username, result):
+    """Latch broker session disagreement; clear only after both open legs fill."""
+    if not _subsecond_mt5_guard_user(username):
+        return None
+    key=_entry_session_guard_key(username)
+    if _terminal_result_market_closed(result):
+        try:
+            ttl=max(60,min(3600,int(os.environ.get(
+                "QH_MT5_SESSION_REJECT_GUARD_SEC","600"))))
+        except (TypeError,ValueError):
+            ttl=600
+        payload={"username":str(username or ""),
+                 "reason":"broker_session_rejected",
+                 "ts":_dt.datetime.utcnow().isoformat()}
+        try: R.setex(key,ttl,json.dumps(payload,separators=(",",":")))
+        except Exception: pass
+        return "latched"
+    if (_resolved_leg_ok(result,"main") and
+            _resolved_leg_ok(result,"hedge")):
+        try: R.delete(key)
+        except Exception: pass
+        return "cleared"
+    return None
+
 def _terminal_leg_reason(result, leg):
     lr=(result or {}).get(leg) or {}
     if _resolved_leg_ok(result,leg): return "confirmed"
+    if _terminal_result_market_closed(lr): return "MARKET_CLOSED"
     if lr.get("truth_unavailable") or lr.get("unknown"): return "truth_unavailable"
     return str(lr.get("error") or lr.get("detail") or lr.get("retcode") or "not_filled")[:180]
 
@@ -15642,8 +17374,7 @@ async def _open_leg_terminal_truth(conn, leg, initial, final):
     if leg_obj is None: return "UNKNOWN",None
     initial_leg=(initial or {}).get(leg) or {}; final_leg=(final or {}).get(leg) or {}
     for leg_result in (final_leg,initial_leg):
-        if (leg_result.get("truth_confirmed")=="not_filled" and
-                (leg_result.get("src")=="order-status" or leg_result.get("not_sent"))):
+        if _open_leg_explicit_not_filled(leg_result):
             return "NOT_FILLED",None
     tickets=_open_truth_ticket_candidates(initial_leg,final_leg)
     rid=(final or {}).get("request_id") or (initial or {}).get("request_id")
@@ -15699,6 +17430,14 @@ async def _reconcile_pending_open_truth(conn, initial, final):
             lr["truth_unavailable"]=True; final[leg]=lr; final[leg+"_ok"]=False
     final["truth_reconciled"]={"operation":"open","recovered_legs":reconciled,
                                 "authoritative":not any(_terminal_leg_reason(final,x)=="truth_unavailable" for x in legs)}
+    compensation=final.get("compensation") if isinstance(final.get("compensation"),dict) else {}
+    terminal_legs=all(
+        _resolved_leg_ok(final,leg) or
+        _open_leg_explicit_not_filled(final.get(leg))
+        for leg in ("main","hedge"))
+    if (terminal_legs and not compensation.get("pending") and
+            not compensation.get("unknown")):
+        final.pop("saga_unknown",None)
     return final
 
 async def _reconcile_pending_close_truth(conn, initial, final, tickets):
@@ -15861,6 +17600,7 @@ def _authoritative_close_pair_survivor(final, ctx):
     ctx=ctx if isinstance(ctx,dict) else {}
     truth=final.get("truth_reconciled")
     if (not isinstance(truth,dict) or truth.get("operation")!="close" or
+            truth.get("operation")!="close" or
             truth.get("authoritative") is not True):
         return None
     resolved={leg:_resolved_leg_ok(final,leg) for leg in ("main","hedge")}
@@ -15923,6 +17663,266 @@ def _record_auto_single_leg_close_attempt(ctx, command_id, target, reason, reque
             TRADE_QUEUE.update_review_job(job_id,auto_single_leg_close=payload)
     except Exception:
         pass
+
+
+def _open_single_leg_compensation_request_id(command_id, command, evidence, leg):
+    """Reuse the connector saga's deterministic compensation id after restart."""
+    command=command if isinstance(command,dict) else {}
+    evidence=evidence if isinstance(evidence,dict) else {}
+    context=_reconciled_open_mapping(command.get("pending_context"))
+    pair_rid=str(
+        command.get("pair_request_id") or context.get("pair_rid") or
+        evidence.get("request_id") or "").strip()
+    if not pair_rid:
+        import hashlib
+        pair_rid="qhac"+hashlib.sha256(
+            (str(command_id)+":"+leg).encode("utf-8")).hexdigest()[:20]
+    burst=_trade_bool(evidence.get("burst_admission")) or _trade_bool(
+        context.get("burst_admission"))
+    return pair_rid+"c"+(leg[0] if burst else "")
+
+
+def _strict_position_rows(raw):
+    if isinstance(raw,dict):
+        stale=raw.get("snapshot_stale",False)
+        if isinstance(stale,str):
+            stale=stale.strip().lower() in ("1","true","yes","stale")
+        if raw.get("registered") is False or stale:
+            return None
+        rows=raw.get("positions")
+    elif isinstance(raw,list):
+        rows=raw
+    else:
+        return None
+    if not isinstance(rows,list) or any(not isinstance(row,dict) for row in rows):
+        return None
+    return rows
+
+
+def _position_close_side(row, fallback=None):
+    side=str((row or {}).get("side") or "").lower()
+    if side in ("buy","sell"):
+        return side
+    raw=(row or {}).get("type")
+    if raw is None:
+        raw=(row or {}).get("position_type")
+    try:
+        value=int(raw)
+        if value in (0,1):
+            return "buy" if value==0 else "sell"
+    except (TypeError,ValueError):
+        pass
+    return fallback if fallback in ("buy","sell") else None
+
+
+async def _execute_authoritative_open_single_leg_close(
+        command_id, command, evidence, identity, reason):
+    """Immediately close one currently visible exact ticket, then prove terminal."""
+    command=dict(command or {}); evidence=dict(evidence or {}); identity=dict(identity or {})
+    leg=str(identity.get("leg") or ""); ticket=_exact_positive_int(identity.get("ticket"))
+    username=str(command.get("username") or "").strip()
+    symbol=str(command.get("symbol") or "XAUUSD")
+    context=_reconciled_open_mapping(command.get("pending_context"))
+    slot=_exact_positive_int(command.get("slot") or context.get("slot"))
+    if leg not in ("main","hedge") or ticket is None or not username or slot is None:
+        return {"closed":False,"reason":"invalid_authoritative_identity"}
+    result=evidence.get(leg) if isinstance(evidence.get(leg),dict) else {}
+    result_tickets={_exact_positive_int(result.get(name))
+                    for name in ("position","order","ticket")}
+    result_tickets.discard(None)
+    if result_tickets and result_tickets!={ticket}:
+        return {"closed":False,"reason":"authoritative_ticket_mismatch",
+                "leg":leg,"ticket":ticket}
+
+    request_id=_open_single_leg_compensation_request_id(
+        command_id,command,evidence,leg)
+    target={"leg":leg,"ticket":ticket,"slot":slot,"username":username,
+            "symbol":symbol}
+    lease_key,lease_token=_claim_auto_single_leg_close_lease(
+        username,symbol,slot,command_id,leg,ticket)
+    if lease_token is None:
+        return {"closed":False,"reason":"auto_close_already_running",
+                "recoverable":True,
+                "leg":leg,"ticket":ticket,"request_id":request_id}
+    try:
+        conn=_user_exec_conn(username)
+        leg_obj=getattr(conn,leg,None)
+        if leg_obj is None:
+            return {"closed":False,"reason":"execution_leg_unavailable",
+                    "recoverable":True,
+                    "leg":leg,"ticket":ticket,"request_id":request_id}
+        try:
+            rows=_strict_position_rows(await leg_obj.positions())
+        except Exception:
+            rows=None
+        if rows is None:
+            return {"closed":False,"reason":"open_ticket_truth_unavailable",
+                    "recoverable":True,
+                    "leg":leg,"ticket":ticket,"request_id":request_id}
+        matches=[row for row in rows
+                 if str(row.get("ticket") or row.get("order"))==str(ticket)]
+        if len(matches)>1:
+            return {"closed":False,
+                    "reason":"open_ticket_not_unique",
+                    "leg":leg,"ticket":ticket,"request_id":request_id}
+        from connector import order_status_probe, verify_leg_closed
+        if not matches:
+            # QH may have restarted after the exact close reached the Agent but
+            # before local FAILED cleanup.  Resume the same deterministic id;
+            # do not infer success from absence alone.
+            deadline=time.monotonic()+max(0.5,_pending_finalizer_budget(context))
+            agent_result,position_result=await _aio.gather(
+                order_status_probe(
+                    leg_obj,request_id,tries=60,delay=0.05,deadline=deadline,
+                    expected_ticket=ticket),
+                verify_leg_closed(
+                    leg_obj,ticket,tries=60,delay=0.05,deadline=deadline),
+                return_exceptions=True)
+            agent_terminal=bool(
+                isinstance(agent_result,dict) and
+                (agent_result.get("ok") or agent_result.get("success")) and
+                not agent_result.get("pending") and not agent_result.get("unknown") and
+                not agent_result.get("failed") and not agent_result.get("error"))
+            position_terminal=position_result=="CLOSED"
+            if not (agent_terminal and position_terminal):
+                return {"closed":False,"reason":"open_ticket_not_visible",
+                        "recoverable":True,
+                        "agent_terminal":agent_terminal,
+                        "position_terminal":position_terminal,
+                        "leg":leg,"ticket":ticket,"request_id":request_id}
+            outcome={"closed":True,"agent_terminal":True,
+                     "position_terminal":True,"leg":leg,"ticket":ticket,
+                     "request_id":request_id,"reason":"exact_ticket_closed_recovered"}
+            get_tracer().update_field(command_id,"auto_single_leg_close",outcome)
+            return outcome
+        row=matches[0]
+        close_symbol=str(row.get("symbol") or (
+            context.get("hedge_symbol") if leg=="hedge" else context.get("symbol")) or symbol)
+        side=_position_close_side(row,str(context.get(leg+"_side") or "").lower())
+        if side is None:
+            return {"closed":False,"reason":"open_ticket_side_unavailable",
+                    "leg":leg,"ticket":ticket,"request_id":request_id}
+        volume=row.get("volume") or context.get(leg+"_vol") or None
+
+        intent={"state":"INTENT","leg":leg,"ticket":ticket,
+                "request_id":request_id,"reason":str(reason or "")[:180],
+                "created_at":_dt.datetime.utcnow().isoformat()}
+        tracer=get_tracer()
+        tracer.update_field(command_id,"auto_single_leg_close",intent)
+        persisted=tracer.get_command(command_id) or {}
+        persisted_intent=_reconciled_open_mapping(
+            persisted.get("auto_single_leg_close"))
+        if (str(persisted_intent.get("request_id") or "")!=request_id or
+                str(persisted_intent.get("ticket") or "")!=str(ticket) or
+                str(persisted_intent.get("leg") or "")!=leg):
+            return {"closed":False,"reason":"auto_close_intent_not_durable",
+                    "recoverable":True,
+                    "leg":leg,"ticket":ticket,"request_id":request_id}
+
+        submitted={}
+        try:
+            submitted=await leg_obj.close_position(
+                close_symbol,side,volume,ticket=ticket,
+                request_id=request_id,ack_only=True)
+            submitted=submitted if isinstance(submitted,dict) else {}
+        except Exception as ex:
+            submitted={"unknown":True,"error":ex.__class__.__name__}
+        agent_terminal=bool(
+            (submitted.get("ok") or submitted.get("success")) and
+            not submitted.get("pending") and not submitted.get("unknown") and
+            not submitted.get("error"))
+        deadline=time.monotonic()+max(0.5,_pending_finalizer_budget(context))
+        async def _agent_truth():
+            if agent_terminal:
+                return submitted
+            return await order_status_probe(
+                leg_obj,request_id,tries=60,delay=0.05,deadline=deadline,
+                expected_ticket=ticket)
+        agent_result,position_result=await _aio.gather(
+            _agent_truth(),
+            verify_leg_closed(leg_obj,ticket,tries=60,delay=0.05,deadline=deadline),
+            return_exceptions=True)
+        if isinstance(agent_result,dict):
+            agent_terminal=bool(
+                (agent_result.get("ok") or agent_result.get("success")) and
+                not agent_result.get("pending") and not agent_result.get("unknown") and
+                not agent_result.get("failed") and not agent_result.get("error"))
+        else:
+            agent_terminal=False
+        position_terminal=position_result=="CLOSED"
+        outcome={"closed":bool(agent_terminal and position_terminal),
+                 "attempted":True,
+                 "agent_terminal":agent_terminal,
+                 "position_terminal":position_terminal,
+                 "leg":leg,"ticket":ticket,"request_id":request_id,
+                 "reason":("exact_ticket_closed" if agent_terminal and position_terminal
+                           else "auto_close_terminal_unconfirmed")}
+        _record_auto_single_leg_close_attempt(
+            context,command_id,target,outcome["reason"],request_id)
+        # The generic attempt recorder also updates this field.  Publish the
+        # terminal proof last so a restart can distinguish INTENT from CLOSED.
+        tracer.update_field(command_id,"auto_single_leg_close",outcome)
+        return outcome
+    finally:
+        _release_auto_single_leg_close_lease(lease_key,lease_token)
+
+
+async def _on_authoritative_open_single_leg_close(
+        command_id, command, evidence, identity, reason):
+    return await _execute_authoritative_open_single_leg_close(
+        command_id,command,evidence,identity,reason)
+
+
+async def _auto_converge_open_single_leg(command_id, final, ctx):
+    """Apply the same exact-ticket compensation in the live async finalizer."""
+    final=final if isinstance(final,dict) else {}; ctx=dict(ctx or {})
+    truth=final.get("truth_reconciled")
+    if (not isinstance(truth,dict) or truth.get("operation")!="open" or
+            truth.get("authoritative") is not True):
+        return final,False,"auto_close_not_authoritative"
+    main_ok=_resolved_leg_ok(final,"main"); hedge_ok=_resolved_leg_ok(final,"hedge")
+    if main_ok==hedge_ok:
+        return final,False,"auto_close_not_single_leg"
+    leg="main" if main_ok else "hedge"; missing="hedge" if main_ok else "main"
+    missing_result=final.get(missing) if isinstance(final.get(missing),dict) else {}
+    explicit_missing=bool(
+        str(missing_result.get("truth_confirmed") or "").lower()=="not_filled" and
+        (str(missing_result.get("src") or "").lower()=="order-status" or
+         missing_result.get("not_sent") is True))
+    if not explicit_missing:
+        return final,False,"missing_leg_not_authoritative"
+    filled=final.get(leg) if isinstance(final.get(leg),dict) else {}
+    ticket=_exact_positive_int(
+        filled.get("position") or filled.get("order") or filled.get("ticket"))
+    if ticket is None:
+        return final,False,"filled_ticket_missing"
+    command={"username":ctx.get("username"),"symbol":ctx.get("symbol"),
+             "slot":ctx.get("slot"),"pair_request_id":ctx.get("pair_rid"),
+             "pending_context":ctx}
+    outcome=await _execute_authoritative_open_single_leg_close(
+        command_id,command,final,{"leg":leg,"missing_leg":missing,"ticket":ticket},
+        "async_open_terminal_mismatch")
+    if not outcome.get("closed"):
+        if ((outcome.get("attempted") or outcome.get("recoverable")) and
+                outcome.get("request_id")):
+            pending=dict(final)
+            pending["compensation"]={"ok":False,"closed":False,
+                "pending":True,"unknown":True,"leg":leg,"ticket":ticket,
+                "request_id":outcome["request_id"],"op":"close",
+                "reason":"authoritative_single_leg_auto_close_pending"}
+            pending["saga_unknown"]=True
+            pending["saga_phase"]="COMPENSATION_UNKNOWN"
+            return pending,False,str(outcome.get("reason") or "auto_close_pending")
+        return final,False,str(outcome.get("reason") or "auto_close_failed")
+    merged=dict(final)
+    merged["compensated"]=True; merged["compensated_leg"]=leg
+    merged["compensation"]={"ok":True,"success":True,"closed":True,
+        "leg":leg,"ticket":ticket,"request_id":outcome["request_id"],
+        "op":"close","reason":"authoritative_single_leg_auto_close",
+        "agent_terminal":True,"position_terminal":True}
+    merged["saga_phase"]="COMPENSATION_DONE"
+    merged.pop("saga_unknown",None)
+    return merged,True,"exact_ticket_closed"
 
 
 async def _auto_converge_close_pair_single_leg(command_id, final, ctx):
@@ -16056,7 +18056,13 @@ async def _finalize_pending_open_locked(command_id,res,ctx):
             )
         except Exception:
             final=final if isinstance(final,dict) else dict(res or {})
+        if (not _open_compensation_succeeded(final) and
+                _resolved_leg_ok(final,"main")!=_resolved_leg_ok(final,"hedge") and
+                not _pair_pending(final)):
+            final,_auto_closed,_auto_reason=await _auto_converge_open_single_leg(
+                command_id,final,ctx)
         _entry_capacity_latch_result(ctx["username"],final,"broker_terminal")
+        _update_mt5_entry_session_guard(ctx["username"],final)
         mok=_resolved_leg_ok(final,"main"); hok=_resolved_leg_ok(final,"hedge")
         _trace_pair_execution(tracer,command_id,final,mark_ack=True)
         trace_fields={"final_result":final}
@@ -16091,7 +18097,8 @@ async def _finalize_pending_open_locked(command_id,res,ctx):
                 _slip_snap(ctx["direction"],"open",_cap_at(ctx["main_tick"],ctx["hedge_tick"],ctx["direction"],"open"),
                            ctx["slot"],_leg_tickets(final.get("main")),thr=ctx["threshold"])
                 owner_saved=await _reserve_slot_with_recovery(
-                    ctx["symbol"],final,ctx["slot"],ctx["username"])
+                    ctx["symbol"],final,ctx["slot"],ctx["username"],
+                    command_id=command_id,job_id=ctx.get("queue_job_id"))
                 _remember_open_positions(ctx["symbol"],ctx.get("hedge_symbol"),ctx["direction"],final,
                                          ctx["slot"],ctx["username"],ctx["main_vol"],ctx["hedge_vol"])
                 if owner_saved:
@@ -16119,7 +18126,8 @@ async def _finalize_pending_open_locked(command_id,res,ctx):
             terminal_reason=_terminal_failure_reason(final,"open_single_leg")
             _halt_auto_entry(ctx["username"],"single_leg_exposed",{
                 "slot":ctx.get("slot"),"symbol":ctx.get("symbol"),
-                "command_id":command_id,"res":final})
+                "command_id":command_id,"job_id":ctx.get("queue_job_id"),
+                "res":final})
             tracer.update_status(command_id,CommandStatus.SINGLE_LEG_EXPOSED)
             tracer.update_field(command_id,"failure_reason",terminal_reason)
             _push_alert("err","亚秒开仓异步终态出现单腿暴露, command_id=%s, 请立即人工核对"%command_id,ctx["username"])
@@ -16236,8 +18244,7 @@ async def _finalize_pending_open_locked(command_id,res,ctx):
         if not durable_pending:
             _release_account_op(ctx["username"],ctx.get("account_token"))
         if ctx.get("slot_token") and not durable_pending:
-            _clear_slot_busy(ctx["symbol"],ctx["slot"],ctx["username"])
-            _release_slot_op(ctx["username"],ctx["symbol"],ctx["slot"],ctx["slot_token"])
+            _release_slot_resources(ctx["username"],ctx["symbol"],ctx["slot"],ctx["slot_token"])
 
 async def _finalize_pending_close(command_id,res,ctx):
     tracer=get_tracer()
@@ -16248,6 +18255,15 @@ async def _finalize_pending_close(command_id,res,ctx):
         if str(existing_job.get("state") or "").upper()=="COMPLETED":
             _clear_slot_review(
                 ctx["username"],ctx["symbol"],ctx["slot"],command_id)
+            # A recovery callback may observe COMPLETED after the queue worker
+            # already committed the result.  It still owns the original slot
+            # token, so release only that token and its matching visual lock.
+            # CAS in _release_slot_op prevents a late callback from clearing a
+            # newer command admitted for the same slot.
+            if ctx.get("slot_token"):
+                _release_slot_resources(
+                    ctx["username"],ctx["symbol"],ctx["slot"],ctx["slot_token"])
+            _release_account_op(ctx["username"],ctx.get("account_token"))
             return True
     close_lease_token=(_claim_close_review_finalizer_lease(queue_job_id)
                        if queue_job_id else None)
@@ -16257,7 +18273,7 @@ async def _finalize_pending_close(command_id,res,ctx):
     durable_pending=False
     truth_budget=_pending_finalizer_budget(ctx)
     truth_deadline=time.monotonic()+truth_budget
-    resolver_deadline=truth_deadline-_pending_close_truth_reserve(truth_budget)
+    resolver_deadline=truth_deadline-_pending_close_truth_reserve(truth_budget,ctx)
     try:
         conn=_user_exec_conn(ctx["username"])
         try:
@@ -16318,7 +18334,8 @@ async def _finalize_pending_close(command_id,res,ctx):
             terminal_reason=_terminal_failure_reason(final,"close_single_leg")
             _halt_auto_entry(ctx["username"],"single_leg_exposed",{
                 "slot":ctx.get("slot"),"symbol":ctx.get("symbol"),
-                "command_id":command_id,"res":final,"op":"close"})
+                "command_id":command_id,"job_id":ctx.get("queue_job_id"),
+                "res":final,"op":"close"})
             tracer.update_status(command_id,CommandStatus.SINGLE_LEG_EXPOSED)
             tracer.update_field(command_id,"failure_reason",terminal_reason)
             _push_alert("err","亚秒平仓异步终态出现单腿暴露, command_id=%s, 请立即人工核对"%command_id,ctx["username"])
@@ -16407,8 +18424,7 @@ async def _finalize_pending_close(command_id,res,ctx):
         if not durable_pending:
             _release_account_op(ctx["username"],ctx.get("account_token"))
         if ctx.get("slot_token") and not durable_pending:
-            _clear_slot_busy(ctx["symbol"],ctx["slot"],ctx["username"])
-            _release_slot_op(ctx["username"],ctx["symbol"],ctx["slot"],ctx["slot_token"])
+            _release_slot_resources(ctx["username"],ctx["symbol"],ctx["slot"],ctx["slot_token"])
         if close_lease_token:
             _release_close_review_finalizer_lease(queue_job_id,close_lease_token)
 
@@ -16418,7 +18434,7 @@ async def _finalize_pending_leg_close(command_id,res,ctx):
     queue_state="UNKNOWN"; final=None; terminal_reason=""
     truth_budget=_pending_finalizer_budget(ctx)
     truth_deadline=time.monotonic()+truth_budget
-    resolver_deadline=truth_deadline-_pending_close_truth_reserve(truth_budget)
+    resolver_deadline=truth_deadline-_pending_close_truth_reserve(truth_budget,ctx)
     try:
         conn=_user_exec_conn(ctx["username"])
         try:
@@ -16487,8 +18503,7 @@ async def _finalize_pending_leg_close(command_id,res,ctx):
                                finished_at=_dt.datetime.utcnow().isoformat())
         _release_account_op(ctx["username"],ctx.get("account_token"))
         if ctx.get("slot_token"):
-            _clear_slot_busy(ctx["symbol"],ctx["slot"],ctx["username"])
-            _release_slot_op(ctx["username"],ctx["symbol"],ctx["slot"],ctx["slot_token"])
+            _release_slot_resources(ctx["username"],ctx["symbol"],ctx["slot"],ctx["slot_token"])
 
 def _fra_sync_uuid(role, uuid):
     """登记变更→FRA a2t-bridge 对应腿 UUID 热同步(POST /admin/account_uuid, 持久化 env)。
@@ -16946,6 +18961,246 @@ def _reconciled_open_mapping(value):
             return {}
     return {}
 
+
+def _completed_open_review_identity(command_id, command, job):
+    """Return the immutable slot identity before inspecting broker evidence."""
+    command=dict(command or {})
+    if (not isinstance(job,dict) or
+            str(job.get("state") or "").upper()!="COMPLETED" or
+            str(job.get("op") or "")!="open_pair" or
+            str(job.get("command_id") or "")!=str(command_id) or
+            str(command.get("type") or "").lower()!=CommandType.OPEN_PAIR.value):
+        return None
+    job_id=str(job.get("job_id") or "").strip()
+    username=str(job.get("username") or "").strip()
+    symbol=str(job.get("symbol") or "").strip()
+    slot=_exact_positive_int(job.get("slot"))
+    if (not job_id or not username or not symbol or slot is None or
+            str(command.get("queue_job_id") or "")!=job_id or
+            str(command.get("username") or "").strip()!=username or
+            str(command.get("symbol") or "").strip()!=symbol or
+            _exact_positive_int(command.get("slot"))!=slot):
+        return None
+    return {"command_id":str(command_id),"job_id":job_id,
+            "username":username,"symbol":symbol,"slot":slot}
+
+
+def _completed_open_command_from_job(job):
+    """Rebuild a terminal command envelope from the durable queue record.
+
+    Queue jobs outlive the 24-hour command tracer TTL.  A completed pair with
+    immutable account/slot/ticket evidence must therefore be recoverable
+    without turning a missing tracer into an account-wide quarantine.
+    """
+    if not isinstance(job,dict):
+        return None
+    command_id=str(job.get("command_id") or "").strip()
+    job_id=str(job.get("job_id") or "").strip()
+    username=str(job.get("username") or "").strip()
+    symbol=str(job.get("symbol") or "").strip()
+    slot=_exact_positive_int(job.get("slot"))
+    if (not command_id or not job_id or not username or not symbol or slot is None or
+            str(job.get("op") or "")!="open_pair" or
+            str(job.get("state") or "").upper()!="COMPLETED"):
+        return None
+    raw_result=job.get("result") if isinstance(job.get("result"),dict) else {}
+    evidence=(raw_result.get("evidence") if raw_result.get("reconciled") and
+              isinstance(raw_result.get("evidence"),dict) else raw_result)
+    tickets=raw_result.get("open_tickets") if isinstance(
+        raw_result.get("open_tickets"),dict) else {}
+    tickets={leg:_exact_positive_int(tickets.get(leg)) for leg in ("main","hedge")}
+    if (not isinstance(evidence,dict) or tickets["main"] is None or
+            tickets["hedge"] is None or tickets["main"]==tickets["hedge"] or
+            raw_result.get("reconciled") is not True or
+            str(raw_result.get("state") or "").upper()!="COMPLETED" or
+            str(raw_result.get("command_id") or "")!=command_id):
+        return None
+    context=_reconciled_open_mapping(job.get("context"))
+    payload=_reconciled_open_mapping(job.get("payload"))
+    pair_rid=str(job.get("pair_rid") or context.get("pair_rid") or
+                 evidence.get("request_id") or "").strip()
+    direction=str(context.get("direction") or payload.get("direction") or "").strip()
+    if not pair_rid or direction not in ("forward","reverse"):
+        return None
+    context.update({
+        "username":username,"symbol":symbol,"slot":slot,
+        "queue_job_id":job_id,"capacity_reservation_id":job_id,
+        "pair_rid":pair_rid,"direction":direction,
+    })
+    command={
+        "command_id":command_id,"type":CommandType.OPEN_PAIR.value,
+        "username":username,"symbol":symbol,"slot":slot,
+        "queue_job_id":job_id,"direction":direction,
+        "pair_request_id":pair_rid,
+        "main_request_id":pair_rid+"m","hedge_request_id":pair_rid+"h",
+        "main_ticket":tickets["main"],"hedge_ticket":tickets["hedge"],
+        "pending_context":context,"status":"RECONCILING",
+    }
+    # Reuse the strict terminal payload validator.  It binds volumes, ledger,
+    # request ids and per-leg evidence to the immutable queue job before any
+    # tracer hash is recreated.
+    try:
+        return command if _completed_open_saga_repair_payload(
+            command_id,command,job) is not None else None
+    except Exception:
+        return None
+
+
+def _materialize_completed_open_command(command):
+    """Persist only a validated queue-derived command identity."""
+    if not isinstance(command,dict):
+        return False
+    command_id=str(command.get("command_id") or "").strip()
+    if not command_id:
+        return False
+    try:
+        tracer=get_tracer()
+        tracer.update_fields(command_id,{
+            "command_id":command_id,
+            "type":CommandType.OPEN_PAIR.value,
+            "username":str(command.get("username") or ""),
+            "symbol":str(command.get("symbol") or ""),
+            "slot":command.get("slot"),
+            "queue_job_id":str(command.get("queue_job_id") or ""),
+            "direction":str(command.get("direction") or ""),
+            "pair_request_id":str(command.get("pair_request_id") or ""),
+            "main_request_id":str(command.get("main_request_id") or ""),
+            "hedge_request_id":str(command.get("hedge_request_id") or ""),
+            "main_ticket":command.get("main_ticket"),
+            "hedge_ticket":command.get("hedge_ticket"),
+            "pending_context":command.get("pending_context") or {},
+            "recovered_from_queue_terminal":"true",
+        })
+        tracer.update_status(command_id,CommandStatus.RECONCILING)
+        key=getattr(tracer,"key_prefix","")+command_id
+        # Keep the recreated identity at least as long as the queue's normal
+        # retention window; a second restart must not recreate a new quarantine.
+        try:
+            R.expire(key,max(86400,int(os.environ.get(
+                "QH_COMPLETED_COMMAND_RECOVERY_TTL",604800))))
+        except Exception:
+            pass
+        stored=tracer.get_command(command_id) or {}
+        return (str(stored.get("queue_job_id") or "")==str(command.get("queue_job_id") or "") and
+                str(stored.get("username") or "")==str(command.get("username") or "") and
+                _exact_positive_int(stored.get("slot"))==_exact_positive_int(command.get("slot")))
+    except Exception:
+        return False
+
+
+def _index_completed_open_quarantines():
+    """Idempotently index markers written before account-scoped gating."""
+    try:
+        for key in R.scan_iter(
+                match=RNS+"tradeq:completed-open-quarantine:*",count=100):
+            raw=R.get(key)
+            if isinstance(raw,bytes): raw=raw.decode("utf-8","replace")
+            try: record=json.loads(raw) if raw else None
+            except (TypeError,ValueError): record=None
+            if not isinstance(record,dict):
+                return False
+            job_id=str(record.get("job_id") or "").strip()
+            if not job_id:
+                return False
+            index_key=_completed_open_quarantine_index_key(
+                str(record.get("username") or "").strip())
+            R.sadd(index_key,job_id)
+            R.persist(index_key)
+        return True
+    except Exception:
+        return False
+
+
+def _clear_completed_open_quarantine(job_id, command_id, username):
+    """CAS-delete only the quarantine owned by this exact queue command."""
+    job_id=str(job_id or "").strip(); command_id=str(command_id or "").strip()
+    if not job_id or not command_id:
+        return False
+    username=str(username or "").strip()
+    script="""
+    local raw=redis.call('get',KEYS[1])
+    if not raw then
+        redis.call('srem',KEYS[2],ARGV[1])
+        if redis.call('scard',KEYS[2]) == 0 then redis.call('del',KEYS[2]) end
+        return 0
+    end
+    local ok,c=pcall(cjson.decode,raw)
+    if not ok or type(c) ~= 'table' or
+       string.match(raw,'^%s*(.)') ~= '{' or
+       type(c.job_id) ~= 'string' or c.job_id == '' or
+       type(c.command_id) ~= 'string' or c.command_id == '' or
+       type(c.username) ~= 'string' then return -1 end
+    if c.job_id ~= ARGV[1] or c.command_id ~= ARGV[2] or
+       c.username ~= ARGV[3] then return -2 end
+    redis.call('del',KEYS[1])
+    redis.call('srem',KEYS[2],ARGV[1])
+    if redis.call('scard',KEYS[2]) == 0 then redis.call('del',KEYS[2]) end
+    return 1
+    """
+    try:
+        result=int(R.eval(script,2,_completed_open_quarantine_key(job_id),
+                          _completed_open_quarantine_index_key(username),
+                          job_id,command_id,username) or 0)
+        return result in (0,1)
+    except Exception:
+        return False
+
+
+def _quarantine_completed_open_job(command_id, job, reason):
+    """Persist a terminal open whose account/slot identity cannot be trusted."""
+    if not isinstance(job,dict):
+        return False
+    job_id=str(job.get("job_id") or "").strip()
+    job_command_id=str(job.get("command_id") or "").strip()
+    caller_command_id=str(command_id or "").strip()
+    if (not job_id or
+            (job_command_id and caller_command_id and
+             job_command_id!=caller_command_id)):
+        return False
+    quarantine_command_id=job_command_id or caller_command_id
+    record={"state":"MANUAL_REVIEW","command_id":quarantine_command_id,
+            "job_id":job_id,"username":str(job.get("username") or "").strip(),
+            "symbol":str(job.get("symbol") or ""),"slot":job.get("slot"),
+            "reason":str(reason or "completed open identity invalid")[:300],
+            "created_at":_dt.datetime.utcnow().isoformat()}
+    try:
+        key=_completed_open_quarantine_key(job_id)
+        index_fn=globals().get("_completed_open_quarantine_index_key")
+        index_key=(index_fn(record["username"]) if callable(index_fn) else
+                   RNS+"tradeq:completed-open-quarantine-account:"+
+                   (record["username"] or "__global__"))
+        encoded=json.dumps(record,ensure_ascii=False,separators=(",",":"),default=str)
+        try:
+            stored_result=int(R.eval("""
+                    redis.call('set',KEYS[1],ARGV[1])
+                    redis.call('persist',KEYS[1])
+                    redis.call('sadd',KEYS[2],ARGV[2])
+                    redis.call('persist',KEYS[2])
+                    return 1
+                    """,2,key,index_key,encoded,job_id) or 0)
+        except AttributeError:
+            # Small maintenance/test Redis doubles may expose only the basic
+            # string API. Production clients always take the atomic branch;
+            # the fallback remains fail-closed because it never deletes data.
+            if not R.set(key,encoded):
+                return False
+            R.persist(key)
+            sadd=getattr(R,"sadd",None)
+            if callable(sadd): sadd(index_key,job_id)
+            stored_result=1
+        if stored_result!=1:
+            return False
+        stored=R.get(key)
+        if isinstance(stored,bytes): stored=stored.decode("utf-8","replace")
+        decoded=json.loads(stored) if stored else None
+        return bool(isinstance(decoded,dict) and
+                    str(decoded.get("command_id") or "")==quarantine_command_id and
+                    str(decoded.get("job_id") or "")==job_id and
+                    (not callable(getattr(R,"sismember",None)) or
+                     bool(R.sismember(index_key,job_id))))
+    except Exception:
+        return False
+
 async def _on_open_saga_reconcile(command_id, command):
     """Let the durable saga own UNKNOWN recovery before generic leg inference."""
     command=dict(command or {})
@@ -16956,6 +19211,66 @@ async def _on_open_saga_reconcile(command_id, command):
         # broker response is still arriving.
         return True
     job=TRADE_QUEUE.get_job(job_id) if job_id else None
+    # Queue truth can win the race with the tracer/reconciler.  A completed
+    # durable saga must be retired here instead of being sent through the
+    # generic MANUAL_REVIEW scanner every five seconds.
+    if (isinstance(job,dict) and
+            str(job.get("state") or "").upper()=="COMPLETED"):
+        # A terminal queue record is authoritative only after its immutable
+        # command/account/slot identity and both exact tickets are verified.
+        # Repair the local suffix (owners, capacity, overlay and tracer) before
+        # publishing COMPLETED.  Returning True on malformed evidence keeps
+        # the generic worker from issuing unrelated Agent/broker truth reads.
+        identity=_completed_open_review_identity(command_id,command,job)
+        if identity is None:
+            # Do not let malformed terminal queue data fall through to the
+            # generic ticket/broker inference path.  When account/slot cannot
+            # be proven, quarantine the exact job for operator review.
+            _quarantine_completed_open_job(
+                command_id,job,"completed open identity invalid")
+            # The terminal queue job owns this command even if Redis could not
+            # write the secondary quarantine marker. Never route it into the
+            # generic broker/ticket inference path.
+            return True
+        repaired=await _repair_completed_open_saga(command_id,command,job)
+        # A lease/slot contender owns the same exact saga. Keep the current
+        # worker from falling into generic ticket inference, but do not mark a
+        # failed durable repair as handled unless its exact review latch still
+        # exists.
+        if repaired:
+            return True
+        try:
+            slot=_exact_positive_int(job.get("slot"))
+            review=_slot_review_record(
+                str(job.get("username") or "").strip(),
+                str(job.get("symbol") or "XAUUSD"),slot) if slot else None
+            latched=bool(
+                isinstance(review,dict) and
+                str(review.get("command_id") or "")==str(command_id) and
+                str(review.get("job_id") or "")==str(job_id))
+            terminal_now=False
+            try:
+                terminal_now=(str((get_tracer().get_command(command_id) or {}).get(
+                    "status") or "").upper()=="COMPLETED")
+            except Exception:
+                terminal_now=False
+            if terminal_now:
+                # Cleanup may have been completed by lazy CAS or a concurrent
+                # retry.  A different command's latch remains untouched.
+                return True
+            if latched:
+                _defer_completed_open_repair(command_id)
+            elif review:
+                _quarantine_completed_open_job(
+                    command_id,job,"completed open slot review identity conflict")
+            # COMPLETED queue truth is a hard ownership boundary.  Lease/latch
+            # contention and transient Redis failures must never fall through
+            # to generic Agent or ticket inference for this old command.
+            return True
+        except Exception:
+            _quarantine_completed_open_job(
+                command_id,job,"completed open review state unavailable")
+            return True
     if not _open_saga_job(job):
         return False
     context=_trade_queue_recovery_context(job)
@@ -16968,6 +19283,810 @@ async def _on_open_saga_reconcile(command_id, command):
     get_tracer().update_field(command_id,"pending_context",context)
     _schedule_open_saga_recovery(command_id,result,context,delay=0.0)
     return True
+
+
+def _completed_open_saga_repair_payload(command_id, command, job):
+    """Validate one terminal queue result before repairing local open state."""
+    command=dict(command or {})
+    if (not isinstance(job,dict) or
+            str(job.get("state") or "").upper()!="COMPLETED" or
+            str(job.get("op") or "")!="open_pair" or
+            str(job.get("command_id") or "")!=str(command_id) or
+            str(command.get("type") or "").lower()!=CommandType.OPEN_PAIR.value):
+        return None
+    job_id=str(job.get("job_id") or "")
+    username=str(command.get("username") or "").strip()
+    symbol=str(command.get("symbol") or "XAUUSD")
+    slot=_exact_positive_int(command.get("slot"))
+    if (not job_id or not username or slot is None or
+            str(command.get("queue_job_id") or "")!=job_id or
+            str(job.get("username") or "").strip()!=username or
+            str(job.get("symbol") or "XAUUSD")!=symbol or
+            _exact_positive_int(job.get("slot"))!=slot):
+        return None
+
+    raw_result=job.get("result") if isinstance(job.get("result"),dict) else {}
+    evidence=raw_result.get("evidence")
+    open_tickets=raw_result.get("open_tickets")
+    if (raw_result.get("reconciled") is not True or
+            str(raw_result.get("state") or "").upper()!="COMPLETED" or
+            str(raw_result.get("command_id") or "")!=str(command_id) or
+            not isinstance(evidence,dict) or
+            not isinstance(open_tickets,dict) or
+            not _trade_bool(evidence.get("saga_durable")) or
+            not evidence.get("main_ok") or not evidence.get("hedge_ok")):
+        return None
+    tickets={leg:_exact_positive_int(open_tickets.get(leg))
+             for leg in ("main","hedge")}
+    if (tickets["main"] is None or tickets["hedge"] is None or
+            tickets["main"]==tickets["hedge"]):
+        return None
+
+    pair_rid=str(job.get("pair_rid") or "")
+    job_context=_reconciled_open_mapping(job.get("context"))
+    command_context=_reconciled_open_mapping(command.get("pending_context"))
+    payload=_reconciled_open_mapping(job.get("payload"))
+    if not pair_rid:
+        return None
+    pair_ids=(job_context.get("pair_rid"),command_context.get("pair_rid"),
+              command.get("pair_request_id"),
+              evidence.get("request_id"))
+    if any(str(value)!=pair_rid for value in pair_ids if value not in (None,"")):
+        return None
+
+    # Context is mutable operational data, but every non-empty identity field
+    # must still describe the immutable queue record.  A stale/cross-account
+    # tracer must never choose the owner, ledger or overlay written by repair.
+    identities={
+        "username":username,"symbol":symbol,"slot":slot,"pair_rid":pair_rid,
+        "queue_job_id":job_id,"capacity_reservation_id":job_id,
+    }
+    for source in (job_context,command_context):
+        for name,expected in identities.items():
+            value=source.get(name)
+            if value not in (None,"") and str(value)!=str(expected):
+                return None
+    intended_slot=payload.get("intended_slot")
+    if intended_slot not in (None,"") and _exact_positive_int(intended_slot)!=slot:
+        return None
+
+    direction_sources=(command.get("direction"),job_context.get("direction"),
+                       command_context.get("direction"),payload.get("direction"))
+    directions={str(value) for value in direction_sources if value not in (None,"")}
+    if len(directions)!=1:
+        return None
+    direction=next(iter(directions))
+    if direction not in ("reverse","forward"):
+        return None
+    ledger_key=RNS+"ledger:"+username+":"+direction
+    for source in (job_context,command_context):
+        candidate=source.get("ledger_key")
+        if candidate not in (None,"") and str(candidate)!=ledger_key:
+            return None
+
+    def _finite_positive(value):
+        if value in (None,"") or isinstance(value,bool):
+            return None
+        try:
+            number=float(value)
+        except (TypeError,ValueError):
+            return None
+        return number if math.isfinite(number) and number>0 else None
+
+    volumes={}
+    for name in ("main_vol","hedge_vol"):
+        declared=[source.get(name) for source in (job_context,command_context)
+                  if source.get(name) not in (None,"")]
+        numeric=[_finite_positive(value) for value in declared]
+        if not numeric or any(value is None for value in numeric) or any(
+                not math.isclose(value,numeric[0],rel_tol=0.0,abs_tol=1e-12)
+                for value in numeric[1:]):
+            return None
+        volumes[name]=numeric[0]
+
+    context=dict(job_context)
+    context.update(command_context)
+    context.update({
+        "username":username,"symbol":symbol,"slot":slot,
+        "pair_rid":pair_rid,"queue_job_id":job_id,
+        "capacity_reservation_id":job_id,"direction":direction,
+        "ledger_key":ledger_key,"main_vol":volumes["main_vol"],
+        "hedge_vol":volumes["hedge_vol"],
+    })
+    for leg,suffix in (("main","m"),("hedge","h")):
+        leg_result=evidence.get(leg) if isinstance(evidence.get(leg),dict) else {}
+        evidence_ticket=_exact_positive_int(
+            leg_result.get("order") or leg_result.get("ticket") or
+            leg_result.get("deal"))
+        expected_rid=pair_rid+suffix
+        request_ids=(command.get(leg+"_request_id"),
+                     leg_result.get("request_id"))
+        existing_ticket=_exact_positive_int(command.get(leg+"_ticket"))
+        if (evidence_ticket!=tickets[leg] or
+                existing_ticket not in (None,tickets[leg]) or
+                any(str(value)!=expected_rid for value in request_ids
+                    if value not in (None,"")) or
+                str(leg_result.get("request_id") or "")!=expected_rid or
+                not _resolved_leg_ok(evidence,leg)):
+            return None
+    return {"job_id":job_id,"username":username,"symbol":symbol,"slot":slot,
+            "direction":direction,"tickets":tickets,"evidence":evidence,
+            "context":context,"open_created_at":job.get("created_at")}
+
+
+def _completed_open_consuming_close_job(payload, close_job, close_command=None):
+    """Return immutable proof that one later close consumed both open tickets."""
+    if not isinstance(payload,dict) or not isinstance(close_job,dict):
+        return None
+    tickets=payload.get("tickets") if isinstance(payload.get("tickets"),dict) else {}
+    expected={leg:_exact_positive_int(tickets.get(leg)) for leg in ("main","hedge")}
+    if (expected["main"] is None or expected["hedge"] is None or
+            expected["main"]==expected["hedge"]):
+        return None
+    job_id=str(close_job.get("job_id") or "")
+    command_id=str(close_job.get("command_id") or "")
+    pair_rid=str(close_job.get("pair_rid") or "")
+    if (not job_id or not command_id or not pair_rid or
+            str(close_job.get("state") or "").upper()!="COMPLETED" or
+            str(close_job.get("kind") or "")!="close" or
+            str(close_job.get("op") or "")!="close_pair" or
+            str(close_job.get("username") or "").strip()!=payload.get("username") or
+            str(close_job.get("symbol") or "")!=payload.get("symbol") or
+            _exact_positive_int(close_job.get("slot"))!=payload.get("slot")):
+        return None
+
+    def _epoch(value):
+        if value in (None,"") or isinstance(value,bool):
+            return None
+        try:
+            number=float(value)
+            if math.isfinite(number) and number>0:
+                return number
+        except (TypeError,ValueError):
+            pass
+        try:
+            return _dt.datetime.fromisoformat(
+                str(value).replace("Z","+00:00")).timestamp()
+        except (TypeError,ValueError,OverflowError,OSError):
+            return None
+
+    open_created=_epoch(payload.get("open_created_at"))
+    close_created=_epoch(close_job.get("created_at"))
+    close_finished=_epoch(close_job.get("finished_at"))
+    if (open_created is None or close_created is None or close_finished is None or
+            close_created<=open_created or close_finished<close_created):
+        return None
+
+    context=_reconciled_open_mapping(close_job.get("context"))
+    request=_reconciled_open_mapping(close_job.get("payload"))
+    result=_reconciled_open_mapping(close_job.get("result"))
+    result_tickets=(result.get("tickets")
+                    if isinstance(result.get("tickets"),dict) else {})
+    truth=(result.get("truth_reconciled")
+           if isinstance(result.get("truth_reconciled"),dict) else {})
+    if (str(context.get("username") or "").strip()!=payload.get("username") or
+            str(context.get("symbol") or "")!=payload.get("symbol") or
+            _exact_positive_int(context.get("slot"))!=payload.get("slot") or
+            str(context.get("queue_job_id") or "")!=job_id or
+            str(context.get("command_id") or "")!=command_id or
+            str(context.get("pair_rid") or "")!=pair_rid or
+            str(result.get("request_id") or "")!=pair_rid or
+            str(result.get("op") or "")!="close" or
+            not _trade_bool(result.get("saga_durable")) or
+            result.get("main_ok") is not True or result.get("hedge_ok") is not True or
+            truth.get("operation")!="close" or
+            truth.get("authoritative") is not True):
+        return None
+    for source in (request,context,result_tickets):
+        if any(_exact_positive_int(source.get(leg+"_ticket")
+                if source is not result_tickets else source.get(leg))!=expected[leg]
+                for leg in ("main","hedge")):
+            return None
+    intended_slot=request.get("intended_slot")
+    if intended_slot not in (None,"") and _exact_positive_int(intended_slot)!=payload.get("slot"):
+        return None
+    for leg,suffix in (("main","m"),("hedge","h")):
+        leg_result=result.get(leg) if isinstance(result.get(leg),dict) else {}
+        result_ticket=_exact_positive_int(
+            leg_result.get("ticket") or leg_result.get("order") or leg_result.get("deal"))
+        if (result_ticket!=expected[leg] or
+                str(leg_result.get("request_id") or "")!=pair_rid+suffix or
+                str(leg_result.get("op") or "")!="close" or
+                not bool(leg_result.get("ok") or leg_result.get("success")) or
+                leg_result.get("pending") or leg_result.get("unknown") or
+                "error" in leg_result or
+                not _resolved_leg_ok(result,leg)):
+            return None
+
+    # Both independently persisted terminal records must agree. This refuses
+    # to infer consumption after a missing/expired tracer even when a queue
+    # payload happens to contain the same tickets.
+    if not isinstance(close_command,dict):
+        return None
+    command_context=_reconciled_open_mapping(close_command.get("pending_context"))
+    command_final=_reconciled_open_mapping(close_command.get("final_result"))
+    command_truth=(command_final.get("truth_reconciled")
+                   if isinstance(command_final.get("truth_reconciled"),dict) else {})
+    if (str(close_command.get("type") or "")!=CommandType.CLOSE_PAIR.value or
+            str(close_command.get("status") or "").upper()!="COMPLETED" or
+            str(close_command.get("command_id") or "")!=command_id or
+            str(close_command.get("queue_job_id") or "")!=job_id or
+            str(close_command.get("username") or "").strip()!=payload.get("username") or
+            str(close_command.get("symbol") or "")!=payload.get("symbol") or
+            _exact_positive_int(close_command.get("slot"))!=payload.get("slot") or
+            str(close_command.get("pair_request_id") or "")!=pair_rid or
+            _exact_positive_int(close_command.get("main_ticket"))!=expected["main"] or
+            _exact_positive_int(close_command.get("hedge_ticket"))!=expected["hedge"] or
+            str(close_command.get("main_request_id") or "")!=pair_rid+"m" or
+            str(close_command.get("hedge_request_id") or "")!=pair_rid+"h" or
+            str(command_context.get("username") or "").strip()!=payload.get("username") or
+            str(command_context.get("symbol") or "")!=payload.get("symbol") or
+            _exact_positive_int(command_context.get("slot"))!=payload.get("slot") or
+            str(command_context.get("queue_job_id") or "")!=job_id or
+            str(command_context.get("command_id") or "")!=command_id or
+            str(command_context.get("pair_rid") or "")!=pair_rid or
+            _exact_positive_int(command_context.get("main_ticket"))!=expected["main"] or
+            _exact_positive_int(command_context.get("hedge_ticket"))!=expected["hedge"] or
+            str(command_final.get("request_id") or "")!=pair_rid or
+            str(command_final.get("op") or "")!="close" or
+            not _trade_bool(command_final.get("saga_durable")) or
+            command_final.get("main_ok") is not True or
+            command_final.get("hedge_ok") is not True or
+            command_truth.get("operation")!="close" or
+            command_truth.get("authoritative") is not True):
+        return None
+    for leg,suffix in (("main","m"),("hedge","h")):
+        leg_result=(command_final.get(leg)
+                    if isinstance(command_final.get(leg),dict) else {})
+        if (_exact_positive_int(
+                leg_result.get("ticket") or leg_result.get("order") or
+                leg_result.get("deal"))!=expected[leg] or
+                str(leg_result.get("request_id") or "")!=pair_rid+suffix or
+                str(leg_result.get("op") or "")!="close" or
+                not bool(leg_result.get("ok") or leg_result.get("success")) or
+                leg_result.get("pending") or leg_result.get("unknown") or
+                "error" in leg_result):
+            return None
+    return {"job_id":job_id,"command_id":command_id,"pair_rid":pair_rid,
+            "created_at":close_job.get("created_at"),
+            "finished_at":close_job.get("finished_at"),"tickets":expected}
+
+
+def _completed_open_close_consumption(payload):
+    """Return CONSUMED, NONE, or AMBIGUOUS from persistent close jobs."""
+    queue_client=getattr(TRADE_QUEUE,"redis",None)
+    namespace=str(getattr(TRADE_QUEUE,"namespace",RNS+"tradeq:"))
+    if queue_client is None:
+        return {"state":"AMBIGUOUS","reason":"close_queue_unavailable"}
+    expected=set(str(value) for value in (payload.get("tickets") or {}).values())
+    overlaps=[]; proofs=[]; seen_job_ids=set()
+    try:
+        for raw_key in queue_client.scan_iter(match=namespace+"job:*",count=200):
+            key=(raw_key.decode("utf-8","replace")
+                 if isinstance(raw_key,bytes) else str(raw_key))
+            if not key.startswith(namespace+"job:"):
+                return {"state":"AMBIGUOUS","reason":"close_queue_key_invalid"}
+            job_id=key[len(namespace+"job:"):]
+            if not job_id or job_id in seen_job_ids:
+                continue
+            seen_job_ids.add(job_id)
+            close_job=TRADE_QUEUE.get_job(job_id)
+            if not isinstance(close_job,dict):
+                return {"state":"AMBIGUOUS","reason":"close_queue_snapshot_changed"}
+            if (str(close_job.get("op") or "")!="close_pair" or
+                    str(close_job.get("username") or "").strip()!=payload.get("username") or
+                    str(close_job.get("symbol") or "")!=payload.get("symbol") or
+                    _exact_positive_int(close_job.get("slot"))!=payload.get("slot")):
+                continue
+            sources=[_reconciled_open_mapping(close_job.get(name))
+                     for name in ("payload","context","result")]
+            result=sources[2]
+            if isinstance(result.get("tickets"),dict):
+                sources.append(result["tickets"])
+            for leg in ("main","hedge"):
+                if isinstance(result.get(leg),dict):
+                    sources.append(result[leg])
+            declared=set()
+            for source in sources:
+                for name in ("main_ticket","hedge_ticket","main","hedge",
+                             "ticket","order","deal"):
+                    ticket=_exact_positive_int(source.get(name))
+                    if ticket is not None:
+                        declared.add(str(ticket))
+            if not (declared & expected):
+                continue
+            overlaps.append(job_id)
+            tracer=get_tracer()
+            try:
+                close_command=tracer.get_command(str(close_job.get("command_id") or ""))
+            except Exception as ex:
+                return {"state":"AMBIGUOUS",
+                        "reason":"close_command_read_failed:%s"%ex.__class__.__name__}
+            proof=_completed_open_consuming_close_job(
+                payload,close_job,close_command=close_command)
+            if proof:
+                proofs.append(proof)
+    except Exception as ex:
+        return {"state":"AMBIGUOUS",
+                "reason":"close_queue_read_failed:%s"%ex.__class__.__name__}
+    if len(proofs)==1 and len(overlaps)==1:
+        proof=dict(proofs[0]); proof["state"]="CONSUMED"
+        return proof
+    if overlaps:
+        return {"state":"AMBIGUOUS","reason":"close_ticket_evidence_conflict",
+                "overlap_count":len(overlaps),"proof_count":len(proofs)}
+    return {"state":"NONE"}
+
+
+async def _completed_open_broker_consumption_proof(payload):
+    """Prove a stale completed pair is no longer exposed at either broker.
+
+    Queue close jobs are the strongest proof, but their tracer can also expire.
+    A fresh, complete history snapshot containing both the exact open and close
+    deal for each ticket, together with a fresh empty position snapshot, is a
+    sufficient terminal-consumption proof.  Any missing metadata stays
+    ambiguous and leaves the safety latch in place.
+    """
+    if not isinstance(payload,dict):
+        return {"state":"AMBIGUOUS","reason":"broker_consumption_payload_invalid"}
+    expected={leg:_exact_positive_int((payload.get("tickets") or {}).get(leg))
+              for leg in ("main","hedge")}
+    if (expected["main"] is None or expected["hedge"] is None or
+            expected["main"]==expected["hedge"]):
+        return {"state":"AMBIGUOUS","reason":"broker_consumption_ticket_identity_invalid"}
+    username=str(payload.get("username") or "").strip()
+    symbol=str(payload.get("symbol") or "XAUUSD")
+    try:
+        conn=_user_authoritative_bridge_conn(username)
+        registrations=_reg_rows_for(username)
+        if (conn is None or set(registrations or {})!={"main","hedge"} or
+                not callable(getattr(conn,"both_positions",None))):
+            return {"state":"AMBIGUOUS","reason":"broker_consumption_route_unavailable"}
+        status_reader=getattr(conn,"both_status",None)
+        if not callable(status_reader):
+            return {"state":"AMBIGUOUS","reason":"broker_consumption_status_unavailable"}
+        statuses=await status_reader()
+        if not isinstance(statuses,dict):
+            return {"state":"AMBIGUOUS","reason":"broker_consumption_status_invalid"}
+        for role in ("main","hedge"):
+            expected_login=str((registrations.get(role) or {}).get("login") or "").strip()
+            current=statuses.get(role)
+            if (not isinstance(current,dict) or current.get("connected") is not True or
+                    current.get("healthy") is not True or not expected_login or
+                    str(current.get("account") or "").strip()!=expected_login):
+                return {"state":"AMBIGUOUS",
+                        "reason":"broker_consumption_account_proof_failed:%s"%role}
+        positions=await _read_both_positions_with_retry(conn,authoritative=True)
+        if not isinstance(positions,dict):
+            return {"state":"AMBIGUOUS","reason":"broker_consumption_positions_invalid"}
+        for leg in ("main","hedge"):
+            raw=positions.get(leg)
+            if not isinstance(raw,dict) or not isinstance(raw.get("positions"),list):
+                return {"state":"AMBIGUOUS",
+                        "reason":"broker_consumption_position_snapshot_invalid:%s"%leg}
+            version=_position_snapshot_version(raw)
+            try:
+                age=float(raw.get("snapshot_age_ms"))
+            except (TypeError,ValueError):
+                age=float("nan")
+            registered=str((registrations.get(leg) or {}).get("login") or "").strip()
+            if (version is None or version.get("source") not in ("broker","ea_file") or
+                    version.get("stale") or _position_snapshot_stale(raw) or
+                    not math.isfinite(age) or age<0 or age>2500 or
+                    raw.get("registered") not in (None,True,registered) or not registered):
+                return {"state":"AMBIGUOUS",
+                        "reason":"broker_consumption_position_snapshot_untrusted:%s"%leg}
+            for row in raw.get("positions"):
+                if not isinstance(row,dict):
+                    continue
+                row_ticket=_exact_positive_int(row.get("ticket") or row.get("order"))
+                if row_ticket in (expected[leg],expected["main"],expected["hedge"]):
+                    return {"state":"AMBIGUOUS",
+                            "reason":"broker_consumption_ticket_still_visible:%s"%leg}
+
+        async def _history(leg, ticket):
+            reader=getattr(conn,leg,None)
+            # The exact-ticket bridge route includes completeness and age
+            # metadata.  Use it when available; a broad legacy history read
+            # is intentionally only a fallback and will remain ambiguous if
+            # it cannot prove freshness/completeness.
+            exact_get=getattr(reader,"_get",None) if reader is not None else None
+            if callable(exact_get):
+                return await exact_get("/mt5/history/deals", days=30,
+                                       ticket=str(ticket), limit=100)
+            fn=getattr(reader,"history_deals",None) if reader is not None else None
+            if not callable(fn):
+                return None
+            return await fn(30)
+
+        histories=await _aio.gather(_history("main",expected["main"]),
+                                    _history("hedge",expected["hedge"]),
+                                    return_exceptions=True)
+        max_age_ms=max(1000.0,min(120000.0,float(os.environ.get(
+            "QH_COMPLETED_HISTORY_MAX_AGE_MS","30000"))))
+        for leg,history in zip(("main","hedge"),histories):
+            if isinstance(history,Exception) or not isinstance(history,dict):
+                return {"state":"AMBIGUOUS",
+                        "reason":"broker_consumption_history_unavailable:%s"%leg}
+            try:
+                history_age=float(history.get("snapshot_age_ms"))
+            except (TypeError,ValueError):
+                history_age=float("nan")
+            deals=history.get("deals")
+            if (history.get("complete") is not True or history.get("truncated") is True or
+                    not math.isfinite(history_age) or history_age<0 or
+                    history_age>max_age_ms or not isinstance(deals,list)):
+                return {"state":"AMBIGUOUS",
+                        "reason":"broker_consumption_history_untrusted:%s"%leg}
+            ticket=expected[leg]; opens=[]; closes=[]
+            for row in deals:
+                if not isinstance(row,dict):
+                    continue
+                row_ticket=_exact_positive_int(row.get("ticket") or row.get("order"))
+                if row_ticket!=ticket or str(row.get("symbol") or "")!=symbol:
+                    continue
+                try:
+                    entry=int(row.get("entry"))
+                except (TypeError,ValueError):
+                    continue
+                if entry==0: opens.append(row)
+                elif entry==1: closes.append(row)
+            if not opens or not closes:
+                return {"state":"AMBIGUOUS",
+                        "reason":"broker_consumption_close_evidence_missing:%s"%leg}
+            open_times=[float(row.get("time")) for row in opens
+                        if str(row.get("time") or "").replace(".","",1).isdigit()]
+            close_times=[float(row.get("time")) for row in closes
+                         if str(row.get("time") or "").replace(".","",1).isdigit()]
+            if open_times and close_times and max(close_times)<min(open_times):
+                return {"state":"AMBIGUOUS",
+                        "reason":"broker_consumption_history_order_invalid:%s"%leg}
+    except Exception as ex:
+        return {"state":"AMBIGUOUS",
+                "reason":"broker_consumption_probe_failed:%s"%ex.__class__.__name__}
+    return {"state":"CONSUMED","source":"broker_history",
+            "tickets":expected,"reason":"exact tickets absent with complete close history"}
+
+
+async def _completed_open_live_pair_proof(payload):
+    """Prove both exact tickets still exist before rebuilding open state."""
+    try:
+        username=str(payload.get("username") or "").strip()
+        conn=_user_authoritative_bridge_conn(username)
+        if conn is None:
+            return {"state":"AMBIGUOUS","reason":"live_open_scoped_bridge_unavailable"}
+        registrations=_reg_rows_for(username)
+        if set(registrations or {})!={"main","hedge"}:
+            return {"state":"AMBIGUOUS","reason":"live_open_registration_incomplete"}
+        status_reader=getattr(conn,"both_status",None)
+        if not callable(status_reader):
+            return {"state":"AMBIGUOUS","reason":"live_open_status_unavailable"}
+        statuses=await status_reader()
+        if not isinstance(statuses,dict):
+            return {"state":"AMBIGUOUS","reason":"live_open_status_invalid"}
+        for role in ("main","hedge"):
+            expected_login=str((registrations.get(role) or {}).get("login") or "").strip()
+            current=statuses.get(role)
+            actual=str((current or {}).get("account") or "").strip()
+            if (not isinstance(current,dict) or current.get("connected") is not True or
+                    current.get("healthy") is not True or not expected_login or
+                    actual!=expected_login):
+                return {"state":"AMBIGUOUS","reason":"live_open_account_proof_failed:%s"%role}
+        route_fingerprint=tuple(
+            (role,str((registrations.get(role) or {}).get(name) or "").strip())
+            for role in ("main","hedge")
+            for name in ("login","platform","bridge_url","conn_mode"))
+        positions=await _read_both_positions_with_retry(conn,authoritative=True)
+        # Bind the snapshot to the same bridge accounts on both sides of the
+        # read. An operator-side account or route switch during recovery must
+        # never combine an old owner proof with a new account snapshot.
+        after_statuses=await status_reader()
+        after_registrations=_reg_rows_for(username)
+        after_fingerprint=tuple(
+            (role,str((after_registrations.get(role) or {}).get(name) or "").strip())
+            for role in ("main","hedge")
+            for name in ("login","platform","bridge_url","conn_mode"))
+        if route_fingerprint!=after_fingerprint:
+            return {"state":"AMBIGUOUS","reason":"live_open_route_changed"}
+        for role in ("main","hedge"):
+            expected_login=str((registrations.get(role) or {}).get("login") or "").strip()
+            current=(after_statuses.get(role)
+                     if isinstance(after_statuses,dict) else None)
+            if (not isinstance(current,dict) or current.get("connected") is not True or
+                    current.get("healthy") is not True or
+                    str(current.get("account") or "").strip()!=expected_login):
+                return {"state":"AMBIGUOUS",
+                        "reason":"live_open_post_account_proof_failed:%s"%role}
+    except Exception as ex:
+        return {"state":"AMBIGUOUS",
+                "reason":"live_open_read_failed:%s"%ex.__class__.__name__}
+    if not isinstance(positions,dict):
+        return {"state":"AMBIGUOUS","reason":"live_open_snapshot_invalid"}
+    expected=payload.get("tickets") if isinstance(payload.get("tickets"),dict) else {}
+    if (not expected.get("main") or not expected.get("hedge") or
+            expected.get("main")==expected.get("hedge")):
+        return {"state":"AMBIGUOUS","reason":"live_open_ticket_identity_invalid"}
+    context=payload.get("context") if isinstance(payload.get("context"),dict) else {}
+    direction=str(payload.get("direction") or "")
+    expected_sides=({"main":"sell","hedge":"buy"} if direction=="reverse"
+                    else {"main":"buy","hedge":"sell"} if direction=="forward"
+                    else {})
+    if set(expected_sides)!={"main","hedge"}:
+        return {"state":"AMBIGUOUS","reason":"live_open_direction_invalid"}
+    matched={}; foreign=[]; accepted_versions={}
+    for leg in ("main","hedge"):
+        raw=positions.get(leg)
+        if not isinstance(raw,dict):
+            return {"state":"AMBIGUOUS",
+                    "reason":"live_open_snapshot_metadata_missing:%s"%leg}
+        leg_positions=raw.get("positions")
+        version=_position_snapshot_version(raw)
+        registered=str((registrations.get(leg) or {}).get("login") or "").strip()
+        platform=str((registrations.get(leg) or {}).get("platform") or "").upper()
+        try:
+            explicit_age=float(raw["snapshot_age_ms"])
+        except (KeyError,TypeError,ValueError):
+            explicit_age=float("nan")
+        previous=_USER_POSITION_VERSIONS.get((username,leg))
+        regressed=bool(previous and version and (
+            version["boot"]<previous["boot"] or
+            (version["boot"]==previous["boot"] and
+             version["seq"]<previous["seq"])))
+        if (version is None or version.get("ts_ms",0)<=0 or
+                version.get("source") not in ("broker","ea_file") or
+                version.get("stale") or _position_snapshot_stale(raw) or
+                not math.isfinite(explicit_age) or explicit_age<0 or explicit_age>2500 or
+                regressed or
+                (platform=="MT5" and (
+                    raw.get("snapshot_authoritative") is not True or
+                    version.get("source")!="broker")) or
+                raw.get("registered") not in (None,True,registered) or
+                not registered or platform not in ("MT4","MT5")):
+            return {"state":"AMBIGUOUS",
+                    "reason":"live_open_snapshot_untrusted:%s"%leg}
+        if not isinstance(leg_positions,list):
+            return {"state":"AMBIGUOUS","reason":"live_open_leg_unreadable:%s"%leg}
+        ticket=_exact_positive_int(expected.get(leg))
+        exact=[]
+        for row in leg_positions:
+            if not isinstance(row,dict):
+                continue
+            row_ticket=_exact_positive_int(row.get("ticket") or row.get("order"))
+            if row_ticket==ticket:
+                exact.append(row)
+            elif row_ticket in {_exact_positive_int(expected.get("main")),
+                                _exact_positive_int(expected.get("hedge"))}:
+                foreign.append({"leg":leg,"ticket":row_ticket})
+        if len(exact)!=1:
+            return {"state":"AMBIGUOUS",
+                    "reason":"live_open_exact_ticket_count:%s:%d"%(leg,len(exact))}
+        row=exact[0]
+        row_account=str(row.get("account") or row.get("login") or "").strip()
+        snapshot_account=str(raw.get("account") or raw.get("login") or "").strip()
+        if (str(row.get("symbol") or "")!=payload.get("symbol") or
+                (snapshot_account and snapshot_account!=registered) or
+                (row_account and row_account!=registered)):
+            return {"state":"AMBIGUOUS","reason":"live_open_symbol_mismatch:%s"%leg}
+        side=str(row.get("side") or "").lower()
+        if not side:
+            raw_type=row.get("type")
+            side=("sell" if str(raw_type)=="1" else
+                  "buy" if str(raw_type)=="0" else "")
+        if side!=expected_sides[leg]:
+            return {"state":"AMBIGUOUS","reason":"live_open_side_mismatch:%s"%leg}
+        try:
+            volume=float(row.get("volume"))
+            expected_volume=float(context.get(leg+"_vol"))
+        except (TypeError,ValueError):
+            return {"state":"AMBIGUOUS","reason":"live_open_volume_invalid:%s"%leg}
+        if (not math.isfinite(volume) or not math.isfinite(expected_volume) or
+                volume<=0 or expected_volume<=0 or
+                not math.isclose(volume,expected_volume,rel_tol=0.0,abs_tol=1e-8)):
+            return {"state":"AMBIGUOUS","reason":"live_open_volume_mismatch:%s"%leg}
+        matched[leg]=ticket
+        accepted_versions[leg]=version
+    if foreign or matched.get("main")==matched.get("hedge"):
+        return {"state":"AMBIGUOUS","reason":"live_open_cross_leg_ticket_conflict"}
+    for leg,version in accepted_versions.items():
+        previous=_USER_POSITION_VERSIONS.get((username,leg))
+        if (not previous or version["boot"]>previous["boot"] or
+                version["seq"]>previous["seq"]):
+            _USER_POSITION_VERSIONS[(username,leg)]=version
+    return {"state":"LIVE","tickets":matched}
+
+
+def _retire_consumed_completed_open(command_id, payload, proof):
+    """Retire stale review state without recreating open ownership or display."""
+    username=payload["username"]; symbol=payload["symbol"]
+    slot=payload["slot"]; job_id=payload["job_id"]
+    _release_entry_capacity_reservation(username,job_id)
+    keys=_entry_capacity_reservation_keys(username)
+    if (R.hget(keys[0],job_id) is not None or
+            R.zscore(keys[1],job_id) is not None or
+            R.hget(_entry_capacity_hold_failure_key(username),job_id) is not None):
+        return False
+    tracer=get_tracer(); evidence=payload["evidence"]
+    fields={
+        "main_ticket":payload["tickets"]["main"],
+        "hedge_ticket":payload["tickets"]["hedge"],
+        "main_result":evidence.get("main") or {},
+        "hedge_result":evidence.get("hedge") or {},
+        "final_result":evidence,
+        "reconcile_result":"queue_completed_open_already_closed",
+        "consumed_by_close_job_id":proof["job_id"],
+        "consumed_by_close_command_id":proof["command_id"],
+        "consumed_by_close_finished_at":proof.get("finished_at") or "",
+        "failure_reason":"",
+    }
+    if isinstance(evidence.get("agent_states"),dict):
+        fields["reconcile_agent_states"]=evidence["agent_states"]
+    tracer.update_fields(command_id,fields)
+    tracer.record_timestamp(command_id,TraceTimestamp.RECONCILE_DONE)
+    latest=tracer.get_command(command_id) or {}
+    if (str(latest.get("consumed_by_close_job_id") or "")!=proof["job_id"] or
+            str(latest.get("consumed_by_close_command_id") or "")!=proof["command_id"] or
+            _exact_positive_int(latest.get("main_ticket"))!=payload["tickets"]["main"] or
+            _exact_positive_int(latest.get("hedge_ticket"))!=payload["tickets"]["hedge"]):
+        return False
+    # Keep the durable review latch until every fallible tracer write is done.
+    # A retry rediscovers the same exact close proof and remains idempotent.
+    tracer.update_status(command_id,CommandStatus.COMPLETED)
+    cleared=_clear_matching_slot_review(
+        username,symbol,slot,command_id,job_id)
+    if not cleared:
+        return False
+    if R.get(_slotreview_key(username,symbol,slot)) is not None:
+        return False
+    clear_quarantine=globals().get("_clear_completed_open_quarantine")
+    if callable(clear_quarantine) and not clear_quarantine(
+            job_id,command_id,username):
+        return False
+    return True
+
+
+async def _repair_completed_open_saga(command_id, command, job):
+    """Idempotently finish local state after queue truth already completed."""
+    identity_fn=globals().get("_completed_open_review_identity")
+    identity=(identity_fn(command_id,command,job)
+              if callable(identity_fn) else True)
+    if identity is None:
+        quarantine_fn=globals().get("_quarantine_completed_open_job")
+        if callable(quarantine_fn):
+            quarantine_fn(command_id,job,"completed open identity invalid")
+        return False
+    payload=_completed_open_saga_repair_payload(command_id,command,job)
+    if not payload:
+        # Identity is safe enough to bind this slot, but evidence is not. Keep
+        # a durable exact latch so a restart cannot route the job to generic
+        # ticket inference or free the slot.
+        if isinstance(identity,dict):
+            _ensure_matching_slot_review(
+                identity["username"],identity["symbol"],identity["slot"],
+                "MANUAL_REVIEW",identity["command_id"],identity["job_id"],
+                "completed saga evidence invalid")
+        return False
+    if not _ensure_matching_slot_review(
+            payload["username"],payload["symbol"],payload["slot"],
+            "MANUAL_REVIEW",command_id,payload["job_id"],
+            "completed saga local suffix repair pending"):
+        return False
+    lease_token=_claim_open_saga_finalizer_lease(payload["job_id"])
+    if lease_token is None:
+        return False
+    # The queue wrapper releases the original operation lock when it moves a
+    # filled pair into review. Reclaim the same slot for the whole close-scan /
+    # live-proof / owner-repair sequence so a new exact-ticket close cannot
+    # interleave between those reads and the owner write.
+    repair_slot_token="saga-repair:"+str(payload["job_id"])
+    repair_slot_locked=False
+    try:
+        repair_slot_locked=bool(_acquire_slot_op(
+            payload["username"],payload["symbol"],payload["slot"],
+            repair_slot_token,ttl=180))
+    except Exception:
+        repair_slot_locked=False
+    if not repair_slot_locked:
+        _release_open_saga_finalizer_lease(payload["job_id"],lease_token)
+        return False
+    repaired_command=dict(command or {})
+    repaired_command.update({
+        "type":CommandType.OPEN_PAIR.value,
+        "queue_job_id":payload["job_id"],
+        "username":payload["username"],"symbol":payload["symbol"],
+        "slot":payload["slot"],"direction":payload["direction"],
+        "main_ticket":payload["tickets"]["main"],
+        "hedge_ticket":payload["tickets"]["hedge"],
+        "pending_context":payload["context"],
+    })
+    try:
+        consumption=await _aio.to_thread(
+            _completed_open_close_consumption,payload)
+        if consumption.get("state")=="AMBIGUOUS":
+            raise RuntimeError(str(consumption.get("reason") or
+                                   "close consumption evidence ambiguous"))
+        if consumption.get("state")=="CONSUMED":
+            if not _retire_consumed_completed_open(command_id,payload,consumption):
+                raise RuntimeError("consumed open retirement failed")
+            return True
+        # A close queue record can expire with the tracer.  Before treating a
+        # completed pair as live, ask both brokers for fresh exact-ticket
+        # history plus an authoritative empty-position snapshot.  This is
+        # read-only and fail-closed: incomplete/ambiguous evidence keeps the
+        # durable review latch instead of unlocking the slot.
+        broker_consumption=await _completed_open_broker_consumption_proof(payload)
+        if broker_consumption.get("state")=="AMBIGUOUS":
+            raise RuntimeError(str(broker_consumption.get("reason") or
+                                   "broker close consumption evidence ambiguous"))
+        if broker_consumption.get("state")=="CONSUMED":
+            if not _retire_consumed_completed_open(
+                    command_id,payload,broker_consumption):
+                raise RuntimeError("broker-consumed open retirement failed")
+            return True
+        live_proof=await _completed_open_live_pair_proof(payload)
+        if live_proof.get("state")!="LIVE":
+            raise RuntimeError(str(live_proof.get("reason") or
+                                   "completed open is not live"))
+        handled=await _on_reconciled_open(
+            command_id,repaired_command,payload["evidence"],"COMPLETED",
+            completed_repair=True)
+        if not handled:
+            raise RuntimeError("completed open suffix repair failed")
+        tracer=get_tracer()
+        evidence=payload["evidence"]
+        fields={
+            "main_ticket":payload["tickets"]["main"],
+            "hedge_ticket":payload["tickets"]["hedge"],
+            "main_result":evidence.get("main") or {},
+            "hedge_result":evidence.get("hedge") or {},
+            "final_result":evidence,
+            "reconcile_result":"queue_completed_suffix_repaired",
+            "failure_reason":"",
+        }
+        if isinstance(evidence.get("agent_states"),dict):
+            fields["reconcile_agent_states"]=evidence["agent_states"]
+        tracer.update_fields(command_id,fields)
+        tracer.record_timestamp(command_id,TraceTimestamp.RECONCILE_DONE)
+        latest=tracer.get_command(command_id) or {}
+        if (_exact_positive_int(latest.get("main_ticket"))!=payload["tickets"]["main"] or
+                _exact_positive_int(latest.get("hedge_ticket"))!=payload["tickets"]["hedge"] or
+                str(latest.get("queue_job_id") or "")!=payload["job_id"]):
+            raise RuntimeError("completed saga tracer prepublish verification failed")
+        # Publish terminal tracer truth before dropping the matching review
+        # latch. If cleanup fails, lazy review reads see COMPLETED and clear it
+        # without ever exposing an unresolved command as an empty slot.
+        tracer.update_status(command_id,CommandStatus.COMPLETED)
+        cleared=_clear_matching_slot_review(
+            payload["username"],payload["symbol"],payload["slot"],
+            command_id,payload["job_id"])
+        if not cleared:
+            raise RuntimeError("completed saga review cleanup failed")
+        if R.get(_slotreview_key(
+                payload["username"],payload["symbol"],payload["slot"])) is not None:
+            raise RuntimeError("completed saga review cleanup unverified")
+        clear_quarantine=globals().get("_clear_completed_open_quarantine")
+        if callable(clear_quarantine) and not clear_quarantine(
+                payload["job_id"],command_id,payload["username"]):
+            raise RuntimeError("completed saga quarantine cleanup failed")
+        return True
+    except Exception:
+        # CAS avoids overwriting a newer command's latch.  If terminal tracer
+        # publication already succeeded, a missing latch is resolved truth,
+        # not a reason to move the command backwards into MANUAL_REVIEW.
+        try:
+            terminal=(str((get_tracer().get_command(command_id) or {}).get(
+                "status") or "").upper()=="COMPLETED")
+        except Exception:
+            terminal=False
+        if not terminal:
+            _ensure_matching_slot_review(
+                payload["username"],payload["symbol"],payload["slot"],
+                "MANUAL_REVIEW",command_id,payload["job_id"],
+                "completed saga local suffix repair pending")
+        return False
+    finally:
+        _release_slot_op(payload["username"],payload["symbol"],
+                         payload["slot"],repair_slot_token)
+        _release_open_saga_finalizer_lease(payload["job_id"],lease_token)
 
 
 def _late_open_saga_completion_allowed(command_id, command, job, evidence, slot, tickets):
@@ -17035,7 +20154,8 @@ def _late_open_saga_completion_allowed(command_id, command, job, evidence, slot,
                 tickets["main"]!=tickets["hedge"])
 
 
-async def _on_reconciled_open(command_id, command, evidence, resolution_state):
+async def _on_reconciled_open(command_id, command, evidence, resolution_state,
+                              completed_repair=False):
     """Commit open ownership/capacity truth before the tracer becomes terminal."""
     command=dict(command or {}); evidence=dict(evidence or {})
     if str(command.get("type") or "").lower()!=CommandType.OPEN_PAIR.value:
@@ -17059,6 +20179,9 @@ async def _on_reconciled_open(command_id, command, evidence, resolution_state):
     if queue_job_id and not isinstance(job,dict):
         return False
     current_queue_state=str((job or {}).get("state") or "").upper()
+    if completed_repair and not (
+            current_queue_state=="COMPLETED" and resolution_state=="COMPLETED"):
+        return False
     confirmed_pair_failure=(
         resolution_state=="FAILED" and
         not bool(evidence.get("main_ok")) and
@@ -17132,6 +20255,41 @@ async def _on_reconciled_open(command_id, command, evidence, resolution_state):
                  bool(evidence.get(leg+"_ok")))):
             normalized[leg]={"order":tickets[leg]}
 
+    repair_display = False
+    atomic_pair_repair=bool(
+        normalized and queue_job_id and set(normalized)=={"main","hedge"} and
+        (_open_saga_job(job) or completed_repair))
+    if atomic_pair_repair:
+        if completed_repair:
+            # Immutable completed evidence is the rebind capability.  The Lua
+            # helper still refuses every authoritative owner collision.
+            repair_display=True
+        else:
+            repair_display = _allow_provisional_display_rebind(
+                symbol, [(leg, str(tickets[leg])) for leg in ("main", "hedge")
+                         if tickets[leg] is not None], slot, username)
+        # A recovered pair must be committed as one ownership decision.  Do
+        # this before the legacy retry path so a partial slotowner write can
+        # never expose one leg as safely mapped while the other remains
+        # ownerless.  The helper is fail-closed on any ticket/slot conflict.
+        if not _repair_recovered_pair_slotowner(
+                symbol,normalized,slot,username,
+                allow_provisional_display_rebind=repair_display):
+            return False
+    # The atomic helper above is the ownership commit for a recovered pair;
+    # do not immediately run the per-leg writer again, which could re-open a
+    # partial-write window or reject an already valid idempotent repair.
+    needs_legacy_reserve=bool(normalized) and not atomic_pair_repair
+    if needs_legacy_reserve and not await _reserve_slot_with_recovery(
+            symbol,normalized,slot,username,
+            allow_provisional_display_rebind=repair_display,
+            command_id=command_id,job_id=queue_job_id):
+        return False
+
+    # Ownership is the safety boundary: never append an open-ledger row for a
+    # pair that could not claim its exact slot.  If the subsequent idempotent
+    # ledger write is temporarily unavailable, the live tickets remain owned
+    # and this same durable saga can retry without exposing the slot for reuse.
     if resolution_state=="COMPLETED" and context.get("ledger_key"):
         ledger_key=str(context.get("ledger_key") or "").strip()
         ledger_entry={
@@ -17144,16 +20302,6 @@ async def _on_reconciled_open(command_id, command, evidence, resolution_state):
         if not _open_ledger_commit_once(
                 command_id,ledger_key,ledger_entry,get_tracer()):
             return False
-    repair_display = False
-    if (normalized and queue_job_id and _open_saga_job(job) and
-            resolution_state == "COMPLETED"):
-        repair_display = _allow_provisional_display_rebind(
-            symbol, [(leg, str(tickets[leg])) for leg in ("main", "hedge")
-                     if tickets[leg] is not None], slot, username)
-    if normalized and not await _reserve_slot_with_recovery(
-            symbol,normalized,slot,username,
-            allow_provisional_display_rebind=repair_display):
-        return False
 
     reservation_keys=_entry_capacity_reservation_keys(username)
     uncertain_resolution=resolution_state in ("SINGLE_LEG_EXPOSED","MANUAL_REVIEW")
@@ -17195,9 +20343,13 @@ async def _on_reconciled_open(command_id, command, evidence, resolution_state):
             if (R.hget(reservation_keys[0],capacity_id) is not None or
                     R.zscore(reservation_keys[1],capacity_id) is not None):
                 return False
-        _clear_slot_review(username,symbol,slot,command_id)
-        if R.get(_slotreview_key(username,symbol,slot)) is not None:
-            return False
+        # A completed-saga repair keeps its durable latch until the outer
+        # repair function publishes tracer COMPLETED as its final identity
+        # write. Normal reconciliation retains the established cleanup path.
+        if not completed_repair:
+            _clear_slot_review(username,symbol,slot,command_id)
+            if R.get(_slotreview_key(username,symbol,slot)) is not None:
+                return False
 
     if normalized and direction in ("reverse","forward"):
         _remember_open_positions(
@@ -17225,6 +20377,12 @@ async def _on_reconciled_close(command_id, command, closed, resolution_state):
                 candidate=payload.get(name)
             if candidate not in (None,""):
                 command[name]=candidate
+    slot_token=str(
+        command.get("slot_token") or pending.get("slot_token") or
+        (queue_job or {}).get("slot_token") or payload.get("slot_token") or
+        "").strip()
+    if slot_token:
+        command["slot_token"]=slot_token
     if queue_job_id:
         command["queue_job_id"]=queue_job_id
     username=str(command.get("username") or "").strip()
@@ -17361,6 +20519,12 @@ async def _on_reconciled_close(command_id, command, closed, resolution_state):
         pass
     if resolution_state=="COMPLETED" and slot is not None:
         _clear_slot_review(username,symbol,slot,command_id)
+        if slot_token:
+            # Exact tickets, their tombstones, the pair ledger (when present),
+            # and the queue terminal state have all been verified above.  The
+            # token CAS prevents a late reconciler from clearing a newer slot
+            # operation or its visual busy marker.
+            _release_slot_resources(username,symbol,slot,slot_token)
     _persist_after_close()
     try:
         _audit(username,"reconciler","close_truth",{
@@ -17383,6 +20547,7 @@ async def _startup_subsecond_reconciler():
         connection_factory=_strict_user_exec_conn,
         close_confirmed_callback=_on_reconciled_close,
         open_confirmed_callback=_on_reconciled_open,
+        single_leg_close_callback=_on_authoritative_open_single_leg_close,
         open_saga_callback=_on_open_saga_reconcile,
         command_active_callback=_trade_queue_command_task_active,
     )
@@ -17394,6 +20559,12 @@ async def _shutdown_subsecond_reconciler():
         await _SUBSECOND_RECON_WORKER.stop()
     if _SUBSECOND_RECON_TASK is not None:
         _SUBSECOND_RECON_TASK.cancel()
+    finalizer_tasks=list(_TRADE_QUEUE_FINALIZER_TASKS.values())
+    for task in finalizer_tasks:
+        task.cancel()
+    if finalizer_tasks:
+        await _aio.gather(*finalizer_tasks,return_exceptions=True)
+    _TRADE_QUEUE_FINALIZER_TASKS.clear()
     saga_tasks=list(_OPEN_SAGA_RECOVERY_TASKS.values())
     for task in saga_tasks:
         task.cancel()

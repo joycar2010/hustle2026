@@ -1,0 +1,7 @@
+snapshot_date=20260819
+created_utc=2026-08-19T01:07:13Z
+hostname=ip-172-31-36-34
+source_git_head=2dc220568430ebc5eef174b13f7fe37507cff827
+source_git_branch=qh
+database_encryption=OpenSSL CMS AES-256-CBC RSA-4096
+plaintext_database_files_in_export=no

@@ -346,6 +346,9 @@
     background-repeat:no-repeat!important; background-size:45% 100%!important;
     animation:slotSweep 1.05s linear infinite}
   @keyframes slotSweep{ from{background-position:-45% 0} to{background-position:145% 0} }
+  @media (prefers-reduced-motion:reduce){
+    #otable tr.slot-busy, body.mobile-mode #otable tr.slot-busy{animation:none!important}
+  }
   /* 操作中秒数(进度渐变之外的数字反馈): 天蓝药丸, 贴操作列 */
   .slot-timer{display:inline-block;min-width:26px;text-align:center;margin-right:5px;padding:1px 6px;border-radius:9px;background:#2E8BD6;color:#fff;font-size:11px;font-weight:700;font-family:var(--num);vertical-align:middle;box-shadow:0 1px 4px rgba(46,139,214,.4)}
   @media(max-width:820px){ .slot-timer{min-width:30px;font-size:12px;padding:2px 7px} }
@@ -1804,11 +1807,11 @@ body.dark .arb-bar{background:#1a2740}
         <div class="formgrid" style="margin-bottom:14px">
           <div class="grouptitle">交易时间</div>
           <div class="fld row2"><label style="flex:0 0 56px">进单时间</label><input id="cfg-entry-start" value="00:05"><span>—</span><input id="cfg-entry-end" value="23:50"></div>
-          <div class="fld row2"><label style="flex:0 0 56px">开始时间</label><input id="cfg-run-start" value="00:00"><span>—</span><input id="cfg-run-end" value="23:59"></div>
+          <div class="fld row2"><label style="flex:0 0 72px">自动运行</label><input id="cfg-run-start" value="00:00"><span>—</span><input id="cfg-run-end" value="23:59"></div>
         </div>
         <div class="switches">
-          <div class="sw"><span class="t" title="周六停市开关:开=周六可交易">周六</span><div id="cfg-sw-sat" class="toggle" onclick="this.classList.toggle('on')"></div></div>
-          <div class="sw"><span class="t" title="周日停市开关:开=周日可交易">周日</span><div id="cfg-sw-sun" class="toggle" onclick="this.classList.toggle('on')"></div></div>
+          <div class="sw"><span class="t" title="开启后周六休市，禁止自动开仓和平仓">周六休市</span><div id="cfg-sw-sat" class="toggle" onclick="this.classList.toggle('on')"></div></div>
+          <div class="sw"><span class="t" title="开启后周日休市，禁止自动开仓和平仓">周日休市</span><div id="cfg-sw-sun" class="toggle" onclick="this.classList.toggle('on')"></div></div>
           <div class="sw"><span class="t" title="开启后点差≤0时自动禁用开仓按钮与坑位进单勾选">智能显示</span><div id="cfg-sw-smartdisplay" class="toggle on" onclick="this.classList.toggle('on');applySwitches()"></div></div>
           <div class="sw"><span class="t" title="根据预算值显示按钮">智能预判</span><div id="cfg-sw-smartpredict" class="toggle on" onclick="this.classList.toggle('on')"></div></div>
           <div class="sw"><span class="t" title="开启后利润大于0才能平仓">盈利平台</span><div id="cfg-sw-profitfirst" class="toggle" onclick="this.classList.toggle('on');applySwitches()"></div></div>
@@ -2085,7 +2088,7 @@ function qhWriterId(){
 const _qhFrontendTrace=(()=>{
   const allowed=new Set(['client_started','frontend_queue_state_received','frontend_position_refresh_done']);
   const pending=[],started=new Map(),batchToRequest=new Map(),queueSignatures=new Map(),positionRefreshReported=new Set();
-  let flushTimer=null,sequence=0,lastSettled={batch_ids:[],records:[],at:0};
+  let flushTimer=null,sequence=0;
   const sessionId=(window.crypto&&typeof window.crypto.randomUUID==='function')
     ?window.crypto.randomUUID():('qh-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2));
   const mono=()=>((typeof performance!=='undefined'&&typeof performance.now==='function')?performance.now():Date.now());
@@ -2127,12 +2130,16 @@ const _qhFrontendTrace=(()=>{
     return record;
   }
   function recordsFor(batchIds){const out=[];ids(batchIds).forEach(function(id){const record=batchToRequest.get(id);if(record&&!out.includes(record))out.push(record);});return out;}
-  function context(batchIds){
-    let batchList=ids(batchIds),records=recordsFor(batchList);
+  function context(batchIds,commandIds){
+    const explicit=ids(batchIds);let batchList=explicit.slice(),records=recordsFor(batchList);
     if(!batchList.length){try{_tradeBatchWatches.forEach(function(watch){if(watch&&watch.id)batchList.push(short(watch.id,96));});}catch(_e){}
       batchList=ids(batchList);records=recordsFor(batchList);}
-    if(!records.length&&lastSettled.at&&mono()-lastSettled.at<10000){records=lastSettled.records.slice();batchList=batchList.concat(lastSettled.batch_ids);}
-    return {batch_ids:ids(batchList),records:records};
+    const requested=new Set(ids(commandIds)),resolved=[];
+    records.forEach(function(record){Array.from(record.command_ids).forEach(function(commandId){
+      commandId=short(commandId,128);
+      if(commandId&&(!requested.size||requested.has(commandId))&&!resolved.includes(commandId))resolved.push(commandId);
+    });});
+    return {batch_ids:ids(batchList),records:records,command_ids:resolved};
   }
   function queueState(state,requestedBatchIds){
     if(!state)return;
@@ -2146,22 +2153,30 @@ const _qhFrontendTrace=(()=>{
     batches.forEach(function(batch){(batch&&batch.jobs||[]).forEach(function(job){
       if(job&&job.command_id)commandIds.push(job.command_id);if(job&&Number(job.slot)>0)slots.push(Number(job.slot));});});
     const ctx=context(batchIds),first=ctx.records[0];
+    const clientRequestIds=ctx.records.map(function(record){return record.client_request_id;});
     emit('frontend_queue_state_received',{batch_ids:batchIds,requested_batch_ids:ids(requestedBatchIds),
-      command_ids:ids(commandIds),slots:Array.from(new Set(slots)),depths:state.depths||{},server_ts:state.server_ts||null,
+      client_request_id:clientRequestIds.length===1?clientRequestIds[0]:'',
+      client_request_ids:clientRequestIds,command_ids:ids(commandIds),slots:Array.from(new Set(slots)),depths:state.depths||{},server_ts:state.server_ts||null,
       elapsed_ms:first?Math.max(0,mono()-first.started_at):null});
     ctx.records.forEach(function(record){ids(commandIds).forEach(function(id){record.command_ids.add(id);});});
   }
-  function settleBatch(batch){const batchId=short(batch&&batch.batch_id,96),records=recordsFor(batchId);
-    if(records.length)lastSettled={batch_ids:batchId?[batchId]:[],records:records,at:mono()};}
+  function settleBatch(_batch){}
   function positionRefreshDone(meta){
-    meta=meta||{};const ctx=context(meta.batch_ids);if(!ctx.batch_ids.length)return;
+    meta=meta||{};const requestedCommands=ids(meta.command_ids);
+    if(!requestedCommands.length)return;
+    const ctx=context(meta.batch_ids,requestedCommands);
+    if(!ctx.batch_ids.length||ctx.command_ids.length!==requestedCommands.length)return;
     const reportable=ctx.batch_ids.filter(function(batchId){return !positionRefreshReported.has(batchId);});
     if(!reportable.length)return;
-    reportable.forEach(function(batchId){positionRefreshReported.add(batchId);});
-    const first=ctx.records[0];emit('frontend_position_refresh_done',Object.assign({batch_ids:ctx.batch_ids,
-      client_request_ids:ctx.records.map(function(record){return record.client_request_id;}),
-      command_ids:Array.from(new Set(ctx.records.reduce(function(out,record){return out.concat(Array.from(record.command_ids));},[]))),
-      elapsed_ms:first?Math.max(0,mono()-first.started_at):null},meta));
+    reportable.forEach(function(batchId){
+      const records=recordsFor(batchId),record=records[0];
+      if(!record)return;
+      positionRefreshReported.add(batchId);
+      emit('frontend_position_refresh_done',Object.assign({},meta,{batch_ids:[batchId],
+        client_request_id:record.client_request_id,client_request_ids:[record.client_request_id],
+        command_ids:ctx.command_ids.filter(function(commandId){return record.command_ids.has(commandId);}),
+        elapsed_ms:Math.max(0,mono()-record.started_at)}));
+    });
   }
   return {start:ensure,link:link,queueState:queueState,settleBatch:settleBatch,positionRefreshDone:positionRefreshDone};
 })();const _runtimeHealth={transport:'检查中',state:null,legs:null,depths:null,
@@ -2202,7 +2217,19 @@ function updateRuntimeHealth(patch){
   if(el){ el.textContent=parts.join(' · '); el.title=(h.state&&h.state.err)?String(h.state.err):parts.join(' / '); }
 }
 const QH={user:null,key:null,started:false,writer:qhWriterId(),
-  async get(p){const h=this.key?{'X-License':this.key}:{};const r=await fetch('/api'+p,{headers:h});if(!r.ok)throw new Error(r.status);return r.json();},
+  async get(p,options){
+    options=options||{};const h=this.key?{'X-License':this.key}:{};
+    let controller=(options.controller&&options.controller.signal)?options.controller:null,timer=null;
+    const timeoutMs=Math.max(0,Number(options.timeoutMs)||0);
+    if(!controller&&timeoutMs&&typeof AbortController!=='undefined')controller=new AbortController();
+    if(controller&&timeoutMs){
+      timer=setTimeout(function(){controller.abort();},timeoutMs);
+    }
+    try{
+      const r=await fetch('/api'+p,{headers:h,cache:options.cache||'default',signal:controller&&controller.signal});
+      if(!r.ok)throw new Error(r.status);return r.json();
+    }finally{if(timer)clearTimeout(timer);}
+  },
   async post(p,b){const h={'Content-Type':'application/json','X-QH-Writer':this.writer};if(this.key)h['X-License']=this.key;const r=await fetch('/api'+p,{method:'POST',headers:h,body:JSON.stringify(b)});const j=await r.json().catch(()=>({}));if(!r.ok){const e=new Error(j.detail||('HTTP '+r.status));e.status=r.status;e.detail=j.detail||'';throw e;}return j;},
   start(){ if(this.started)return; this.started=true; window.__LIVE=true; if(typeof applyCoinLabel==='function')applyCoinLabel(); if(typeof applySwitches==='function')applySwitches(); this.connectWS(); this.initLazyCharts(); this.restoreToggles();
     // Account runtime is user-scoped and is not present in the global WS fast snapshot.
@@ -2217,14 +2244,16 @@ const QH={user:null,key:null,started:false,writer:qhWriterId(),
     const tick=async()=>{
       this._legsCardTimer=null;
       if(!this.started)return;
-      // Queue state is the execution authority. Broker position reads are
-      // resumed only after every active trade reaches a server terminal state.
-      if(tradeStateActive()){
-        this._legsCardTimer=setTimeout(tick,document.hidden?1000:250); return;
-      }
       const pollStarted=performance.now();
-      await refreshLegsCard();
-      const target=document.hidden?3000:650;
+      // Queue batches and the terminal Redis projection own active-trade
+      // convergence. A full legs read calls status()/positions() on both
+      // terminals and can contend with native order_send, so keep that poll
+      // completely out of the execution window and its short recovery tail.
+      const nativeReadAllowed=_nativeLegsReadAllowed();
+      if(nativeReadAllowed)await refreshLegsCard();
+      const blocked=!_nativeLegsReadAllowed();
+      const target=document.hidden?(blocked?1000:3000):(blocked?250:650);
+      // Compensate for request time without overlapping full bridge reads.
       const delay=Math.max(25,target-(performance.now()-pollStarted));
       this._legsCardTimer=setTimeout(tick,delay);
     };
@@ -2619,7 +2648,11 @@ function toggleExpand(leg){
 function cls(id,c){const e=$(id);if(e)e.className=c;}
 function fnum(n,d){d=(d==null?2:d);return (n==null||isNaN(n))?'--':Number(n).toFixed(d);}
 const SINGLE_LEG_STABLE_MS=2500;
-const TERMINAL_POSITION_GRACE_MS=6000;
+// A terminal command already carries exact-ticket truth.  Keep only a short
+// repaint cushion for a stale broker snapshot; the previous six-second grace
+// made a successful close look queued and blocked rapid multi-slot closes.
+const TERMINAL_POSITION_GRACE_MS=850;
+const TRADE_STATE_CONFIRMATION_MS=70000;
 const _singleLegSeen={};
 function _slotReviewLocked(slot){
   slot=Number(slot)||0;
@@ -2642,8 +2675,12 @@ function _slotActiveExecution(slot){
   slot=Number(slot)||0;
   return (window.__busyLocal&&window.__busyLocal.has(slot))||
          (window.__queueBusy&&window.__queueBusy.has(slot))||
-         (window.__remoteBusy||[]).map(Number).indexOf(slot)>=0||
-         _slotReviewLocked(slot);
+         (window.__remoteBusy||[]).map(Number).indexOf(slot)>=0;
+}
+function _slotTradeBlocked(slot){
+  // A durable review state blocks only its own slot. It is not an active
+  // execution and must not hold the account-wide refresh/overlay state open.
+  return _slotReviewLocked(slot)||_slotActiveExecution(slot);
 }
 function _clearSlotTerminal(slot){
   slot=Number(slot)||0;
@@ -2654,33 +2691,42 @@ function _markSlotTerminal(slot,job,kind){
   slot=Number(slot)||0; if(!slot)return;
   const id=String((job&&job.job_id)||((job&&job.batch_id)||'')+':'+slot);
   const old=(window.__queueTerminalMeta||{})[slot];
+  const replaced=!old||old.id!==id;
   const version=_jobVersion(job||{});
   const created=_jobCreatedVersion(job||{});
   if(old&&old.id!==id&&Number(old.created||0)>created)return false;
   if(old&&old.id===id&&Number(old.version||0)>version)return false;
   if(old&&old.id===id&&_queueTerminalStates.has(old.state)&&!_queueTerminalStates.has((job&&job.state)||''))return false;
-  if(!old||old.id!==id){
-    window.__queueTerminalMeta[slot]={id:id,kind:(job&&job.kind)||kind||'open',op:(job&&job.op)||'',target_leg:(job&&job.payload&&job.payload.leg)||'',target_ticket:_jobLegTicket(job||'',(job&&job.payload&&job.payload.leg)||'')||'',state:(job&&job.state)||'',at:Date.now(),settled:false,version:version,created:created};
+  if(replaced){
+    window.__queueTerminalMeta[slot]={id:id,kind:(job&&job.kind)||kind||'open',op:(job&&job.op)||'',target_leg:(job&&job.payload&&job.payload.leg)||'',target_ticket:_jobLegTicket(job||'',(job&&job.payload&&job.payload.leg)||'')||'',state:(job&&job.state)||'',at:Date.now(),startedAt:Number((window.__busyStart||{})[slot])||(created>0?created*1000:Date.now()),settled:false,version:version,created:created};
   }else{
     old.kind=(job&&job.kind)||kind||old.kind; old.op=(job&&job.op)||old.op||''; old.target_leg=(job&&job.payload&&job.payload.leg)||old.target_leg||''; old.target_ticket=_jobLegTicket(job||'',old.target_leg)||old.target_ticket||''; old.state=(job&&job.state)||old.state; old.version=version; old.created=created;
   }
   window.__queueTerminal.add(slot);
+  if(replaced&&String((job&&job.state)||'')==='COMPLETED'){
+    setTimeout(function(){
+      const current=(window.__queueTerminalMeta||{})[slot];
+      if(current&&current.id===id&&!current.settled&&typeof applySlotBusy==='function')applySlotBusy();
+    },TERMINAL_POSITION_GRACE_MS+20);
+  }
   return true;
 }
 function _slotExecutionPending(slot,m,h){
   // UNKNOWN/MANUAL_REVIEW is a fixed reconciliation lock, not an operation
   // timer. Keep controls blocked without presenting it as ongoing execution.
   if(_slotReviewLocked(slot))return false;
-  if(_slotActiveExecution(slot))return true;
   const meta=(window.__queueTerminalMeta||{})[Number(slot)||0];
-  if(!meta||meta.settled||meta.state!=='COMPLETED')return false;
-  let settled;
-  if(meta.kind==='close'&&meta.op==='close_leg'){
-    const rows=_positionRows(window.__lastPositions||null,meta.target_leg||'main')||[];
-    settled=!meta.target_ticket||!rows.some(function(p){return String((p||{}).ticket||'')===String(meta.target_ticket);});
-  }else settled=meta.kind==='close'?(!m&&!h):!!(m&&h);
-  if(settled){ meta.settled=true; return false; }
-  return Date.now()-meta.at<TERMINAL_POSITION_GRACE_MS;
+  if(meta&&meta.state==='COMPLETED'){
+    if(meta.settled)return false;
+    let settled;
+    if(meta.kind==='close'&&meta.op==='close_leg'){
+      const rows=_positionRows(window.__lastPositions||null,meta.target_leg||'main')||[];
+      settled=!meta.target_ticket||!rows.some(function(p){return String((p||{}).ticket||'')===String(meta.target_ticket);});
+    }else settled=meta.kind==='close'?(!m&&!h):!!(m&&h);
+    if(settled){ meta.settled=true; return false; }
+    return Date.now()-meta.at<TERMINAL_POSITION_GRACE_MS;
+  }
+  return _slotActiveExecution(slot);
 }
 function singleLegSnapshotState(slot,m,h){
   const key=String(slot), miss=(m&&!h)?'hedge':((h&&!m)?'main':null);
@@ -2747,8 +2793,14 @@ function _positionOwnershipVerified(position,slot){
   return !!(position&&position.ownership_verified===true&&
     Number(position.slot)===Number(slot));
 }
-function _positionSnapshotTrusted(leg){
-  return !!(window.__positionTrust&&window.__positionTrust[leg]===true);
+function _positionSnapshotTrusted(leg,position){
+  const trust=window.__positionTrust||{};
+  if(trust[leg]===true)return true;
+  // A degraded leg-wide read must not lock every unrelated slot.  Exact
+  // ticket truth from the trade result remains usable for that one position.
+  const ticket=_positionTicket(position);
+  const exact=window.__ticketTrust&&window.__ticketTrust[leg];
+  return !!(ticket&&exact&&exact[ticket]===true);
 }
 function _buildPositionSlotMaps(mainRows,hedgeRows,ladders){
   const bySlotM={}, bySlotH={}, conflicts={};
@@ -2818,6 +2870,26 @@ function _resolveConflictingLegs(main,hedge,conflict){
   const mq=_positionQuality(main,'main'), hq=_positionQuality(hedge,'hedge');
   if(mq>hq)return {main:main,hedge:null,conflict:true};
   return {main:null,hedge:hedge,conflict:true};
+}
+function _positionFooterCounts(occupiedSlots,bySlotM,bySlotH,pairConflict,slotFacts){
+  let paired=0,single=0;
+  occupiedSlots.forEach(function(k){
+    const conflict=pairConflict.has(String(k));
+    const facts=slotFacts&&slotFacts[String(k)];
+    // Conflicting, untrusted, or review-locked rows are unresolved evidence,
+    // not a user-facing pair/single-leg total.
+    if(conflict||(facts&&(facts.reviewLocked||!facts.snapshotTrusted||
+        (facts.validPair&&!facts.ownershipVerified))))return;
+    if((facts?facts.validPair:_positionPairValid(bySlotM[k],bySlotH[k]))){paired++;return;}
+    const resolved=_resolveConflictingLegs(bySlotM[k],bySlotH[k],conflict);
+    const state=(facts&&facts.singleState)||
+      singleLegSnapshotState(Number(k),resolved.main,resolved.hedge);
+    // The row and footer share one stability decision. A transient broker
+    // projection may say "leg syncing" but must not simultaneously increment
+    // the user-facing single-leg alarm count.
+    if(state.mature&&!state.pending)single++;
+  });
+  return {paired:paired,single:single};
 }
 function _dedupeSummaryRows(mainRows,hedgeRows){
   const winners=new Map(), order=[];
@@ -2891,8 +2963,30 @@ function renderPosLive(positions){
   const supplementalSlots=new Set([...occupiedSlots].map(Number).concat(_supplementalTradeSlots()));
   [...supplementalSlots].filter(function(slot){return slot>ladders;})
     .sort(function(a,b){return a-b;}).forEach(function(slot){renderSlots.push(slot);});
-  let paired=0; occupiedSlots.forEach(function(k){if(_positionPairValid(bySlotM[k],bySlotH[k])&&!pairConflict.has(String(k)))paired++;});
-  const single=occupiedSlots.size-paired;
+  const positionProjectionFacts={};
+  occupiedSlots.forEach(function(slotKey){
+    const k=Number(slotKey), rawM=bySlotM[slotKey], rawH=bySlotH[slotKey];
+    const reviewLocked=_slotReviewLocked(k);
+    const ticketConflict=pairConflict.has(String(k));
+    const resolved=_resolveConflictingLegs(rawM,rawH,ticketConflict);
+    const m=resolved.main, h=resolved.hedge;
+    const executionPending=_slotExecutionPending(k,rawM,rawH);
+    const singleState=singleLegSnapshotState(k,m,h);
+    const validPair=_positionPairValid(m,h)&&!ticketConflict;
+    const snapshotTrusted=(!m||_positionSnapshotTrusted('main',m))&&
+      (!h||_positionSnapshotTrusted('hedge',h));
+    const ownershipVerified=validPair&&_positionOwnershipVerified(m,k)&&
+      _positionOwnershipVerified(h,k);
+    positionProjectionFacts[String(k)]={
+      reviewLocked:reviewLocked,ticketConflict:ticketConflict,resolved:resolved,
+      executionPending:executionPending,singleState:singleState,
+      validPair:validPair,snapshotTrusted:snapshotTrusted,
+      ownershipVerified:ownershipVerified
+    };
+  });
+  const footerCounts=_positionFooterCounts(
+    occupiedSlots,bySlotM,bySlotH,pairConflict,positionProjectionFacts);
+  const paired=footerCounts.paired, single=footerCounts.single;
   const foot=document.querySelector('.tablecard tfoot td');
   if(foot)foot.textContent='共 '+paired+' 笔配对'+(single?(' / '+single+' 笔单腿'):'')+' / '+ladders+' 坑';
   if(!renderSlots.length){
@@ -2904,11 +2998,12 @@ function renderPosLive(positions){
   let html='';
   for(const k of renderSlots){
     const rawM=bySlotM[k], rawH=bySlotH[k];
-    const reviewLocked=_slotReviewLocked(k);
-    const ticketConflict=pairConflict.has(String(k));
-    const resolved=_resolveConflictingLegs(rawM,rawH,ticketConflict);
+    const projectionFacts=positionProjectionFacts[String(k)]||null;
+    const reviewLocked=projectionFacts?projectionFacts.reviewLocked:_slotReviewLocked(k);
+    const ticketConflict=projectionFacts?projectionFacts.ticketConflict:pairConflict.has(String(k));
+    const resolved=projectionFacts?projectionFacts.resolved:_resolveConflictingLegs(rawM,rawH,ticketConflict);
     const m=resolved.main, h=resolved.hedge;
-    const executionPending=_slotExecutionPending(k,rawM,rawH);
+    const executionPending=projectionFacts?projectionFacts.executionPending:_slotExecutionPending(k,rawM,rawH);
     const ov=(window.__slotov||{})[String(k)]||null;
     // 买入点位=入场下限(点差≥此值才进): 无覆盖→全局; 覆盖buy_point=null→任意都开; 数字(含0)→该值
     let bp;
@@ -2936,7 +3031,7 @@ function renderPosLive(positions){
       else { act='<span class="slot-norule" onclick="openSlotEdit('+k+')" title="点击设置本坑规则(手数/买入点位等)，留空=回落全局">未设置规则</span>'; }
       html+='<tr class="wait" data-slot="'+k+'"><td class="slotno" onclick="openSlotEdit('+k+')" title="点击编辑本坑规则">坑'+k+'</td><td>—</td><td>—</td><td>—</td>'+
             '<td>-</td><td>'+bp+'</td><td>'+sp+'</td>'+
-            '<td class="st hold">'+(reviewLocked?'<span style="color:#c0392b">待核对</span>':(dis?'<span style="color:#c0392b">禁用</span>':'空'))+'</td>'+ 
+            '<td class="st hold">'+(reviewLocked?'<span style="color:#c0392b">待核对</span>':(dis?'<span style="color:#c0392b">禁用</span>':'空'))+'</td>'+
             '<td class="actcell">'+_armChips(k)+act+'</td></tr>';
       continue;
     }
@@ -2948,12 +3043,14 @@ function renderPosLive(positions){
     const mSide=m?((Number(m.type)===1||m.side==='sell')?'sell':'buy'):'buy';
     const hSide=h?((Number(h.type)===1||h.side==='sell')?'sell':'buy'):'sell';
     // Queue activity and terminal position grace keep transient snapshots locked.
-     const singleState=singleLegSnapshotState(k,m,h), missLeg=singleState.miss;
+     const singleState=projectionFacts?projectionFacts.singleState:singleLegSnapshotState(k,m,h), missLeg=singleState.miss;
      const syncing=!ticketConflict&&(executionPending||(!!missLeg&&(singleState.pending||!singleState.mature)));
      const transitionLabel=executionPending?_slotActionLabel(k):'';
-     const validPair=_positionPairValid(m,h)&&!ticketConflict;
-     const snapshotTrusted=(!m||_positionSnapshotTrusted('main'))&&(!h||_positionSnapshotTrusted('hedge'));
-     const ownershipVerified=validPair&&_positionOwnershipVerified(m,k)&&_positionOwnershipVerified(h,k);
+     const validPair=projectionFacts?projectionFacts.validPair:(_positionPairValid(m,h)&&!ticketConflict);
+     const snapshotTrusted=projectionFacts?projectionFacts.snapshotTrusted:
+       ((!m||_positionSnapshotTrusted('main',m))&&(!h||_positionSnapshotTrusted('hedge',h)));
+     const ownershipVerified=projectionFacts?projectionFacts.ownershipVerified:
+       (validPair&&_positionOwnershipVerified(m,k)&&_positionOwnershipVerified(h,k));
      window.__slotDetail[String(k)]={mPx:mPx,hTk:hTk,hPx:hPx,spread:spread,filled:true,paired:validPair,
        ticketConflict:ticketConflict,mTk:mTk,mSide:mSide,hSide:hSide,pf:pf,syncing:syncing,
        executionPending:executionPending,snapshotTrusted:snapshotTrusted,
@@ -2974,10 +3071,10 @@ function renderPosLive(positions){
      let stCell;
      if(ticketConflict)stCell='<span style="color:#c0392b;font-weight:700" title="缺失或重复 ticket 不能证明为一组双腿持仓">⚠票据冲突</span>';
      else if(reviewLocked)stCell='<span style="color:#c0392b;font-weight:700" title="上一笔成交结果待权威核对，已禁止重复操作">待人工核对</span>';
-     else if(!snapshotTrusted)stCell='<span style="color:#c0392b;font-weight:700" title="当前显示的是缓存持仓，实时持仓读取失败">持仓读取异常</span>';
+     else if(!snapshotTrusted)stCell='<span style="color:#b7791f;font-weight:700" title="等待新的权威持仓快照，不作为单腿证明">持仓快照待确认</span>';
      else if(validPair&&!ownershipVerified)stCell='<span style="color:#b7791f;font-weight:700" title="展示坑位不是权威持仓归属，禁止按对平仓">待归属核对</span>';
      else if(syncing&&transitionLabel)stCell='<span style="color:#b7791f;font-weight:700">'+transitionLabel+'</span>';
-     else if(syncing)stCell='—';
+     else if(syncing)stCell='<span style="color:#b7791f;font-weight:700">'+(missLeg==='main'?'主腿同步中':'对冲腿同步中')+'</span>';
      else if(missLeg)stCell='<span style="color:#c0392b;font-weight:700" title="交易终态后持仓仍持续缺腿, 存在单边敞口">⚠单腿</span>';
      else stCell=(pf>=0?'+':'')+fnum(pf);
      const closeBtn=ticketConflict
@@ -2985,7 +3082,7 @@ function renderPosLive(positions){
        :reviewLocked
        ? '<button class="closebtn full" data-syncing="1" disabled style="opacity:.55;cursor:not-allowed" title="上一笔成交结果待权威核对，禁止重复平仓">待人工核对</button>'
        :!snapshotTrusted
-       ? '<button class="closebtn full" data-syncing="1" disabled style="opacity:.55;cursor:not-allowed" title="实时持仓读取失败，禁止使用缓存 ticket 平仓">持仓读取异常</button>'
+       ? '<button class="closebtn full" data-syncing="1" disabled style="opacity:.55;cursor:not-allowed" title="等待新的权威持仓快照，确认后才允许平仓">快照确认中</button>'
        :(validPair&&!ownershipVerified)
        ? '<button class="closebtn full" data-syncing="1" disabled style="opacity:.55;cursor:not-allowed" title="双腿尚无权威共同坑位归属，禁止按对平仓">待归属核对</button>'
        :(syncing&&transitionLabel)
@@ -2995,9 +3092,11 @@ function renderPosLive(positions){
        : '<button class="closebtn full" onclick="closePair(\''+mSide+'\',\''+hSide+'\',(window.QHSYM||\'XAUUSD\'),\''+(m?mTk:'')+'\',\''+(h?hTk:'')+'\','+k+')" title="平仓(按本坑进场方向对应平; 单腿时只平现有腿)">平仓</button>';
     // 成交行: col1=坑号+订单号+手数(小字); col6/7=本坑买入/卖出点位(与表头一致, 修列错位); col8=获利
      const mainTicket=m?('<span class="ord-tk">#'+(mTk||'未知')+'</span>'):
-       (ticketConflict?'<span class="ord-tk" style="color:#c0392b">主腿票据冲突</span>':'<span class="ord-tk" style="color:#c0392b">主腿缺失</span>');
+       (ticketConflict?'<span class="ord-tk" style="color:#c0392b">主腿票据冲突</span>':
+        (syncing?'<span class="ord-tk" style="color:#b7791f">主腿同步中</span>':'<span class="ord-tk" style="color:#c0392b">主腿缺失</span>'));
+     const hedgeTicket=hTk||((syncing&&missLeg==='hedge')?'<span style="color:#b7791f">对冲腿同步中</span>':'-');
     html+='<tr data-slot="'+k+'"><td class="slotno" onclick="openSlotEdit('+k+')" title="点击编辑本坑规则">坑'+k+' <span class="ord-info">'+mainTicket+'<span class="ord-lot">'+vol+'手</span></span></td>'+
-          '<td>'+mPx+'</td><td>'+(hTk||'-')+'</td><td>'+hPx+'</td>'+
+          '<td>'+mPx+'</td><td>'+hedgeTicket+'</td><td>'+hPx+'</td>'+
           '<td>'+spread+'</td><td>'+bp+'</td><td>'+sp+'</td>'+
           '<td class="st '+(missLeg?'hold':(pf>=0?'profit':'hold'))+'">'+stCell+'</td>'+
           '<td class="actcell">'+_armChips(k)+repairBtn+closeBtn+'</td></tr>';
@@ -3026,7 +3125,7 @@ async function repairLeg(slot, leg, direction, vol){
   try{
     const r=await licPost('/cmd/repair_leg',{username:QH.user,license_key:QH.key,symbol:(window.QHSYM||'XAUUSD'),leg:leg,direction:direction,volume:vol,slot:slot,confirm:true});
     toast(r.msg||'补腿完成'); pushAlert('warn','坑'+slot+' '+(r.msg||'已补腿'));
-  }catch(e){ toast('补腿失败：'+(e.message||e)); pushAlert('err','坑'+slot+' 补腿失败: '+(e.message||e)); }
+  }catch(e){ const closed=tradeClosedMessage(e,'open'); const msg=closed||('补腿失败：'+(e.message||e)); toast(msg); pushAlert('err','坑'+slot+' '+msg); }
   finally{ setSlotBusy(slot,false,null,busyOwner); }
 }
 // 坑位行"操作中"进度渐变: 本地(手动点击即时)∪ 远程(后端 busy_slots, 自动实时经WS/poll)
@@ -3041,14 +3140,17 @@ async function refreshSlotov(){
 window.__busyLocal = window.__busyLocal || new Set();
 window.__busyLocalOwners = window.__busyLocalOwners || {};
 window.__busyStart = window.__busyStart || {};   // 坑号→操作起始 ms(供按钮秒数倒计时)
+window.__busyPhaseStart = window.__busyPhaseStart || {}; // 坑号→当前真实阶段起始 ms
 window.__busyLabel = window.__busyLabel || {};
 window.__busyJob = window.__busyJob || {};       // 坑号→当前队列任务，防止跨任务复用计时
 window.__busyOwner = window.__busyOwner || {};   // 坑号→当前计时 owner（本地操作或队列任务）
+window.__remoteBusyActions = window.__remoteBusyActions || {};
 window.__queueBusy = window.__queueBusy || new Set();
 window.__queueTerminal = window.__queueTerminal || new Set();
 window.__queueTerminalMeta = window.__queueTerminalMeta || {};
 window.__positionTruthTerminal = window.__positionTruthTerminal || {};
 window.__slotReviewLocks = window.__slotReviewLocks || {};
+window.__queueConfirming = window.__queueConfirming || new Set();
 const _queueTerminalStates=new Set(['COMPLETED','FAILED','UNKNOWN','MANUAL_REVIEW','SINGLE_LEG_EXPOSED']);
 const _queueReviewStates=new Set(['UNKNOWN','MANUAL_REVIEW','SINGLE_LEG_EXPOSED']);
 const _tradeHardFailureStates=new Set(['FAILED','MANUAL_REVIEW','SINGLE_LEG_EXPOSED']);
@@ -3057,23 +3159,76 @@ const _tradeBatchWatches=new Map();
 const _tradeJobs=new Map();
 let _queueStateFetch=null, _tradeStateTimer=null, _queueSyncFailures=0;
 let _busyOwnerSeq=0, _unknownRemoteBusySignature='';
+const SLOT_FEEDBACK_CYCLE_MS=800;
+const TRADE_NATIVE_READ_QUIET_MS=900;
+let _tradeNativeReadBlockedUntil=0;
 
 function _tradeActionLabel(kind){return kind==='close'?'平仓中':'开仓中';}
+function _tradeDoneLabel(kind){return kind==='close'?'已平仓':'已开仓';}
+function _tradePhaseLabel(kind,phase){
+  const action=kind==='close'?'平仓':'开仓';
+  const labels={REQUEST:'请求发送',ADMISSION:'接纳确认',ADMITTED:'队列已接纳',CLAIMED:'队列已分配',
+    EXECUTING:'执行预检',BRIDGE:'等待桥端 ACK',LEG_ACK:'首腿已 ACK·第二腿执行',ACK:'桥端已 ACK·终态确认',
+    TERMINAL:'终态已确认·持仓同步'};
+  return action+'·'+(labels[phase]||'处理中');
+}
+function _jobProgressPhase(job){
+  const state=String((job&&job.state)||'').toUpperCase();
+  if(state==='COMPLETED')return 'TERMINAL';
+  if(state==='QUEUED')return 'ADMITTED';
+  if(state==='CLAIMED')return 'CLAIMED';
+  if(state==='EXECUTING')return 'EXECUTING';
+  if(state==='DISPATCHING'){
+    const result=(job&&job.result&&typeof job.result==='object')?job.result:{};
+    const phase=[job&&job.dispatch_phase,job&&job.saga_phase,result.saga_phase]
+      .map(function(value){return String(value||'').toUpperCase();}).join(' ');
+    if(/(^|[_\s])FIRST_(ACK|DONE)([_\s]|$)/.test(phase))return 'LEG_ACK';
+    return /(^|[_\s])(ACK|DONE)([_\s]|$)/.test(phase)?'ACK':'BRIDGE';
+  }
+  return 'REQUEST';
+}
 function _slotActionKind(slot){
   slot=Number(slot)||0;
   const meta=(window.__queueTerminalMeta||{})[slot]||{};
   if(meta.kind==='open'||meta.kind==='close')return meta.kind;
+  const remote=(window.__remoteBusyActions||{})[String(slot)]||(window.__remoteBusyActions||{})[slot];
+  if(remote==='open'||remote==='close')return remote;
   const label=String((window.__busyLabel||{})[slot]||'');
   if(label.indexOf('平仓')===0)return 'close';
   if(label.indexOf('开仓')===0)return 'open';
   const detail=(window.__slotDetail||{})[String(slot)]||{};
   return detail.filled?'close':'open';
 }
-function _slotActionLabel(slot,kind){return _tradeActionLabel(kind||_slotActionKind(slot));}
+function _slotActionLabel(slot,kind){
+  slot=Number(slot)||0;
+  const raw=String((window.__busyLabel||{})[Number(slot)||0]||'');
+  if((window.__queueConfirming||new Set()).has(slot)||raw==='订单状态确认中')return '订单状态确认中';
+  if(!kind&&raw.indexOf('补腿')===0)return '补腿中';
+  if(!kind&&raw.indexOf('平仓')===0)return '平仓中';
+  if(!kind&&raw.indexOf('开仓')===0)return '开仓中';
+  return _tradeActionLabel(kind||_slotActionKind(slot));
+}
+function _slotUserBusyLabel(slot,label,kind){
+  const raw=String(label||'');
+  if((window.__queueConfirming||new Set()).has(Number(slot)||0)||raw==='订单状态确认中')return '订单状态确认中';
+  if(raw.indexOf('终态已确认')>=0)return _tradeDoneLabel(kind||_slotActionKind(slot));
+  if(kind==='open'||kind==='close')return _tradeActionLabel(kind);
+  if(raw.indexOf('补腿')===0)return '补腿中';
+  if(raw.indexOf('平仓')===0)return '平仓中';
+  if(raw.indexOf('开仓')===0)return '开仓中';
+  return _slotActionLabel(slot);
+}
 
 function tradeStateActive(){
   return _tradeBatchWatches.size>0||!!(window.__queueBusy&&window.__queueBusy.size)||
     !!(window.__busyLocal&&window.__busyLocal.size);
+}
+function _blockNativeLegReads(ms){
+  _tradeNativeReadBlockedUntil=Math.max(_tradeNativeReadBlockedUntil,
+    Date.now()+Math.max(0,Number(ms)||0));
+}
+function _nativeLegsReadAllowed(){
+  return !tradeStateActive()&&Date.now()>=_tradeNativeReadBlockedUntil;
 }
 function _activeTradePollDelay(){
   const now=Date.now(); let justSubmitted=false;
@@ -3090,6 +3245,37 @@ function _tradeStatePollDelay(){
 function _markPositionTruthTerminal(slot){
   slot=Number(slot)||0; if(!slot)return;
   window.__positionTruthTerminal[slot]=Date.now()+TERMINAL_POSITION_GRACE_MS;
+}
+function _trustTradeTickets(result){
+  const exact=window.__ticketTrust||(window.__ticketTrust={main:{},hedge:{}});
+  const seen=new Set(), add=function(leg,value){
+    const ticket=String(value==null?'':value).trim();
+    if(ticket&&ticket!=='0')exact[leg][ticket]=true;
+  };
+  const visit=function(node){
+    if(!node||typeof node!=='object'||seen.has(node))return;
+    seen.add(node);
+    if(Array.isArray(node)){node.forEach(visit);return;}
+    // Queue payloads carry the exact tickets selected by the backend. They
+    // are useful only as ticket-scoped UI proof; the close endpoint still
+    // performs the authoritative account/slot/ticket validation.
+    add('main',node.main_ticket); add('hedge',node.hedge_ticket);
+    if(node.leg==='main')add('main',node.ticket);
+    if(node.leg==='hedge')add('hedge',node.ticket);
+    ['main','hedge'].forEach(function(leg){
+      const row=node[leg];
+      if(row&&typeof row==='object'){
+        add(leg,_positionTicket(row));
+        add(leg,row.order||row.deal||row.ticket||row.position);
+      }
+    });
+    // Keep the walk bounded to known response containers.  Arbitrary nested
+    // values must never be interpreted as broker ticket identities.
+    ['payload','result','final_result','detail','context','evidence','ticket_proofs','jobs'].forEach(function(key){
+      if(node[key]&&typeof node[key]==='object')visit(node[key]);
+    });
+  };
+  visit(result);
 }
 function _newSlotBusyOwner(kind){
   _busyOwnerSeq+=1;
@@ -3127,12 +3313,17 @@ function _syncSlotBusyOwner(slot){
   }
   window.__busyLocal.add(slot);
   const displayOwner='local:'+current.owner;
+  const ownerChanged=window.__busyOwner[slot]!==displayOwner;
   if(window.__busyOwner[slot]!==displayOwner||!window.__busyStart[slot]||
      Number(window.__busyStart[slot])!==Number(current.startedAt)){
     window.__busyStart[slot]=current.startedAt;
     window.__busyOwner[slot]=displayOwner;
   }
-  window.__busyLabel[slot]=current.label||_slotActionLabel(slot);
+  const nextLabel=current.label||_slotActionLabel(slot);
+  if(ownerChanged||window.__busyLabel[slot]!==nextLabel||!window.__busyPhaseStart[slot]){
+    window.__busyPhaseStart[slot]=Number(current.phaseStartedAt)||Date.now();
+  }
+  window.__busyLabel[slot]=nextLabel;
   return current;
 }
 function _releaseSlotBusyOwner(slot,owner){
@@ -3143,7 +3334,20 @@ function _releaseSlotBusyOwner(slot,owner){
 }
 function _clearSlotBusyTimer(slot){
   delete window.__busyStart[slot]; delete window.__busyLabel[slot]; delete window.__busyJob[slot];
+  delete window.__busyPhaseStart[slot];
   delete window.__busyOwner[slot];
+}
+function _setBusyControlLock(btn,locked){
+  if(!btn)return;
+  if(locked){
+    if(!Object.prototype.hasOwnProperty.call(btn.dataset,'busyBaseDisabled')){
+      btn.dataset.busyBaseDisabled=btn.disabled?'1':'0';
+    }
+    btn.disabled=true;
+  }else if(Object.prototype.hasOwnProperty.call(btn.dataset,'busyBaseDisabled')){
+    btn.disabled=btn.dataset.busyBaseDisabled==='1';
+    delete btn.dataset.busyBaseDisabled;
+  }
 }
 function _requestUnknownRemoteBusySync(remote){
   const queue=window.__queueBusy||new Set();
@@ -3161,13 +3365,13 @@ function setSlotBusy(slot, on, label, owner){ slot=Number(slot); if(!slot)return
     const owners=_slotBusyOwnerMap(slot,true), existing=owners.get(ownerId);
     if(existing){
       const nextLabel=label||existing.label||_slotActionLabel(slot);
-      if(existing.label!==nextLabel){existing.label=nextLabel;existing.startedAt=Date.now();}
+      if(existing.label!==nextLabel){existing.label=nextLabel;existing.phaseStartedAt=Date.now();}
     }
     else {
       // A slot is single-flight. If an old local owner survived a completed
       // request, never let it reappear when this new owner is released.
       owners.clear();
-      owners.set(ownerId,{owner:ownerId,label:label||_slotActionLabel(slot),startedAt:Date.now(),
+      owners.set(ownerId,{owner:ownerId,label:label||_slotActionLabel(slot),startedAt:Date.now(),phaseStartedAt:Date.now(),
         seq:_nextSlotBusySequence(owners)});
     }
     _syncSlotBusyOwner(slot);
@@ -3195,69 +3399,142 @@ function applySlotBusy(){
   document.querySelectorAll('#otable tr[data-slot]').forEach(function(tr){
     const k=Number(tr.getAttribute('data-slot'));
     const detail=(window.__slotDetail||{})[String(k)]||{};
+    const meta=(window.__queueTerminalMeta||{})[k]||{};
+    const terminalKnown=terminal.has(k)&&_queueTerminalStates.has(String(meta.state||''));
+    const reviewTerminal=terminalKnown&&_queueReviewStates.has(String(meta.state||''));
+    const terminalProtection=terminalKnown&&meta.state==='COMPLETED'&&!meta.settled&&
+      now-Number(meta.at||0)<TERMINAL_POSITION_GRACE_MS;
     const truthSettled=Number(truthTerminal[k])>now;
     const busy=all.has(k)&&!(truthSettled&&!(window.__busyLocal||new Set()).has(k));
     const syncing=!busy&&!!detail.executionPending;
-    tr.classList.toggle('slot-busy', busy);
+    if(terminalKnown){
+      const locked=reviewTerminal||terminalProtection;
+      tr.classList.remove('slot-busy');
+      tr.setAttribute('aria-busy',locked?'true':'false');
+      _clearSlotBusyTimer(k);
+      tr.querySelectorAll('button[data-busy-base]').forEach(function(btn){
+        btn.textContent=btn.dataset.busyBase;
+        if(btn.dataset.busyBaseAria)btn.setAttribute('aria-label',btn.dataset.busyBaseAria);else btn.removeAttribute('aria-label');
+        if(!locked){delete btn.dataset.busyBase; delete btn.dataset.busyBaseAria; delete btn.dataset.busyA11y;}
+      });
+      const terminalOpener=tr.querySelector('.slotopen');
+      if(terminalOpener){
+        terminalOpener.classList.remove('busy'); terminalOpener.removeAttribute('data-busy-label');
+        terminalOpener.removeAttribute('role'); terminalOpener.removeAttribute('aria-live');
+        terminalOpener.removeAttribute('aria-atomic'); terminalOpener.removeAttribute('aria-label');
+        terminalOpener.setAttribute('aria-busy',locked?'true':'false'); delete terminalOpener.dataset.busyA11y;
+      }
+      tr.querySelectorAll('.actcell button').forEach(function(btn){_setBusyControlLock(btn,locked);});
+      return;
+    }
+    tr.classList.toggle('slot-busy', busy||syncing);
+    tr.setAttribute('aria-busy',(busy||syncing)?'true':'false');
     if(busy&&remoteSet.has(k)&&(terminal.has(k)||truthSettled)){
       const meta=(window.__queueTerminalMeta||{})[k]||{};
       const boundary=String(meta.id||truthTerminal[k]||'terminal');
       const remoteOwner='remote:'+k+':after:'+boundary;
       if(window.__busyOwner[k]!==remoteOwner){
-        window.__busyStart[k]=Date.now(); window.__busyLabel[k]=_slotActionLabel(k);
+        if(!window.__busyStart[k])window.__busyStart[k]=Number(meta.startedAt)||Date.now();
+        window.__busyPhaseStart[k]=Date.now(); window.__busyLabel[k]=_tradePhaseLabel(meta.kind||_slotActionKind(k),'TERMINAL');
         window.__busyOwner[k]=remoteOwner; delete window.__busyJob[k];
       }
     }
     if(busy && !window.__busyStart[k]){
       window.__busyStart[k]=Date.now();
+      window.__busyPhaseStart[k]=Date.now();
       window.__busyOwner[k]='remote:'+k;
     }
     if(syncing){
+      const meta=(window.__queueTerminalMeta||{})[k]||{};
+      const terminalOwner='terminal:'+String(meta.id||k);
+      if(!window.__busyStart[k])window.__busyStart[k]=Number(meta.startedAt)||Number(meta.at)||Date.now();
+      if(window.__busyOwner[k]!==terminalOwner||!window.__busyPhaseStart[k])window.__busyPhaseStart[k]=Number(meta.at)||Date.now();
+      window.__busyOwner[k]=terminalOwner;
+      window.__busyLabel[k]=_tradePhaseLabel(meta.kind||_slotActionKind(k),'TERMINAL');
       tr.querySelectorAll('.actcell button').forEach(function(btn){btn.disabled=true;});
       const opener=tr.querySelector('.slotopen');
-      if(opener){ opener.classList.add('busy'); opener.setAttribute('data-busy-label',_slotActionLabel(k)); }
+      if(opener){ opener.classList.add('busy'); opener.setAttribute('data-busy-label',_slotUserBusyLabel(k,window.__busyLabel[k],meta.kind)); }
     }else if(!busy){
       _clearSlotBusyTimer(k);
       tr.querySelectorAll('button[data-busy-base]').forEach(function(btn){
-        btn.textContent=btn.dataset.busyBase; btn.disabled=false; delete btn.dataset.busyBase;
+        btn.textContent=btn.dataset.busyBase; _setBusyControlLock(btn,false);
+        if(btn.dataset.busyBaseAria)btn.setAttribute('aria-label',btn.dataset.busyBaseAria);else btn.removeAttribute('aria-label');
+        delete btn.dataset.busyBase; delete btn.dataset.busyBaseAria; delete btn.dataset.busyA11y;
       });
       const opener=tr.querySelector('.slotopen');
-      if(opener){ opener.classList.remove('busy'); opener.removeAttribute('data-busy-label'); opener.querySelectorAll('button').forEach(function(btn){btn.disabled=false;}); }
+      if(opener){ opener.classList.remove('busy'); opener.removeAttribute('data-busy-label'); opener.removeAttribute('role'); opener.removeAttribute('aria-live'); opener.removeAttribute('aria-atomic'); opener.removeAttribute('aria-label'); opener.removeAttribute('aria-busy'); delete opener.dataset.busyA11y; opener.querySelectorAll('button').forEach(function(btn){_setBusyControlLock(btn,false);}); }
     }
   });
   updateSlotTimers();
 }
-// 秒数直接显示在按钮上，从用户提交到服务端终态连续计时并以 100ms 更新。
+function _slotFeedbackModel(slot,now,reducedMotion){
+  const started=Number((window.__busyStart||{})[slot])||now;
+  const phaseStarted=Number((window.__busyPhaseStart||{})[slot])||started;
+  const label=String((window.__busyLabel||{})[slot]||_slotActionLabel(slot));
+  const totalSec=Math.max(0,(now-started)/1000);
+  const phaseElapsed=Math.max(0,now-phaseStarted);
+  const cycleSec=Math.floor((phaseElapsed%SLOT_FEEDBACK_CYCLE_MS)/100)/10;
+  const terminal=label.indexOf('终态已确认')>=0;
+  const confirming=(window.__queueConfirming||new Set()).has(Number(slot)||0)||label==='订单状态确认中';
+  const compact=label.replace(/^开仓·/,'开·').replace(/^平仓·/,'平·')
+    .replace('请求发送','请求').replace('接纳确认','等接纳').replace('队列已接纳','接纳').replace('队列已分配','排队')
+    .replace('执行预检','预检').replace('等待桥端 ACK','等 ACK')
+    .replace('首腿已 ACK·第二腿执行','首ACK/次腿')
+    .replace('桥端已 ACK·终态确认','ACK/终态').replace('终态已确认·持仓同步','终态/刷新');
+  const actionLabel=_slotUserBusyLabel(slot,label);
+  const visible=terminal?_tradeDoneLabel(_slotActionKind(slot)):
+    (confirming?'订单状态确认中':(actionLabel==='补腿中'?actionLabel:(actionLabel+' '+totalSec.toFixed(1)+'s')));
+  // Do not make aria-live announce ten timer updates per second.
+  const accessible=actionLabel;
+  return {label:label,compact:compact,totalSec:totalSec,cycleSec:cycleSec,visible:visible,accessible:accessible,terminal:terminal};
+}
+// 阶段与真实耗时保留给内部诊断；交易用户只看到稳定的动作状态。
 function updateSlotTimers(){
-  const bs=window.__busyStart||{};
+  const now=Date.now();
+  const reduced=!!(window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches);
   document.querySelectorAll('#otable tr.slot-busy').forEach(function(tr){
-    const k=Number(tr.getAttribute('data-slot')); const st=bs[k]; if(!st)return;
-    const sec=Math.max(0,(Date.now()-st)/1000).toFixed(1);
-    const label=(window.__busyLabel||{})[k]||_slotActionLabel(k);
+    const k=Number(tr.getAttribute('data-slot')); if(!(window.__busyStart||{})[k])return;
+    const feedback=_slotFeedbackModel(k,now,reduced);
     const opener=tr.querySelector('.slotopen');
     if(opener){
-      opener.classList.add('busy'); opener.setAttribute('data-busy-label',label+' '+sec+'s');
-      opener.querySelectorAll('button').forEach(function(btn){btn.disabled=true;}); return;
+      opener.classList.add('busy'); opener.setAttribute('data-busy-label',feedback.visible);
+      opener.setAttribute('role','status'); opener.setAttribute('aria-live','polite'); opener.setAttribute('aria-atomic','true'); opener.setAttribute('aria-busy','true');
+      if(opener.dataset.busyA11y!==feedback.accessible){opener.dataset.busyA11y=feedback.accessible;opener.setAttribute('aria-label',feedback.accessible);}
+      opener.querySelectorAll('button').forEach(function(btn){_setBusyControlLock(btn,true);}); return;
     }
     const buttons=Array.from(tr.querySelectorAll('.actcell .closebtn'));
     if(buttons.length){
-      buttons.forEach(function(btn){ if(!btn.dataset.busyBase)btn.dataset.busyBase=btn.textContent; btn.disabled=true; });
-      const btn=(label.indexOf('补腿')===0 ? buttons.find(function(x){return (x.dataset.busyBase||'').indexOf('补腿')>=0;}) : buttons[buttons.length-1])||buttons[0];
-      btn.textContent=label+' '+sec+'s';
+      buttons.forEach(function(btn){ if(!btn.dataset.busyBase){btn.dataset.busyBase=btn.textContent;btn.dataset.busyBaseAria=btn.getAttribute('aria-label')||'';} _setBusyControlLock(btn,true); });
+      const btn=(feedback.label.indexOf('补腿')===0 ? buttons.find(function(x){return (x.dataset.busyBase||'').indexOf('补腿')>=0;}) : buttons[buttons.length-1])||buttons[0];
+      btn.textContent=feedback.visible;
+      if(btn.dataset.busyA11y!==feedback.accessible){btn.dataset.busyA11y=feedback.accessible;btn.setAttribute('aria-label',feedback.accessible);}
     }
   });
 }
 setInterval(updateSlotTimers, 100);
 
 function _jobVersion(job){
-  const raw=(job&&job.updated_at)||(job&&job.finished_at)||(job&&job.created_at)||0;
-  const numeric=Number(raw); if(Number.isFinite(numeric)&&numeric>0)return numeric;
-  const parsed=Date.parse(raw); return Number.isFinite(parsed)?parsed/1000:0;
+  for(const raw of [job&&job.updated_at,job&&job.finished_at,job&&job.created_at]){
+    const version=_jobTimestampVersion(raw); if(version>0)return version;
+  }
+  return 0;
 }
 function _jobCreatedVersion(job){
-  const raw=(job&&job.created_at)||0, numeric=Number(raw);
-  if(Number.isFinite(numeric)&&numeric>0)return numeric;
-  const parsed=Date.parse(raw); return Number.isFinite(parsed)?parsed/1000:0;
+  return _jobTimestampVersion(job&&job.created_at);
+}
+function _jobTimestampVersion(raw){
+  const numeric=Number(raw); if(Number.isFinite(numeric)&&numeric>0)return numeric;
+  if(raw===0||raw==='0'||typeof raw!=='string'||!raw.trim())return 0;
+  const parsed=Date.parse(raw); return Number.isFinite(parsed)&&parsed>0?parsed/1000:0;
+}
+function _jobConfirmationStartedMs(job){
+  const created=_jobCreatedVersion(job||{});
+  if(created>0)return created*1000;
+  const updated=_jobVersion(job||{});
+  if(updated>0)return updated*1000;
+  const slot=Number(job&&job.slot)||0;
+  const local=slot>0?Number((window.__busyStart||{})[slot]):0;
+  return Number.isFinite(local)&&local>0?local:0;
 }
 function _jobEffectiveState(job){
   const state=String((job&&job.state)||'');
@@ -3351,6 +3628,7 @@ function _applyTradeJobTruth(job,positions){
 }
 function _recordTradeJob(job,kind){
   if(!job)return null;
+  _trustTradeTickets(job.result||job.final_result||job.detail||job);
   const slot=Number(job.slot)||0;
   const id=String(job.job_id||((job.batch_id||'account')+':'+slot));
   if(!slot||!id)return null;
@@ -3449,7 +3727,7 @@ function _settleMissingTradeBatches(returnedIds,requestedBatchIds){
   });
 }
 function _rebuildTradeSlots(){
-  const now=Date.now(), latestBySlot={}, activeBySlot={}, terminalBySlot={};
+  const now=Date.now(), latestBySlot={}, activeBySlot={}, terminalBySlot={}, confirming=new Set();
   _tradeJobs.forEach(function(job,id){
     const terminal=_queueTerminalStates.has(_jobEffectiveState(job));
     const batchId=String(job&&job.batch_id||'');
@@ -3474,15 +3752,16 @@ function _rebuildTradeSlots(){
   const terminal=new Set();
   Object.keys(activeBySlot).forEach(function(key){
     const slot=Number(key), job=activeBySlot[key];
+    if(_jobNeedsConfirmationLabel(job,now))confirming.add(slot);
     _clearSlotTerminal(slot); delete window.__positionTruthTerminal[slot];
     const identity=String(job.job_id||job.batch_id||''), previousIdentity=String(window.__busyJob[slot]||'');
     const watch=_tradeBatchWatches.get(String(job.batch_id||''));
     const linkedOwner=String((watch&&watch.localOwner)||''), localMeta=_currentSlotBusyOwner(slot);
-    const queueLabel=_queueSlotLabel(job.state,job.kind);
+    const queueLabel=confirming.has(slot)?'订单状态确认中':_queueSlotLabel(job.state,job.kind,job);
     if(localMeta){
       if(linkedOwner&&localMeta.owner===linkedOwner){
-        if(localMeta.label!==queueLabel){localMeta.label=queueLabel;localMeta.startedAt=Date.now();}
-        window.__busyStart[slot]=localMeta.startedAt; window.__busyLabel[slot]=queueLabel;
+        if(localMeta.label!==queueLabel){localMeta.label=queueLabel;localMeta.phaseStartedAt=Date.now();}
+        _syncSlotBusyOwner(slot);
       }
     }else{
       const queueOwner='queue:'+identity;
@@ -3492,8 +3771,14 @@ function _rebuildTradeSlots(){
       const jobChanged=!!(identity&&previousIdentity&&identity!==previousIdentity);
       const afterTerminalRemote=currentOwner.indexOf('remote:'+slot+':after:')===0;
       const phaseChanged=String(window.__busyLabel[slot]||'')!==queueLabel;
-      if(!window.__busyStart[slot]||jobChanged||afterTerminalRemote||
-         phaseChanged||(!adoptsRemote&&window.__busyOwner[slot]!==queueOwner))window.__busyStart[slot]=Date.now();
+      const createdMs=_jobCreatedVersion(job)*1000;
+      const validCreated=createdMs>0&&createdMs<=Date.now();
+      if(!window.__busyStart[slot]||jobChanged||afterTerminalRemote||(!adoptsRemote&&window.__busyOwner[slot]!==queueOwner)){
+        window.__busyStart[slot]=validCreated?createdMs:Date.now();
+      }else if(validCreated&&createdMs<Number(window.__busyStart[slot])){
+        window.__busyStart[slot]=createdMs;
+      }
+      if(phaseChanged||!window.__busyPhaseStart[slot])window.__busyPhaseStart[slot]=Date.now();
       window.__busyOwner[slot]=queueOwner;
       window.__busyLabel[slot]=queueLabel;
     }
@@ -3518,6 +3803,7 @@ function _rebuildTradeSlots(){
     if(!active.has(slot)&&!terminal.has(slot))_clearSlotTerminal(slot);
   });
   window.__queueBusy=active; window.__queueTerminal=terminal;
+  window.__queueConfirming=confirming;
   const local=window.__busyLocal||new Set();
   const remoteActive=new Set((window.__remoteBusy||[]).map(Number).filter(function(slot){return slot>0;}));
   Object.keys(window.__busyStart||{}).forEach(function(key){
@@ -3654,9 +3940,19 @@ async function syncTradeQueueStates(){
       const previousSupplementalSlots=_supplementalTradeSlots().join(',');
       const ids=Array.from(_tradeBatchWatches.keys()).slice(0,20);
       const requestedBatchIds=new Set(ids);
-      let path='/trade_queue/'+encodeURIComponent(QH.user)+'?symbol='+encodeURIComponent(window.QHSYM||'XAUUSD');
-      if(ids.length)path+='&batch_ids='+encodeURIComponent(ids.join(','));
-      const state=await licGet(path,{priority:'high',cache:'no-store'});
+      let state;
+      if(ids.length){
+        const batches=(await Promise.all(ids.map(async function(batchId){
+          try{return await licGet('/trade_queue/batch/'+encodeURIComponent(batchId),
+            {priority:'high',cache:'no-store'});}
+          catch(e){if(Number(e&&e.status)===404)return null;throw e;}
+        }))).filter(Boolean);
+        state={username:QH.user,symbol:window.QHSYM||'XAUUSD',batches:batches,slots:[],
+          depths:_runtimeHealth.depths||{},server_ts:Date.now()/1000,fast_path:'batch'};
+      }else{
+        const path='/trade_queue/'+encodeURIComponent(QH.user)+'?symbol='+encodeURIComponent(window.QHSYM||'XAUUSD');
+        state=await licGet(path,{priority:'high',cache:'no-store'});
+      }
       _qhFrontendTrace.queueState(state,ids);
       _queueSyncFailures=0;
       updateRuntimeHealth({depths:state.depths||{},queueError:false});
@@ -4732,7 +5028,8 @@ async function loadCfg(){
     setv('cfg-entrymode',p.entry_mode); setv('cfg-exitmode',p.exit_mode); setv('cfg-speed',p.speed_mode);
     setv('cfg-predict',p.predict_budget);
     setsw('cfg-sw-autoclose', p.auto_close!==false); setsw('cfg-sw-singleleg', p.single_leg_alert!==false);
-    setsw('cfg-sw-sat', !!p.weekend_sat); setsw('cfg-sw-sun', !!p.weekend_sun);
+    // 数据库存量字段保留 True=允许交易；页面开关使用直观的 ON=休市。
+    setsw('cfg-sw-sat', p.weekend_sat!==true); setsw('cfg-sw-sun', p.weekend_sun!==true);
     // 10 个 UI 开关从 localStorage 恢复(批四: 状态持久化)
     ['cfg-sw-smartdisplay','cfg-sw-smartpredict','cfg-sw-profitfirst','cfg-sw-entrymech','cfg-sw-entrywait','cfg-sw-showquote','cfg-sw-loop','cfg-sw-exitmode'].forEach(function(id){ const v=localStorage.getItem('qh_'+id); if(v!=null)setsw(id, v==='1'); });
   }catch(e){ /* 回填失败保留默认, 不阻断打开 */ }
@@ -4746,19 +5043,20 @@ async function saveCfg(){
   const intv=function(id,d){const e=$(id);const v=e?parseInt(e.value):NaN;return isNaN(v)?d:v;};
   const strv=function(id,d){const e=$(id);const v=e?String(e.value).trim():'';return v||d;};
   const swon=function(id,d){const e=$(id);return e?e.classList.contains('on'):d;};
-  // 周末交易 select: 第一项"关闭"=weekend_guard true
   const ladderRaw=Number((($('cfg-ladders')||{}).value||''));
   if(!Number.isInteger(ladderRaw)||ladderRaw<1||ladderRaw>20){
     toast('进单量必须是 1..20 的整数');
     const input=$('cfg-ladders'); if(input)input.focus();
     return;
   }
+  const satClosed=swon('cfg-sw-sat',true), sunClosed=swon('cfg-sw-sun',true);
   const body={
     username:QH.user, license_key:QH.key, symbol:strv('cfg-symbol','XAUUSD'),
     entry_spread:numv('cfg-spread',0.30), tp_points:0.30, sl_points:0.50,  /* 点差净盈亏点数(全局默认; 逐坑/批量可覆盖) */
     ladders:ladderRaw, hold_secs:intv('cfg-hold',300),
-    weekend_guard:!(swon('cfg-sw-sat',false)||swon('cfg-sw-sun',false)),
-    weekend_sat:swon('cfg-sw-sat',false), weekend_sun:swon('cfg-sw-sun',false),
+    // 后端历史字段仍是 allow 语义，保存时反向映射，现有配置无需迁移。
+    weekend_guard:satClosed&&sunClosed,
+    weekend_sat:!satClosed, weekend_sun:!sunClosed,
     main_lot_mult:numv('cfg-mlot',1.0), hedge_lot_mult:numv('cfg-hlot',1.0),
     main_spread_cap:numv('cfg-mcap',30), hedge_spread_cap:numv('cfg-hcap',30),
     slippage_tol:numv('cfg-sliptol',5), slippage_pause_min:intv('cfg-slippause',2),
@@ -4782,6 +5080,10 @@ async function saveCfg(){
     entry_win_start:strv('cfg-entry-start',''), entry_win_end:strv('cfg-entry-end',''),
     run_win_start:strv('cfg-run-start',''), run_win_end:strv('cfg-run-end','')
   };
+  const validTime=function(value){return /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(String(value||''));};
+  for(const win of [[body.entry_win_start,body.entry_win_end,'进单时间'],[body.run_win_start,body.run_win_end,'自动运行时间']]){
+    if((win[0]||win[1])&&(!validTime(win[0])||!validTime(win[1]))){toast(win[2]+'须同时填写有效时间(HH:MM)');return;}
+  }
   // applySwitches 读取用: 预算值 + 循环间隔(=入场间隔) 落 localStorage
   localStorage.setItem('qh_predict_budget', String(body.predict_budget));
   localStorage.setItem('qh_loop_interval', String(body.entry_interval_sec));
@@ -4865,7 +5167,7 @@ async function doCloseAll(mode){
     if(r.demo){ toast('【演示模式】'+r.msg); pushAlert(mode==='force'?'err':'info', '[演示] '+label); }
     else if(r.accepted){ toast('平仓中'); watchTradeBatch(r,'close',[],label); pushAlert('info',label+' 平仓中'); }
     else { toast(r.msg||'已执行'); pushAlert('err', label+' 已真实执行'); }
-  }catch(e){ toast('执行失败：'+(e.message||e)); }
+  }catch(e){ toast(tradeClosedMessage(e,'close')||('执行失败：'+(e.message||e))); }
   finally{ _tradeUnlock(key); }
 }
 
@@ -4918,9 +5220,35 @@ async function licPost(path, body, options){
   return _licensedJson(path,{method:'POST',headers:{'Content-Type':'application/json','X-QH-Writer':QH.writer},
     body:JSON.stringify(body)},timeoutMs);
 }
+function tradeClosedMessage(e,kind){
+  const value=(e&&e.error&&typeof e.error==='object')?e.error:e;
+  const values=[],pending=[value],seen=new Set();
+  while(pending.length&&seen.size<32){
+    const current=pending.pop();
+    if(current==null)continue;
+    if(typeof current==='object'){
+      if(seen.has(current))continue; seen.add(current);
+      ['detail','message','code','retcode','comment','reason','error'].forEach(function(key){
+        const item=current[key]; if(item==null)return;
+        if(typeof item==='object')pending.push(item); else values.push(key+'='+String(item));
+      });
+      Object.keys(current).forEach(function(key){
+        const item=current[key]; if(item&&typeof item==='object')pending.push(item);
+      });
+    }else values.push(String(current));
+  }
+  const raw=values.join(' ');
+  const code=String((value&&value.code)||'').toUpperCase();
+  const closed=code==='MARKET_CLOSED'||/\bMARKET_CLOSED\b|TRADE_RETCODE_MARKET_CLOSED|market closed|市场关闭|休市中|(?:^|[^0-9])(?:132|10018)(?:[^0-9]|$)/i.test(raw);
+  if(!closed)return null;
+  const action=String((value&&value.action)||kind||'open').toLowerCase();
+  return action==='close'||/禁止平仓/.test(raw)?'休市中，禁止平仓!':'休市中，禁止开仓!';
+}
 function openBlockMessage(e,slot){
+  const closed=tradeClosedMessage(e,'open'); if(closed)return closed;
   if(Number(e&&e.status)!==409)return null;
   let raw=String((e&&e.detail)||(e&&e.message)||'').trim();
+  if(/行情新鲜度闸|quote_gate|max_age|报价可能冻结|stale quote/i.test(raw))return '行情暂不可用，禁止开仓!';
   if(/ACCOUNT_WRITER_LEASE_HELD/.test(raw))return raw.replace(/^ACCOUNT_WRITER_LEASE_HELD:\s*/, '');
   if(/ACCOUNT_EXECUTION_BUSY/.test(raw))return raw.replace(/^ACCOUNT_EXECUTION_BUSY:\s*/, '');
   if(/裸空|单腿/.test(raw))return null;
@@ -4957,6 +5285,8 @@ async function _recoverTradeAdmission(clientRequestId,timeoutMs){
 }
 async function tradePost(path,body,clientRequestId,fallbackSlots){
   const requestId=String(clientRequestId||_newTradeRequestId());
+  _cancelTradePositionRead();
+  _blockNativeLegReads(TRADE_NATIVE_READ_QUIET_MS);
   const traceMeta={kind:/close/.test(path)?'close':'open',path:path,
     slots:(fallbackSlots||[]).map(Number).filter(function(slot){return slot>0;})};
   _qhFrontendTrace.start(requestId,traceMeta);
@@ -5015,47 +5345,108 @@ function _tradeTickets(result){
   ['main','hedge'].forEach(function(leg){ const x=detail[leg]||{}; add(x.order||x.deal||x.ticket); });
   return Array.from(new Set(found));
 }
-let _tradePositionFetch=null, _tradePositionFetchAt=0;
+let _tradePositionFetch=null, _tradeProjectionFetch=null, _tradePositionFetchAt=0;
+let _tradePositionController=null;
+function _cancelTradePositionRead(){
+  const controller=_tradePositionController;_tradePositionController=null;
+  if(controller){try{controller.__qhTradeCancelled=true;controller.abort();}catch(_e){}}
+}
 async function _readTradePositions(options){
   options=options||{};
   const force=options.force===true;
-  if(_tradePositionFetch)return _tradePositionFetch;
+  const projection=options.projection===true;
+  // A terminal projection is Redis-local and must not wait behind a slow
+  // cross-region full positions read. It has its own single-flight lane.
+  if(projection&&_tradeProjectionFetch)return _tradeProjectionFetch;
+  if(!projection&&_tradePositionFetch)return _tradePositionFetch;
   const _frontendPositionTraceContext=_qhFrontendTrace&&_qhFrontendTrace.positionRefreshDone;
-  const _frontendPositionTraceBatchIds=Array.from(new Set((options.batch_ids||[]).concat(
-    Array.from(_tradeBatchWatches.keys())))).map(String).filter(Boolean);
-  _tradePositionFetch=(async function(){
+  // Only an explicit terminal refresh owns terminal telemetry. Active position
+  // polls must not settle a different in-flight command sharing the response.
+  const _frontendPositionTraceBatchIds=(options.terminal===true
+    ?Array.from(new Set(options.batch_ids||[])):[]).map(String).filter(Boolean);
+  const _frontendPositionTraceCommandIds=(options.terminal===true
+    ?Array.from(new Set(options.command_ids||[])):[]).map(String).filter(Boolean);
+  const positionController=(!projection&&typeof AbortController!=='undefined')?new AbortController():null;
+  if(positionController)_tradePositionController=positionController;
+  const positionRequest=(async function(){
     const pause=force?0:Math.max(0,100-(Date.now()-_tradePositionFetchAt)); if(pause)await _delay(pause);
-    const legs=await QH.get('/engine/legs?username='+encodeURIComponent(QH.user)+'&_t='+Date.now());
+    // One degraded bridge read must not hold the entire slot UI indefinitely.
+    // The next active-trade loop retries immediately with the previous trusted
+    // snapshot still visible.
+    const legs=await QH.get('/engine/legs?username='+encodeURIComponent(QH.user)+
+      (projection?'&projection=true':'')+'&_t='+Date.now(),
+      {timeoutMs:tradeStateActive()?1200:2500,cache:'no-store',controller:positionController});
     _tradePositionFetchAt=Date.now();
     const ms=legs.status&&legs.status.main, hs=legs.status&&legs.status.hedge;
     if(ms)fillAcct('m',ms,ms.platform||'--'); if(hs)fillAcct('h',hs,hs.platform||'--');
     const incoming=legs.positions||null, previous=window.__lastPositions||null, merged={}, trust={};
+    const ticketTrust=window.__ticketTrust||(window.__ticketTrust={main:{},hedge:{}});
     ['main','hedge'].forEach(function(leg){
       const status=(legs.status&&legs.status[leg])||{};
       const nextRows=_positionRows(incoming,leg), previousRows=_positionRows(previous,leg);
       const failed=!!status.positions_error&&!status.positions_stale;
       trust[leg]=nextRows!==null&&!status.positions_error&&!status.positions_stale&&status.connected!==false;
-      if(nextRows!==null&&!failed)merged[leg]=incoming[leg];
-      else if(previousRows!==null)merged[leg]=previous[leg];
+      if(nextRows!==null&&!failed){
+        merged[leg]=incoming[leg];
+        // Trust is ticket-scoped so one degraded leg cannot freeze every
+        // unrelated slot.  A fresh broker snapshot replaces the set; a
+        // degraded read below deliberately preserves the last trusted set.
+        const nextTrust={};
+        nextRows.forEach(function(row){const tk=_positionTicket(row);if(tk)nextTrust[tk]=true;});
+        // Preserve exact trade-result proof for tickets that have not yet
+        // appeared in this bridge snapshot; a later stale read must not
+        // revoke a command-local proof for the same ticket.
+        Object.keys(ticketTrust[leg]||{}).forEach(function(tk){
+          if(ticketTrust[leg][tk]===true&&!nextTrust[tk])nextTrust[tk]=true;
+        });
+        ticketTrust[leg]=nextTrust;
+      } else if(previousRows!==null)merged[leg]=previous[leg];
+      if(!ticketTrust[leg])ticketTrust[leg]={};
     });
     window.__positionTrust=trust;
     if(_positionRows(merged,'main')!==null||_positionRows(merged,'hedge')!==null)window.__lastPositions=merged;
-    window.__remoteBusy=legs.busy_slots||[];
-    updateRuntimeHealth({legs:legs.status||null,legsError:false});
+    window.__remoteBusy=(legs.busy_slots||[]).map(Number).filter(function(slot){return slot>0;});
+    const incomingBusyActions=(legs.busy_actions&&typeof legs.busy_actions==='object')?legs.busy_actions:{};
+    const previousBusyActions=window.__remoteBusyActions||{}, nextBusyActions={};
+    window.__remoteBusy.forEach(function(slot){
+      const action=incomingBusyActions[String(slot)]||previousBusyActions[String(slot)];
+      if(action==='open'||action==='close')nextBusyActions[String(slot)]=action;
+    });
+    window.__remoteBusyActions=nextBusyActions;
+    // A terminal projection intentionally avoids bridge status I/O. Preserve
+    // the last account-health card until the regular full snapshot arrives.
+    if(!legs.position_projection)updateRuntimeHealth({legs:legs.status||null,legsError:false});
     renderPosLive(window.__lastPositions);
-    if(_frontendPositionTraceContext&&_frontendPositionTraceBatchIds.length&&trust.main&&trust.hedge){
-      _frontendPositionTraceContext({batch_ids:_frontendPositionTraceBatchIds,trust:trust,counts:{main:(_positionRows(window.__lastPositions,'main')||[]).length,hedge:(_positionRows(window.__lastPositions,'hedge')||[]).length}});
+    if(options.terminal===true&&_frontendPositionTraceContext&&
+       _frontendPositionTraceBatchIds.length&&_frontendPositionTraceCommandIds.length&&
+       trust.main&&trust.hedge){
+      _frontendPositionTraceContext({batch_ids:_frontendPositionTraceBatchIds,
+        command_ids:_frontendPositionTraceCommandIds,trust:trust,
+        counts:{main:(_positionRows(window.__lastPositions,'main')||[]).length,
+          hedge:(_positionRows(window.__lastPositions,'hedge')||[]).length}});
     }
     // Re-apply the decision snapshot after the authoritative position read;
     // this is the convergence point for the top bar, mobile nav, and slots.
     if(window.__axData&&typeof applyAutoExitState==='function')applyAutoExitState(window.__axData);
     return Object.assign({},legs,{positions:window.__lastPositions||{}});
   })();
-  try{return await _tradePositionFetch;}catch(e){
-    window.__positionTrust={main:false,hedge:false};
-    if(typeof renderPosLive==='function')renderPosLive(window.__lastPositions||null);
-    updateRuntimeHealth({legsError:true}); throw e;
-  }finally{_tradePositionFetch=null;}
+  if(projection)_tradeProjectionFetch=positionRequest;
+  else _tradePositionFetch=positionRequest;
+  try{return await positionRequest;}catch(e){
+    if(!projection&&!(positionController&&positionController.__qhTradeCancelled&&
+       String(e&&e.name)==='AbortError')){
+      window.__positionTrust={main:false,hedge:false};
+      if(typeof renderPosLive==='function')renderPosLive(window.__lastPositions||null);
+      updateRuntimeHealth({legsError:true});
+    }
+    throw e;
+  }finally{
+    if(projection){if(_tradeProjectionFetch===positionRequest)_tradeProjectionFetch=null;}
+    else{
+      if(_tradePositionFetch===positionRequest)_tradePositionFetch=null;
+      if(_tradePositionController===positionController)_tradePositionController=null;
+    }
+  }
 }
 async function refreshTradePositions(kind,tickets,timeoutMs){
   const expected=new Set((tickets||[]).map(String).filter(function(x){return x&&x!=='0';}));
@@ -5089,8 +5480,15 @@ const _tradeInflight={};
 function _tradeLock(key){ if(_tradeInflight[key])return false; _tradeInflight[key]=true; return true; }
 function _tradeUnlock(key,delay){ setTimeout(function(){ _tradeInflight[key]=false; }, delay==null?100:delay); }
 
-function _queueSlotLabel(state,kind){
-  return _tradeActionLabel(kind);
+function _queueSlotLabel(state,kind,job){
+  if(_jobNeedsConfirmationLabel(Object.assign({},job||{},{state:state}),Date.now()))return '订单状态确认中';
+  return _tradePhaseLabel(kind,_jobProgressPhase(Object.assign({},job||{},{state:state})));
+}
+function _jobNeedsConfirmationLabel(job,now){
+  const state=String((job&&job.state)||'').toUpperCase();
+  if(!new Set(['QUEUED','CLAIMED','EXECUTING','DISPATCHING']).has(state))return false;
+  const started=_jobConfirmationStartedMs(job||{}); if(!(started>0))return false;
+  return Math.max(0,Number(now||Date.now())-started)>=TRADE_STATE_CONFIRMATION_MS;
 }
 function _tradeJobReason(job){
   const err=(job&&job.error)||{}, result=(job&&job.result)||{};
@@ -5117,6 +5515,7 @@ function _tradeJobFailedLegs(job){
 function _tradeJobFailureMessage(job,kind){
   const slot=Number(job&&job.slot)||0, state=(job&&job.state)||'FAILED', reason=_tradeJobReason(job);
   const legs=_tradeJobFailedLegs(job);
+  const closed=tradeClosedMessage((job&&job.error)||reason,kind); if(closed)return closed;
   if(state==='SINGLE_LEG_EXPOSED')return '坑'+slot+' 单腿暴露(SINGLE_LEG_EXPOSED，'+legs+')：'+reason+'；请立即核对持仓';
   if(state==='UNKNOWN'||state==='MANUAL_REVIEW')return '坑'+slot+' 待人工核对('+state+'，'+legs+')：'+reason+'；请勿重复点击';
   if(kind==='open'){
@@ -5125,21 +5524,30 @@ function _tradeJobFailureMessage(job,kind){
   }
   return '坑'+slot+' '+(kind==='close'?'平仓':'开仓')+'失败('+state+'，'+legs+')：'+reason;
 }
-let _terminalPositionTimer=null, _terminalPositionBatchIds=new Set();
+let _terminalPositionTimer=null, _terminalPositionBatchIds=new Set(), _terminalPositionCommandIds=new Set();
 function _scheduleTerminalPositionRefresh(batch){
   const batchId=String((batch&&batch.batch_id)||'');if(batchId)_terminalPositionBatchIds.add(batchId);
+  (batch&&batch.jobs||[]).forEach(function(job){
+    const commandId=String((job&&job.command_id)||'');
+    if(commandId&&_queueTerminalStates.has(_jobEffectiveState(job)))_terminalPositionCommandIds.add(commandId);
+  });
   if(_terminalPositionTimer)clearTimeout(_terminalPositionTimer);
   const refresh=async function(){
     _terminalPositionTimer=null;
     const batchIds=Array.from(_terminalPositionBatchIds);_terminalPositionBatchIds.clear();
-    try{await refreshLegsCard({force:true,batch_ids:batchIds});}catch(e){}
+    const commandIds=Array.from(_terminalPositionCommandIds);_terminalPositionCommandIds.clear();
+    try{await refreshLegsCard({force:true,projection:true,terminal:true,
+      batch_ids:batchIds,command_ids:commandIds});}catch(e){}
   };
-  _terminalPositionTimer=setTimeout(refresh,25);
+  // Run on the next task so every terminal batch coalesces into one forced,
+  // no-cache position read without adding an artificial UI delay.
+  _terminalPositionTimer=setTimeout(refresh,0);
 }
 function _settleTradeBatch(batch){
   const id=String((batch&&batch.batch_id)||''), watch=_tradeBatchWatches.get(id);
   if(!watch||watch.settled)return;
   batch=_normaliseTradeBatch(batch,watch);
+  _blockNativeLegReads(TRADE_NATIVE_READ_QUIET_MS);
   _qhFrontendTrace.settleBatch(batch);
   watch.settled=true; _tradeBatchWatches.delete(id);
   watch.initial.forEach(function(slot){_releaseSlotBusyOwner(slot,watch.localOwner);});
@@ -5167,6 +5575,7 @@ function watchTradeBatch(response,kind,fallbackTickets,label,localOwner){
   if(!response||!response.batch_id)return Promise.resolve(null);
   const id=String(response.batch_id), existing=_tradeBatchWatches.get(id);
   if(existing)return existing.promise;
+  _trustTradeTickets(response.detail||response.result||response);
   const initial=(response.slots||[]).map(Number).filter(function(slot){return slot>0;});
   if(!localOwner&&initial.length){
     const inherited=initial.map(function(slot){const current=_currentSlotBusyOwner(slot);return current&&current.owner;});
@@ -5182,7 +5591,8 @@ function watchTradeBatch(response,kind,fallbackTickets,label,localOwner){
   watch._initialTruth={};
   initial.forEach(function(slot){watch._initialTruth[String(slot)]=_slotPositionSignature(window.__lastPositions||{},slot);});
   _tradeBatchWatches.set(id,watch);
-  initial.forEach(function(slot){setSlotBusy(slot,true,_tradeActionLabel(watch.kind),localOwner);});
+  const admissionPhase=response.admission_uncertain?'ADMISSION':'ADMITTED';
+  initial.forEach(function(slot){setSlotBusy(slot,true,_tradePhaseLabel(watch.kind,admissionPhase),localOwner);});
   _requestTradeStateSync();
   return promise;
 }
@@ -5208,10 +5618,10 @@ async function openPair(direction){
   const _lp=window.__lastPositions||{}; const _mp=(_lp.main&&(_lp.main.positions||_lp.main))||[];
   const _occ=new Set(_mp.map(p=>Number(p&&p.slot)).filter(x=>x>0));
   const _tgt=[];
-  for(let k=1;k<=slots;k++){ if(!_occ.has(k)&&!_slotActiveExecution(k))_tgt.push(k); }
+  for(let k=1;k<=slots;k++){ if(!_occ.has(k)&&!_slotTradeBlocked(k))_tgt.push(k); }
   if(!_tgt.length){ _tradeUnlock(key); toast('暂无可开坑位，已有开仓正在执行'); return; }
   const busyOwner=_newSlotBusyOwner('open:'+direction);
-  _tgt.forEach(k=>setSlotBusy(k,true,_tradeActionLabel('open'),busyOwner));
+  _tgt.forEach(k=>setSlotBusy(k,true,_tradePhaseLabel('open','REQUEST'),busyOwner));
   let accepted=false;
   try{
     const j=await tradePost('/cmd/open_pair',{username:QH.user,license_key:QH.key,confirm:true,
@@ -5238,7 +5648,7 @@ async function _submitTargetOpenGroup(group){
   const label=direction==='reverse' ? '反向(1空2涨)' : '正向(2空1涨)';
   const slotLabel=slots.map(function(slot){return '坑'+slot;}).join('/');
   const busyOwner=String(first.busyOwner||_newSlotBusyOwner('open-slots:'+slots.join('-')+':'+direction));
-  group.forEach(function(item){setSlotBusy(item.slot,true,_tradeActionLabel('open'),busyOwner);});
+  group.forEach(function(item){setSlotBusy(item.slot,true,_tradePhaseLabel('open','REQUEST'),busyOwner);});
   let accepted=false;
   try{
     const j=await tradePost('/cmd/open_pair',{username:QH.user,license_key:QH.key,confirm:true,
@@ -5276,11 +5686,12 @@ function openPairSlot(slot, direction){
     toast('坑'+slot+'超出当前进单量范围 1..'+ladders);
     return Promise.resolve();
   }
+  if(_slotReviewLocked(slot)){ toast('坑'+slot+'成交结果待人工核对，已禁止重复开仓'); return; }
   if(_slotActiveExecution(slot)){ toast('坑'+slot+'开仓中，请稍候'); return; }
   const key='openslot_'+slot+'_'+direction;
   if(!_tradeLock(key)){ toast('开仓中'); return Promise.resolve(); }
   const provisionalOwner=_newSlotBusyOwner('open-slot-wait:'+slot+':'+direction);
-  setSlotBusy(slot,true,_tradeActionLabel('open'),provisionalOwner);
+  setSlotBusy(slot,true,_tradePhaseLabel('open','REQUEST'),provisionalOwner);
   return new Promise(function(resolve){
     const item={slot:slot,direction:direction,symbol:(window.QHSYM||'XAUUSD'),
       busyOwner:provisionalOwner,
@@ -5302,6 +5713,7 @@ function closeSlot(mode){
   closePair(d.mSide,d.hSide,(window.QHSYM||'XAUUSD'),d.mTk||'',d.hTk||'',slot);
 }
 function closeBlockMessage(e,kLbl){
+  const closed=tradeClosedMessage(e,'close'); if(closed)return closed;
   const raw=String((e&&e.detail)||(e&&e.message)||e||'').trim();
   if(Number(e&&e.status)===409&&/持仓已关闭|ticket 不存在|position already closed|ticket missing/i.test(raw)){
     return kLbl+'已无该持仓，本次未发送平仓';
@@ -5330,7 +5742,7 @@ async function closePair(mainSide,hedgeSide,sym,mTk,hTk,slot){
   if(!_tradeLock(key)){ toast(kLbl+'平仓中'); return; }   // 立即执行, 不再二次确认
   toast(kLbl+' 平仓中');
   const busyOwner=_newSlotBusyOwner('close:'+String(slot||mTk+':'+hTk));
-  if(slot)setSlotBusy(slot,true,_tradeActionLabel('close'),busyOwner);
+  if(slot)setSlotBusy(slot,true,_tradePhaseLabel('close','REQUEST'),busyOwner);
   let accepted=false;
   try{
     const mt=parseInt(mTk,10)||0, ht=parseInt(hTk,10)||0;

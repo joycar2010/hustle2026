@@ -1,5 +1,5 @@
 # Quant Hedge 连接器层 — Adapter 模式（双腿：主 ICMarkets + 对冲 Bybit）
-import os, httpx, asyncio, inspect as _inspect, uuid as _uuid, hashlib as _hashlib
+import os, re as _re, httpx, asyncio, inspect as _inspect, uuid as _uuid, hashlib as _hashlib, time as _time
 
 # 速度档位 → 腿间延迟(秒)。同进同出忽略此延迟(并发); 顺序模式用它隔开两腿。
 SPEED_LEG_DELAY = {"normal": 0.5, "fast": 0.2, "turbo": 0.0}
@@ -91,11 +91,33 @@ def _open_dispatch_exception(ex, request_id, comment):
 _EXPLICIT_NOT_FILLED_RETCODES = frozenset({
     129, 130, 131, 132, 133, 134, 135, 136, 138, 140, 141,
     145, 146, 147, 148, 149, 150, 4106, 4107, 4108, 4109,
-    # MT5 TRADE_RETCODE_INVALID: the request was rejected before execution.
+    # MT5 INVALID / MARKET_CLOSED: broker rejected before execution.
     # Keep timeout/transport codes out of this set because they do not prove
     # that the broker never accepted the order.
-    10013,
+    10013, 10018, 10044,
 })
+
+def _explicit_not_filled_scalar(value):
+    if isinstance(value,bool) or value is None:
+        return None
+    try:
+        code=int(value)
+    except (TypeError,ValueError):
+        code=None
+    if code in _EXPLICIT_NOT_FILLED_RETCODES:
+        return code
+    text=str(value).strip().lower()
+    if "session closed" in text or "session_closed" in text:
+        return 10044
+    if ("market closed" in text or "market_closed" in text or
+            "trade_retcode_market_closed" in text or
+            "市场关闭" in text or "休市" in text):
+        return 10018
+    for token in _re.findall(r"(?<!\d)(\d{3,5})(?!\d)",text):
+        code=int(token)
+        if code in _EXPLICIT_NOT_FILLED_RETCODES:
+            return code
+    return None
 
 def _new_deadline(timeout):
     return asyncio.get_running_loop().time() + max(0.0, float(timeout))
@@ -141,6 +163,58 @@ def _position_items(snapshot):
         raise ValueError("stale positions snapshot")
     return snapshot.get("positions")
 
+def _explicit_not_filled_retcode(result):
+    """Return a broker rejection code from a bounded structured payload."""
+    pending=[result]; seen=set()
+    while pending and len(seen)<32:
+        current=pending.pop()
+        if isinstance(current,dict):
+            marker=id(current)
+            if marker in seen:
+                continue
+            seen.add(marker)
+            for key,value in current.items():
+                name=str(key or "").lower()
+                if name in ("retcode","final_retcode","trade_retcode","return_code",
+                            "code","result","detail","error","comment","message","reason") and not isinstance(
+                                value,(dict,list,tuple)):
+                    code=_explicit_not_filled_scalar(value)
+                    if code is not None:
+                        return code
+                if isinstance(value,(dict,list,tuple)):
+                    pending.append(value)
+        elif isinstance(current,(list,tuple)):
+            pending.extend(current)
+        else:
+            code=_explicit_not_filled_scalar(current)
+            if code is not None:
+                return code
+    return None
+
+def _normalize_explicit_not_filled(result):
+    """Make immediate and order-status rejections share one terminal shape."""
+    if not isinstance(result,dict):
+        result={"result":result}
+    retcode=_explicit_not_filled_retcode(result)
+    if retcode is None:
+        return result
+    result.update({
+        "ok":False,"success":False,"failed":True,
+        "pending":False,"unknown":False,"accepted":False,
+        "not_filled":True,"certainty":"NOT_FILLED",
+        "truth_confirmed":"not_filled","unknown_resolved":"not_filled",
+    })
+    result.setdefault("final_retcode",retcode)
+    result.setdefault("retcode",retcode)
+    return result
+
+def _immediate_result_ok(result):
+    result=_normalize_explicit_not_filled(result)
+    return (not _explicit_not_filled(result) and
+            bool(result.get("success",result.get("ok",True))) and
+            not result.get("pending") and not result.get("unknown") and
+            "error" not in result)
+
 def _explicit_not_filled(result):
     """Accept no-fill proof only when its structured fields agree."""
     if not isinstance(result, dict):
@@ -157,6 +231,24 @@ def _explicit_not_filled(result):
         return int(raw) in _EXPLICIT_NOT_FILLED_RETCODES
     except (TypeError, ValueError):
         return result.get("dispatch_durable") is False
+
+def _attach_order_status_trace(result, status):
+    """Carry Agent execution timing through the connector terminal result."""
+    result=dict(result or {})
+    status_trace=(status.get("trace") if isinstance(status,dict) else None)
+    if not isinstance(status_trace,dict):
+        return result
+    trace=(dict(result.get("trace"))
+           if isinstance(result.get("trace"),dict) else {})
+    trace.update(status_trace)
+    result["trace"]=trace
+    completed_ns=trace.get("agent_execution_completed_ns")
+    if completed_ns not in (None,""):
+        timing=(dict(result.get("execution_timing"))
+                if isinstance(result.get("execution_timing"),dict) else {})
+        timing.setdefault("execution_completed_at_ns",completed_ns)
+        result["execution_timing"]=timing
+    return result
 
 async def order_status_probe(exec_leg, request_id, tries=1, delay=1.0, deadline=None,
                              expected_ticket=None):
@@ -180,8 +272,37 @@ async def order_status_probe(exec_leg, request_id, tries=1, delay=1.0, deadline=
             return None                      # 404/不支持(FRA/A2T) → 立即回退, 不空耗轮询
         if isinstance(st, dict):
             state = st.get("state")
+            if state == "ABSENT":
+                failure = dict(st.get("result") or {})
+                failure.update({
+                    "success": False,
+                    "failed": True,
+                    "pending": False,
+                    "unknown": False,
+                    "accepted": False,
+                    "not_sent": True,
+                    "not_filled": True,
+                    "dispatch_durable": False,
+                    "certainty": "NOT_FILLED",
+                    "truth_confirmed": "not_filled",
+                    "unknown_resolved": "not_filled",
+                    "request_id": request_id,
+                    "src": "order-status",
+                })
+                failure.setdefault("error", "request was not admitted to the bridge WAL")
+                return failure
             if state == "DONE":
-                r = dict(st.get("result") or {})
+                raw_result=st.get("result")
+                r=(dict(raw_result) if isinstance(raw_result,dict) else
+                   ({"result":raw_result} if raw_result not in (None,"") else {}))
+                if st.get("detail") not in (None,""):
+                    r.setdefault("detail",st.get("detail"))
+                r=_attach_order_status_trace(r,st)
+                r=_normalize_explicit_not_filled(r)
+                if _explicit_not_filled(r):
+                    r["failed"]=True; r["src"]="order-status"
+                    r.setdefault("error",r.get("detail") or "broker rejected order")
+                    return r
                 positive = bool(r.get("success") or r.get("ok"))
                 history_only = (r.get("history_only") or
                                 str(r.get("src") or "").lower() == "history")
@@ -214,33 +335,22 @@ async def order_status_probe(exec_leg, request_id, tries=1, delay=1.0, deadline=
                     r["terminal_via_status"] = True; r["src"] = "order-status"
                     return r
                 return None
-            if state == "FAILED":
-                failure = dict(st.get("result") or {})
+            if state in ("FAILED","UNKNOWN"):
+                raw_result=st.get("result")
+                failure=(dict(raw_result) if isinstance(raw_result,dict) else
+                         ({"result":raw_result} if raw_result not in (None,"") else {}))
+                if st.get("detail") not in (None,""):
+                    failure.setdefault("detail",st.get("detail"))
+                failure=_normalize_explicit_not_filled(failure)
                 if not failure.get("error") and st.get("detail"):
                     failure["error"] = st.get("detail")
-                raw_retcode = failure.get("final_retcode", failure.get("retcode"))
-                try:
-                    retcode = int(raw_retcode)
-                except (TypeError, ValueError):
-                    retcode = None
-                if retcode in _EXPLICIT_NOT_FILLED_RETCODES:
-                    # Older MT5 Agent builds only persisted FAILED + retcode.
-                    # Normalize the structured no-fill proof here so every
-                    # caller follows the same safe terminal path.
-                    failure.update({
-                        "not_filled": True,
-                        "certainty": "NOT_FILLED",
-                        "truth_confirmed": "not_filled",
-                        "unknown_resolved": "not_filled",
-                    })
+                if state=="UNKNOWN" and not _explicit_not_filled(failure):
+                    # UNKNOWN without explicit broker no-fill proof remains
+                    # unresolved and falls through to exact truth scanning.
+                    return None
                 failure["failed"] = True
                 failure["src"] = "order-status"
                 return failure
-            if state == "UNKNOWN":
-                # The Agent has frozen publication until broker truth resolves.
-                # Repeated status polling cannot improve that truth, so fall
-                # through immediately to the exact token/ticket scan.
-                return None
         else:
             return None
         # SENDING/pending: EA 尚未落盘, 等待重试(内网桥 order-status 惰性读 EA 结果文件)
@@ -416,6 +526,18 @@ async def _race_open_terminal(exec_leg, request_id, expected_comment, attempts,
                 active.discard(truth_task)
                 recovered=truth_task.result()
                 if recovered is not None:
+                    # Position truth can win a scheduler turn immediately
+                    # before the Agent DONE response. Give an already-arrived
+                    # status response two zero-delay turns so its native
+                    # completion timestamp is not discarded.
+                    for _i in range(2):
+                        if status_task.done():
+                            break
+                        await asyncio.sleep(0)
+                    if status_task.done():
+                        probe=status_task.result()
+                        if probe is not None:
+                            return probe
                     return recovered
         return None
     finally:
@@ -515,6 +637,14 @@ async def _race_close_terminal(exec_leg, request_id, ticket, attempts, deadline)
                 active.discard(truth_task)
                 closed=truth_task.result()
                 if closed=="CLOSED":
+                    for _i in range(2):
+                        if status_task.done():
+                            break
+                        await asyncio.sleep(0)
+                    if status_task.done():
+                        probe=status_task.result()
+                        if probe is not None:
+                            return probe,closed
                     return probe,closed
         return probe,closed
     finally:
@@ -533,7 +663,7 @@ class IHedgeConnector(ABC):
     @abstractmethod
     async def history_deals(self, days: int = 1): ...
     @abstractmethod
-    async def status(self): ...
+    async def status(self, execution_probe=False): ...
 
 # ---- 共享 HTTP 连接池(keep-alive 复用) ----
 # 坑: 原每次调用 `async with httpx.AsyncClient()` 新建客户端 = 每个请求都付一次 TCP 握手,
@@ -586,7 +716,9 @@ class _BridgeLeg:
     async def account_info(self): return await self._get("/mt5/account/info")
     async def positions(self):    return await self._get("/mt5/positions")
     async def history_deals(self, days=1): return await self._get("/mt5/history/deals", days=days)
-    async def status(self):       return await self._get("/mt5/connection/status")
+    async def status(self, execution_probe=False):
+        params={"execution_probe":True} if execution_probe else {}
+        return await self._get("/mt5/connection/status", **params)
     async def _post(self, path, body=None):
         r=await _pooled("bridge-fast",POST_FAST_TIMEOUT).post(
             self.base+path, headers=self.h, json=(body or {}), timeout=POST_FAST_TIMEOUT)
@@ -603,7 +735,16 @@ class _BridgeLeg:
             if detail:
                 message += ": %s" % detail
             raise httpx.HTTPStatusError(message, request=r.request, response=r) from ex
-        return r.json()
+        payload=r.json()
+        if isinstance(payload,dict):
+            trace=(dict(payload.get("trace"))
+                   if isinstance(payload.get("trace"),dict) else {})
+            # Capture each leg at its own HTTP completion boundary.  Pair
+            # gather returns only after the slow leg, so stamping later makes
+            # two different ACKs look artificially identical.
+            trace["qh_http_response_ns"]=_time.time_ns()
+            payload["trace"]=trace
+        return payload
     async def close_all(self, symbol=None):
         return await self._post("/mt5/position/close-all", {"symbol": symbol})
     async def open_order(self, symbol, volume, order_type, comment="QH", request_id=None,
@@ -637,7 +778,8 @@ class Mt5BridgeConnector(IHedgeConnector):
     async def account_info(self): return await self.main.account_info()
     async def positions(self):    return await self.main.positions()
     async def history_deals(self, days=1): return await self.main.history_deals(days)
-    async def status(self):       return await self.main.status()
+    async def status(self, execution_probe=False):
+        return await self.main.status(execution_probe=execution_probe)
     # 双腿接口
     # 双腿读取/紧急平仓一律并发(gather): 串行会把跨洲 RTT ×2(开仓前置检查曾因此多花 ~1s)
     async def both_accounts(self):
@@ -652,11 +794,13 @@ class Mt5BridgeConnector(IHedgeConnector):
         else:
             m=await self.main.positions(); h=None
         return {"main":m,"hedge":h}
-    async def both_status(self):
+    async def both_status(self, execution_probe=False):
         if self.hedge:
-            m,h=await asyncio.gather(self.main.status(), self.hedge.status())
+            m,h=await asyncio.gather(
+                self.main.status(execution_probe=execution_probe),
+                self.hedge.status(execution_probe=execution_probe))
         else:
-            m=await self.main.status(); h=None
+            m=await self.main.status(execution_probe=execution_probe); h=None
         return {"main":m,"hedge":h}
     async def both_close_all(self, symbol=None):
         if self.hedge:
@@ -667,7 +811,8 @@ class Mt5BridgeConnector(IHedgeConnector):
     async def open_pair(self, direction, main_symbol, hedge_symbol, main_vol, hedge_vol,
                         mode="main_first", speed="fast", truth=None, rid=None, main_dev=None,
                         hedge_dev=None, ordered_ack=False, phase_hook=None,
-                        dispatch_only=False, burst_admission=False):
+                        dispatch_only=False, burst_admission=False,
+                        eager_ordered_ack=False):
         """锁仓对开仓。direction:
              'reverse'(反向/1空2涨): 主 sell + 对冲 buy
              'forward'(正向/2空1涨): 主 buy  + 对冲 sell
@@ -679,6 +824,8 @@ class Mt5BridgeConnector(IHedgeConnector):
            speed: 顺序模式两腿间延迟档位(normal/fast/turbo)。
            ordered_ack: 用 Agent WAL ACK 快速提交每条腿，但顺序模式仍以首腿 Broker 终态成功
            作为第二腿派发屏障。第二腿明确失败时按首腿 exact ticket 执行幂等补偿平仓。
+           eager_ordered_ack: 顺序模式保留首腿 ACK 先于第二腿 ACK，但不等待首腿 Broker
+           终态；双腿终态由后台并发确认，单腿由 exact-ticket 守卫立即回滚。
            V1.1(M2): rid=幂等键(缺省自动生成), comment 带 #rid + 内网桥 request_id 幂等;
            超时类异常=UNKNOWN → 经 truth(真相源连接器, 缺省=self) 查真相: 实际成交→恢复结果继续时序,
            确认未成交→安全判失败, 查不清→保留 unknown 标志交上层告警(绝不当'未成交'盲判)。"""
@@ -695,6 +842,7 @@ class Mt5BridgeConnector(IHedgeConnector):
         out={"direction":direction,"mode":mode,"main":None,"hedge":None,"main_ok":False,"hedge_ok":False,
              "request_id":rid,"op":"open","ordered_ack":bool(ordered_ack),
              "dispatch_only":bool(dispatch_only),"burst_admission":bool(burst_admission),
+             "eager_ordered_ack":bool(eager_ordered_ack),
              "saga_durable":bool(phase_hook),"saga_phase":"PAIR_INTENT",
              "leg_contexts":{
                  "main":{"symbol":main_symbol,"volume":main_vol,"side":mside,"deviation":main_dev,
@@ -722,12 +870,12 @@ class Mt5BridgeConnector(IHedgeConnector):
                 out["saga_persist_error"]="%s:%s"%(name,ex.__class__.__name__)
                 return False
         def _ok(r):
-            r=r or {}
-            return bool(r.get("success", r.get("ok", True))) and not r.get("pending") and not r.get("unknown") and "error" not in r
+            return _immediate_result_ok(r or {})
         def _record_dispatch(leg,result):
             ctx=out["leg_contexts"][leg]
             if not isinstance(result,dict):
                 result={"result":result}
+            _normalize_explicit_not_filled(result)
             result.setdefault("request_id",ctx["request_id"])
             result.setdefault("op","open")
             result.setdefault("dispatch_request_id",ctx["request_id"])
@@ -872,7 +1020,10 @@ class Mt5BridgeConnector(IHedgeConnector):
                           "request_id":request_id,"op":"open",
                           "dispatch_request_id":ctx["request_id"],
                           "dispatch_comment":ctx["comment"],
-                          "dispatch_started":False,"dispatch_durable":False}
+                          "dispatch_started":False,"dispatch_durable":False,
+                          "not_sent":True,"not_filled":True,
+                          "certainty":"NOT_FILLED","truth_confirmed":"not_filled",
+                          "src":"client-rejection"}
                 out[leg+"_ok"]=False
                 if stage=="SECOND":
                     out["saga_unknown"]=True
@@ -902,14 +1053,26 @@ class Mt5BridgeConnector(IHedgeConnector):
             # QH worker while waiting on the account-serial broker.
             if dispatch_only:
                 current=dict(out.get(leg) or {})
-                if (current.get("pending") or current.get("accepted") or
-                        str(current.get("state") or "").upper() in
-                        ("PENDING", "SENDING", "DISPATCHING")):
+                durable_ack=bool(
+                    current.get("dispatch_durable") and
+                    (current.get("pending") or current.get("accepted") or
+                     current.get("success") or current.get("ok") or
+                     str(current.get("state") or "").upper() in
+                     ("PENDING", "SENDING", "DISPATCHING", "DONE")))
+                if durable_ack:
                     current.setdefault("pending", True)
                     current.setdefault("state", "DISPATCHING")
                     out[leg]=current
                     out[leg+"_ok"]=False
-                    return False
+                    # The normal dispatch-only path hands the slot to the
+                    # finalizer after the first ACK.  The turbo ordered path
+                    # crosses the second durable write boundary immediately,
+                    # preserving ACK order while overlapping broker calls.
+                    return bool(eager_ordered_ack)
+                current.setdefault("error","Agent did not durably accept ordered open")
+                out[leg]=current; out[leg+"_ok"]=False
+                await _phase(stage+"_FAILED")
+                return False
             await _rec(leg,wait_for_terminal=True)
             current=out.get(leg) or {}
             terminal=(stage+"_DONE" if out.get(leg+"_ok") else
@@ -921,6 +1084,17 @@ class Mt5BridgeConnector(IHedgeConnector):
                 out[leg]=current; out[leg+"_ok"]=False; out["saga_unknown"]=True
                 return False
             return bool(out.get(leg+"_ok"))
+
+        def _mark_peer_not_sent(leg, reason):
+            ctx=out["leg_contexts"][leg]
+            out[leg]={"error":reason,"request_id":rid+leg[0],"op":"open",
+                      "dispatch_request_id":ctx["request_id"],
+                      "dispatch_comment":ctx["comment"],
+                      "dispatch_started":False,"dispatch_durable":False,
+                      "not_sent":True,"not_filled":True,
+                      "certainty":"NOT_FILLED","truth_confirmed":"not_filled",
+                      "src":"client-rejection"}
+            out[leg+"_ok"]=False
 
         if not await _phase("PAIR_INTENT"):
             out["main"]={"error":"SAGA_PAIR_INTENT_PERSIST_FAILED",
@@ -963,14 +1137,20 @@ class Mt5BridgeConnector(IHedgeConnector):
             await asyncio.gather(_rec("main"), _rec("hedge"))
         elif mode=="hedge_first":
             if not await _ordered_leg("FIRST","hedge",_hedge):
+                if _explicit_not_filled(out.get("hedge") or {}):
+                    _mark_peer_not_sent("main","first ordered leg was explicitly not filled")
                 return out                                      # 第一腿未终态成功→不开第二腿
             if delay>0: await asyncio.sleep(delay)
             await _ordered_leg("SECOND","main",_main)
         else:  # main_first (默认 1先2后)
             if not await _ordered_leg("FIRST","main",_main):
+                if _explicit_not_filled(out.get("main") or {}):
+                    _mark_peer_not_sent("hedge","first ordered leg was explicitly not filled")
                 return out                                      # 第一腿未终态成功→不开第二腿
             if delay>0: await asyncio.sleep(delay)
             await _ordered_leg("SECOND","hedge",_hedge)
+        if dispatch_only and eager_ordered_ack:
+            return out
         await self._compensate_ordered_open(out, timeout=30.0, phase_hook=phase_hook)
         return out
 
@@ -1130,7 +1310,7 @@ class Mt5BridgeConnector(IHedgeConnector):
     async def close_pair(self, main_symbol, hedge_symbol, main_side, hedge_side,
                          main_vol=None, hedge_vol=None, mode="concurrent", speed="fast",
                          main_ticket=None, hedge_ticket=None, truth=None, rid=None,
-                         ordered_ack=False, burst_admission=False):
+                         ordered_ack=False, burst_admission=False, dispatch_hook=None):
         """按对平仓(双腿各平一笔)。side=各腿当前持仓方向; ticket=按坑精确平某笔(有票只平该笔, 无票回落按方向)。
            mode/speed 同 open_pair 语义。
            V1.1(M2): 平仓异常不再向上抛(原 gather 直接炸500); 超时类=UNKNOWN 且有 ticket →
@@ -1152,13 +1332,21 @@ class Mt5BridgeConnector(IHedgeConnector):
         async def _one(leg, sym, side, vol, ticket):
             leg_obj=self.main if leg=="main" else self.hedge
             try:
+                # Record the actual per-leg dispatch boundary immediately
+                # before handing the exact-ticket request to the bridge.  The
+                # hook is optional so adapters/tests can remain lightweight.
+                if dispatch_hook is not None:
+                    notified=dispatch_hook(leg)
+                    if _inspect.isawaitable(notified):
+                        await notified
                 kwargs={"ticket":ticket,"request_id":rid+leg[0]}
                 if ordered_ack: kwargs["ack_only"]=True
-                res[leg]=await leg_obj.close_position(sym,side,vol,**kwargs)
+                res[leg]=_normalize_explicit_not_filled(
+                    await leg_obj.close_position(sym,side,vol,**kwargs))
                 lr=res[leg] or {}
                 if isinstance(lr,dict):
                     lr.setdefault("request_id",rid+leg[0]); lr.setdefault("op","close"); lr.setdefault("ticket",ticket)
-                res[leg+"_ok"]=bool(lr.get("success",lr.get("ok",True))) and not lr.get("pending") and not lr.get("unknown") and "error" not in lr
+                res[leg+"_ok"]=_immediate_result_ok(lr)
             except Exception as ex:
                 res[leg]={"error":str(ex),"request_id":rid+leg[0],"op":"close","ticket":ticket}
                 if not _is_unknown_exc(ex): return
@@ -1202,18 +1390,14 @@ class Mt5BridgeConnector(IHedgeConnector):
         try:
             kwargs={"ticket":ticket,"request_id":request_id}
             if ordered_ack: kwargs["ack_only"]=True
-            res[leg] = await leg_obj.close_position(symbol,side,volume,**kwargs)
+            res[leg] = _normalize_explicit_not_filled(
+                await leg_obj.close_position(symbol,side,volume,**kwargs))
             lr = res[leg] or {}
             if isinstance(lr, dict):
                 lr.setdefault("request_id", request_id)
                 lr.setdefault("op", "close")
                 lr.setdefault("ticket", ticket)
-            res[leg + "_ok"] = (
-                bool(lr.get("success", lr.get("ok", True)))
-                and not lr.get("pending")
-                and not lr.get("unknown")
-                and "error" not in lr
-            )
+            res[leg + "_ok"] = _immediate_result_ok(lr)
         except Exception as ex:
             res[leg] = {"error": str(ex), "request_id": request_id,
                         "op": "close", "ticket": ticket}
@@ -1283,7 +1467,7 @@ class Mt5BridgeConnector(IHedgeConnector):
                         comment=comment,request_id=expected,
                         deviation=ctx.get("deviation"),ack_only=True),
                 )
-                reply=dict(reply or {})
+                reply=_normalize_explicit_not_filled(reply or {})
                 reply.setdefault("request_id",expected); reply.setdefault("op","open")
                 reply.setdefault("dispatch_request_id",expected)
                 reply.setdefault("dispatch_comment",comment)
@@ -1292,10 +1476,7 @@ class Mt5BridgeConnector(IHedgeConnector):
                         reply.get("success") or reply.get("ok")):
                     reply.setdefault("dispatch_durable",True)
                 res[leg]=reply
-                res[leg+"_ok"]=(bool(reply.get("success",reply.get("ok",True))) and
-                                  not reply.get("pending") and
-                                  not reply.get("unknown") and
-                                  "error" not in reply)
+                res[leg+"_ok"]=_immediate_result_ok(reply)
             except Exception as ex:
                 res[leg]=_open_dispatch_exception(ex,expected,comment)
                 res[leg+"_ok"]=False
@@ -1477,7 +1658,7 @@ class Mt5BridgeConnector(IHedgeConnector):
                     pending.pop("error",None); pending.pop("truth_confirmed",None)
                     res[leg]=pending; res[leg+"_ok"]=False
                     return
-                reply=dict(reply or {})
+                reply=_normalize_explicit_not_filled(reply or {})
                 reported_request_id=reply.get("request_id")
                 reported_ticket=reply.get("ticket")
                 try:
@@ -1491,6 +1672,9 @@ class Mt5BridgeConnector(IHedgeConnector):
                 reply.setdefault("request_id",request_id)
                 reply.setdefault("ticket",ticket)
                 reply.setdefault("op","close")
+                if _explicit_not_filled(reply):
+                    res[leg]=reply; res[leg+"_ok"]=False
+                    return
                 positive=bool(reply.get("success") or reply.get("ok"))
                 terminal_success=bool(
                     positive and not reply.get("pending") and
@@ -1565,6 +1749,7 @@ class Mt5BridgeConnector(IHedgeConnector):
                         comment=comment,
                         request_id=request_id,deviation=ctx.get("deviation"),ack_only=True)
                     if not isinstance(resumed,dict): resumed={"result":resumed}
+                    resumed=_normalize_explicit_not_filled(resumed)
                     resumed.setdefault("request_id",request_id); resumed.setdefault("op","open")
                     resumed.setdefault("dispatch_request_id",request_id)
                     resumed.setdefault("dispatch_comment",comment)
@@ -1576,9 +1761,7 @@ class Mt5BridgeConnector(IHedgeConnector):
                     ctx["dispatch_started"]=bool(resumed.get("dispatch_started"))
                     if "dispatch_durable" in resumed:
                         ctx["dispatch_durable"]=resumed.get("dispatch_durable")
-                    res[leg+"_ok"]=(bool(resumed.get("success",resumed.get("ok",True)))
-                                      and not resumed.get("pending") and not resumed.get("unknown")
-                                      and "error" not in resumed)
+                    res[leg+"_ok"]=_immediate_result_ok(resumed)
                 except Exception as ex:
                     res[leg]=_open_dispatch_exception(ex,request_id,comment)
                     ctx["dispatch_started"]=bool(res[leg].get("dispatch_started"))
@@ -1659,7 +1842,7 @@ class Api2TradeLeg:
         return j if isinstance(j,(list,dict)) else []
     async def history_deals(self, days=1):
         return await self._get("/ClosedOrders")
-    async def status(self):
+    async def status(self, execution_probe=False):
         try:
             await self._get("/AccountSummary"); return {"connected":True}
         except Exception as ex:
@@ -1705,8 +1888,9 @@ class Api2TradeConnector(IHedgeConnector):
     async def history_deals(self, days=1):
         if not self.main: raise NotImplementedError("QH_A2T_MAIN_UUID 未配置")
         return await self.main.history_deals(days)
-    async def status(self):
-        return await self.main.status() if self.main else {"connected":False,"error":"no_main_uuid"}
+    async def status(self, execution_probe=False):
+        return (await self.main.status(execution_probe=execution_probe)
+                if self.main else {"connected":False,"error":"no_main_uuid"})
 
 def get_connector() -> IHedgeConnector:
     mode=os.environ.get("QH_CONNECTOR","mt5bridge")

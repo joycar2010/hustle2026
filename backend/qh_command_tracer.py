@@ -140,10 +140,59 @@ class CommandTracer:
     def update_status(self, command_id: str, status: CommandStatus):
         """更新命令状态"""
         key = f"{self.key_prefix}{command_id}"
-        self.redis.hset(key, mapping={
+        mapping = {
             "status": status.value,
             f"status_{status.value}_at": datetime.utcnow().isoformat(),
-        })
+        }
+        # Reconciliation can promote UNKNOWN/SUBMITTED to COMPLETED. Publish
+        # the terminal state and remove its provisional failure atomically.
+        if status == CommandStatus.COMPLETED:
+            mapping["failure_reason"] = ""
+        self.redis.hset(key, mapping=mapping)
+
+    def clear_completed_failure_reason(self, command_id: str,
+                                       expected: Optional[str] = None) -> bool:
+        """CAS-clear a stale failure reason on an already completed command."""
+        key = f"{self.key_prefix}{command_id}"
+        script = """
+        local status = redis.call('HGET', KEYS[1], 'status')
+        if status ~= 'COMPLETED' then
+            return 0
+        end
+        local reason = redis.call('HGET', KEYS[1], 'failure_reason')
+        if not reason or reason == '' then
+            return 0
+        end
+        if ARGV[1] ~= '' and reason ~= ARGV[1] then
+            return 0
+        end
+        redis.call('HSET', KEYS[1], 'failure_reason', '')
+        return 1
+        """
+        try:
+            return bool(self.redis.eval(script, 1, key, str(expected or "")))
+        except Exception:
+            # Some Redis-compatible test/local servers do not expose EVAL.
+            # WATCH/MULTI preserves the same compare-and-set semantics there.
+            try:
+                with self.redis.pipeline() as pipe:
+                    pipe.watch(key)
+                    status = pipe.hget(key, "status")
+                    reason = pipe.hget(key, "failure_reason")
+                    if isinstance(status, bytes):
+                        status = status.decode("utf-8", "replace")
+                    if isinstance(reason, bytes):
+                        reason = reason.decode("utf-8", "replace")
+                    if (str(status or "").upper() != "COMPLETED" or
+                            not reason or
+                            (expected and str(reason) != str(expected))):
+                        pipe.unwatch()
+                        return False
+                    pipe.multi()
+                    pipe.hset(key, "failure_reason", "")
+                    return bool(pipe.execute() is not None)
+            except Exception:
+                return False
 
     def update_fields(self, command_id: str, fields: Dict[str, Any]):
         """Update related trace fields with one atomic Redis hash write."""
@@ -175,9 +224,19 @@ class CommandTracer:
             return None
 
         # 字节转字符串
-        return {k.decode() if isinstance(k, bytes) else k:
-                v.decode() if isinstance(v, bytes) else v
-                for k, v in data.items()}
+        command = {k.decode() if isinstance(k, bytes) else k:
+                   v.decode() if isinstance(v, bytes) else v
+                   for k, v in data.items()}
+        # COMPLETED is terminal and must not expose an old provisional error
+        # left behind by a crash between durable-saga writes.  Persist the
+        # cleanup with CAS while also keeping this API read immediately clean.
+        if (str(command.get("status") or "").upper() ==
+                CommandStatus.COMPLETED.value and
+                str(command.get("failure_reason") or "")):
+            expected = str(command["failure_reason"])
+            if self.clear_completed_failure_reason(command_id, expected):
+                command["failure_reason"] = ""
+        return command
 
     def calculate_latencies(self, command_id: str) -> Dict[str, float]:
         """

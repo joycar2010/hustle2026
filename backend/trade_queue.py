@@ -636,6 +636,11 @@ class RedisTradeQueue:
                       isinstance(evidence, dict) else raw_result)
             durable = (str(job.get("saga_durable") or "").lower() in ("1", "true") or
                        bool(result.get("saga_durable")))
+            # Terminal queue truth owns the lifecycle.  In particular, an old
+            # tracer MANUAL_REVIEW must not resurrect a job whose durable saga
+            # already reconciled to COMPLETED.
+            if state == "COMPLETED":
+                continue
             if durable and state in (
                     "DISPATCHING", "UNKNOWN", "MANUAL_REVIEW", "SINGLE_LEG_EXPOSED"):
                 jobs.append(job)

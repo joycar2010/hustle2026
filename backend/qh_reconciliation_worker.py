@@ -6,6 +6,7 @@ import asyncio
 import inspect
 import json
 import logging
+import time
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, Tuple
 import httpx
@@ -26,6 +27,8 @@ logger = logging.getLogger(__name__)
 AGENT_SENDING_GRACE_SECONDS = 2.0
 RECONCILIATION_SCAN_LIMIT = 100
 RECONCILIATION_SCAN_COUNT = 1000
+MANUAL_REVIEW_MAX_ATTEMPTS = 3
+MANUAL_REVIEW_BACKOFF_SECONDS = (0.5, 2.0, 5.0)
 
 
 def _decode_redis_hash(raw):
@@ -51,7 +54,8 @@ class ReconciliationWorker:
                  close_confirmed_callback=None,
                  open_confirmed_callback=None,
                  open_saga_callback=None,
-                 command_active_callback=None):
+                 command_active_callback=None,
+                 single_leg_close_callback=None):
         self.redis = redis_client
         self.db = db_session
         self.tracer = get_tracer()
@@ -61,6 +65,7 @@ class ReconciliationWorker:
         self.connection_factory = connection_factory
         self.close_confirmed_callback = close_confirmed_callback
         self.open_confirmed_callback = open_confirmed_callback
+        self.single_leg_close_callback = single_leg_close_callback
         self.open_saga_callback = open_saga_callback
         self.command_active_callback = command_active_callback
         self.running = False
@@ -175,6 +180,7 @@ class ReconciliationWorker:
                         command.get("type") == CommandType.OPEN_PAIR.value and
                         command.get("main_request_id") and
                         command.get("hedge_request_id") and
+                        self._manual_review_due(command) and
                         len(manual) < RECONCILIATION_SCAN_LIMIT):
                     manual.append((command_id, command))
 
@@ -192,6 +198,21 @@ class ReconciliationWorker:
         counts = {status: len(buckets[status]) for status in wanted}
         counts["MANUAL_OPEN"] = len(manual)
         return ordered, counts
+
+    @staticmethod
+    def _manual_review_due(command):
+        """Bound generic MANUAL_REVIEW retries; durable callbacks own recovery."""
+        try:
+            attempts=int(command.get("reconcile_attempts") or 0)
+        except (TypeError, ValueError):
+            attempts=0
+        if attempts>=MANUAL_REVIEW_MAX_ATTEMPTS:
+            return False
+        try:
+            due=float(command.get("next_reconcile_at") or 0)
+        except (TypeError, ValueError):
+            due=0
+        return due<=time.time()
 
     async def _reconcile_one(self, command_id: str,
                              command: Optional[Dict[str, str]] = None):
@@ -220,12 +241,32 @@ class ReconciliationWorker:
                 cmd.get("type") == CommandType.OPEN_PAIR.value and
                 cmd.get("main_request_id") and cmd.get("hedge_request_id")
             )
+            if recoverable_manual_open and not self._manual_review_due(cmd):
+                return
             if not recoverable and not recoverable_manual_open:
                 return
 
             if await self._command_is_active(command_id, cmd):
                 logger.debug("Reconciliation deferred for active command %s", command_id)
                 return
+
+            if recoverable_manual_open:
+                try:
+                    attempts=int(cmd.get("reconcile_attempts") or 0)+1
+                except (TypeError, ValueError):
+                    attempts=1
+                delay=MANUAL_REVIEW_BACKOFF_SECONDS[min(attempts-1,
+                    len(MANUAL_REVIEW_BACKOFF_SECONDS)-1)]
+                retry_fields = {
+                    "reconcile_attempts": attempts,
+                    "next_reconcile_at": time.time()+delay,
+                }
+                update_fields = getattr(self.tracer, "update_fields", None)
+                if callable(update_fields):
+                    update_fields(command_id, retry_fields)
+                else:
+                    for field, value in retry_fields.items():
+                        self.tracer.update_field(command_id, field, value)
 
             # 更新状态为对账中
             cmd_type = cmd.get("type")
@@ -308,7 +349,7 @@ class ReconciliationWorker:
             self.tracer.update_field(command_id, "reconcile_result", "agent_both_done")
             return True
 
-        terminal = {"DONE", "FAILED"}
+        terminal = {"DONE", "FAILED", "ABSENT"}
         if all(state in terminal for state in states):
             evidence = {
                 "main": (main.get("result")
@@ -330,7 +371,7 @@ class ReconciliationWorker:
                 if ticket:
                     cmd[f"{leg}_ticket"] = str(ticket)
                     self.tracer.update_field(command_id, f"{leg}_ticket", ticket)
-            if states[0] == states[1] == "FAILED":
+            if all(state in ("FAILED", "ABSENT") for state in states):
                 if not all(explicit_no_fill.values()):
                     evidence["reason"] = "Agent terminal failure lacks explicit no-fill proof"
                     if not await self._apply_confirmed_open(
@@ -351,7 +392,7 @@ class ReconciliationWorker:
             else:
                 failed_leg = next(
                     (index for index, state in enumerate(states)
-                     if state == "FAILED"), None)
+                     if state in ("FAILED", "ABSENT")), None)
                 if failed_leg is not None and not explicit_no_fill[
                         ("main", "hedge")[failed_leg]]:
                     evidence["reason"] = "Agent terminal failure lacks explicit no-fill proof"
@@ -360,6 +401,9 @@ class ReconciliationWorker:
                         logger.error("Open manual-review hold failed %s", command_id)
                     await self._mark_manual_review(
                         command_id, evidence["reason"])
+                    return True
+                if await self._auto_close_confirmed_open_single_leg(
+                        command_id, cmd, evidence, "agent_terminal_mismatch"):
                     return True
                 if not await self._apply_confirmed_open(
                         command_id, cmd, evidence, "SINGLE_LEG_EXPOSED"):
@@ -561,6 +605,9 @@ class ReconciliationWorker:
 
         elif main_filled and hedge_truth == "NOT_FOUND":
             # 单腿暴露 - 主腿成交,对冲腿未成交
+            if await self._auto_close_confirmed_open_single_leg(
+                    command_id, cmd, evidence, "main_filled_hedge_missing"):
+                return
             if not await self._apply_confirmed_open(
                     command_id, cmd, evidence, "SINGLE_LEG_EXPOSED"):
                 await self._mark_manual_review(
@@ -572,6 +619,9 @@ class ReconciliationWorker:
 
         elif main_truth == "NOT_FOUND" and hedge_filled:
             # 单腿暴露 - 对冲腿成交,主腿未成交
+            if await self._auto_close_confirmed_open_single_leg(
+                    command_id, cmd, evidence, "hedge_filled_main_missing"):
+                return
             if not await self._apply_confirmed_open(
                     command_id, cmd, evidence, "SINGLE_LEG_EXPOSED"):
                 await self._mark_manual_review(
@@ -1153,6 +1203,118 @@ class ReconciliationWorker:
         except Exception as exc:
             logger.error("Open cleanup failed %s: %s", command_id, exc, exc_info=True)
             return False
+
+    @staticmethod
+    def _confirmed_open_single_leg_identity(cmd, evidence):
+        """Return one immutable filled-leg identity, never inferred from absence."""
+        cmd = cmd if isinstance(cmd, dict) else {}
+        evidence = evidence if isinstance(evidence, dict) else {}
+        main_ok = evidence.get("main_ok") is True
+        hedge_ok = evidence.get("hedge_ok") is True
+        if main_ok == hedge_ok:
+            return None
+        leg = "main" if main_ok else "hedge"
+        missing = "hedge" if leg == "main" else "main"
+        broker_truth = evidence.get("broker_truth")
+        agent_states = evidence.get("agent_states")
+        agent_no_fill = evidence.get("agent_no_fill")
+        missing_proven = bool(
+            isinstance(broker_truth, dict) and
+            broker_truth.get(leg) == "FILLED" and
+            broker_truth.get(missing) == "NOT_FOUND"
+        ) or bool(
+            isinstance(agent_states, dict) and
+            agent_states.get(leg) == "DONE" and
+            agent_states.get(missing) in ("FAILED", "ABSENT") and
+            isinstance(agent_no_fill, dict) and
+            agent_no_fill.get(missing) is True
+        )
+        if not missing_proven:
+            return None
+        result = evidence.get(leg) if isinstance(evidence.get(leg), dict) else {}
+        candidates = {
+            str(value) for value in (
+                result.get("position"), result.get("order"), result.get("ticket"),
+                cmd.get(leg + "_ticket"),
+            ) if value not in (None, "", 0, "0")
+        }
+        if len(candidates) != 1:
+            return None
+        ticket = next(iter(candidates))
+        try:
+            if int(ticket) <= 0:
+                return None
+        except (TypeError, ValueError):
+            return None
+        return {"leg": leg, "missing_leg": missing, "ticket": ticket}
+
+    async def _auto_close_confirmed_open_single_leg(
+            self, command_id, cmd, evidence, reason):
+        """Close only a callback-verified live ticket and commit failed cleanup."""
+        identity = self._confirmed_open_single_leg_identity(cmd, evidence)
+        callback = self.single_leg_close_callback
+        if identity is None or callback is None:
+            return False
+        try:
+            result = callback(
+                command_id, dict(cmd or {}), dict(evidence or {}),
+                dict(identity), reason,
+            )
+            if inspect.isawaitable(result):
+                result = await result
+        except Exception as exc:
+            logger.error("Single-leg auto-close failed %s: %s",
+                         command_id, exc, exc_info=True)
+            self.tracer.update_field(
+                command_id, "auto_single_leg_close_error", exc.__class__.__name__)
+            return False
+        result = result if isinstance(result, dict) else {}
+        terminal = bool(
+            result.get("closed") is True and
+            result.get("agent_terminal") is True and
+            result.get("position_terminal") is True and
+            str(result.get("leg") or "") == identity["leg"] and
+            str(result.get("ticket") or "") == identity["ticket"] and
+            result.get("request_id")
+        )
+        self.tracer.update_field(command_id, "auto_single_leg_close", result)
+        if not terminal:
+            if ((result.get("attempted") is True or
+                    result.get("recoverable") is True) and
+                    result.get("request_id")):
+                review = dict(evidence or {})
+                review["reason"] = "single_leg_auto_close_terminal_unconfirmed"
+                if not await self._apply_confirmed_open(
+                        command_id, cmd, review, "MANUAL_REVIEW"):
+                    logger.error("Single-leg pending close hold failed %s", command_id)
+                await self._mark_manual_review(
+                    command_id,
+                    "Single-leg exact-ticket close sent; terminal confirmation pending",
+                )
+                return True
+            return False
+
+        repaired = dict(evidence or {})
+        repaired["compensated"] = True
+        repaired["compensated_leg"] = identity["leg"]
+        repaired["compensation"] = {
+            "ok": True, "success": True, "closed": True,
+            "leg": identity["leg"], "ticket": identity["ticket"],
+            "request_id": result["request_id"], "op": "close",
+            "reason": "authoritative_single_leg_auto_close",
+            "agent_terminal": True, "position_terminal": True,
+        }
+        if not await self._apply_confirmed_open(
+                command_id, cmd, repaired, "FAILED"):
+            await self._mark_manual_review(
+                command_id,
+                "Single leg auto-closed but durable local cleanup failed",
+            )
+            return True
+        self.tracer.update_field(command_id, "final_result", repaired)
+        await self._mark_failed(
+            command_id, "single_leg_auto_closed:%s" % reason)
+        return True
 
     async def _apply_confirmed_close(self, command_id, cmd, closed, resolution_state):
         if not closed:
