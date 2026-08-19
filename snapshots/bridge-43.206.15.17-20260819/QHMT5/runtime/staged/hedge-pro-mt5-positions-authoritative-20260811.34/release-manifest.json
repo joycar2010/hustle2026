@@ -1,0 +1,28 @@
+{
+  "schema": 1,
+  "release": "hedge-pro-mt5-positions-authoritative-20260811.34",
+  "created_at": "2026-08-11T14:05:43Z",
+  "host": "43.206.15.17",
+  "ports": [8061, 8063],
+  "candidate": {
+    "main.py": "440c09d7758f3ba4f118f85633cae4d6ed109f0e735ceb074a802ef57d7b5078",
+    "runtime.py": "5b6b87fe0f37d5faa65800d4645b9f5a25877b6471b0c030bd39d0d005b91356"
+  },
+  "production_before": {
+    "main.py": "7be2ad872b2c2347a814053579d84a4068211ee79d3d4cf94cbd5de69e560441",
+    "runtime.py": "70c45585422c5800641caa4a0885aa7670177cd85ad257a9d905184d2da3d6b7"
+  },
+  "safety": {
+    "explicit_execute_switch": true,
+    "preflight": "no recent in-flight MT5 execution",
+    "requires_empty_execution_and_native_queues": true,
+    "requires_empty_positions": true,
+    "requires_broker_fresh_authoritative_snapshot": true,
+    "position_signature_preserved": true,
+    "terminal_pid_preserved": true,
+    "bridge_only_restart": true,
+    "watchdog_quiesced_and_restored": true,
+    "rollback_on_verification_failure": true,
+    "real_trade_canary": false
+  }
+}

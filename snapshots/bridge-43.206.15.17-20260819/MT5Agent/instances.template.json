@@ -1,0 +1,38 @@
+{
+    "hustle-mt5-mt5-by01":  {
+                                "name":  "hustle-mt5-mt5-by01",
+                                "path":  "D:\\QHMT5\\terminals\\by01\\terminal64.exe",
+                                "account":  "2163899",
+                                "password":  "<REDACTED_SECRET>",
+                                "server":  "Bybit-Live-3",
+                                "portable":  false,
+                                "bridge_service":  "by01"
+                            },
+    "hustle-mt5-mt5-ic01":  {
+                                "name":  "hustle-mt5-mt5-ic01",
+                                "path":  "D:\\QHMT5\\terminals\\ic01\\terminal64.exe",
+                                "account":  "15016910",
+                                "password":  "<REDACTED_SECRET>",
+                                "server":  "ICMarketsSC-MT5-6",
+                                "portable":  false,
+                                "bridge_service":  "ic01"
+                            },
+    "hustle-mt5-mt5-bysys":  {
+                                 "name":  "hustle-mt5-mt5-bysys",
+                                 "path":  "D:\\QHMT5\\terminals\\bysys\\terminal64.exe",
+                                 "account":  "2325036",
+                                 "password":  "<REDACTED_SECRET>",
+                                 "server":  "Bybit-Live-2",
+                                 "portable":  false,
+                                 "bridge_service":  "bysys"
+                             },
+    "hustle-mt5-mt5-icsys":  {
+                                 "name":  "hustle-mt5-mt5-icsys",
+                                 "path":  "D:\\QHMT5\\terminals\\icsys\\terminal64.exe",
+                                 "account":  "15015331",
+                                 "password":  "<REDACTED_SECRET>",
+                                 "server":  "ICMarketsSC-MT5-6",
+                                 "portable":  false,
+                                 "bridge_service":  "icsys"
+                             }
+}
