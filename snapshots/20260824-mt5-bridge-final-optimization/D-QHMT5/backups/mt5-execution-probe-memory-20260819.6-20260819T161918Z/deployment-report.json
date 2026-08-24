@@ -1,0 +1,13 @@
+﻿{
+    "failed_at":  "2026-08-19T16:22:45.1768302Z",
+    "cell_watchdog_restored":  true,
+    "cell_supervisor_quiesced":  false,
+    "release":  "mt5-execution-probe-memory-20260819.6",
+    "real_orders_sent":  false,
+    "backup":  "D:\\QHMT5\\backups\\mt5-execution-probe-memory-20260819.6-20260819T161918Z",
+    "error":  "cell watchdog interactive start timeout: {\"ok\":false,\"cell\":\"tokyo-bridge-1\",\"warm\":2,\"allocated\":6,\"allocated_healthy\":4,\"allocated_status\":[{\"slot\":\"s1\",\"platform\":\"MT5\",\"port\":8061,\"healthy\":false,\"rtt_ms\":0,\"trade_allowed\":null,\"reason\":\"bridge_unreachable_or_unhealthy\"},{\"slot\":\"s3\",\"platform\":\"MT5\",\"port\":8063,\"healthy\":false,\"rtt_ms\":0,\"trade_allowed\":null,\"reason\":\"bridge_unreachable_or_unhealthy\"},{\"slot\":\"m1\",\"platform\":\"MT4\",\"port\":8065,\"healthy\":true,\"rtt_ms\":0,\"trade_allowed\":true},{\"slot\":\"m2\",\"platform\":\"MT4\",\"port\":8066,\"healthy\":true,\"rtt_ms\":0,\"trade_allowed\":true},{\"slot\":\"m3\",\"platform\":\"MT4\",\"port\":8067,\"healthy\":true,\"rtt_ms\":0,\"trade_allowed\":true},{\"slot\":\"m4\",\"platform\":\"MT4\",\"port\":8068,\"healthy\":true,\"rtt_ms\":0,\"trade_allowed\":true}],\"unhealthy_slots\":[{\"slot\":\"s1\",\"platform\":\"MT5\",\"port\":8061,\"healthy\":false,\"rtt_ms\":0,\"trade_allowed\":null,\"reason\":\"bridge_unreachable_or_unhealthy\"},{\"slot\":\"s3\",\"platform\":\"MT5\",\"port\":8063,\"healthy\":false,\"rtt_ms\":0,\"trade_allowed\":null,\"reason\":\"bridge_unreachable_or_unhealthy\"}],\"ts\":1787156528}",
+    "rollback_verified":  true,
+    "ok":  false,
+    "candidate_start_requested":  true,
+    "production_mutated":  true
+}

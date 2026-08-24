@@ -1,0 +1,36 @@
+﻿{
+    "cell_watchdog_restored":  true,
+    "bridges":  [
+                    {
+                        "pending":  0,
+                        "build_id":  "mt5-trade-wake-priority-20260817.4",
+                        "native_owner_mode":  "single_process_read_write_rpc",
+                        "name":  "s1",
+                        "worker_pid":  2252,
+                        "http_pid":  7208,
+                        "port":  8061,
+                        "absent_probe":  "qh-deploy-absent-s1-20260818T005758Z",
+                        "positions":  0
+                    },
+                    {
+                        "pending":  0,
+                        "build_id":  "mt5-trade-wake-priority-20260817.4",
+                        "native_owner_mode":  "single_process_read_write_rpc",
+                        "name":  "s3",
+                        "worker_pid":  2064,
+                        "http_pid":  7388,
+                        "port":  8063,
+                        "absent_probe":  "qh-deploy-absent-s3-20260818T005758Z",
+                        "positions":  0
+                    }
+                ],
+    "release":  "mt5-trade-wake-priority-20260817.4",
+    "real_orders_sent":  false,
+    "backup":  "D:\\QHMT5\\backups\\mt5-trade-wake-priority-20260817.4-20260818T005758Z",
+    "deployed_at":  "2026-08-18T00:58:34.3541033Z",
+    "qh_maintenance_owned":  true,
+    "candidate_start_requested":  true,
+    "ok":  true,
+    "manifest_sha256":  "b50ecb103d3748ea453bdef02201829ecd36641f98ebcd998a3130af6940d7c0",
+    "rollback_verified":  false
+}

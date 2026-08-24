@@ -1,0 +1,102 @@
+{
+  "schema": 1,
+  "release": "mt5-trade-wake-priority-20260817.4",
+  "build_id": "mt5-trade-wake-priority-20260817.4",
+  "created_at": "2026-08-18T00:25:00Z",
+  "deployment_status": "candidate_sealed_not_deployed",
+  "production_mutated": false,
+  "real_orders_sent": false,
+  "host": "43.206.15.17",
+  "private_host": "172.31.5.62",
+  "ports": [
+    8061,
+    8063
+  ],
+  "production_before": {
+    "main.py": "34298e859a66f49e2e4860234fd06d90a5db847a6a1d64137088acc18cb3872b",
+    "runtime.py": "03656b2c29e86256a50d68794c01abb7322c74ae3f2ef4c67eca4db7169f0647",
+    "cell.py": "9b79718e064dbcf2b3ffbe7ffd8d9f4f7322c9064de14890faea8d570ff3cf09",
+    "build_id": "mt5-tick-isolation-20260817.3",
+    "execution_process_isolation": true
+  },
+  "candidate": {
+    "main.py": "2204b0bf0133059287ef41628eb3796df6332e8c731d0a422e22e262124e3902",
+    "runtime.py": "409d78917f275a135d9a14856f34464d148fb400b7a14ca11b1b2d6ad88583ec",
+    "cell.py": "1ef3371d3ba7321941992cfc6f0c2e5d379a67b6c26ded7b062ab644275d42c6",
+    "deploy.ps1": "cbbd26be60c32d2e3229d8d0275ff839c8ec4e7eddf566be5b14fc651085c732"
+  },
+  "architecture": {
+    "http_process": "durable WAL admission, in-memory execution identity probes, and HTTP only",
+    "native_owner": "one spawned process owns every MetaTrader5 read and write",
+    "read_transport": "generation-fenced duplex Pipe with admission recheck before native reads",
+    "write_transport": "ADMITTED -> generation wake -> PENDING -> CLAIMED -> SENDING -> terminal WAL",
+    "wakeup": "generation-scoped cross-process Pipe with durable 50ms poll fallback",
+    "post_trade_refresh": "coalesced low-priority positions and account snapshot refresh that yields to admitted trades",
+    "public_tick_read": "per-symbol request snapshot; cache-only during trade activity and quiet tail",
+    "policy": "close_priority_terminal_serial_single_native_owner_durable_wakeup"
+  },
+  "required_env": {
+    "MT5_EXECUTION_PROCESS_ISOLATION": "1",
+    "MAX_PENDING_EXECUTIONS": "32",
+    "MT5_PARENT_READ_GATE_WAIT_MS": "5000",
+    "MT5_EXECUTION_READY_SEC": "55",
+    "MT5_EXECUTION_CONNECT_SEC": "45",
+    "MT5_EXECUTION_CONNECT_RETRY_MS": "750",
+    "MT5_NATIVE_RPC_TIMEOUT_SEC": "30",
+    "MT5_PUBLIC_TICK_CACHE_TTL_MS": "250",
+    "MT5_WAL_FALLBACK_POLL_MS": "50",
+    "ACCOUNT_IDLE_REFRESH_SEC": "5",
+    "MT5_BRIDGE_BUILD_ID": "mt5-trade-wake-priority-20260817.4"
+  },
+  "required_runtime_gates": {
+    "maintenance_owned": true,
+    "all_positions": 0,
+    "all_execution_queues": 0,
+    "trade_allowed": true,
+    "native_owner_mode": "single_process_read_write_rpc",
+    "native_owner_pid_equals_execution_pid": true,
+    "http_pid_distinct_from_native_owner_pid": true,
+    "cell_all_allocated_healthy": true,
+    "hedge_pro_expected_accounts": {
+      "s1": "52940784",
+      "s3": "277809090"
+    }
+  },
+  "deployment_order": [
+    "Acquire and retain QH blocking maintenance and prove all QH accounts, jobs, commands, locks, reservations, positions, and bridge queues are idle.",
+    "Verify the live MT5 code and build exactly match mt5-tick-isolation-20260817.3 and both hedge_pro accounts match their expected identities.",
+    "Run deploy.ps1 with the sealed manifest SHA256 and QHMaintenanceOwned switch.",
+    "Verify both ports, the single native owner, the cell watchdog, exact candidate hashes, zero positions, zero queues, and retained QH maintenance."
+  ],
+  "rollback_policy": {
+    "code_and_environment": "Restore the exact .3 code and pre-deploy environment files while QH maintenance remains held.",
+    "durable_execution_evidence": "Never restore or roll back the live idempotency database, WAL, or SHM; preserve broker evidence at its newest state.",
+    "automatic_order_submission": false
+  },
+  "validation": {
+    "execution_wakeup_read_identity_and_recovery": {
+      "passed": 16,
+      "failed": 0
+    },
+    "candidate_bridge_regression": {
+      "passed": 55,
+      "failed": 0,
+      "canonical_exclusions": 2
+    },
+    "candidate_process_transport_native_rpc": {
+      "passed": 17,
+      "failed": 0,
+      "canonical_exclusions": 3
+    },
+    "windows_spawn_single_owner": {
+      "passed": 1,
+      "failed": 0
+    },
+    "python_compile": "passed",
+    "powershell_parse": "passed",
+    "production_deployment": "not_run",
+    "live_trade_test": "not_run",
+    "real_orders_sent": false
+  },
+  "physical_limit": "The bridge removes avoidable WAL wake and native-read contention. Broker order_send latency and terminal serialization remain external and cannot be guaranteed below 0.5 seconds."
+}

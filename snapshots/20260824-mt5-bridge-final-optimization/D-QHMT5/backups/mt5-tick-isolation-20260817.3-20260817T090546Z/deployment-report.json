@@ -1,0 +1,36 @@
+﻿{
+    "cell_watchdog_restored":  true,
+    "bridges":  [
+                    {
+                        "pending":  0,
+                        "build_id":  "mt5-tick-isolation-20260817.3",
+                        "native_owner_mode":  "single_process_read_write_rpc",
+                        "name":  "s1",
+                        "worker_pid":  3796,
+                        "http_pid":  7036,
+                        "port":  8061,
+                        "absent_probe":  "qh-deploy-absent-s1-20260817T090546Z",
+                        "positions":  0
+                    },
+                    {
+                        "pending":  0,
+                        "build_id":  "mt5-tick-isolation-20260817.3",
+                        "native_owner_mode":  "single_process_read_write_rpc",
+                        "name":  "s3",
+                        "worker_pid":  840,
+                        "http_pid":  5404,
+                        "port":  8063,
+                        "absent_probe":  "qh-deploy-absent-s3-20260817T090546Z",
+                        "positions":  0
+                    }
+                ],
+    "release":  "mt5-tick-isolation-20260817.3",
+    "real_orders_sent":  false,
+    "backup":  "D:\\QHMT5\\backups\\mt5-tick-isolation-20260817.3-20260817T090546Z",
+    "deployed_at":  "2026-08-17T09:06:23.3562251Z",
+    "qh_maintenance_owned":  true,
+    "candidate_start_requested":  true,
+    "ok":  true,
+    "manifest_sha256":  "0d1623259c4dd6d81460516505345dffeb08747393faf67c9a5e8f9280164444",
+    "rollback_verified":  false
+}

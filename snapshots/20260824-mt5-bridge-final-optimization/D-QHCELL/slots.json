@@ -1,0 +1,150 @@
+[
+ {
+  "slot": "s1",
+  "family": "ic",
+  "port": 8061,
+  "state": "allocated",
+  "alloc": {
+   "login": "52940784",
+   "server": "ICMarketsSC-Demo",
+   "user": "hedge_pro",
+   "role": "main",
+   "label": "IC MT5 Demo(Cell)",
+   "ts": 1784608343,
+   "measured": {
+    "alloc_ms": 4376,
+    "login_wait_ms": 4032,
+    "health_rtt_ms": 0
+   }
+  },
+  "pid": 2000,
+  "platform": "MT5"
+ },
+ {
+  "slot": "s2",
+  "family": "ic",
+  "port": 8062,
+  "state": "warm",
+  "alloc": null,
+  "pid": null,
+  "platform": "MT5"
+ },
+ {
+  "slot": "s3",
+  "family": "exness",
+  "port": 8063,
+  "state": "allocated",
+  "alloc": {
+   "login": "277809090",
+   "server": "Exness-MT5Trial5",
+   "user": "hedge_pro",
+   "role": "hedge",
+   "label": "Exness MT5 Trial",
+   "ts": 1784607194,
+   "measured": {
+    "alloc_ms": 24768,
+    "login_wait_ms": 24377,
+    "health_rtt_ms": 1
+   }
+  },
+  "pid": 8504,
+  "platform": "MT5"
+ },
+ {
+  "slot": "s4",
+  "family": "exness",
+  "port": 8064,
+  "state": "warm",
+  "alloc": null,
+  "pid": null,
+  "platform": "MT5"
+ },
+ {
+  "slot": "m1",
+  "family": "mt4-ic",
+  "platform": "MT4",
+  "port": 8065,
+  "state": "allocated",
+  "alloc": {
+   "login": "31387661",
+   "server": "ICMarketsSC-Demo03",
+   "user": "jj456",
+   "role": "main",
+   "label": "",
+   "platform": "MT4",
+   "ts": 1784662824,
+   "measured": {
+    "alloc_ms": 10446,
+    "login_wait_ms": 7537,
+    "health_rtt_ms": 0
+   }
+  },
+  "pid": 7600
+ },
+ {
+  "slot": "m2",
+  "family": "mt4-exness",
+  "platform": "MT4",
+  "port": 8066,
+  "state": "allocated",
+  "alloc": {
+   "login": "95301641",
+   "server": "Exness-Trial",
+   "user": "jj456",
+   "role": "hedge",
+   "label": "",
+   "platform": "MT4",
+   "ts": 1784662874,
+   "measured": {
+    "alloc_ms": 10238,
+    "login_wait_ms": 7550,
+    "health_rtt_ms": 0
+   }
+  },
+  "pid": 8952
+ },
+ {
+  "slot": "m3",
+  "family": "mt4-ic",
+  "platform": "MT4",
+  "port": 8067,
+  "state": "allocated",
+  "alloc": {
+   "login": "31387662",
+   "server": "ICMarketsSC-Demo03",
+   "user": "lei789",
+   "role": "main",
+   "label": "IC MT4主",
+   "platform": "MT4",
+   "ts": 1784664742,
+   "measured": {
+    "alloc_ms": 18990,
+    "login_wait_ms": 16110,
+    "health_rtt_ms": 0
+   }
+  },
+  "pid": 7652
+ },
+ {
+  "slot": "m4",
+  "family": "mt4-exness",
+  "platform": "MT4",
+  "port": 8068,
+  "state": "allocated",
+  "alloc": {
+   "login": "95301642",
+   "server": "Exness-Trial",
+   "user": "lei789",
+   "role": "hedge",
+   "label": "Exness MT4对冲",
+   "platform": "MT4",
+   "ts": 1784666500,
+   "measured": {
+    "alloc_ms": 22416,
+    "login_wait_ms": 18789,
+    "health_rtt_ms": 39
+   }
+  },
+  "pid": 7712
+ }
+]

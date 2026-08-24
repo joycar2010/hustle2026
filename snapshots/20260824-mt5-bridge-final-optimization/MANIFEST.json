@@ -1,0 +1,1422 @@
+﻿[
+    {
+        "path":  "EXCLUDED_LARGE_FILES.md",
+        "bytes":  1295,
+        "sha256":  "C162DD91E63B588B499D312F56DF38086B558B0FDE9C3F75FC39BFD6D10FCE6A"
+    },
+    {
+        "path":  "manifest-mt5-inventory.md",
+        "bytes":  9239,
+        "sha256":  "8033989A2E765BDE3CA5819914561464195CA6872EFC4B6E2BB81F2A1E84A8F6"
+    },
+    {
+        "path":  "README.md",
+        "bytes":  1893,
+        "sha256":  "ABC10B3FA7AA29D1143F04BC2C33D4C54880F5B53D0E6ABA4F0166E2869B7B59"
+    },
+    {
+        "path":  "SECURITY.md",
+        "bytes":  401,
+        "sha256":  "B64B8718D94B8A2C87EDD807FE7CBF55425F10D13239268DAA22CD1F83A7962F"
+    },
+    {
+        "path":  "C-MT5Agent/config.json",
+        "bytes":  1364,
+        "sha256":  "E2676B408FA800A88C402D2196F0AF8A12BA71DC9159C5B76DED2951B4D09A95"
+    },
+    {
+        "path":  "C-MT5Agent/instances.json",
+        "bytes":  2100,
+        "sha256":  "55B355DAC56C6A183C2660479B0ECC035827E4035F6FC994CA616FFBF443187C"
+    },
+    {
+        "path":  "C-MT5Agent/main_v3.py",
+        "bytes":  100801,
+        "sha256":  "6E3C3076537F832EBEC3861B69352EAED0795A9A06C9FF12464C9FAFED952EF2"
+    },
+    {
+        "path":  "C-MT5Agent/requirements.txt",
+        "bytes":  63,
+        "sha256":  "3A7A070505CC9F73317BB172275769C4A83C7001BC421B5C41A58AC6AD2A5F08"
+    },
+    {
+        "path":  "D-MT4LAB/agent/deploy_no123_agent.ps1",
+        "bytes":  4536,
+        "sha256":  "833B47927DAB2C6570A97A3D590D6100475B38A684E91F959EA2AB12C8E66A4A"
+    },
+    {
+        "path":  "D-MT4LAB/agent/diagnose_no123_v115.ps1",
+        "bytes":  2687,
+        "sha256":  "6B6BA73FE6F2808D22FAE35C33334E0FC22487EAADED6706C4C833A2FFB6D5C2"
+    },
+    {
+        "path":  "D-MT4LAB/agent/filebridge.py",
+        "bytes":  13016,
+        "sha256":  "1FC24FD132A2B680C772E0E4A1F04B2D110B8B5FE26FBCEDEDEE264D06BCB27A"
+    },
+    {
+        "path":  "D-MT4LAB/agent/inspect_no123_agent_wal.py",
+        "bytes":  856,
+        "sha256":  "4019A352EC1EB7B0199AD600987A15FBD289A559A5BB963AD59933C5263561C0"
+    },
+    {
+        "path":  "D-MT4LAB/agent/inspect_no123_tasks.ps1",
+        "bytes":  1542,
+        "sha256":  "649D1D9D234892D02312E96F35BC571F861521281C563A8DF62AE0B731EE791D"
+    },
+    {
+        "path":  "D-MT4LAB/agent/install_mt4_agent_watchdog.ps1",
+        "bytes":  2173,
+        "sha256":  "2A020EA3AC03D10F6AB976A78C6A4B090D1278B8D9B2349B5BE82143F8D4F5EA"
+    },
+    {
+        "path":  "D-MT4LAB/agent/ledger.py",
+        "bytes":  7038,
+        "sha256":  "7A4EBBEFB8B3A9C168805F9DE6DC90F363A96B696D7C564A88354D7632BB2511"
+    },
+    {
+        "path":  "D-MT4LAB/agent/main.py",
+        "bytes":  50585,
+        "sha256":  "DBAB22D3BAA16B27A3BF58AC787A57B289415FBCB0EC8A8B49FD49734E863E4F"
+    },
+    {
+        "path":  "D-MT4LAB/agent/mt4_agent_watchdog.ps1",
+        "bytes":  6479,
+        "sha256":  "10E54982720E742C9BDD9D0C5AB49605609EC00A23C7D9FF9AB278A012DF20CA"
+    },
+    {
+        "path":  "D-MT4LAB/agent/predeploy_no123_readonly.ps1",
+        "bytes":  1168,
+        "sha256":  "BA0B88D61AC383B4AFF3527C7C9CC45EB49339F640C9B807C56C31F5D356904C"
+    },
+    {
+        "path":  "D-MT4LAB/agent/predeploy_no123_v115_readonly.ps1",
+        "bytes":  2892,
+        "sha256":  "C44777AC3667785A6BC55B35391E6AA7F1D459239067816D62260FD5E10A987A"
+    },
+    {
+        "path":  "D-MT4LAB/agent/QHBridge.ex4",
+        "bytes":  61136,
+        "sha256":  "3C209087E781D3EE8BD5BA0BA4A44E0B75326D50406058E20630CEFF1659A239"
+    },
+    {
+        "path":  "D-MT4LAB/agent/QHBridge.mq4",
+        "bytes":  25793,
+        "sha256":  "6F94B81CB34802B421732DAECFA59E7E3964F254179E7B1883F39E58FEF9816A"
+    },
+    {
+        "path":  "D-MT4LAB/agent/run_agent.ps1",
+        "bytes":  1672,
+        "sha256":  "563E81C84A5D47F0C90C7BE551F586390409F1F9FFD53A618B0036981390EF1B"
+    },
+    {
+        "path":  "D-MT4LAB/agent/simulator.py",
+        "bytes":  8858,
+        "sha256":  "7B8BCAC7590E128F7AD0C0DA4AA6DC8035108B39AC840F6B067DCF4124B4BE5F"
+    },
+    {
+        "path":  "D-MT4LAB/agent/test_phased.py",
+        "bytes":  6291,
+        "sha256":  "C5C9817A66108E1372FCFCE1754C1FDD39CC5C55B55B86BCF3CE182667F615E1"
+    },
+    {
+        "path":  "D-MT4LAB/agent/watchdog-state.json",
+        "bytes":  318,
+        "sha256":  "106C2A503EB4BDD8747ECED1F7A9E2B9D9A0692DCCE51D09DAD31B62B276C644"
+    },
+    {
+        "path":  "D-MT4LAB/agent/backups/batch-ladders-20260731T1924Z/filebridge.py",
+        "bytes":  6836,
+        "sha256":  "93CD3AE32838C776F46E20F88AF39B79AA655543B3F265D33CB905269419681E"
+    },
+    {
+        "path":  "D-MT4LAB/agent/backups/batch-ladders-20260731T1924Z/ledger.py",
+        "bytes":  4084,
+        "sha256":  "EC02BA49C7EB46DAC9F5EDE8958B014531FCD87DFD490E73FC6704ADCAB84DBC"
+    },
+    {
+        "path":  "D-MT4LAB/agent/backups/batch-ladders-20260731T1924Z/main.py",
+        "bytes":  26053,
+        "sha256":  "1C3EADFB761929B392B1818A8E6A18970C4EEAD0BB78C2616DA4E874DE83915F"
+    },
+    {
+        "path":  "D-MT4LAB/agent/backups/qhtest1-20260731T0645Z/filebridge.py",
+        "bytes":  6251,
+        "sha256":  "6F71EC776291A0F150E67D64A1CED4002AA163C171ADF7218D5DA6B497C79A00"
+    },
+    {
+        "path":  "D-MT4LAB/agent/backups/qhtest1-20260731T0645Z/main.py",
+        "bytes":  22958,
+        "sha256":  "7C660B9AA3FB28D2535F09C880C75029434FBDE51BFB682673FFB03A40AEB6BC"
+    },
+    {
+        "path":  "D-MT4LAB/agent/backups/watchdog-20260731T035917Z/MT4LAB-Agent-exness.xml",
+        "bytes":  3028,
+        "sha256":  "430E9B8696D85ED05A7941B92E931B2C1E18AAF312D52B7265D7CF2A7570D742"
+    },
+    {
+        "path":  "D-MT4LAB/agent/backups/watchdog-20260731T035917Z/MT4LAB-Agent-ic.xml",
+        "bytes":  3012,
+        "sha256":  "3457998520E3B09870C547B1C962922C9E8888894E11C7B1E440A115E3AAE070"
+    },
+    {
+        "path":  "D-MT4LAB/agent/backups/watchdog-20260731T035917Z/run_agent.ps1",
+        "bytes":  1677,
+        "sha256":  "2D8DB5D2CCCA0FFF2E562A3A31D88B6BCFDA3705B246316F2E6944EA6716D427"
+    },
+    {
+        "path":  "D-MT4LAB/build/filebridge-bounded-watch.py",
+        "bytes":  6251,
+        "sha256":  "6F71EC776291A0F150E67D64A1CED4002AA163C171ADF7218D5DA6B497C79A00"
+    },
+    {
+        "path":  "D-MT4LAB/build/QHBridge-1.11.mq4",
+        "bytes":  24603,
+        "sha256":  "D872F67AB0B53DA1DB2D0A0277A50E62D685186491C456207128440475B7783F"
+    },
+    {
+        "path":  "D-MT4LAB/build/QHBridge-1.12.mq4",
+        "bytes":  24342,
+        "sha256":  "5EB831D5F72A5F7B05266D6414AF68CA05D7C52B74FCBED19B37B9D3189D1AE9"
+    },
+    {
+        "path":  "D-MT4LAB/build/QHBridge-1.13.mq4",
+        "bytes":  26682,
+        "sha256":  "76AEF3C4774E8104CA08D5EE9E4FE989DAE6A2CDAF3EF35328D469126479BFFF"
+    },
+    {
+        "path":  "D-MT4LAB/build/QHBridge-1.14.mq4",
+        "bytes":  26882,
+        "sha256":  "F8BB2ED1E248AC2A16C36F9D443F414ECD39B545659DB5F2A581D05434713F07"
+    },
+    {
+        "path":  "D-MT4LAB/build/no123-subsecond-20260727/QHBridge.ex4",
+        "bytes":  61692,
+        "sha256":  "65C9E1164C6196407F6D6ECAD606B25B68EF3283F2D08F36D74E17AA0F178EA0"
+    },
+    {
+        "path":  "D-MT4LAB/build/no123-subsecond-20260727/QHBridge.mq4",
+        "bytes":  25768,
+        "sha256":  "8C364C1215DF20641DC921C343FEBB36F85308B74E6804EB536D17AFBF6C6B95"
+    },
+    {
+        "path":  "D-MT4LAB/releases/no123-subsecond-20260727/agent/filebridge.py",
+        "bytes":  5981,
+        "sha256":  "9609C9D561C07A35D25FCCAD13A22D08D80463A51520F5A54495ABA8CD8DA8F4"
+    },
+    {
+        "path":  "D-MT4LAB/releases/no123-subsecond-20260727/agent/ledger.py",
+        "bytes":  4084,
+        "sha256":  "EC02BA49C7EB46DAC9F5EDE8958B014531FCD87DFD490E73FC6704ADCAB84DBC"
+    },
+    {
+        "path":  "D-MT4LAB/releases/no123-subsecond-20260727/agent/main.py",
+        "bytes":  22367,
+        "sha256":  "20439EDE755B529CCD03046D920501F7D831C8B34B9A3A737C0A645DAC704B9B"
+    },
+    {
+        "path":  "D-MT4LAB/releases/no123-subsecond-20260727/agent/run_agent.ps1",
+        "bytes":  1677,
+        "sha256":  "CBDAC3E87CA5E779147ED9AE2DC78C378715BA592DA072735F4387C27FF69AD4"
+    },
+    {
+        "path":  "D-MT4LAB/releases/no123-subsecond-20260727/exness/QHBridge.ex4",
+        "bytes":  61770,
+        "sha256":  "F26676727E6DABA4456B28487BF14B66FD43D7E979B142AAB708479D172CB679"
+    },
+    {
+        "path":  "D-MT4LAB/releases/no123-subsecond-20260727/exness/QHBridge.mq4",
+        "bytes":  25793,
+        "sha256":  "6F94B81CB34802B421732DAECFA59E7E3964F254179E7B1883F39E58FEF9816A"
+    },
+    {
+        "path":  "D-MT4LAB/releases/no123-subsecond-20260727/ic/QHBridge.ex4",
+        "bytes":  61136,
+        "sha256":  "3C209087E781D3EE8BD5BA0BA4A44E0B75326D50406058E20630CEFF1659A239"
+    },
+    {
+        "path":  "D-MT4LAB/releases/no123-subsecond-20260727/ic/QHBridge.mq4",
+        "bytes":  25793,
+        "sha256":  "6F94B81CB34802B421732DAECFA59E7E3964F254179E7B1883F39E58FEF9816A"
+    },
+    {
+        "path":  "D-MT4LAB/task_backup_20260722_cutover/MT4LAB-Agent-exness.xml",
+        "bytes":  1506,
+        "sha256":  "0E8A75D22BB5C50C4F0C4EA78A38743D54ADC2C3ECB41290E23F9044100B5B33"
+    },
+    {
+        "path":  "D-MT4LAB/task_backup_20260722_cutover/MT4LAB-Agent-ic.xml",
+        "bytes":  1498,
+        "sha256":  "C15085955B008322B02AF777AF8193B4764907A73CCCA27244274B8A7F6C40BE"
+    },
+    {
+        "path":  "D-MT4LAB/task_backup_20260722_cutover/MT4LAB-Startup.xml",
+        "bytes":  1481,
+        "sha256":  "45CB9FA64CCC8F0944562F835DD7A5915926D5DDB02842964D30CEFF9BAD8F7B"
+    },
+    {
+        "path":  "D-QHCELL/cell.py",
+        "bytes":  25921,
+        "sha256":  "171BCF175F8DE9F1D50F5891C809A4F2D9A7881B5B0E8485EE51C36EF7905935"
+    },
+    {
+        "path":  "D-QHCELL/run_cell.ps1",
+        "bytes":  608,
+        "sha256":  "BFFCC209801C307BB49ABFB50A6F8D3C5382FFC6DE3C5D768F013F4E6E161E39"
+    },
+    {
+        "path":  "D-QHCELL/slots.json",
+        "bytes":  2770,
+        "sha256":  "C1968E42FFCDD7A14DC4933B9424FC19640FC9E26E54B4BE2B71AA0DADE6ACDB"
+    },
+    {
+        "path":  "D-QHCELL/backups/QH-MT4-Agent-Watchdog.before-disable-20260811.xml",
+        "bytes":  3190,
+        "sha256":  "2747D952C6143BE2533ABA04046AB66FAEEDD0AF63596D5DB4CEBC56B88D73D5"
+    },
+    {
+        "path":  "D-QHCELL/backups/QHCELL-Agent.before-system.xml",
+        "bytes":  2852,
+        "sha256":  "F8288B9B0F6C7D10C6922D2A99906CF06599B5E0EA48BAA40B5AEA019E99CFDF"
+    },
+    {
+        "path":  "D-QHCELL/backups/QHCELL-t-m1.before-system.xml",
+        "bytes":  2460,
+        "sha256":  "3BE50FC3E077C9C74E680CA9F7CE1362A735F1DD7AE6D91A300166CAD3D9E857"
+    },
+    {
+        "path":  "D-QHCELL/backups/QHCELL-t-m2.before-system.xml",
+        "bytes":  2460,
+        "sha256":  "0AF3835FD70726CACC78414F17E74CCFCF43A3B7F5611CEFE15165412C48092D"
+    },
+    {
+        "path":  "D-QHCELL/backups/QHCELL-t-m3.before-system.xml",
+        "bytes":  2460,
+        "sha256":  "6D8BBB9F31144CDC9B85A50D573B7D2ECF6079986E6DD8DBC5D0F3F5D0227DDA"
+    },
+    {
+        "path":  "D-QHCELL/backups/QHCELL-t-m4.before-system.xml",
+        "bytes":  2460,
+        "sha256":  "08FCC3DA77EA284BD41A322BDBA320C2D437CB208FCD8DFB6C9E78124CBB6655"
+    },
+    {
+        "path":  "D-QHCELL/pool/m1/start.ini",
+        "bytes":  95,
+        "sha256":  "56E6FB8913C6C95445AA7B84D0438EF41040525A82C14BF7B61E9EDB5AC902A6"
+    },
+    {
+        "path":  "D-QHCELL/pool/m1/terminal/MQL4/Experts/QHBridge.ex4",
+        "bytes":  80568,
+        "sha256":  "89085EA19DD1B41C922710C8D237EF87CBA9347E045FBD8653AF75D1938FA284"
+    },
+    {
+        "path":  "D-QHCELL/pool/m1/terminal/MQL4/Experts/QHBridge.mq4",
+        "bytes":  41534,
+        "sha256":  "C6468A6F49296011B82AFC11AC08D8CFE2801C2B9D3A851B434F6E4CC9BC0B01"
+    },
+    {
+        "path":  "D-QHCELL/pool/m1/terminal/MQL4/Experts/stage_qhbridge_v122_20260810/QHBridge.ex4",
+        "bytes":  80568,
+        "sha256":  "89085EA19DD1B41C922710C8D237EF87CBA9347E045FBD8653AF75D1938FA284"
+    },
+    {
+        "path":  "D-QHCELL/pool/m1/terminal/MQL4/Experts/stage_qhbridge_v122_20260810/QHBridge.mq4",
+        "bytes":  41534,
+        "sha256":  "C6468A6F49296011B82AFC11AC08D8CFE2801C2B9D3A851B434F6E4CC9BC0B01"
+    },
+    {
+        "path":  "D-QHCELL/pool/m2/start.ini",
+        "bytes":  93,
+        "sha256":  "0D6FE34F8099608CE76A4B03F15DA296EB189ABE01A06F6A29A9C87C0EF3E0CC"
+    },
+    {
+        "path":  "D-QHCELL/pool/m2/terminal/MQL4/Experts/QHBridge.ex4",
+        "bytes":  80748,
+        "sha256":  "BC3D6D664035B2A90C0C95007BDD37800255CF213C6EC2C2916C2265DD391BA8"
+    },
+    {
+        "path":  "D-QHCELL/pool/m2/terminal/MQL4/Experts/QHBridge.mq4",
+        "bytes":  41534,
+        "sha256":  "C6468A6F49296011B82AFC11AC08D8CFE2801C2B9D3A851B434F6E4CC9BC0B01"
+    },
+    {
+        "path":  "D-QHCELL/pool/m2/terminal/MQL4/Experts/stage_qhbridge_v122_20260810/QHBridge.ex4",
+        "bytes":  80748,
+        "sha256":  "BC3D6D664035B2A90C0C95007BDD37800255CF213C6EC2C2916C2265DD391BA8"
+    },
+    {
+        "path":  "D-QHCELL/pool/m2/terminal/MQL4/Experts/stage_qhbridge_v122_20260810/QHBridge.mq4",
+        "bytes":  41534,
+        "sha256":  "C6468A6F49296011B82AFC11AC08D8CFE2801C2B9D3A851B434F6E4CC9BC0B01"
+    },
+    {
+        "path":  "D-QHCELL/pool/m3/start.ini",
+        "bytes":  95,
+        "sha256":  "2CF7AE2480F1D367AA3DAA78A31F9186F9FA4AE689DED5A27B164EF8B24B8CC2"
+    },
+    {
+        "path":  "D-QHCELL/pool/m3/terminal/MQL4/Experts/QHBridge.ex4",
+        "bytes":  80388,
+        "sha256":  "723F8154922EF126DE3926C6A87CABABC1CD3B236828969D88CCB9982EA95FD8"
+    },
+    {
+        "path":  "D-QHCELL/pool/m3/terminal/MQL4/Experts/QHBridge.mq4",
+        "bytes":  41534,
+        "sha256":  "C6468A6F49296011B82AFC11AC08D8CFE2801C2B9D3A851B434F6E4CC9BC0B01"
+    },
+    {
+        "path":  "D-QHCELL/pool/m3/terminal/MQL4/Experts/stage_qhbridge_v122_20260810/QHBridge.ex4",
+        "bytes":  80388,
+        "sha256":  "723F8154922EF126DE3926C6A87CABABC1CD3B236828969D88CCB9982EA95FD8"
+    },
+    {
+        "path":  "D-QHCELL/pool/m3/terminal/MQL4/Experts/stage_qhbridge_v122_20260810/QHBridge.mq4",
+        "bytes":  41534,
+        "sha256":  "C6468A6F49296011B82AFC11AC08D8CFE2801C2B9D3A851B434F6E4CC9BC0B01"
+    },
+    {
+        "path":  "D-QHCELL/pool/m4/start.ini",
+        "bytes":  93,
+        "sha256":  "C7D6479D844477B2FB9E7B7C1468466C9A713030F9734C794C6FEF31CA79CECA"
+    },
+    {
+        "path":  "D-QHCELL/pool/m4/terminal/MQL4/Experts/QHBridge.ex4",
+        "bytes":  81010,
+        "sha256":  "0C3D7BABAE9076DDB73BB2396FC48D92E5B78664535F2E8FD7599C84EA800D0B"
+    },
+    {
+        "path":  "D-QHCELL/pool/m4/terminal/MQL4/Experts/QHBridge.mq4",
+        "bytes":  41534,
+        "sha256":  "C6468A6F49296011B82AFC11AC08D8CFE2801C2B9D3A851B434F6E4CC9BC0B01"
+    },
+    {
+        "path":  "D-QHCELL/pool/m4/terminal/MQL4/Experts/stage_qhbridge_v122_20260810/QHBridge.ex4",
+        "bytes":  81010,
+        "sha256":  "0C3D7BABAE9076DDB73BB2396FC48D92E5B78664535F2E8FD7599C84EA800D0B"
+    },
+    {
+        "path":  "D-QHCELL/pool/m4/terminal/MQL4/Experts/stage_qhbridge_v122_20260810/QHBridge.mq4",
+        "bytes":  41534,
+        "sha256":  "C6468A6F49296011B82AFC11AC08D8CFE2801C2B9D3A851B434F6E4CC9BC0B01"
+    },
+    {
+        "path":  "D-QHCELL/templates/exness/Profiles/SymbolSets/forex.all.set",
+        "bytes":  288,
+        "sha256":  "960E8672BA9DF5A8D5325BDEE8976703C3FC263AB7881C6772EFC3433055A28A"
+    },
+    {
+        "path":  "D-QHCELL/templates/exness/Profiles/SymbolSets/forex.crosses.set",
+        "bytes":  218,
+        "sha256":  "C95A2B57F4DE8504D8CAFD99DE6049D49DF31E0A86466C0FAE55008BEC9E1736"
+    },
+    {
+        "path":  "D-QHCELL/templates/exness/Profiles/SymbolSets/forex.major.set",
+        "bytes":  64,
+        "sha256":  "C5B114B137A44C5C93AD16C4BEFE696280CA069B4F4DD6AC7DB2B66825EA4804"
+    },
+    {
+        "path":  "D-QHCELL/templates/ic/Config/common.ini",
+        "bytes":  590,
+        "sha256":  "105ACB77429BA04708B8ADBAC596615C3284C9C32E14186AA9AD57EF3DC31BDA"
+    },
+    {
+        "path":  "D-QHCELL/templates/ic/Config/hotkeys.ini",
+        "bytes":  2,
+        "sha256":  "B3D510EF04275CA8E698E5B3CBB0ECE3949EF9252F0CDC839E9EE347409A2209"
+    },
+    {
+        "path":  "D-QHCELL/templates/ic/Config/settings.ini",
+        "bytes":  5908,
+        "sha256":  "DE20D998E283AE0830FA85FA945A48AE04BCFCE46F7216EE69C889C6FCA51275"
+    },
+    {
+        "path":  "D-QHCELL/templates/ic/Config/terminal.ini",
+        "bytes":  15626,
+        "sha256":  "44ABD9F1AE75F4F37B7098CF93C14CA6D517324FA44D0EA5EE167C33967B19B9"
+    },
+    {
+        "path":  "D-QHCELL/templates/ic/MQL5/Experts/Examples/Math 3D/Sets/Chomolungma.set",
+        "bytes":  684,
+        "sha256":  "127338EDC08D7E8917BE3E3C12374EA87292BBF99E48232080883D449194049B"
+    },
+    {
+        "path":  "D-QHCELL/templates/ic/MQL5/Experts/Examples/Math 3D/Sets/ClimberDream.set",
+        "bytes":  696,
+        "sha256":  "2694EBAC06D59A71DDD81E7271BA6967C9A75A1D859541028027BBD5485C88CF"
+    },
+    {
+        "path":  "D-QHCELL/templates/ic/MQL5/Experts/Examples/Math 3D/Sets/DoubleScrew.set",
+        "bytes":  684,
+        "sha256":  "D1F57E586FE6183D12EF3005250577C3736264C4F78C2E1A7D281C2CBD2F579D"
+    },
+    {
+        "path":  "D-QHCELL/templates/ic/MQL5/Experts/Examples/Math 3D/Sets/Granite.set",
+        "bytes":  684,
+        "sha256":  "F6FFF43E9E51DF34394355ABB5762C67734B16B71D17317D6BF8308620F8DBF1"
+    },
+    {
+        "path":  "D-QHCELL/templates/ic/MQL5/Experts/Examples/Math 3D/Sets/Hedgehog.set",
+        "bytes":  692,
+        "sha256":  "E570C593568C176D70DB615EC9332E518F331478BA074FE9A97A2E56D4075821"
+    },
+    {
+        "path":  "D-QHCELL/templates/ic/MQL5/Experts/Examples/Math 3D/Sets/Hill.set",
+        "bytes":  688,
+        "sha256":  "91F64DB113AA14E6CB1A11E7B21210AD0A2E6BEC01C36044FD1861C251710BA7"
+    },
+    {
+        "path":  "D-QHCELL/templates/ic/MQL5/Experts/Examples/Math 3D/Sets/Josephine.set",
+        "bytes":  688,
+        "sha256":  "B9E296E738CEC9399858F0776EC494E85B66B831F8A671ECD595EE5BA2C2C40E"
+    },
+    {
+        "path":  "D-QHCELL/templates/ic/MQL5/Experts/Examples/Math 3D/Sets/MultyExtremalScrew.set",
+        "bytes":  684,
+        "sha256":  "E675F036FC883D068270FAA944C117CC2BC6852C962D47133136A6340C4E79AE"
+    },
+    {
+        "path":  "D-QHCELL/templates/ic/MQL5/Experts/Examples/Math 3D/Sets/Screw.set",
+        "bytes":  684,
+        "sha256":  "39521CA3764D174F76884FF40B11B9D075414401112C8590ACD2C0501A3A9358"
+    },
+    {
+        "path":  "D-QHCELL/templates/ic/MQL5/Experts/Examples/Math 3D/Sets/Sink.set",
+        "bytes":  686,
+        "sha256":  "FC14A76BE7899185562BE8FE8F54198077F0EB00323FE9E7B2DDDE29538BC4C3"
+    },
+    {
+        "path":  "D-QHCELL/templates/ic/MQL5/Experts/Examples/Math 3D/Sets/Skin.set",
+        "bytes":  686,
+        "sha256":  "F274ED976510F11069FFCC7A2C0026989E2D83E38DE78D54E700A4ED619C82EC"
+    },
+    {
+        "path":  "D-QHCELL/templates/ic/MQL5/Experts/Examples/Math 3D/Sets/Trapfall.set",
+        "bytes":  686,
+        "sha256":  "F8FD9CCA752B40EDB574990A675912B2EA73DC3A13D6B0F77D1D126A091F86E1"
+    },
+    {
+        "path":  "D-QHCELL/templates/ic/MQL5/Profiles/SymbolSets/forex.all.set",
+        "bytes":  288,
+        "sha256":  "960E8672BA9DF5A8D5325BDEE8976703C3FC263AB7881C6772EFC3433055A28A"
+    },
+    {
+        "path":  "D-QHCELL/templates/ic/MQL5/Profiles/SymbolSets/forex.crosses.set",
+        "bytes":  218,
+        "sha256":  "C95A2B57F4DE8504D8CAFD99DE6049D49DF31E0A86466C0FAE55008BEC9E1736"
+    },
+    {
+        "path":  "D-QHCELL/templates/ic/MQL5/Profiles/SymbolSets/forex.major.set",
+        "bytes":  64,
+        "sha256":  "C5B114B137A44C5C93AD16C4BEFE696280CA069B4F4DD6AC7DB2B66825EA4804"
+    },
+    {
+        "path":  "D-QHCELL/templates/ic/Profiles/SymbolSets/forex.all.set",
+        "bytes":  288,
+        "sha256":  "960E8672BA9DF5A8D5325BDEE8976703C3FC263AB7881C6772EFC3433055A28A"
+    },
+    {
+        "path":  "D-QHCELL/templates/ic/Profiles/SymbolSets/forex.crosses.set",
+        "bytes":  218,
+        "sha256":  "C95A2B57F4DE8504D8CAFD99DE6049D49DF31E0A86466C0FAE55008BEC9E1736"
+    },
+    {
+        "path":  "D-QHCELL/templates/ic/Profiles/SymbolSets/forex.major.set",
+        "bytes":  64,
+        "sha256":  "C5B114B137A44C5C93AD16C4BEFE696280CA069B4F4DD6AC7DB2B66825EA4804"
+    },
+    {
+        "path":  "D-QHCELL/templates/mt4-exness/config/experts.ini",
+        "bytes":  4388,
+        "sha256":  "468783A8C53D236B49E2F179B3E99AF8EBFA8E922634E71BFE2B08236018C24D"
+    },
+    {
+        "path":  "D-QHCELL/templates/mt4-exness/config/terminal.ini",
+        "bytes":  4447,
+        "sha256":  "EAB5AB996FAA88E5D57BD48EDCA4C59A165D832A58384007E44A9DED1AFA89E1"
+    },
+    {
+        "path":  "D-QHCELL/templates/mt4-exness/MQL4/Experts/QHBridge.ex4",
+        "bytes":  48480,
+        "sha256":  "59A2EE315A0A25A93FC212C7DC0D555F53EDAB6C1FF5FB5E4C1D343E5C0C9BA3"
+    },
+    {
+        "path":  "D-QHCELL/templates/mt4-exness/profiles/lastprofile.ini",
+        "bytes":  9,
+        "sha256":  "E97E0F176D36639FD89A6F64264F0BA4CBAA9A49BB968D5D75B914E94402F3C7"
+    },
+    {
+        "path":  "D-QHCELL/templates/mt4-ic/config/experts.ini",
+        "bytes":  4388,
+        "sha256":  "468783A8C53D236B49E2F179B3E99AF8EBFA8E922634E71BFE2B08236018C24D"
+    },
+    {
+        "path":  "D-QHCELL/templates/mt4-ic/config/terminal.ini",
+        "bytes":  4437,
+        "sha256":  "85D5FE5B1E75AFC88FD262FF0239F82408715D6E9722AE76121E24AB06512372"
+    },
+    {
+        "path":  "D-QHCELL/templates/mt4-ic/MQL4/Experts/QHBridge.ex4",
+        "bytes":  48480,
+        "sha256":  "59A2EE315A0A25A93FC212C7DC0D555F53EDAB6C1FF5FB5E4C1D343E5C0C9BA3"
+    },
+    {
+        "path":  "D-QHCELL/templates/mt4-ic/profiles/lastprofile.ini",
+        "bytes":  9,
+        "sha256":  "E97E0F176D36639FD89A6F64264F0BA4CBAA9A49BB968D5D75B914E94402F3C7"
+    },
+    {
+        "path":  "D-QHMT5/guardian.ps1",
+        "bytes":  413,
+        "sha256":  "CB6F9533BBEEE43C768EF6737F6CAA1CB63EAA50D22874D192C14E5D115693AB"
+    },
+    {
+        "path":  "D-QHMT5/launch_bridges.ps1",
+        "bytes":  949,
+        "sha256":  "0F302D85634A3D2239C15BEDC70A5814034C07B3922801AEF839E050A65BAC68"
+    },
+    {
+        "path":  "D-QHMT5/seed_login.ps1",
+        "bytes":  1394,
+        "sha256":  "18C0CA03F9BE49D1F3296823274EC1E46E05CF338264DA0194D9979E72AA7019"
+    },
+    {
+        "path":  "D-QHMT5/supervisor.ps1",
+        "bytes":  3263,
+        "sha256":  "EFC8DB43AD695A51CBCA064484A8CB02B9151A04B5E1FF38B8BFBE5EDF7DA6EE"
+    },
+    {
+        "path":  "D-QHMT5/ws_probe_mt5.py",
+        "bytes":  562,
+        "sha256":  "F7CDB30B81C8F3B4F6753E4EB7623110DC89F841B0667C38E48915C5FD1190D8"
+    },
+    {
+        "path":  "D-QHMT5/backups/hedge-pro-mt5-positions-authoritative-20260811.34-20260811T145241Z/deployment-result.json",
+        "bytes":  3708,
+        "sha256":  "604DBEB08B04D3867D8DC59F0FBA1FA2951AF76EEF003CFC0FF05AAB637D3DF8"
+    },
+    {
+        "path":  "D-QHMT5/backups/hedge-pro-mt5-positions-authoritative-20260811.34-20260811T145241Z/release-manifest.json",
+        "bytes":  1057,
+        "sha256":  "7B9BF017A2EAF2C28E93C144D292C7249D4644321135383BBA99C3CF83A39865"
+    },
+    {
+        "path":  "D-QHMT5/backups/hedge-pro-mt5-quiet-refresh-20260811.35-20260812T000925Z/deployment-result.json",
+        "bytes":  3692,
+        "sha256":  "9A120C9C4D6754BD9EA610F24762423B9BBB925AC03E2ADBB068C3681323811F"
+    },
+    {
+        "path":  "D-QHMT5/backups/hedge-pro-mt5-quiet-refresh-20260811.35-20260812T000925Z/release-manifest.json",
+        "bytes":  1097,
+        "sha256":  "28958BCE4648D8095D73DDBA1513C40BF39C8EEC826E45AF547B0DEF69FE9CC4"
+    },
+    {
+        "path":  "D-QHMT5/backups/mt5-admission-snapshot-capability-20260821.86-20260821T222842Z/deployment-report.json",
+        "bytes":  266,
+        "sha256":  "B10D64FB499EFE5E1258850A1D17AC2EE03D53DA2CD5C95F34F95D4EA2EE1DF6"
+    },
+    {
+        "path":  "D-QHMT5/backups/mt5-admission-snapshot-capability-20260821.86-20260821T222842Z/release-manifest.json",
+        "bytes":  1665,
+        "sha256":  "1CCB68517BDA9857DF3E7D810C952AEA1F1DC478CC632E11D435AD5F7C7849D8"
+    },
+    {
+        "path":  "D-QHMT5/backups/mt5-execution-probe-memory-20260818.5-20260818T013324Z/deployment-report.json",
+        "bytes":  1863,
+        "sha256":  "E506D50703A7CBDB14EBE6CF41D699FACD656E085F35F237D82EFD692127B34C"
+    },
+    {
+        "path":  "D-QHMT5/backups/mt5-execution-probe-memory-20260818.5-20260818T013324Z/release-manifest.json",
+        "bytes":  5047,
+        "sha256":  "97298D951F133D86175BAA33733D08B34704E58DA2497A2A5B48D1CE8836C663"
+    },
+    {
+        "path":  "D-QHMT5/backups/mt5-execution-probe-memory-20260819.6-20260819T161918Z/deployment-report.json",
+        "bytes":  1706,
+        "sha256":  "A4147E822530D947E9E517A2F115BC4C12CB9936848AA0E4053A3F74BB4F7902"
+    },
+    {
+        "path":  "D-QHMT5/backups/mt5-execution-probe-memory-20260819.6-20260819T161918Z/release-manifest.json",
+        "bytes":  9429,
+        "sha256":  "29B675AFC115FFBFE7F3D9CE2C0D128CC48D6BEBF4285EC9BB58C6594C54F21B"
+    },
+    {
+        "path":  "D-QHMT5/backups/mt5-execution-probe-memory-20260819.6-20260819T162722Z/deployment-report.json",
+        "bytes":  3040,
+        "sha256":  "F09B54F33A9B63A0787AF02C6406FEAC49343F0392D87D89221A59D1C443B28C"
+    },
+    {
+        "path":  "D-QHMT5/backups/mt5-execution-probe-memory-20260819.6-20260819T162722Z/release-manifest.json",
+        "bytes":  9534,
+        "sha256":  "BCCF44A98DAE1FCC7E6D852FDEF15CF866BEA7CF9AC2CFC4048D45BBA298CE72"
+    },
+    {
+        "path":  "D-QHMT5/backups/mt5-execution-probe-memory-20260819.6-20260819T163902Z/deployment-report.json",
+        "bytes":  1864,
+        "sha256":  "5465BFAD1C455F866D97A1467099B91CD50A37327CFA5509B211105E85F623EB"
+    },
+    {
+        "path":  "D-QHMT5/backups/mt5-execution-probe-memory-20260819.6-20260819T163902Z/release-manifest.json",
+        "bytes":  9534,
+        "sha256":  "030A3711DB6C2A750D97AEC9F517CA900B50EDF0065B0B236626DC7DBE44A498"
+    },
+    {
+        "path":  "D-QHMT5/backups/mt5-execution-quote-snapshot-20260821.1-20260821T182548Z/deployment-report.json",
+        "bytes":  1710,
+        "sha256":  "7A60F117EB3E8FD3C60E79FA842E04F15AA3C5D4C50A1A716743DD011375CA62"
+    },
+    {
+        "path":  "D-QHMT5/backups/mt5-execution-quote-snapshot-20260821.1-20260821T182548Z/release-manifest.json",
+        "bytes":  10681,
+        "sha256":  "8EE17C6481B8D8614804214F7A08B5D53129A80FBFA0CE4E76B4CD1636190DF3"
+    },
+    {
+        "path":  "D-QHMT5/backups/mt5-execution-quote-snapshot-20260821.1-20260821T184315Z/deployment-report.json",
+        "bytes":  1871,
+        "sha256":  "A01F67F24693059EF7952C639B44E62F485833B1F9B643F0A853A0D541E5F5CB"
+    },
+    {
+        "path":  "D-QHMT5/backups/mt5-execution-quote-snapshot-20260821.1-20260821T184315Z/release-manifest.json",
+        "bytes":  10717,
+        "sha256":  "B1A13DE3D0730BEBCEF4FDFD9C897230FE683083F9624B35633803A8F7C685A8"
+    },
+    {
+        "path":  "D-QHMT5/backups/mt5-process-admission-20260817.1-20260817T042040Z/deployment-report.json",
+        "bytes":  340,
+        "sha256":  "E2058629B9416245435C3FAC794776BDC0562016718D9CAF1E880BC1DABCA4AF"
+    },
+    {
+        "path":  "D-QHMT5/backups/mt5-process-admission-20260817.1-20260817T043149Z/deployment-report.json",
+        "bytes":  340,
+        "sha256":  "B4129EF03FA127D2EE4BA8ED5D8AFC019A8CB66957ECECD66ADE1C37D1CC5C5A"
+    },
+    {
+        "path":  "D-QHMT5/backups/mt5-single-owner-admission-20260817.2-20260817T061412Z/deployment-report.json",
+        "bytes":  392,
+        "sha256":  "71BF8F2AB1C7022B36205E648030E1EF238E885719F4DE4A9CF72F0727DD0122"
+    },
+    {
+        "path":  "D-QHMT5/backups/mt5-single-owner-admission-20260817.2-20260817T061412Z/release-manifest.json",
+        "bytes":  2436,
+        "sha256":  "DFABFBBAF6D86C683E084A8C6633822FF65BC1D830CB6BD3F46F51D2D3F70A19"
+    },
+    {
+        "path":  "D-QHMT5/backups/mt5-single-owner-admission-20260817.2-20260817T064913Z/deployment-report.json",
+        "bytes":  1621,
+        "sha256":  "9036D469AE66183C29E237991E284499EA5BF56D49A03C678717CA3D507B9BCF"
+    },
+    {
+        "path":  "D-QHMT5/backups/mt5-single-owner-admission-20260817.2-20260817T064913Z/release-manifest.json",
+        "bytes":  2478,
+        "sha256":  "FE86B4DA156CCBAF20DDE5F5A12D76AD3819C7B9EC68D90938B179126A636F80"
+    },
+    {
+        "path":  "D-QHMT5/backups/mt5-tick-isolation-20260817.3-20260817T090546Z/deployment-report.json",
+        "bytes":  1589,
+        "sha256":  "58EF1ACFF4AD2F4C15C00F5129F2638A7C0FDD7A767463AD06A5D632EA92AA21"
+    },
+    {
+        "path":  "D-QHMT5/backups/mt5-tick-isolation-20260817.3-20260817T090546Z/release-manifest.json",
+        "bytes":  2722,
+        "sha256":  "0D1623259C4DD6D81460516505345DFFEB08747393FAF67C9A5E8F9280164444"
+    },
+    {
+        "path":  "D-QHMT5/backups/mt5-trade-wake-priority-20260817.4-20260818T005758Z/deployment-report.json",
+        "bytes":  1610,
+        "sha256":  "0F248DA0F61D62E2B4C61E66A877E948FBCACB44168E838FE58D8559EDC74AF5"
+    },
+    {
+        "path":  "D-QHMT5/backups/mt5-trade-wake-priority-20260817.4-20260818T005758Z/release-manifest.json",
+        "bytes":  4560,
+        "sha256":  "B50ECB103D3748EA453BDEF02201829ECD36641F98EBCD998A3130AF6940D7C0"
+    },
+    {
+        "path":  "D-QHMT5/backups/qh-bridge-window-20260824T063920Z/main.py",
+        "bytes":  166676,
+        "sha256":  "5C279CB44FF6FF2F86EFCA48BE205459E75BB3236F0B43DCF5DE814EB8DDA3F5"
+    },
+    {
+        "path":  "D-QHMT5/backups/qh-bridge-window-20260824T063920Z/runtime.py",
+        "bytes":  111063,
+        "sha256":  "3E9A4DBB83E84E0D0667678C5E42E27FA1C7FCCE7272DAA8455A9660F4891EC5"
+    },
+    {
+        "path":  "D-QHMT5/deploy/mt5-execution-probe-memory-20260818.5/CANDIDATE-NOT-DEPLOYED.md",
+        "bytes":  1250,
+        "sha256":  "51504175173DFA9A7F6D9A56BB83D1D4E9CBC39D3ABAF23C6A0CF242CD5B338D"
+    },
+    {
+        "path":  "D-QHMT5/deploy/mt5-execution-probe-memory-20260818.5/cell.py",
+        "bytes":  25301,
+        "sha256":  "7957C6F91FB565B2B6A1D223833A372FDA51D01C8BB4F77127C199906E5790E9"
+    },
+    {
+        "path":  "D-QHMT5/deploy/mt5-execution-probe-memory-20260818.5/deploy.ps1",
+        "bytes":  36842,
+        "sha256":  "0A47BFBDA23ACA3C57EB8AC9862247B4D8AF43E9FAB8B80098048123459CD5EF"
+    },
+    {
+        "path":  "D-QHMT5/deploy/mt5-execution-probe-memory-20260818.5/release-manifest.json",
+        "bytes":  5047,
+        "sha256":  "97298D951F133D86175BAA33733D08B34704E58DA2497A2A5B48D1CE8836C663"
+    },
+    {
+        "path":  "D-QHMT5/deploy/mt5-execution-probe-memory-20260818.5/validate_release_20260818_5.py",
+        "bytes":  5952,
+        "sha256":  "33C96C2D5EDFB8038C99243CA2F5017522AD58611B8CBFEF25A34E3C4E87BDA4"
+    },
+    {
+        "path":  "D-QHMT5/deploy/mt5-execution-probe-memory-20260818.5/app/main.py",
+        "bytes":  105709,
+        "sha256":  "D5A3CDB205DE72C6389624137D162FC61E730DB5F420A7C8ECC2F101A1A5B77E"
+    },
+    {
+        "path":  "D-QHMT5/deploy/mt5-execution-probe-memory-20260818.5/app/runtime.py",
+        "bytes":  104003,
+        "sha256":  "B2C17884B0F9E0F1B609CED34276EB476ADE53101618A3900DEE0119DCF7741D"
+    },
+    {
+        "path":  "D-QHMT5/deploy/mt5-execution-probe-memory-20260818.5/app/__init__.py",
+        "bytes":  38,
+        "sha256":  "E1EF91E57D9ACEA875EA3FD4FDC0E964520D50F4F7CDA334C89DA60A7B3096FB"
+    },
+    {
+        "path":  "D-QHMT5/deploy/mt5-execution-probe-memory-20260819.6-deploy/cell.py",
+        "bytes":  25543,
+        "sha256":  "8176E749C07EF49EBE6753118E4AC748273B3FB92378A5981B23246BADED80A6"
+    },
+    {
+        "path":  "D-QHMT5/deploy/mt5-execution-probe-memory-20260819.6-deploy/deploy.ps1",
+        "bytes":  37344,
+        "sha256":  "1D211F4341F5D25D734DED5F9E556D48547FDD4C470093BF3058F0F1549E3551"
+    },
+    {
+        "path":  "D-QHMT5/deploy/mt5-execution-probe-memory-20260819.6-deploy/release-manifest.json",
+        "bytes":  9534,
+        "sha256":  "030A3711DB6C2A750D97AEC9F517CA900B50EDF0065B0B236626DC7DBE44A498"
+    },
+    {
+        "path":  "D-QHMT5/deploy/mt5-execution-probe-memory-20260819.6-deploy/app/main.py",
+        "bytes":  138550,
+        "sha256":  "9B7A5F0507630994BC631CCA2D4589A61120B8966EAD8CBD4DFA796A78FC9353"
+    },
+    {
+        "path":  "D-QHMT5/deploy/mt5-execution-probe-memory-20260819.6-deploy/app/runtime.py",
+        "bytes":  108812,
+        "sha256":  "BB598D82343B04F0D09359870B36DFE8929F33D7F2F9CB52943D133F54C50D3F"
+    },
+    {
+        "path":  "D-QHMT5/deploy/mt5-execution-probe-memory-20260819.6-deploy/app/__init__.py",
+        "bytes":  38,
+        "sha256":  "E1EF91E57D9ACEA875EA3FD4FDC0E964520D50F4F7CDA334C89DA60A7B3096FB"
+    },
+    {
+        "path":  "D-QHMT5/deploy/mt5-execution-quote-snapshot-20260821.1-deploy/cell.py",
+        "bytes":  25850,
+        "sha256":  "5EAE0286385314DE7A03D58168896DB9EE79C608D563A765138057536929527E"
+    },
+    {
+        "path":  "D-QHMT5/deploy/mt5-execution-quote-snapshot-20260821.1-deploy/deploy.ps1",
+        "bytes":  37803,
+        "sha256":  "0F344DC1A6A7704D09C66FC0B3294A51BFB3A96A1EFAAD3B26C4A673B0E1754E"
+    },
+    {
+        "path":  "D-QHMT5/deploy/mt5-execution-quote-snapshot-20260821.1-deploy/qh-acquire-maintenance.py",
+        "bytes":  2507,
+        "sha256":  "71E3C7006C58F76359FEFA10E844FC23E5569D8AD493F6DDE330AFA09ADCBA28"
+    },
+    {
+        "path":  "D-QHMT5/deploy/mt5-execution-quote-snapshot-20260821.1-deploy/qh-release-maintenance.py",
+        "bytes":  2848,
+        "sha256":  "EBA18EF7A28018B8807C69E7739DFAD82E54860119BAC5CAE46A6AD291857172"
+    },
+    {
+        "path":  "D-QHMT5/deploy/mt5-execution-quote-snapshot-20260821.1-deploy/release-manifest.json",
+        "bytes":  10681,
+        "sha256":  "8EE17C6481B8D8614804214F7A08B5D53129A80FBFA0CE4E76B4CD1636190DF3"
+    },
+    {
+        "path":  "D-QHMT5/deploy/mt5-execution-quote-snapshot-20260821.1-deploy/app/main.py",
+        "bytes":  162838,
+        "sha256":  "1007650FED89947DA1674FAC4BE3803F0256FF6EF849AEE74AA72C0C2F552D29"
+    },
+    {
+        "path":  "D-QHMT5/deploy/mt5-execution-quote-snapshot-20260821.1-deploy/app/runtime.py",
+        "bytes":  109655,
+        "sha256":  "035F0D9C7D411C1C07DBC9D7B39020BA640142CBBD0CF70FBAE61E68D12B4B5B"
+    },
+    {
+        "path":  "D-QHMT5/deploy/mt5-execution-quote-snapshot-20260821.1-deploy/app/__init__.py",
+        "bytes":  38,
+        "sha256":  "E1EF91E57D9ACEA875EA3FD4FDC0E964520D50F4F7CDA334C89DA60A7B3096FB"
+    },
+    {
+        "path":  "D-QHMT5/deploy/mt5-execution-quote-snapshot-20260821.1-retry2/cell.py",
+        "bytes":  25915,
+        "sha256":  "9B3A844BA279F7991818BD077A2D58375DA16F34FB8C91071CE194DB95B2A17E"
+    },
+    {
+        "path":  "D-QHMT5/deploy/mt5-execution-quote-snapshot-20260821.1-retry2/deploy.ps1",
+        "bytes":  37803,
+        "sha256":  "8F31CA9127883ABC9179355E0575CE58561198EADFF97082058B35DCBAFA9634"
+    },
+    {
+        "path":  "D-QHMT5/deploy/mt5-execution-quote-snapshot-20260821.1-retry2/deployment-token.txt",
+        "bytes":  32,
+        "sha256":  "08D3A406A1AEA913487AD61C2A9ACE827F3918E893FDF958A1B7FCCF110D863F"
+    },
+    {
+        "path":  "D-QHMT5/deploy/mt5-execution-quote-snapshot-20260821.1-retry2/qh-acquire-maintenance.py",
+        "bytes":  2507,
+        "sha256":  "71E3C7006C58F76359FEFA10E844FC23E5569D8AD493F6DDE330AFA09ADCBA28"
+    },
+    {
+        "path":  "D-QHMT5/deploy/mt5-execution-quote-snapshot-20260821.1-retry2/qh-release-maintenance.py",
+        "bytes":  2848,
+        "sha256":  "EBA18EF7A28018B8807C69E7739DFAD82E54860119BAC5CAE46A6AD291857172"
+    },
+    {
+        "path":  "D-QHMT5/deploy/mt5-execution-quote-snapshot-20260821.1-retry2/release-manifest.json",
+        "bytes":  10717,
+        "sha256":  "8B4B7D084770D17C1E9AA17EB2EF165DA116F85E6DA0462E4CD3DFDE44D4241A"
+    },
+    {
+        "path":  "D-QHMT5/deploy/mt5-execution-quote-snapshot-20260821.1-retry2/app/main.py",
+        "bytes":  162838,
+        "sha256":  "1007650FED89947DA1674FAC4BE3803F0256FF6EF849AEE74AA72C0C2F552D29"
+    },
+    {
+        "path":  "D-QHMT5/deploy/mt5-execution-quote-snapshot-20260821.1-retry2/app/runtime.py",
+        "bytes":  109655,
+        "sha256":  "035F0D9C7D411C1C07DBC9D7B39020BA640142CBBD0CF70FBAE61E68D12B4B5B"
+    },
+    {
+        "path":  "D-QHMT5/deploy/mt5-execution-quote-snapshot-20260821.1-retry2/app/__init__.py",
+        "bytes":  38,
+        "sha256":  "E1EF91E57D9ACEA875EA3FD4FDC0E964520D50F4F7CDA334C89DA60A7B3096FB"
+    },
+    {
+        "path":  "D-QHMT5/deploy/mt5-process-admission-20260817.1/cell.py",
+        "bytes":  23391,
+        "sha256":  "FD315EED24AA2024C879163EFF4B12BC936F246DC88F68B20404361F74CCD902"
+    },
+    {
+        "path":  "D-QHMT5/deploy/mt5-process-admission-20260817.1/deploy.ps1",
+        "bytes":  21590,
+        "sha256":  "2BFFFAA3FE313C6E63BAAB128A2A2C6333DF013033F916B0E6571D07F5AB3094"
+    },
+    {
+        "path":  "D-QHMT5/deploy/mt5-process-admission-20260817.1/inspect_migration.py",
+        "bytes":  4683,
+        "sha256":  "2CE617515D23C8C77CFB4D90BFAA1D114F1DA6AA5372F17C594DF85A6972D0D9"
+    },
+    {
+        "path":  "D-QHMT5/deploy/mt5-process-admission-20260817.1/app/main.py",
+        "bytes":  89305,
+        "sha256":  "63D82F29C9CD87E43ADD022F1ED08A0951535C0736569BFDE0F2757CF0E6ECDF"
+    },
+    {
+        "path":  "D-QHMT5/deploy/mt5-process-admission-20260817.1/app/runtime.py",
+        "bytes":  75742,
+        "sha256":  "77EE01C39D026A030BFF6E0C6A2C9495577F4BDC1E105691B7826D013766F443"
+    },
+    {
+        "path":  "D-QHMT5/deploy/mt5-single-owner-admission-20260817.2-20260817T061017Z/cell.py",
+        "bytes":  25123,
+        "sha256":  "A00B2D5B54E4F2E881C6C9025747AC0924CF5386CDABE78D74D92B5F37D95E36"
+    },
+    {
+        "path":  "D-QHMT5/deploy/mt5-single-owner-admission-20260817.2-20260817T061017Z/deploy.ps1",
+        "bytes":  28560,
+        "sha256":  "01BDDB1CCC5E46833F71DF1308EB5D7ABB24D38C11BEF11A657F335A262FF9FE"
+    },
+    {
+        "path":  "D-QHMT5/deploy/mt5-single-owner-admission-20260817.2-20260817T061017Z/release-manifest.json",
+        "bytes":  2436,
+        "sha256":  "DFABFBBAF6D86C683E084A8C6633822FF65BC1D830CB6BD3F46F51D2D3F70A19"
+    },
+    {
+        "path":  "D-QHMT5/deploy/mt5-single-owner-admission-20260817.2-20260817T061017Z/app/main.py",
+        "bytes":  96574,
+        "sha256":  "EACC47DA2C87975EFC8EF294A1EAA3A7083ECF0E34E2E4E3D813FDCB42D3DB7B"
+    },
+    {
+        "path":  "D-QHMT5/deploy/mt5-single-owner-admission-20260817.2-20260817T061017Z/app/runtime.py",
+        "bytes":  94293,
+        "sha256":  "03656B2C29E86256A50D68794C01ABB7322C74AE3F2EF4C67ECA4DB7169F0647"
+    },
+    {
+        "path":  "D-QHMT5/deploy/mt5-single-owner-admission-20260817.2-20260817T064740Z/cell.py",
+        "bytes":  25123,
+        "sha256":  "A00B2D5B54E4F2E881C6C9025747AC0924CF5386CDABE78D74D92B5F37D95E36"
+    },
+    {
+        "path":  "D-QHMT5/deploy/mt5-single-owner-admission-20260817.2-20260817T064740Z/deploy.ps1",
+        "bytes":  34341,
+        "sha256":  "956671B40685121B67CAFF793CCF0A0CC8904E47331BC01C79C8CE552EFB3045"
+    },
+    {
+        "path":  "D-QHMT5/deploy/mt5-single-owner-admission-20260817.2-20260817T064740Z/release-manifest.json",
+        "bytes":  2478,
+        "sha256":  "FE86B4DA156CCBAF20DDE5F5A12D76AD3819C7B9EC68D90938B179126A636F80"
+    },
+    {
+        "path":  "D-QHMT5/deploy/mt5-single-owner-admission-20260817.2-20260817T064740Z/app/main.py",
+        "bytes":  96574,
+        "sha256":  "EACC47DA2C87975EFC8EF294A1EAA3A7083ECF0E34E2E4E3D813FDCB42D3DB7B"
+    },
+    {
+        "path":  "D-QHMT5/deploy/mt5-single-owner-admission-20260817.2-20260817T064740Z/app/runtime.py",
+        "bytes":  94293,
+        "sha256":  "03656B2C29E86256A50D68794C01ABB7322C74AE3F2EF4C67ECA4DB7169F0647"
+    },
+    {
+        "path":  "D-QHMT5/deploy/mt5-tick-isolation-20260817.3/cell.py",
+        "bytes":  25208,
+        "sha256":  "9B79718E064DBCF2B3FFBE7FFD8D9F4F7322C9064DE14890FAEA8D570FF3CF09"
+    },
+    {
+        "path":  "D-QHMT5/deploy/mt5-tick-isolation-20260817.3/deploy.ps1",
+        "bytes":  34392,
+        "sha256":  "35596A6701C7AF35409C4BF7329720E5C4E9E1190F2AA396F43A4D78664DA62E"
+    },
+    {
+        "path":  "D-QHMT5/deploy/mt5-tick-isolation-20260817.3/release-manifest.json",
+        "bytes":  2722,
+        "sha256":  "0D1623259C4DD6D81460516505345DFFEB08747393FAF67C9A5E8F9280164444"
+    },
+    {
+        "path":  "D-QHMT5/deploy/mt5-tick-isolation-20260817.3/app/main.py",
+        "bytes":  101594,
+        "sha256":  "34298E859A66F49E2E4860234FD06D90A5DB847A6A1D64137088ACC18CB3872B"
+    },
+    {
+        "path":  "D-QHMT5/deploy/mt5-tick-isolation-20260817.3/app/runtime.py",
+        "bytes":  94293,
+        "sha256":  "03656B2C29E86256A50D68794C01ABB7322C74AE3F2EF4C67ECA4DB7169F0647"
+    },
+    {
+        "path":  "D-QHMT5/deploy/mt5-trade-wake-priority-20260817.4/CANDIDATE-NOT-DEPLOYED.md",
+        "bytes":  1018,
+        "sha256":  "24BC56CCD30A1E575EC92589F497263323A80B6E7CF1B2CB0583A6578AFFDFAB"
+    },
+    {
+        "path":  "D-QHMT5/deploy/mt5-trade-wake-priority-20260817.4/cell.py",
+        "bytes":  25298,
+        "sha256":  "1EF3371D3BA7321941992CFC6F0C2E5D379A67B6C26DED7B062AB644275D42C6"
+    },
+    {
+        "path":  "D-QHMT5/deploy/mt5-trade-wake-priority-20260817.4/deploy.ps1",
+        "bytes":  34525,
+        "sha256":  "CBBD26BE60C32D2E3229D8D0275FF839C8EC4E7EDDF566BE5B14FC651085C732"
+    },
+    {
+        "path":  "D-QHMT5/deploy/mt5-trade-wake-priority-20260817.4/release-manifest.json",
+        "bytes":  4560,
+        "sha256":  "B50ECB103D3748EA453BDEF02201829ECD36641F98EBCD998A3130AF6940D7C0"
+    },
+    {
+        "path":  "D-QHMT5/deploy/mt5-trade-wake-priority-20260817.4/validate_release_20260817_4.py",
+        "bytes":  4779,
+        "sha256":  "1B6CEDF975521AE54B55EB6EE56DC08B269B670D57D797F8DD4F74BEF8D9A8CC"
+    },
+    {
+        "path":  "D-QHMT5/deploy/mt5-trade-wake-priority-20260817.4/app/main.py",
+        "bytes":  105341,
+        "sha256":  "2204B0BF0133059287EF41628EB3796DF6332E8C731D0A422E22E262124E3902"
+    },
+    {
+        "path":  "D-QHMT5/deploy/mt5-trade-wake-priority-20260817.4/app/runtime.py",
+        "bytes":  101116,
+        "sha256":  "409D78917F275A135D9A14856F34464D148FB400B7A14CA11B1B2D6AD88583EC"
+    },
+    {
+        "path":  "D-QHMT5/deploy/mt5-trade-wake-priority-20260817.4/app/__init__.py",
+        "bytes":  38,
+        "sha256":  "E1EF91E57D9ACEA875EA3FD4FDC0E964520D50F4F7CDA334C89DA60A7B3096FB"
+    },
+    {
+        "path":  "D-QHMT5/deploy/release_mt5_admission_20260821_2/cell.py",
+        "bytes":  25909,
+        "sha256":  "7A0D97AB95425E4BAB49402FF2E249CDB7B23E2FB9C74681FCF3E82257959240"
+    },
+    {
+        "path":  "D-QHMT5/deploy/release_mt5_admission_20260821_2/deploy.ps1",
+        "bytes":  13450,
+        "sha256":  "25ECEEE08C326968C2309A8C42ACBC71FD674AEAB5FECCC405701D00E93092D6"
+    },
+    {
+        "path":  "D-QHMT5/deploy/release_mt5_admission_20260821_2/release-manifest.json",
+        "bytes":  1550,
+        "sha256":  "E7A1DFE7BAEF2AAD16D71F4D3DF46CE50657995F83FF6651B478612B55BD7E26"
+    },
+    {
+        "path":  "D-QHMT5/deploy/release_mt5_admission_20260821_2/app/main.py",
+        "bytes":  164222,
+        "sha256":  "4672FBD1016ABE003A49490DAE1F92B23160D29FEA47DAD5FFD4BC45141B3A6C"
+    },
+    {
+        "path":  "D-QHMT5/deploy/release_mt5_admission_20260821_2/app/runtime.py",
+        "bytes":  111063,
+        "sha256":  "3E9A4DBB83E84E0D0667678C5E42E27FA1C7FCCE7272DAA8455A9660F4891EC5"
+    },
+    {
+        "path":  "D-QHMT5/deploy/release_mt5_admission_capability_20260821_3/cell.py",
+        "bytes":  25921,
+        "sha256":  "171BCF175F8DE9F1D50F5891C809A4F2D9A7881B5B0E8485EE51C36EF7905935"
+    },
+    {
+        "path":  "D-QHMT5/deploy/release_mt5_admission_capability_20260821_3/deploy.ps1",
+        "bytes":  13462,
+        "sha256":  "76CFF357F51930E3A957647A94D51EC0F2FF1AE88ACCD674B36D87C4D022FA62"
+    },
+    {
+        "path":  "D-QHMT5/deploy/release_mt5_admission_capability_20260821_3/release-manifest.json",
+        "bytes":  1665,
+        "sha256":  "1CCB68517BDA9857DF3E7D810C952AEA1F1DC478CC632E11D435AD5F7C7849D8"
+    },
+    {
+        "path":  "D-QHMT5/deploy/release_mt5_admission_capability_20260821_3/app/main.py",
+        "bytes":  166676,
+        "sha256":  "5C279CB44FF6FF2F86EFCA48BE205459E75BB3236F0B43DCF5DE814EB8DDA3F5"
+    },
+    {
+        "path":  "D-QHMT5/deploy/release_mt5_admission_capability_20260821_3/app/runtime.py",
+        "bytes":  111063,
+        "sha256":  "3E9A4DBB83E84E0D0667678C5E42E27FA1C7FCCE7272DAA8455A9660F4891EC5"
+    },
+    {
+        "path":  "D-QHMT5/instances/by01/.env.example",
+        "bytes":  188,
+        "sha256":  "BD549DB2A37BDEB1958FBC08EFD027F023FBBE56B5A9CCDC2345274B39B0293C"
+    },
+    {
+        "path":  "D-QHMT5/instances/by01/app/main.py",
+        "bytes":  34998,
+        "sha256":  "46E812E11F54C3D97FFED73BE2B4C5CC7F5EFBE751F00BC2F1B20BC297CE349D"
+    },
+    {
+        "path":  "D-QHMT5/instances/bysys/.env.example",
+        "bytes":  165,
+        "sha256":  "E4856F1EF39F36008DED2979306323BFFE5E41BF1014671C9FDCA480E67C8752"
+    },
+    {
+        "path":  "D-QHMT5/instances/bysys/app/main.py",
+        "bytes":  34998,
+        "sha256":  "46E812E11F54C3D97FFED73BE2B4C5CC7F5EFBE751F00BC2F1B20BC297CE349D"
+    },
+    {
+        "path":  "D-QHMT5/instances/ic01/.env.example",
+        "bytes":  165,
+        "sha256":  "E4856F1EF39F36008DED2979306323BFFE5E41BF1014671C9FDCA480E67C8752"
+    },
+    {
+        "path":  "D-QHMT5/instances/ic01/app/main.py",
+        "bytes":  171453,
+        "sha256":  "8B442F24AB5101FB4FC1FB702F76E056BC1EF38E5532A27968D00E592CEC7A5F"
+    },
+    {
+        "path":  "D-QHMT5/instances/ic01/app/runtime.py",
+        "bytes":  111063,
+        "sha256":  "3E9A4DBB83E84E0D0667678C5E42E27FA1C7FCCE7272DAA8455A9660F4891EC5"
+    },
+    {
+        "path":  "D-QHMT5/instances/ic01/app/__init__.py",
+        "bytes":  38,
+        "sha256":  "E1EF91E57D9ACEA875EA3FD4FDC0E964520D50F4F7CDA334C89DA60A7B3096FB"
+    },
+    {
+        "path":  "D-QHMT5/instances/icsys/.env.example",
+        "bytes":  165,
+        "sha256":  "E4856F1EF39F36008DED2979306323BFFE5E41BF1014671C9FDCA480E67C8752"
+    },
+    {
+        "path":  "D-QHMT5/instances/icsys/app/main.py",
+        "bytes":  171453,
+        "sha256":  "8B442F24AB5101FB4FC1FB702F76E056BC1EF38E5532A27968D00E592CEC7A5F"
+    },
+    {
+        "path":  "D-QHMT5/instances/icsys/app/runtime.py",
+        "bytes":  111063,
+        "sha256":  "3E9A4DBB83E84E0D0667678C5E42E27FA1C7FCCE7272DAA8455A9660F4891EC5"
+    },
+    {
+        "path":  "D-QHMT5/instances/icsys/app/__init__.py",
+        "bytes":  38,
+        "sha256":  "E1EF91E57D9ACEA875EA3FD4FDC0E964520D50F4F7CDA334C89DA60A7B3096FB"
+    },
+    {
+        "path":  "D-QHMT5/instances/icsysnew/.env.example",
+        "bytes":  165,
+        "sha256":  "E4856F1EF39F36008DED2979306323BFFE5E41BF1014671C9FDCA480E67C8752"
+    },
+    {
+        "path":  "D-QHMT5/instances/icsysnew/app/main.py",
+        "bytes":  171453,
+        "sha256":  "8B442F24AB5101FB4FC1FB702F76E056BC1EF38E5532A27968D00E592CEC7A5F"
+    },
+    {
+        "path":  "D-QHMT5/instances/icsysnew/app/runtime.py",
+        "bytes":  111063,
+        "sha256":  "3E9A4DBB83E84E0D0667678C5E42E27FA1C7FCCE7272DAA8455A9660F4891EC5"
+    },
+    {
+        "path":  "D-QHMT5/instances/icsysnew/app/__init__.py",
+        "bytes":  38,
+        "sha256":  "E1EF91E57D9ACEA875EA3FD4FDC0E964520D50F4F7CDA334C89DA60A7B3096FB"
+    },
+    {
+        "path":  "D-QHMT5/runtime/releases/v1/bybit/requirements.txt",
+        "bytes":  109,
+        "sha256":  "695142F593286CD1FE8E83FA15DDF84B645D6DF08927FA96855B8E6DEFEB3A80"
+    },
+    {
+        "path":  "D-QHMT5/runtime/releases/v1/bybit/app/main.py",
+        "bytes":  34998,
+        "sha256":  "46E812E11F54C3D97FFED73BE2B4C5CC7F5EFBE751F00BC2F1B20BC297CE349D"
+    },
+    {
+        "path":  "D-QHMT5/runtime/releases/v1/ic/requirements.txt",
+        "bytes":  109,
+        "sha256":  "695142F593286CD1FE8E83FA15DDF84B645D6DF08927FA96855B8E6DEFEB3A80"
+    },
+    {
+        "path":  "D-QHMT5/runtime/releases/v1/ic/test_bridge_deps.py",
+        "bytes":  950,
+        "sha256":  "FB126D0B96932BA894DD9A89721D314B9B998DAC24BE582D1BE7C8AEA3A78FF5"
+    },
+    {
+        "path":  "D-QHMT5/runtime/releases/v1/ic/app/main.py",
+        "bytes":  171453,
+        "sha256":  "8B442F24AB5101FB4FC1FB702F76E056BC1EF38E5532A27968D00E592CEC7A5F"
+    },
+    {
+        "path":  "D-QHMT5/runtime/releases/v1/ic/app/runtime.py",
+        "bytes":  111063,
+        "sha256":  "3E9A4DBB83E84E0D0667678C5E42E27FA1C7FCCE7272DAA8455A9660F4891EC5"
+    },
+    {
+        "path":  "D-QHMT5/runtime/releases/v1/ic/app/__init__.py",
+        "bytes":  38,
+        "sha256":  "E1EF91E57D9ACEA875EA3FD4FDC0E964520D50F4F7CDA334C89DA60A7B3096FB"
+    },
+    {
+        "path":  "D-QHMT5/runtime/staged/hedge-pro-mt5-account-cache-20260811/release-manifest.json",
+        "bytes":  786,
+        "sha256":  "3A52E8248A236C7B7E425FD0BECE60E5BA6E0924AA109AD77855428E5D542A0A"
+    },
+    {
+        "path":  "D-QHMT5/runtime/staged/hedge-pro-mt5-account-cache-20260811/app/main.py",
+        "bytes":  78992,
+        "sha256":  "7BE2AD872B2C2347A814053579D84A4068211EE79D3D4CF94CBD5DE69E560441"
+    },
+    {
+        "path":  "D-QHMT5/runtime/staged/hedge-pro-mt5-account-cache-20260811/app/runtime.py",
+        "bytes":  25363,
+        "sha256":  "70C45585422C5800641CAA4A0885AA7670177CD85AD257A9D905184D2DA3D6B7"
+    },
+    {
+        "path":  "D-QHMT5/runtime/staged/hedge-pro-mt5-batch-20260731/app/main.py",
+        "bytes":  53928,
+        "sha256":  "F0F4BA29211D89ED42CD4FDA0041583CEB342409C99BA9D5B869F544B42E5FAC"
+    },
+    {
+        "path":  "D-QHMT5/runtime/staged/hedge-pro-mt5-batch-20260731/app/runtime.py",
+        "bytes":  10105,
+        "sha256":  "FDF42FF7CCB40B974C0FA81C9D6B095C9F6E2AC1956BF22F5B6CBBA940572C35"
+    },
+    {
+        "path":  "D-QHMT5/runtime/staged/hedge-pro-mt5-burst-cache-20260810/main.py",
+        "bytes":  62039,
+        "sha256":  "8C4D450496EBACC3CCF46106B96F8000D140F093C71EC29CBD5B30C09A99D92A"
+    },
+    {
+        "path":  "D-QHMT5/runtime/staged/hedge-pro-mt5-burst-cache-20260810/runtime.py",
+        "bytes":  20890,
+        "sha256":  "EFB346F196C90F492B5EB411A66D04CEF2384C7265BBFB287DD4C16EBB153034"
+    },
+    {
+        "path":  "D-QHMT5/runtime/staged/hedge-pro-mt5-burst-cache-20260810/validate_mt5_v3_stage.py",
+        "bytes":  1238,
+        "sha256":  "73E0AF9D86DAC948340A3C66208DA207EDE74989931EAC1C183D6D05F30E9DF0"
+    },
+    {
+        "path":  "D-QHMT5/runtime/staged/hedge-pro-mt5-burst-cache-20260810/__init__.py",
+        "bytes":  38,
+        "sha256":  "E1EF91E57D9ACEA875EA3FD4FDC0E964520D50F4F7CDA334C89DA60A7B3096FB"
+    },
+    {
+        "path":  "D-QHMT5/runtime/staged/hedge-pro-mt5-burst-cache-20260810/app/main.py",
+        "bytes":  63018,
+        "sha256":  "96F4A3F337D84517CEBC2FDD74053EE2D6FDECCD5F8E4A8BD4EBFC8028F770FE"
+    },
+    {
+        "path":  "D-QHMT5/runtime/staged/hedge-pro-mt5-burst-cache-20260810/app/runtime.py",
+        "bytes":  21820,
+        "sha256":  "27719826EBCB67599A249859B6CCF3F384A46F11186D8AD59AE61F2217FD8851"
+    },
+    {
+        "path":  "D-QHMT5/runtime/staged/hedge-pro-mt5-burst-cache-20260810/app/__init__.py",
+        "bytes":  38,
+        "sha256":  "E1EF91E57D9ACEA875EA3FD4FDC0E964520D50F4F7CDA334C89DA60A7B3096FB"
+    },
+    {
+        "path":  "D-QHMT5/runtime/staged/hedge-pro-mt5-latency-20260811/deploy.ps1",
+        "bytes":  9459,
+        "sha256":  "A0FE35049F23D5FC90313BD75D31DDAD160ACB23260E3FBE559680CFDCB7FD17"
+    },
+    {
+        "path":  "D-QHMT5/runtime/staged/hedge-pro-mt5-latency-20260811/app/main.py",
+        "bytes":  65612,
+        "sha256":  "C02194F5436C4F620ACE9181EB51E12218E155E8FD41A1EBE46713441D51A7C0"
+    },
+    {
+        "path":  "D-QHMT5/runtime/staged/hedge-pro-mt5-latency-20260811/app/runtime.py",
+        "bytes":  21820,
+        "sha256":  "27719826EBCB67599A249859B6CCF3F384A46F11186D8AD59AE61F2217FD8851"
+    },
+    {
+        "path":  "D-QHMT5/runtime/staged/hedge-pro-mt5-order-send-closure-20260810/app/main.py",
+        "bytes":  54984,
+        "sha256":  "517E8AEF5F27A855207BFA6109873542D414CDBCFEF6EEC16B349B004DB3CB18"
+    },
+    {
+        "path":  "D-QHMT5/runtime/staged/hedge-pro-mt5-order-send-keyword-20260810/app/main.py",
+        "bytes":  54203,
+        "sha256":  "B629B4CA194E688239C353C3501FCCFD56E85D9D15530145505E276986C47DFA"
+    },
+    {
+        "path":  "D-QHMT5/runtime/staged/hedge-pro-mt5-positions-authoritative-20260811.34/deploy_hedge_pro_mt5_positions_authoritative_20260811_34.ps1",
+        "bytes":  15781,
+        "sha256":  "F3433825D248EA33C6E9ADE551FDC18D81CA52AD56288DB5C867112C8FD2BFED"
+    },
+    {
+        "path":  "D-QHMT5/runtime/staged/hedge-pro-mt5-positions-authoritative-20260811.34/release-manifest.json",
+        "bytes":  1057,
+        "sha256":  "7B9BF017A2EAF2C28E93C144D292C7249D4644321135383BBA99C3CF83A39865"
+    },
+    {
+        "path":  "D-QHMT5/runtime/staged/hedge-pro-mt5-positions-authoritative-20260811.34/app/main.py",
+        "bytes":  82134,
+        "sha256":  "440C09D7758F3BA4F118F85633CAE4D6ED109F0E735CEB074A802EF57D7B5078"
+    },
+    {
+        "path":  "D-QHMT5/runtime/staged/hedge-pro-mt5-positions-authoritative-20260811.34/app/runtime.py",
+        "bytes":  28387,
+        "sha256":  "5B6B87FE0F37D5FAA65800D4645B9F5A25877B6471B0C030BD39D0D005B91356"
+    },
+    {
+        "path":  "D-QHMT5/runtime/staged/hedge-pro-mt5-priority-20260810/deploy_hedge_pro_mt5_priority_20260810.ps1",
+        "bytes":  9461,
+        "sha256":  "55208840CAB5EAABDA4FBBD137D02DADD1F705F92A55C7ACA3868E49330653D7"
+    },
+    {
+        "path":  "D-QHMT5/runtime/staged/hedge-pro-mt5-priority-20260810/app/main.py",
+        "bytes":  56331,
+        "sha256":  "61706063D5090985AC5A94A71D647454C9B4526729DE629B32D1F99469935DD7"
+    },
+    {
+        "path":  "D-QHMT5/runtime/staged/hedge-pro-mt5-priority-20260810/app/runtime.py",
+        "bytes":  15738,
+        "sha256":  "F65E4009AA059DB542117F9513B68EEA6D2A3742472D8676B0340DBAB42C6F3F"
+    },
+    {
+        "path":  "D-QHMT5/runtime/staged/hedge-pro-mt5-priority-queue-20260810/deploy_hedge_pro_mt5_priority_queue_20260810.ps1",
+        "bytes":  9473,
+        "sha256":  "DA4995357EBBE111D6F6AEE20D298469DA4A9E26FB21CF7DE71CE9D5D11F018B"
+    },
+    {
+        "path":  "D-QHMT5/runtime/staged/hedge-pro-mt5-priority-queue-20260810/app/main.py",
+        "bytes":  56591,
+        "sha256":  "918E1655276604E3D10985219AF5CB81617E83799E8216B7A402C7A8A2E815B2"
+    },
+    {
+        "path":  "D-QHMT5/runtime/staged/hedge-pro-mt5-priority-queue-20260810/app/runtime.py",
+        "bytes":  17046,
+        "sha256":  "3AE28D92AE25F0DEB7809CAE8DEE8602AC8D61A169E5DA38DDC6C66B4C4C1725"
+    },
+    {
+        "path":  "D-QHMT5/runtime/staged/hedge-pro-mt5-quiet-refresh-20260811.35/deploy_hedge_pro_mt5_quiet_refresh_20260811_35.ps1",
+        "bytes":  15903,
+        "sha256":  "C8555DA329CB935419B5138DC291AD1A4D3A4AF55CBF656751440E3DDF02739A"
+    },
+    {
+        "path":  "D-QHMT5/runtime/staged/hedge-pro-mt5-quiet-refresh-20260811.35/release-manifest.json",
+        "bytes":  1097,
+        "sha256":  "28958BCE4648D8095D73DDBA1513C40BF39C8EEC826E45AF547B0DEF69FE9CC4"
+    },
+    {
+        "path":  "D-QHMT5/runtime/staged/hedge-pro-mt5-quiet-refresh-20260811.35/app/main.py",
+        "bytes":  82320,
+        "sha256":  "75796B08663CC00DCA274A7B50D85781D205B9A3BD939A5CBB1FCA81673E321F"
+    },
+    {
+        "path":  "D-QHMT5/runtime/staged/hedge-pro-mt5-quiet-refresh-20260811.35/app/runtime.py",
+        "bytes":  28387,
+        "sha256":  "5B6B87FE0F37D5FAA65800D4645B9F5A25877B6471B0C030BD39D0D005B91356"
+    },
+    {
+        "path":  "D-QHMT5/runtime/staged/hedge-pro-mt5-refresh-20260810/deploy_hedge_pro_mt5_v3.ps1",
+        "bytes":  7918,
+        "sha256":  "93286635AA0176831F01F6AAF3CBE6CC73DB4809CC77A7AA3DA12841961D27D5"
+    },
+    {
+        "path":  "D-QHMT5/runtime/staged/hedge-pro-mt5-refresh-20260810/app/main.py",
+        "bytes":  54984,
+        "sha256":  "517E8AEF5F27A855207BFA6109873542D414CDBCFEF6EEC16B349B004DB3CB18"
+    },
+    {
+        "path":  "D-QHMT5/runtime/staged/hedge-pro-mt5-refresh-20260810/app/runtime.py",
+        "bytes":  10541,
+        "sha256":  "346E509484646E97C93D8447A491F30AA9F7D83A191C56644CE6C2277CEBC849"
+    },
+    {
+        "path":  "D-QHMT5/runtime/staged/hedge-pro-mt5-v3-20260731/app/main.py",
+        "bytes":  53813,
+        "sha256":  "F8BAE4B044933B451E6F9BBE12837AC7A99584B5758A5EE8D2CF6499952E4462"
+    },
+    {
+        "path":  "D-QHMT5/runtime/staged/hedge-pro-mt5-v3-20260731/app/runtime.py",
+        "bytes":  8196,
+        "sha256":  "21A49D043450E3EA56FFA2E9B57487E2B6F88BA609005DCB49C7F8BC2EEE07BA"
+    },
+    {
+        "path":  "secrets/qh-mt5-runtime-state-20260824.tar.gz.enc",
+        "bytes":  33404944,
+        "sha256":  "C4832BB6C955EFBFD31259FEBCB2F49B588D043AE6FA674FE953585D230AD99A"
+    },
+    {
+        "path":  "secrets/qh-mt5-sensitive-20260824.tar.gz.enc",
+        "bytes":  2016,
+        "sha256":  "1FF26EAA5093B9DD024D568A363AF103415EC6AF1DCAF056A4C04B1AFAEF6E5C"
+    },
+    {
+        "path":  "user-home/bridge-read.ps1",
+        "bytes":  285,
+        "sha256":  "D788E27F97C58BADFEA6EA2C89FBEC04120A661AA3507668A5E4FFA81C741CF3"
+    },
+    {
+        "path":  "user-home/main.ordered-entry.new.py",
+        "bytes":  22958,
+        "sha256":  "7C660B9AA3FB28D2535F09C880C75029434FBDE51BFB682673FFB03A40AEB6BC"
+    },
+    {
+        "path":  "user-home/mt5-main-10013.py",
+        "bytes":  63018,
+        "sha256":  "96F4A3F337D84517CEBC2FDD74053EE2D6FDECCD5F8E4A8BD4EBFC8028F770FE"
+    },
+    {
+        "path":  "user-home/qh-history-v116/deploy_no123_v116.ps1",
+        "bytes":  10278,
+        "sha256":  "9B20A17A7E1CD941ACA83D1DEB2F452BF9E43D6D9AA68FDFEA0D3A981387816D"
+    },
+    {
+        "path":  "user-home/qh-history-v116/QHBridge.mq4",
+        "bytes":  34909,
+        "sha256":  "D60EE4467E7ABED53BAF1E7F174E7B66571E70E72E31447C0E2537B0940C57FA"
+    },
+    {
+        "path":  "user-home/qh-v118-candidate/QHBridge.mq4",
+        "bytes":  36569,
+        "sha256":  "B2197FCAAE3BE1DE80B024C89599C881AC76B7EDA88055603E222904AA20D3E2"
+    }
+]

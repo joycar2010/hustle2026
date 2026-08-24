@@ -1,0 +1,12 @@
+﻿{
+    "exness":  {
+                   "Failures":  0,
+                   "LastRestartEpoch":  1787360131,
+                   "Connected":  true
+               },
+    "ic":  {
+               "Failures":  0,
+               "LastRestartEpoch":  1787547092,
+               "Connected":  true
+           }
+}

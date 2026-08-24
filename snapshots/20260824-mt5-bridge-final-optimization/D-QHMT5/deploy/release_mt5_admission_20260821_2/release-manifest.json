@@ -1,0 +1,37 @@
+{
+  "schema": 1,
+  "release": "mt5-admission-snapshot-20260821.2",
+  "deployment_status": "sealed",
+  "requires_qh_maintenance": true,
+  "real_orders_sent": false,
+  "scope": {
+    "account": "hedge_pro",
+    "ports": [8061, 8063],
+    "files": [
+      "D:\\QHMT5\\runtime\\releases\\v1\\ic\\app\\main.py",
+      "D:\\QHMT5\\runtime\\releases\\v1\\ic\\app\\runtime.py",
+      "D:\\QHCELL\\cell.py",
+      "D:\\QHCELL\\pool\\s1\\inst\\.env",
+      "D:\\QHCELL\\pool\\s3\\inst\\.env"
+    ],
+    "excluded": ["terminal files", "idempotency databases", "frontend dist", "MT4 bridges"]
+  },
+  "production_before": {
+    "build_id": "mt5-execution-quote-snapshot-20260821.1",
+    "main_py": "1007650fed89947da1674fac4be3803f0256ff6ef849aee74aa72c0c2f552d29",
+    "runtime_py": "035f0d9c7d411c1c07dbc9d7b39020ba640142cbbd0cf70fbae61e68d12b4b5b",
+    "cell_py": "9b3a844ba279f7991818bd077a2d58375da16f34fb8c91071ce194db95b2a17e"
+  },
+  "candidate": {
+    "main_py": "4672fbd1016abe003a49490dae1f92b23160d29fea47dad5ffd4bc45141b3a6c",
+    "runtime_py": "3e9a4dbb83e84e0d0667678c5e42e27fa1c7fcce7272daa8455a9660f4891ec5",
+    "cell_py": "7a0d97ab95425e4bab49402ff2e249cdb7b23e2fb9c74681fcf3e82257959240",
+    "deploy_ps1": "25eceee08c326968c2309a8c42acbc71fd674aeab5feccc405701d00e93092d6"
+  },
+  "behaviour": {
+    "admission_snapshot_max_age_ms": 200,
+    "native_io_in_admission_path": false,
+    "cache_miss": "503 then QH authoritative fallback",
+    "safety": ["slot CAS retained", "exact ticket checks retained", "terminal confirmation retained"]
+  }
+}

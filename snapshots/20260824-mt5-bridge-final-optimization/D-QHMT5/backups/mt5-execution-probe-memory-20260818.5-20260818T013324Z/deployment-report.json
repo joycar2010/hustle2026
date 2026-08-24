@@ -1,0 +1,40 @@
+﻿{
+    "cell_watchdog_restored":  true,
+    "bridges":  [
+                    {
+                        "pending":  0,
+                        "positions":  0,
+                        "build_id":  "mt5-execution-probe-memory-20260818.5",
+                        "native_owner_mode":  "single_process_read_write_rpc",
+                        "name":  "s1",
+                        "worker_pid":  5684,
+                        "http_pid":  4900,
+                        "port":  8061,
+                        "execution_probe_source":  "memory",
+                        "absent_probe":  "qh-deploy-absent-s1-20260818T013324Z",
+                        "execution_probe_healthy":  true
+                    },
+                    {
+                        "pending":  0,
+                        "positions":  0,
+                        "build_id":  "mt5-execution-probe-memory-20260818.5",
+                        "native_owner_mode":  "single_process_read_write_rpc",
+                        "name":  "s3",
+                        "worker_pid":  2252,
+                        "http_pid":  932,
+                        "port":  8063,
+                        "execution_probe_source":  "memory",
+                        "absent_probe":  "qh-deploy-absent-s3-20260818T013324Z",
+                        "execution_probe_healthy":  true
+                    }
+                ],
+    "release":  "mt5-execution-probe-memory-20260818.5",
+    "real_orders_sent":  false,
+    "backup":  "D:\\QHMT5\\backups\\mt5-execution-probe-memory-20260818.5-20260818T013324Z",
+    "deployed_at":  "2026-08-18T01:34:00.7735823Z",
+    "qh_maintenance_owned":  true,
+    "candidate_start_requested":  true,
+    "ok":  true,
+    "manifest_sha256":  "97298d951f133d86175baa33733d08b34704e58da2497a2a5b48d1ce8836c663",
+    "rollback_verified":  false
+}

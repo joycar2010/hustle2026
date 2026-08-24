@@ -1,0 +1,8 @@
+﻿{
+    "error":  "bridge process forest did not stop: pids=7668,88,7500,8076 ports=; rollback=rollback bridge health timeout: s3",
+    "failed_at":  "2026-08-17T06:15:48.4901934Z",
+    "ok":  false,
+    "release":  "mt5-single-owner-admission-20260817.2",
+    "real_orders_sent":  false,
+    "backup":  "D:\\QHMT5\\backups\\mt5-single-owner-admission-20260817.2-20260817T061412Z"
+}

@@ -1,0 +1,36 @@
+﻿{
+    "agent":  {
+                  "host":  "0.0.0.0",
+                  "port":  8765,
+                  "api_key":  "\u003cREDACTED\u003e"
+              },
+    "backend":  {
+                    "url":  "\u003cREDACTED\u003e",
+                    "username":  "",
+                    "password":  "\u003cREDACTED\u003e",
+                    "enabled":  false
+                },
+    "database":  {
+                     "host":  "127.0.0.1",
+                     "port":  5432,
+                     "database":  "postgres",
+                     "user":  "",
+                     "password":  "\u003cREDACTED\u003e"
+                 },
+    "monitoring":  {
+                       "enabled":  true,
+                       "check_interval":  30,
+                       "freeze_threshold":  10,
+                       "cpu_threshold":  95,
+                       "memory_threshold":  90
+                   },
+    "instance_source":  "file",
+    "auto_start_enabled":  false,
+    "supervisor_root":  "D:\\QHMT5",
+    "bridge_service_ports":  {
+                                 "hustle-mt5-mt5-by01":  8001,
+                                 "hustle-mt5-mt5-ic01":  8021,
+                                 "hustle-mt5-mt5-bysys":  8886,
+                                 "hustle-mt5-mt5-icsys":  8888
+                             }
+}

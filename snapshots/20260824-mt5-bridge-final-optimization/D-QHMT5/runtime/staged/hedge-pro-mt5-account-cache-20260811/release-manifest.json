@@ -1,0 +1,22 @@
+{
+  "schema": 1,
+  "release": "hedge-pro-mt5-account-cache-20260811",
+  "created_at": "2026-08-11T12:22:42.5471674Z",
+  "host": "43.206.15.17",
+  "ports": [8061, 8063],
+  "candidate": {
+    "main.py": "7be2ad872b2c2347a814053579d84a4068211ee79d3d4cf94cbd5de69e560441",
+    "runtime.py": "70c45585422c5800641caa4a0885aa7670177cd85ad257a9d905184d2da3d6b7"
+  },
+  "production_before": {
+    "main.py": "c02194f5436c4f620ace9181eb51e12218e155e8fd41a1ebe46713441d51a7c0",
+    "runtime.py": "27719826ebcb67599a249859b6ccf3f384a46f11186d8ad59ae61f2217fd8851"
+  },
+  "safety": {
+    "preflight": "no recent in-flight MT5 execution",
+    "position_signature_preserved": true,
+    "terminal_pid_preserved": true,
+    "rollback_on_verification_failure": true,
+    "real_trade_canary": false
+  }
+}

@@ -1,0 +1,8 @@
+﻿{
+    "error":  "new bridge health timeout s3: Unable to connect to the remote server",
+    "failed_at":  "2026-08-17T04:34:28.7102163Z",
+    "ok":  false,
+    "release":  "mt5-process-admission-20260817.1",
+    "real_orders_sent":  false,
+    "backup":  "D:\\QHMT5\\backups\\mt5-process-admission-20260817.1-20260817T043149Z"
+}

@@ -1,0 +1,100 @@
+{
+  "schema": 1,
+  "release": "mt5-execution-probe-memory-20260818.5",
+  "build_id": "mt5-execution-probe-memory-20260818.5",
+  "created_at": "2026-08-18T01:21:12Z",
+  "deployment_status": "candidate_sealed_not_deployed",
+  "production_mutated": false,
+  "real_orders_sent": false,
+  "host": "43.206.15.17",
+  "private_host": "172.31.5.62",
+  "ports": [8061, 8063],
+  "root_cause": {
+    "path": "GET /mt5/connection/status?execution_probe=true",
+    "previous_operation": "ProcessIsolatedExecutionCoordinator.metrics()",
+    "previous_cost": "SQLite lock plus four COUNT queries on every QH keepalive",
+    "production_keepalive_median_ms": {"8061": 57.5, "8063": 145.9}
+  },
+  "production_before": {
+    "main.py": "2204b0bf0133059287ef41628eb3796df6332e8c731d0a422e22e262124e3902",
+    "runtime.py": "409d78917f275a135d9a14856f34464d148fb400b7a14ca11b1b2d6ad88583ec",
+    "cell.py": "1ef3371d3ba7321941992cfc6f0c2e5d379a67b6c26ded7b062ab644275d42c6",
+    "app_init_present": false,
+    "build_id": "mt5-trade-wake-priority-20260817.4",
+    "execution_process_isolation": true
+  },
+  "candidate": {
+    "__init__.py": "e1ef91e57d9acea875ea3fd4fdc0e964520d50f4f7cda334c89da60a7b3096fb",
+    "main.py": "d5a3cdb205de72c6389624137d162fc61e730db5f420a7c8ecc2f101a1a5b77e",
+    "runtime.py": "b2c17884b0f9e0f1b609ced34276eb476ade53101618a3900dee0119dcf7741d",
+    "cell.py": "7957c6f91fb565b2b6a1d223833a372fda51d01c8bb4f77127c199906e5790e9",
+    "deploy.ps1": "0a47bfbda23aca3c57eb8ac9862247b4d8af43e9fab8b80098048123459cd5ef"
+  },
+  "architecture": {
+    "execution_probe": "cached identity plus in-memory manager and coordinator health only",
+    "execution_probe_forbidden_io": ["SQLite", "durable WAL counts", "full coordinator metrics", "native MT5 RPC"],
+    "execution_probe_fail_closed_checks": [
+      "execution process alive",
+      "worker ready and not stopping",
+      "promoter thread alive without error",
+      "monitor thread alive without error",
+      "single owner lock held",
+      "worker generation present",
+      "result transport open",
+      "HTTP PID distinct from native owner PID",
+      "coordinator not shutting down"
+    ],
+    "write_transport": "ADMITTED -> generation wake -> PENDING -> CLAIMED -> SENDING -> terminal WAL",
+    "rollback_durable_policy": "preserve newest live database, WAL, and SHM"
+  },
+  "required_env": {
+    "MT5_EXECUTION_PROCESS_ISOLATION": "1",
+    "MAX_PENDING_EXECUTIONS": "32",
+    "MT5_PARENT_READ_GATE_WAIT_MS": "5000",
+    "MT5_EXECUTION_READY_SEC": "55",
+    "MT5_EXECUTION_CONNECT_SEC": "45",
+    "MT5_EXECUTION_CONNECT_RETRY_MS": "750",
+    "MT5_NATIVE_RPC_TIMEOUT_SEC": "30",
+    "MT5_PUBLIC_TICK_CACHE_TTL_MS": "250",
+    "MT5_WAL_FALLBACK_POLL_MS": "50",
+    "ACCOUNT_IDLE_REFRESH_SEC": "5",
+    "MT5_BRIDGE_BUILD_ID": "mt5-execution-probe-memory-20260818.5"
+  },
+  "required_runtime_gates": {
+    "maintenance_owned": true,
+    "all_positions": 0,
+    "all_execution_queues": 0,
+    "trade_allowed": true,
+    "native_owner_mode": "single_process_read_write_rpc",
+    "native_owner_pid_equals_execution_pid": true,
+    "http_pid_distinct_from_native_owner_pid": true,
+    "memory_execution_probe_healthy": true,
+    "cell_all_allocated_healthy": true,
+    "hedge_pro_expected_accounts": {"s1": "52940784", "s3": "277809090"}
+  },
+  "deployment_order": [
+    "Acquire and retain QH blocking maintenance and prove all QH accounts, jobs, commands, locks, reservations, positions, and bridge queues are idle.",
+    "Verify live code, build, and package shape exactly match mt5-trade-wake-priority-20260817.4.",
+    "Verify both hedge_pro account identities, single native owners, Cell health, zero positions, and zero execution queues.",
+    "Run deploy.ps1 with this sealed manifest SHA256 and QHMaintenanceOwned switch.",
+    "Verify both ports report the .5 build and healthy memory execution probe while maintenance remains held."
+  ],
+  "rollback_policy": {
+    "code_and_environment": "Restore exact .4 code, package shape, and pre-deploy environment files while QH maintenance remains held.",
+    "durable_execution_evidence": "Never restore or roll back the live idempotency database, WAL, or SHM; preserve broker evidence at its newest state.",
+    "automatic_order_submission": false
+  },
+  "validation": {
+    "memory_execution_probe": {"passed": 13, "failed": 0},
+    "execution_wakeup_read_identity_and_recovery": {"passed": 16, "failed": 0},
+    "candidate_bridge_regression": {"passed": 55, "failed": 0, "canonical_exclusions": 2},
+    "candidate_process_transport_native_rpc": {"passed": 17, "failed": 0, "canonical_exclusions": 3},
+    "windows_spawn_single_owner": {"passed": 1, "failed": 0},
+    "python_compile": "passed",
+    "powershell_parse": "passed",
+    "production_deployment": "not_run",
+    "live_trade_test": "not_run",
+    "real_orders_sent": false
+  },
+  "physical_limit": "The bridge removes avoidable keepalive SQLite latency. Broker order_send latency and terminal serialization remain external and cannot be guaranteed below 0.5 seconds."
+}

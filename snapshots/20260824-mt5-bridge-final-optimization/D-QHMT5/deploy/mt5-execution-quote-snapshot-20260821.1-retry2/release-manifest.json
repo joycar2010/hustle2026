@@ -1,0 +1,147 @@
+{
+    "schema":  1,
+    "release":  "mt5-execution-quote-snapshot-20260821.1",
+    "build_id":  "mt5-execution-quote-snapshot-20260821.1",
+    "created_at":  "2026-08-21T18:30:00Z",
+    "deployment_status":  "candidate_sealed_not_deployed",
+    "production_mutated":  false,
+    "real_orders_sent":  false,
+    "host":  "43.206.15.17",
+    "private_host":  "172.31.5.62",
+    "ports":  [
+                  8061,
+                  8063
+              ],
+    "root_cause":  {
+                       "path":  "GET /mt5/connection/status?execution_probe=true",
+                       "previous_operation":  "ProcessIsolatedExecutionCoordinator.metrics()",
+                       "previous_cost":  "SQLite lock plus four COUNT queries on every QH keepalive",
+                       "production_keepalive_median_ms":  {
+                                                              "8061":  57.5,
+                                                              "8063":  145.9
+                                                          }
+                   },
+    "production_before":  {
+                              "main.py":  "9b7a5f0507630994bc631cca2d4589a61120b8966ead8cbd4dfa796a78fc9353",
+                              "runtime.py":  "bb598d82343b04f0d09359870b36dfe8929f33d7f2f9cb52943d133f54c50d3f",
+                              "cell.py":  "5eae0286385314de7a03d58168896db9ee79c608d563a765138057536929527e",
+                              "app_init_present":  true,
+                              "build_id":  "mt5-execution-probe-memory-20260819.6",
+                              "execution_process_isolation":  true,
+                              "__init__.py":  "e1ef91e57d9acea875ea3fd4fdc0e964520d50f4f7cda334c89da60a7b3096fb"
+                          },
+    "candidate":  {
+                      "__init__.py":  "e1ef91e57d9acea875ea3fd4fdc0e964520d50f4f7cda334c89da60a7b3096fb",
+                      "main.py":  "1007650fed89947da1674fac4be3803f0256ff6ef849aee74aa72c0c2f552d29",
+                      "runtime.py":  "035f0d9c7d411c1c07dbc9d7b39020ba640142cbbd0cf70fbae61e68d12b4b5b",
+                      "cell.py":  "9b3a844ba279f7991818bd077a2d58375da16f34fb8c91071ce194db95b2a17e",
+                      "deploy.ps1":  "8f31ca9127883abc9179355e0575ce58561198eadff97082058b35dcbafa9634"
+                  },
+    "architecture":  {
+                         "execution_probe":  "cached identity plus in-memory manager and coordinator health only",
+                         "execution_probe_forbidden_io":  [
+                                                              "SQLite",
+                                                              "durable WAL counts",
+                                                              "full coordinator metrics",
+                                                              "native MT5 RPC"
+                                                          ],
+                         "execution_probe_fail_closed_checks":  [
+                                                                    "execution process alive",
+                                                                    "worker ready and not stopping",
+                                                                    "promoter thread alive without error",
+                                                                    "monitor thread alive without error",
+                                                                    "single owner lock held",
+                                                                    "worker generation present",
+                                                                    "result transport open",
+                                                                    "HTTP PID distinct from native owner PID",
+                                                                    "coordinator not shutting down"
+                                                                ],
+                         "write_transport":  "ADMITTED -\u003e generation wake -\u003e PENDING -\u003e CLAIMED -\u003e SENDING -\u003e terminal WAL",
+                         "rollback_durable_policy":  "preserve newest live database, WAL, and SHM"
+                     },
+    "required_env":  {
+                         "MT5_EXECUTION_PROCESS_ISOLATION":  "1",
+                         "MAX_PENDING_EXECUTIONS":  "32",
+                         "MT5_PARENT_READ_GATE_WAIT_MS":  "5000",
+                         "MT5_EXECUTION_READY_SEC":  "55",
+                         "MT5_EXECUTION_CONNECT_SEC":  "45",
+                         "MT5_EXECUTION_CONNECT_RETRY_MS":  "750",
+                         "MT5_NATIVE_RPC_TIMEOUT_SEC":  "30",
+                         "MT5_PUBLIC_TICK_CACHE_TTL_MS":  "250",
+                          "MT5_NATIVE_TICK_CACHE_TTL_MS":  "300",
+                          "MT5_TRADE_QUOTE_MODE":  "lazy",
+                          "MT5_CLOSE_SNAPSHOT_MAX_AGE_MS":  "500",
+                          "MT5_REQUOTE_RETRIES":  "1",
+                          "SYMBOL_INFO_CACHE_TTL_MS":  "1000",
+                          "POST_TRADE_SNAPSHOT_GRACE_MS":  "50",
+                          "MT5_WAL_FALLBACK_POLL_MS":  "50",
+                          "ACCOUNT_IDLE_REFRESH_SEC":  "5",
+                          "MT5_BRIDGE_BUILD_ID":  "mt5-execution-quote-snapshot-20260821.1"
+                     },
+    "required_runtime_gates":  {
+                                   "maintenance_owned":  true,
+                                   "all_positions":  0,
+                                   "all_execution_queues":  0,
+                                   "trade_allowed":  true,
+                                   "native_owner_mode":  "single_process_read_write_rpc",
+                                   "native_owner_pid_equals_execution_pid":  true,
+                                   "http_pid_distinct_from_native_owner_pid":  true,
+                                   "memory_execution_probe_healthy":  true,
+                                   "cell_all_allocated_healthy":  true,
+                                   "hedge_pro_expected_accounts":  {
+                                                                       "s1":  "52940784",
+                                                                       "s3":  "277809090"
+                                                                   }
+                               },
+    "deployment_order":  [
+                             "Acquire and retain QH blocking maintenance and prove all QH accounts, jobs, commands, locks, reservations, positions, and bridge queues are idle.",
+                              "Verify live code, build, and package shape exactly match mt5-execution-probe-memory-20260819.6.",
+                             "Verify both hedge_pro account identities, single native owners, Cell health, zero positions, and zero execution queues.",
+                             "Run deploy.ps1 with this sealed manifest SHA256 and QHMaintenanceOwned switch.",
+                              "Verify both ports report the mt5-execution-quote-snapshot-20260821.1 build and healthy memory execution probe while maintenance remains held."
+                         ],
+    "rollback_policy":  {
+                            "code_and_environment":  "Restore exact mt5-execution-probe-memory-20260819.6 code, package shape, and pre-deploy environment files while QH maintenance remains held.",
+                            "durable_execution_evidence":  "Never restore or roll back the live idempotency database, WAL, or SHM; preserve broker evidence at its newest state.",
+                            "automatic_order_submission":  false
+                        },
+    "validation":  {
+                       "memory_execution_probe":  {
+                                                      "passed":  13,
+                                                      "failed":  0
+                                                  },
+                       "execution_wakeup_read_identity_and_recovery":  {
+                                                                           "passed":  16,
+                                                                           "failed":  0
+                                                                       },
+                       "candidate_bridge_regression":  {
+                                                           "passed":  55,
+                                                           "failed":  0,
+                                                           "canonical_exclusions":  2
+                                                       },
+                       "candidate_process_transport_native_rpc":  {
+                                                                      "passed":  17,
+                                                                      "failed":  0,
+                                                                      "canonical_exclusions":  3
+                                                                  },
+                       "windows_spawn_single_owner":  {
+                                                          "passed":  1,
+                                                          "failed":  0
+                                                      },
+                       "python_compile":  "passed",
+                       "powershell_parse":  "passed",
+                       "candidate_quote_snapshot_regression":  {
+                                                                  "passed":  17,
+                                                                  "failed":  0
+                                                              },
+                       "snapshot_fencing_regression":  {
+                                                            "passed":  6,
+                                                            "failed":  0
+                                                        },
+                       "production_deployment":  "not_run",
+                       "live_trade_test":  "not_run",
+                       "real_orders_sent":  false,
+                        "candidate_cell_hotfix":  "Cell health gate pins the quote-snapshot release because QHCELL-Agent does not inherit bridge instance .env"
+                   },
+    "physical_limit":  "The bridge removes avoidable quote, snapshot, and keepalive I/O. Under normal broker conditions the single-ticket target is about 0.7 seconds; broker order_send tails, network jitter, requotes, terminal serialization, and multi-ticket work remain external and cannot be guaranteed below 0.5 seconds."
+}

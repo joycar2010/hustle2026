@@ -1,0 +1,62 @@
+{
+  "schema": 1,
+  "release": "mt5-tick-isolation-20260817.3",
+  "created_at": "2026-08-17T08:34:10Z",
+  "deployment_status": "candidate_sealed_not_deployed",
+  "host": "43.206.15.17",
+  "private_host": "172.31.5.62",
+  "ports": [8061, 8063],
+  "production_before": {
+    "main.py": "eacc47da2c87975efc8ef294a1eaa3a7083ecf0e34e2e4e3d813fdcb42d3db7b",
+    "runtime.py": "03656b2c29e86256a50d68794c01abb7322c74ae3f2ef4c67eca4db7169f0647",
+    "cell.py": "a00b2d5b54e4f2e881c6c9025747ac0924cf5386cdabe78d74d92b5f37d95e36",
+    "build_id": "mt5-single-owner-admission-20260817.2",
+    "execution_process_isolation": true
+  },
+  "candidate": {
+    "main.py": "34298e859a66f49e2e4860234fd06d90a5db847a6a1d64137088acc18cb3872b",
+    "runtime.py": "03656b2c29e86256a50d68794c01abb7322c74ae3f2ef4c67eca4db7169f0647",
+    "cell.py": "9b79718e064dbcf2b3ffbe7ffd8d9f4f7322c9064de14890faea8d570ff3cf09",
+    "deploy.ps1": "35596a6701c7af35409c4bf7329720e5c4e9e1190f2aa396f43a4d78664da62e"
+  },
+  "architecture": {
+    "http_process": "durable WAL admission and HTTP only",
+    "native_owner": "one spawned process owns every MetaTrader5 read and write",
+    "read_transport": "generation-fenced duplex Pipe with per-generation synchronization",
+    "public_tick_read": "per-symbol request snapshot; cache-only during trade activity and 75ms quiet window",
+    "write_transport": "ADMITTED -> PENDING -> CLAIMED -> SENDING -> terminal WAL",
+    "policy": "close_priority_terminal_serial_single_native_owner_public_tick_isolation"
+  },
+  "required_env": {
+    "MT5_EXECUTION_PROCESS_ISOLATION": "1",
+    "MAX_PENDING_EXECUTIONS": "32",
+    "MT5_PARENT_READ_GATE_WAIT_MS": "5000",
+    "MT5_EXECUTION_READY_SEC": "55",
+    "MT5_EXECUTION_CONNECT_SEC": "45",
+    "MT5_EXECUTION_CONNECT_RETRY_MS": "750",
+    "MT5_NATIVE_RPC_TIMEOUT_SEC": "30",
+    "MT5_PUBLIC_TICK_CACHE_TTL_MS": "250",
+    "MT5_BRIDGE_BUILD_ID": "mt5-tick-isolation-20260817.3"
+  },
+  "required_runtime_gates": {
+    "maintenance_owned": true,
+    "all_positions": 0,
+    "all_execution_queues": 0,
+    "trade_allowed": true,
+    "native_owner_mode": "single_process_read_write_rpc",
+    "native_owner_pid_equals_execution_pid": true,
+    "http_pid_distinct_from_native_owner_pid": true,
+    "cell_all_allocated_healthy": true
+  },
+  "validation": {
+    "process_isolation": {"passed": 15, "failed": 0},
+    "process_transport": {"passed": 4, "failed": 0},
+    "windows_spawn_single_owner": {"passed": 1, "failed": 0},
+    "bridge_v3": {"passed": 57, "failed": 0},
+    "cell_health": {"passed": 5, "failed": 0},
+    "tick_isolation": {"passed": 7, "failed": 0},
+    "cell_watchdog_quiescence": "passed",
+    "python_compile": "passed",
+    "real_orders_sent": false
+  }
+}
