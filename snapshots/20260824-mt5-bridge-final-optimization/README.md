@@ -4,6 +4,8 @@ Collected read-only from `43.206.15.17` (`EC2AMAZ-2SH9D10`) on 2026-08-24
 UTC. The snapshot contains the bridge programs and deployment material used
 by the current production tasks:
 
+Backup note: 20260824 MT5/MT4 final optimization.
+
 * `C-MT5Agent` contains the new MT5 bridge entry point and redacted runtime
   configuration.
 * `D-QHMT5` contains the IC/Bybit Python bridge sources, per-instance app
