@@ -1,6 +1,7 @@
 # Capture metadata
 
 * Capture time: 2026-08-24 UTC
+* Backup label: `20260824MT5MT4最终优化版`
 * QH host: `54.238.164.60` (private host `ip-172-31-36-34`)
 * Live build reported by `/api/health`: `hedge-pro-mt5-terminal-projection-manual-eager-20260824.3`
 * Live API source: `python/app.py`, SHA-256
