@@ -19,3 +19,6 @@
 The snapshot is a filesystem capture of the live roots, not a reset or merge
 of the dirty `/opt/quanthedge` working tree. This preserves the production
 dist/assets exactly as served.
+
+Root-level historical source files are preserved in the encrypted
+`database/qh-root-files-20260824.tar.gz.enc` artifact.

@@ -6,8 +6,8 @@
     },
     {
         "path":  "BUILD.md",
-        "bytes":  1064,
-        "sha256":  "C0EE6A8C67BF68DA14E898ABA2BE7AD46E12169FA836CF8BD026E00F4FB5315B"
+        "bytes":  1186,
+        "sha256":  "F36446C9FA1EF817CA90B541471D54E6E70A2D8CAD6FA5946D1834B0C5C5BE3D"
     },
     {
         "path":  "manifest-mt5-inventory.md",
@@ -21,8 +21,8 @@
     },
     {
         "path":  "README.md",
-        "bytes":  2093,
-        "sha256":  "4DAA98C99F1DC463F25131287127B2A964C776EE3A70A01E43DB93CC1880BE48"
+        "bytes":  2330,
+        "sha256":  "D8904B367EA0F9DEDFEAB405B4FF67EF5138501B58C63F0C8C81D11C947DAB82"
     },
     {
         "path":  "SECURITY.md",
@@ -33,6 +33,11 @@
         "path":  "database/qh-mt5-sensitive-20260824.tar.gz.enc",
         "bytes":  2016,
         "sha256":  "1FF26EAA5093B9DD024D568A363AF103415EC6AF1DCAF056A4C04B1AFAEF6E5C"
+    },
+    {
+        "path":  "database/qh-root-files-20260824.tar.gz.enc",
+        "bytes":  19925584,
+        "sha256":  "17E6033A807136513AEED8196E4080665D144FF7013EEA675CF53A41914DDBEE"
     },
     {
         "path":  "database/qh-sensitive-20260824.part-000",

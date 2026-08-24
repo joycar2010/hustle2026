@@ -25,6 +25,11 @@ Redis RDB snapshot, exact Nginx/systemd/history archives, and the exact MT5
 secret archive. No plaintext credentials, private keys, or database contents
 are committed to this public repository.
 
+The additional `database/qh-root-files-20260824.tar.gz.enc` archive contains
+every regular file directly under `/opt/quanthedge`, including dated Python
+source revisions and migration scripts that are not part of the live runtime
+tree.
+
 To restore the encrypted artifact on the backup workstation, concatenate the
 parts in lexical order and decrypt with the local key file
 `C:\Users\Administrator\qh-backup-work-20260824\qh-secret-key.txt` using
