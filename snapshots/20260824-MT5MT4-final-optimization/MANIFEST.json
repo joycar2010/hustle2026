@@ -1,5 +1,10 @@
 ﻿[
     {
+        "path":  ".gitattributes",
+        "bytes":  128,
+        "sha256":  "4F0128B5B39A28A45E89767360C9D4029D46DD375F3E37B1C8883C3A3D5D6161"
+    },
+    {
         "path":  "BUILD.md",
         "bytes":  1016,
         "sha256":  "F782C37892492F6BBD2E08786C8366A80851146E5D5A5F4F547123025D133FCA"
