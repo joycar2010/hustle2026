@@ -1,0 +1,5 @@
+# A filesystem backup must preserve the bytes and line endings from the host.
+* -text
+*.ex4 -text
+*.mq4 -text
+*.enc -text
