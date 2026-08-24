@@ -1,8 +1,8 @@
 ﻿[
     {
         "path":  "BUILD.md",
-        "bytes":  882,
-        "sha256":  "2C056F078E80C8BB2750D222C51AEADAB76B0D2A25B48A8B6123285BD1F18306"
+        "bytes":  1016,
+        "sha256":  "F782C37892492F6BBD2E08786C8366A80851146E5D5A5F4F547123025D133FCA"
     },
     {
         "path":  "manifest-mt5-inventory.md",
@@ -1710,6 +1710,16 @@
         "sha256":  "5CA5C79F25370DA79EDB29526A159AA4D2DE1E41DB5D2AB8111D3B71A09CB397"
     },
     {
+        "path":  "python/__pycache__/app.cpython-311.pyc",
+        "bytes":  1588617,
+        "sha256":  "E674D8E5C458241661055061B4F1E94E907592491F16D9937EA4C1A00210EF58"
+    },
+    {
+        "path":  "python/__pycache__/connector.cpython-311.pyc",
+        "bytes":  121855,
+        "sha256":  "8CC5A7E6E5AC94DD3A7F73B8497E94BA3D8F3490C85485B86F36F2378E005B66"
+    },
+    {
         "path":  "rust/deployed-qh_ws_hub/Cargo.lock",
         "bytes":  40054,
         "sha256":  "4BE22244A21F25505F00E38D7AC3091347DE7C2EFE99580EB23C1608E7026566"
@@ -1723,6 +1733,11 @@
         "path":  "rust/deployed-qh_ws_hub/src/main.rs",
         "bytes":  7823,
         "sha256":  "7FA93479EE8DDE79983C42270997523D6B36DB6E78B84E22302C566FE84D8890"
+    },
+    {
+        "path":  "rust/live-release/qh-ws-hub",
+        "bytes":  2697768,
+        "sha256":  "A6DCCACE82378E55F9E4FABA72232971940541232764D8F4E5FB53EC012FD69E"
     },
     {
         "path":  "rust/source-qh_ws_hub/Cargo.lock",

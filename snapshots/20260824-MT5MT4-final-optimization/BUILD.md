@@ -7,6 +7,8 @@
   `24852143B8F580D8BCF79AE0777742C7898D1FA7920EBCE6D11009EAD4341961`
 * Frontend `qh` index SHA-256:
   `8733D07EBDA2524A0DB72821486C693D73C89A41BE40861E348EEB82C97CD720`
+* Running Rust hub binary `rust/live-release/qh-ws-hub` SHA-256:
+  `A6DCCACE82378E55F9E4FABA72232971940541232764D8F4E5FB53EC012FD69E`
 * Health checks at capture: `qh.hustle2026.xyz/api/health` and
   `qhadmin.hustle2026.xyz/api/health` returned HTTP 200; the public site
   config endpoint returned HTTP 200.
