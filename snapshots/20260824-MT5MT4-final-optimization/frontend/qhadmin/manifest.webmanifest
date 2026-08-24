@@ -1,0 +1,15 @@
+{
+  "name": "Quant Hedge 管理后台",
+  "short_name": "QH Admin",
+  "description": "Quant Hedge 对冲运营管理后台",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#08113A",
+  "theme_color": "#08113A",
+  "icons": [
+    { "src": "/logo-white.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/logo-white.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}

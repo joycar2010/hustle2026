@@ -1,0 +1,44 @@
+# ===== QH 仓库 allowlist(白名单): 默认忽略一切, 仅显式放行源码/产物 =====
+# 安全命门: channels.json(飞书/admin令牌)、venv、密钥、所有 backup_*/*.bak、数据库dump、exe 一律不追踪
+/*
+!/.gitignore
+!/VERSION
+!/app.py
+!/connector.py
+!/engine.py
+!/migrate_p24.py
+!/migrate_p25.py
+!/migrate_p26.py
+!/web/
+!/admin/
+!/admin-src/
+!/qh_ws_hub/
+!/qhwww/
+!/client-src/
+# web(dashboard dist)排除杂物
+web/*.bak*
+web/backup_*
+# admin(qhadmin dist)排除 sourcemap
+admin/**/*.map
+# admin-src(qhadmin Vue 源)排除依赖与构建产物
+admin-src/node_modules/
+admin-src/dist/
+# rust hub 源: 排除 target 构建产物与备份
+qh_ws_hub/target/
+qh_ws_hub/**/*.bak*
+qh_ws_hub/*.bin.bak*
+# qhwww: 排除 56MB 安装包(不进 git)与备份
+qhwww/*.exe
+qhwww/*.bak*
+# C/S 客户端源: 排除构建产物与本地机密
+client-src/bin/
+client-src/obj/
+client-src/publish/
+client-src/.vs/
+client-src/**/*.exe
+client-src/**/*.dll
+client-src/**/*.pdb
+# 全局: 数据库 dump 与备份目录绝不进 git
+backups/
+*.sql
+*.dump

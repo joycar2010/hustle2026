@@ -1,0 +1,95 @@
+﻿server {
+    server_name qhadmin.hustle2026.xyz;
+    include /etc/nginx/snippets/qh-security-headers.conf;
+
+    # ç®¡ç†åŽç«¯ APIï¼ˆä¸Žç”¨æˆ· Web å…±ç”¨åŽç«¯ï¼Œä½†èµ°ç‹¬ç«‹å­åŸŸï¼Œé‰´æƒè¾¹ç•Œæ¸…æ™°ï¼‰
+    location /api/ {
+        proxy_pass http://127.0.0.1:8090;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location /ws {
+        proxy_pass http://127.0.0.1:9091;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_read_timeout 3600s;
+    }
+
+    # ===== Go-View æ•°æ®å¤§å±(ç‹¬ç«‹ä½Žä»£ç åº”ç”¨; åŽç«¯ goview-serve@9503 SQLite) =====
+    location ^~ /goview-api/ {
+        proxy_pass http://127.0.0.1:9503/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        client_max_body_size 20m;
+    }
+    # å…¥å£HTMLç¦ç¼“å­˜: æ¯æ¬¡å‘ç‰ˆåŽŸå­æ¢chunk, æ—§index.htmlç¼“å­˜ä¼šå¼•ç”¨å·²åˆ chunkè‡´æ‡’åŠ è½½404
+    location = /goview/index.html {
+        alias /opt/goview/web/index.html;
+        include /etc/nginx/snippets/qh-security-headers.conf;
+        add_header Cache-Control "no-cache";
+    }
+    location = /goview/ {
+        alias /opt/goview/web/;
+        index index.html;
+        include /etc/nginx/snippets/qh-security-headers.conf;
+        add_header Cache-Control "no-cache";
+    }
+    location ^~ /goview/ {
+        alias /opt/goview/web/;
+        try_files $uri $uri/ /goview/index.html;
+    }
+
+    # admin SPA é™æ€äº§ç‰©ï¼ˆä¸Žç”¨æˆ· Web éš”ç¦»çš„ç‹¬ç«‹ç›®å½•ï¼‰
+    # gzip: å…¨å±€åªåŽ‹ text/html, è¿™é‡Œè¡¥é½ JS/CSS/JSON/å­—ä½“/SVG
+    gzip on;
+    gzip_comp_level 5;
+    gzip_min_length 1024;
+    gzip_proxied any;
+    gzip_vary on;
+    gzip_types application/javascript text/javascript application/json text/css image/svg+xml application/manifest+json font/woff font/woff2;
+
+    root /opt/quanthedge/admin;
+    index index.html;
+
+    # å“ˆå¸Œèµ„æº(æ–‡ä»¶åå«å†…å®¹å“ˆå¸Œâ†’ä¸å¯å˜): æ°¸ä¹…å¼ºç¼“å­˜
+    location /assets/ {
+        include /etc/nginx/snippets/qh-security-headers.conf;
+        add_header Cache-Control "public, max-age=31536000, immutable";
+        try_files $uri =404;
+    }
+    # SPA å…¥å£ & Service Worker: ä¸ç¼“å­˜, æ¯æ¬¡æ ¡éªŒ, æ–°å‘å¸ƒç«‹å³ç”Ÿæ•ˆ
+    location = /index.html {
+        include /etc/nginx/snippets/qh-security-headers.conf;
+        add_header Cache-Control "no-cache";
+    }
+    location = /sw.js {
+        include /etc/nginx/snippets/qh-security-headers.conf;
+        add_header Cache-Control "no-cache";
+    }
+    location / { try_files $uri $uri/ /index.html; }
+
+    listen 443 ssl; # managed by Certbot
+    ssl_certificate /etc/letsencrypt/live/qhadmin.hustle2026.xyz/fullchain.pem; # managed by Certbot
+    ssl_certificate_key /etc/letsencrypt/live/qhadmin.hustle2026.xyz/privkey.pem; # managed by Certbot
+    include /etc/letsencrypt/options-ssl-nginx.conf; # managed by Certbot
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem; # managed by Certbot
+
+}
+server {
+    if ($host = qhadmin.hustle2026.xyz) {
+        return 301 https://$host$request_uri;
+    } # managed by Certbot
+
+
+    listen 80;
+    server_name qhadmin.hustle2026.xyz;
+    return 404; # managed by Certbot
+
+
+}
+

@@ -1,0 +1,1797 @@
+﻿[
+    {
+        "path":  "BUILD.md",
+        "bytes":  882,
+        "sha256":  "2C056F078E80C8BB2750D222C51AEADAB76B0D2A25B48A8B6123285BD1F18306"
+    },
+    {
+        "path":  "manifest-mt5-inventory.md",
+        "bytes":  9239,
+        "sha256":  "8033989A2E765BDE3CA5819914561464195CA6872EFC4B6E2BB81F2A1E84A8F6"
+    },
+    {
+        "path":  "manifest-qh-inventory.txt",
+        "bytes":  7511,
+        "sha256":  "8B637444FE89B439273A38182EDBE4896778EE995E8D1DDD80D520B55F2F051E"
+    },
+    {
+        "path":  "README.md",
+        "bytes":  2093,
+        "sha256":  "4DAA98C99F1DC463F25131287127B2A964C776EE3A70A01E43DB93CC1880BE48"
+    },
+    {
+        "path":  "SECURITY.md",
+        "bytes":  464,
+        "sha256":  "A7624550C248A8B2586C97625290287F4E21476E3D91C4C22A3FA0C444717EFB"
+    },
+    {
+        "path":  "database/qh-mt5-sensitive-20260824.tar.gz.enc",
+        "bytes":  2016,
+        "sha256":  "1FF26EAA5093B9DD024D568A363AF103415EC6AF1DCAF056A4C04B1AFAEF6E5C"
+    },
+    {
+        "path":  "database/qh-sensitive-20260824.part-000",
+        "bytes":  52428800,
+        "sha256":  "FB201F540DBEB426DE2FB2B418CECA63741133DC0ACA825D0F07A4878074F374"
+    },
+    {
+        "path":  "database/qh-sensitive-20260824.part-001",
+        "bytes":  52428800,
+        "sha256":  "BE3BAD966F3C45CB620AA8BAE37AB46F264CB48D72B392A3C5670AAF88531350"
+    },
+    {
+        "path":  "database/qh-sensitive-20260824.part-002",
+        "bytes":  52428800,
+        "sha256":  "A1175424D6CEB85775ADF26A1DA5D73308860E6D477A5FF6CB8E04CB75AAA7A7"
+    },
+    {
+        "path":  "database/qh-sensitive-20260824.part-003",
+        "bytes":  52428800,
+        "sha256":  "F2E9BB99A65C00A3BF20FE620EE48220A8D7891F3469E59303ECC70940C32700"
+    },
+    {
+        "path":  "database/qh-sensitive-20260824.part-004",
+        "bytes":  52428800,
+        "sha256":  "73771B0E2B4467A3C003A262D3A3C1566823E79520F01CD0E949AD653F3AC8E7"
+    },
+    {
+        "path":  "database/qh-sensitive-20260824.part-005",
+        "bytes":  11252272,
+        "sha256":  "9DEE8D8D6FD133DF5EE40FF725705016FE8879D967559F39328E4922D71B6437"
+    },
+    {
+        "path":  "deploy/.deploy/app.py.20260821T104242Z",
+        "bytes":  1273524,
+        "sha256":  "8DB167E874681AABAAD04FEC124B63729A88BA90247563F451222B3DEAD22C9B"
+    },
+    {
+        "path":  "deploy/.deploy/index.html.20260821T104242Z",
+        "bytes":  501308,
+        "sha256":  "68FD3374B38132AE023110C883EC7A9C283C0C203CF0F52F9CE2BD6FA5487382"
+    },
+    {
+        "path":  "deploy/.deploy/mt5-targeted-eager-20260821.82/pre.sha256",
+        "bytes":  268,
+        "sha256":  "1E2229CC2C01DF551B6032A98791331E115C7674B01AEBBD1AD5269FB618D6BD"
+    },
+    {
+        "path":  "deploy/.deploy/mt5-targeted-eager-20260821.82/pre/app.py",
+        "bytes":  1307266,
+        "sha256":  "69EC841BB494858B87965C7324A49E92803788FE5643250DAED969246AEF4843"
+    },
+    {
+        "path":  "deploy/.deploy/mt5-targeted-eager-20260821.82/pre/index.html",
+        "bytes":  507236,
+        "sha256":  "8733D07EBDA2524A0DB72821486C693D73C89A41BE40861E348EEB82C97CD720"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/app.py",
+        "bytes":  1306163,
+        "sha256":  "87A68962E03ED72E5B2E446AD1E54191532EAFDB90B64C267A89DD599363A647"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/candidate-app.sha256",
+        "bytes":  93,
+        "sha256":  "D72C50AFE4C1FAD5F9C622CA0317F854ED51E8673D18DE289BFC311E1785982B"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/candidate-web.sha256",
+        "bytes":  101,
+        "sha256":  "B3A796CF48922867AAC3209B12793BE335839611495319E3D1A4590395FF34D8"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/postinstall-app.sha256",
+        "bytes":  89,
+        "sha256":  "A9066DC03C313EBE8878E2E03D199FCB55E0AD27C73C10F3A5FF6B9DB57D1333"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/postinstall-web.sha256",
+        "bytes":  97,
+        "sha256":  "D13B5736005088CE48F981AC225F1CADFD2D48E32E3842C14B2ECD7D37343E2A"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/predeploy.sha256",
+        "bytes":  186,
+        "sha256":  "DA384435F07BE05E71CB1067259E08EDE976F2B26AB95CC9191E4E3DE31F3BEC"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin/favicon.ico",
+        "bytes":  5689,
+        "sha256":  "21B7393EEEE202390AC76EA7103C01AECDBEF4342EE2BF69FC01C40CD66C7394"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin/index.html",
+        "bytes":  1163,
+        "sha256":  "C3837BBACFD763A6E9AB86F0C6B69247DBEBCAA2673BAD0BF9D4EF539F5F505E"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin/logo-white.png",
+        "bytes":  4231,
+        "sha256":  "E1CF20CDEC7443A7DAA3D6878302903824C7434522412CD07E00C983019948F0"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin/manifest.webmanifest",
+        "bytes":  486,
+        "sha256":  "DAB98D88EA8AC66DD99660A409C6DCE37CA7E0C0438A36B5FCD34A6B0C70A776"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin/sw.js",
+        "bytes":  3025,
+        "sha256":  "D914088C280EAF7E40DC7F8D602BED8A883A0A0DEB36875A8E381B96E5CF5D64"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin/assets/Accounts-CITygPD8.js",
+        "bytes":  9370,
+        "sha256":  "A2716331FA8D1D00C4519BA57A1D3B5EF19D746F8DADA47EEF29F83238E6ED58"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin/assets/Agents-C3SeRv3A.js",
+        "bytes":  11828,
+        "sha256":  "D7DA2B86E5E996F1F5392573C6B72D405C8109FAE8E6F64E14DEC8D8EF69C332"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin/assets/Agents-DH5i1zTF.css",
+        "bytes":  97,
+        "sha256":  "CFED776C5FF37D12BB7DEC508F3C5649B435849A03E32C8B9AAC521A404A21F7"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin/assets/Bi-BAlLVgXl.js",
+        "bytes":  8728,
+        "sha256":  "F6F11B482245314772043AAD6CC98AA8711B7F872BC435B52FF5EA1347444452"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin/assets/Bi-Cm4JZAfX.css",
+        "bytes":  352,
+        "sha256":  "D959B2C4B20AB011691DDD4B23341068FDA4CD8DD0EF7EE6F92EE6C2958288BF"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin/assets/Campaigns-1k3TubrJ.css",
+        "bytes":  121,
+        "sha256":  "F1F7BF24A49F37CECF8B9AB6426EA8D9A3333A6299DEFECE5BDA7EDC71FED644"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin/assets/Campaigns-BtdrISer.js",
+        "bytes":  14749,
+        "sha256":  "16BFE792CB306112982C505279E621E731201511373B6CB574927B2EDC4D625D"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin/assets/ChartBox-DpJxfuHO.js",
+        "bytes":  620,
+        "sha256":  "C6ED40651D7AED0E5A6BD3FF9162F6C36792FB374B44EFA3D8DEE61C46A50F4D"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin/assets/Chat-BTL9m7yt.js",
+        "bytes":  16535,
+        "sha256":  "35F826BFA018E0C665E5A9D8CFDD230192BCB5C4564DA38F032BAAD2BBA4ED1D"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin/assets/Chat-ClOaiJQq.css",
+        "bytes":  396,
+        "sha256":  "AE396CF7B58EE55718D5792B33826B2CA520830EEB4BC9A6E211AE827EC6B208"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin/assets/Contests-Bal6PqdU.css",
+        "bytes":  121,
+        "sha256":  "2378DF14AB9A027B6D648F6AFD15CAA31AA897F6D5E284F3D042D9B451FBA082"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin/assets/Contests-CyFiVTHZ.js",
+        "bytes":  10326,
+        "sha256":  "275069081D04AE86097A0F23B12210E667EEAE6089A0DE64146EBCCD8876C26A"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin/assets/Coupons-C0oXuVT-.css",
+        "bytes":  69,
+        "sha256":  "58C64E744EAF8E63A56BC0FAB6CF8DECB46550F045FEB09698A209C8B0607C0D"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin/assets/Coupons-CSWm72yj.js",
+        "bytes":  8527,
+        "sha256":  "A47301CB4F55C3DD63B65EA10D4E044F2A8FDCA2B77839394FA60F7B546A3E46"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin/assets/Dashboard-BerpUksY.css",
+        "bytes":  97,
+        "sha256":  "08893100D3772BF95B486576A5D3F9670038AC93A1E7F04620DA09081012A974"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin/assets/Dashboard-Bi45SqA1.js",
+        "bytes":  13079,
+        "sha256":  "09F8BE5A64804E6EAA0F3499F408B752F79A7C85216C949792B5C2B20F20D5D6"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin/assets/DataMgr-BzjPlJSs.css",
+        "bytes":  175,
+        "sha256":  "0E515DF4C380B2FAB4034107FEC3FA2D17FEDBBB563B46C381958226A555E1D4"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin/assets/DataMgr-Dj_ZO44n.js",
+        "bytes":  22944,
+        "sha256":  "56C7561676160B5B68A73407A5BD1452B055C6C5B7D18DC36B3A9168EE83AA12"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin/assets/dicts-DbSxMDD2.js",
+        "bytes":  1059,
+        "sha256":  "86A95D1E5963625EEA84415F283BC962B4432FBB5E7C38939DB2A4495608156D"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin/assets/features-mYrm82YG.js",
+        "bytes":  1739,
+        "sha256":  "83F608ACD85AA8908E0619191496230E7180BE5F691AD632BF63F0AD4551C9E4"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin/assets/Iap-DPBSFNc3.js",
+        "bytes":  14155,
+        "sha256":  "AEFD60E913A669262E5F2B80BA6D3BEC6DABB961D420BFCBE27A1F8350DEC17D"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin/assets/index-Chkm5Ywj.js",
+        "bytes":  70766,
+        "sha256":  "2E9C097EEECC5099A7681FC443195C20D0ED6B6CA1E931ADFEF7543DCC501F6E"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin/assets/index-PekZK__G.css",
+        "bytes":  7901,
+        "sha256":  "2C7F919B93947E2BB5E4544924AA4B8D510D280F57C240E845E5701CCDDCBE83"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin/assets/Leads-B2bkP0Zi.js",
+        "bytes":  7956,
+        "sha256":  "C86F0E380B1C8319B8D48023378AA92DC86024E43CF14A400484E264F356C9AF"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin/assets/Legs-DcLdPpFA.js",
+        "bytes":  3296,
+        "sha256":  "C3E36918F12A887E9971A1553CBC301606BBB63AC7C77D0DF0FBB1E37C703DC9"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin/assets/Notify-BtjpxFFy.css",
+        "bytes":  222,
+        "sha256":  "BC2AA9DD59099CEAA75B6E5FE9ACB3479669DABAC0B093BD9AA8C46E0CC1C586"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin/assets/Notify-DaQGYYQr.js",
+        "bytes":  30840,
+        "sha256":  "377D491F4FBB18176E048147C3771AC269F36260E16A209B1DD9AB71D6110BEE"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin/assets/Operators-CkRWYOQh.js",
+        "bytes":  11807,
+        "sha256":  "A6CDC67EC4575BC42B98530986102CCEFCFCFAF54B547C8B4F5772845D48C41E"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin/assets/Orders-CnRw_v1I.js",
+        "bytes":  11157,
+        "sha256":  "BC99D3B0C802B4816B317D7CA8BA211D0888527D4A3B5D9ED2459FFAEEC017D1"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin/assets/Overview-AVQO9xfG.css",
+        "bytes":  279,
+        "sha256":  "753693D0245B8D5BD84DE954102D4FA15F8B101037F7107AA626473643635734"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin/assets/Overview-CtOAM2Dp.js",
+        "bytes":  3664,
+        "sha256":  "9202DB8BF690A4FD16DC817ECD90CE9AF7642A504E776924BEAC5116CE8B8CBE"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin/assets/Params-Bpq2hYHe.js",
+        "bytes":  22882,
+        "sha256":  "06812352B2FFE48B0E361EDB6A0A542191201433F6EC9756C03037ED89069FA5"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin/assets/Params-btxgcOBF.css",
+        "bytes":  520,
+        "sha256":  "0D8CD558A548DC91D3A66217AB05FE6D9FA64C4A05200F799757D3BDA2C4A37C"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin/assets/Points-DRiKA-bA.js",
+        "bytes":  6107,
+        "sha256":  "F6DB18E036591400FADC8C205B528A3F98B6AD31C78B61D210FDB320C9D42450"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin/assets/Points-_QvWZH_W.css",
+        "bytes":  141,
+        "sha256":  "C9545A679F89471DFDAE6E114718377FC45C01807B0EB7FC9D7A912E1EDEEDEA"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin/assets/Product-CEMamDWX.js",
+        "bytes":  13939,
+        "sha256":  "E91AD585488C277DEAB7BB9EA92624B5234E8D02798AD0A8E9F636553CF45250"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin/assets/Product-Cz3Lr-Z1.css",
+        "bytes":  400,
+        "sha256":  "7D3987ED928D6A042A86F428D8875455CBAC0F5A24A6EC3CA241552F5582732A"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin/assets/Recon-CH4xQVFE.js",
+        "bytes":  8328,
+        "sha256":  "64DFA29F7F66B554F18ED195AF82C3B58FE25E058F84497D6966050A75CB99BD"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin/assets/Recon-GGktuCJh.css",
+        "bytes":  525,
+        "sha256":  "B8C1A04391D131858E1ED4DED6D86B5B3056468BC63D26223FCECCDB0E30DD8B"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin/assets/SiteMgr-Dj0PIGWu.css",
+        "bytes":  251,
+        "sha256":  "898B87AC6156A23A5B68C6DEA41AF6FDA45BEE46528501F3A08231B7FF93F2F0"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin/assets/SiteMgr-Dpiqlh6C.js",
+        "bytes":  21001,
+        "sha256":  "FA8EA32B71E55BEC5E3C214D9DA4D1E6847A42D0D851BB334423408719F3CB8B"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin/assets/Staff-CVgt6KEL.css",
+        "bytes":  193,
+        "sha256":  "3367DAAFAA7D9D09E06CD8C8A04A7FC32F8C429DCCE4E3775C7997D8C3B8451F"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin/assets/Staff-D2UkmeUJ.js",
+        "bytes":  11523,
+        "sha256":  "B843E2E7EC63F416435A0D518FEC0C72D264966E2F474D2479CE65DC004A7782"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin/assets/System-C3KIfwJb.css",
+        "bytes":  716,
+        "sha256":  "3BE8059A3DA7AB9096EA42D3582483AFD7C57AAB03AD495393B9EE5DE0BB1E8A"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin/assets/System-ClB5hJ1s.js",
+        "bytes":  15562,
+        "sha256":  "9889BDF14A15DC42F86AFC0EF59178E217164068E5A61F1625BEF1D21CC16887"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin/assets/Trials-BzR8EMWf.js",
+        "bytes":  5370,
+        "sha256":  "B1B82723164164140B856EAA9B62B7BDCFE38DA027A6AC935CB28CA76C5FD7DC"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin/assets/useLiveRefresh-DH-HgP44.js",
+        "bytes":  853,
+        "sha256":  "40B218C2870747C3BA80B8E7DD50C1EC1CC07A639C2B59C463B58C66FEBC10D0"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin/assets/Users-DR95YomD.js",
+        "bytes":  21957,
+        "sha256":  "0FBB217262D9AE7AFF5BD553C207C040FF94D4B76A724949FB7AD501D33DE8CF"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin/assets/UserSelect-Bk7x4Fif.js",
+        "bytes":  1471,
+        "sha256":  "0C5FF813A33B6C8DF5C222C531DE289694ACC5F67EF76B81EEB34E2E2BA2F0EF"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin/assets/vendor-C3-0unKy.js",
+        "bytes":  259079,
+        "sha256":  "9FD94DFFFCA971C43E549D81252D1CDE475CC64ADA6747CD0952FD5CB197BA37"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin/assets/vendor-echarts-C-j4TZen.js",
+        "bytes":  1035085,
+        "sha256":  "6936EAA1D76DB9B4A6324ABDED8B960A519011175676E26029ED6D38CF8B2AEF"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin/assets/vendor-element-By8by_yx.js",
+        "bytes":  945717,
+        "sha256":  "26E11D5E5C925DBBCD480562721F7A03C9E0C3BF6BECAB8EE0846910C1AC28A2"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin/assets/vendor-element-CudmXO5w.css",
+        "bytes":  357497,
+        "sha256":  "61EC4917740507D748E317747816EABA2F60A9F5A0E96528382DA7C627A5F01A"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin/assets/vendor-vue-BsIJpjDD.js",
+        "bytes":  80802,
+        "sha256":  "0638D9CEE84111A0B597E2AEAB15D091B827E7F5E6ED7D86DCFB592D284B548A"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin-src/index.html",
+        "bytes":  748,
+        "sha256":  "86835A6B3A94E23E792FDDDD6E47B76362DAD90D7EC35D3696E2EA33E3221839"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin-src/package-lock.json",
+        "bytes":  82328,
+        "sha256":  "9381CF85B05BBC15F091F5142D7EC2B44BB3503ABB5F76CE744B7053519EBE8D"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin-src/package.json",
+        "bytes":  527,
+        "sha256":  "510C0023F921174BFC8D7FED19B2E69411B2B2A9C03131A6074125C7D610FFF5"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin-src/postcss.config.js",
+        "bytes":  31,
+        "sha256":  "0A37D0784804E398C21889267090C1BE1AD0C93DC5FDF5B21C01E980EBA37531"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin-src/vite.config.js",
+        "bytes":  955,
+        "sha256":  "0BE25926C647B1D719C03AA1496E5BE08F5EC8F94D1C17CECFB576377CBEB3AB"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin-src/public/favicon.ico",
+        "bytes":  5689,
+        "sha256":  "21B7393EEEE202390AC76EA7103C01AECDBEF4342EE2BF69FC01C40CD66C7394"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin-src/public/logo-white.png",
+        "bytes":  4231,
+        "sha256":  "E1CF20CDEC7443A7DAA3D6878302903824C7434522412CD07E00C983019948F0"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin-src/public/manifest.webmanifest",
+        "bytes":  486,
+        "sha256":  "DAB98D88EA8AC66DD99660A409C6DCE37CA7E0C0438A36B5FCD34A6B0C70A776"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin-src/public/sw.js",
+        "bytes":  3025,
+        "sha256":  "D914088C280EAF7E40DC7F8D602BED8A883A0A0DEB36875A8E381B96E5CF5D64"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin-src/src/App.vue",
+        "bytes":  41,
+        "sha256":  "042AA1D445B8B8D040129409FC4909DE05936A1A32ABF6418AC5731A3AEDBB2C"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin-src/src/dicts.js",
+        "bytes":  1932,
+        "sha256":  "BC89C476BA63AA3CEC132306E5B7203DF26D86B1B86F6FBEE14F1708C48046F3"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin-src/src/features.js",
+        "bytes":  3464,
+        "sha256":  "BD1F8951826179CEC3B867FE80FAD8907C63764569FBD94D74CB9649E4E096A6"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin-src/src/main.js",
+        "bytes":  2202,
+        "sha256":  "6F33CA18DADFE39333E134FA784DF9AD6FFFD9DC5D5B4B4BE1F8A35A2132CBAF"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin-src/src/tips.js",
+        "bytes":  35494,
+        "sha256":  "D330C59D611C0D34270DB55CB856A949A0629E113936E676CFA9A0F5EFB9CF5C"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin-src/src/api/index.js",
+        "bytes":  20443,
+        "sha256":  "BF127BE26035F37C823CCB0EF025286AA84254A00DE1CD50C21E28F6B09082C9"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin-src/src/components/ChartBox.vue",
+        "bytes":  813,
+        "sha256":  "DAA085B6FCD31794ABACF7478299E1FDA4A3D8D0EF739FCBB102091D3700C92D"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin-src/src/components/UserSelect.vue",
+        "bytes":  1374,
+        "sha256":  "9EF8129610F0CD13A86A8F18BDEE378367E5B05E4958B078418332B8CFCA52D0"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin-src/src/composables/useLiveRefresh.js",
+        "bytes":  2299,
+        "sha256":  "335FD788141D8A34160F9E096509FBB453CB023025DA968829261FCFF5F4C1D8"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin-src/src/directives/longpress.js",
+        "bytes":  2170,
+        "sha256":  "18F1990A39AF3FF5F47FE0AAB9E5D323953CA13EADD80C4C109368627EEB11A9"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin-src/src/layout/Layout.vue",
+        "bytes":  17338,
+        "sha256":  "B3EAFECC8CE89CF2F415BECDFEC1D94366AF0C3DA1293C77A81C4D885CC420A0"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin-src/src/locales/index.js",
+        "bytes":  982,
+        "sha256":  "BF9D44C332C5FF0A928FC68E1627777D963ED57133C175EF43B27F31EFA35114"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin-src/src/router/index.js",
+        "bytes":  4547,
+        "sha256":  "159B77329FCAE2694869ACC6970AD06692AA497FF36E70B5E9A17DBBA836CAA8"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin-src/src/styles/theme.scss",
+        "bytes":  6454,
+        "sha256":  "E2612BD2120462BAFBF07869EA6984B1CE24541F4B9819B188B2D834E0E3C5BA"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin-src/src/views/Accounts.vue",
+        "bytes":  8678,
+        "sha256":  "140431C54BE75054FC24950FEE34CC5BF644BD70ECEFEEC9371AD87E349026C8"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin-src/src/views/Agents.vue",
+        "bytes":  11323,
+        "sha256":  "64FD51F163145D9E8E0E8FE827892511EDE0A248AFBC21081340A647EA52E39D"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin-src/src/views/Alerts.vue",
+        "bytes":  776,
+        "sha256":  "42393BF16773553C8A9F904D5A5E393B78FE1F085FD5D23338B1DD6A12A6391C"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin-src/src/views/Bi.vue",
+        "bytes":  8351,
+        "sha256":  "848701F6292E7FB7AC70F5E57BF80DDB9408BDE26CAEEC4663C8D0082129DBAD"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin-src/src/views/Campaigns.vue",
+        "bytes":  13056,
+        "sha256":  "5343E716CC9BB142F47293FDF27CF96A815983C8C3AA7A354C183CB98BF26431"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin-src/src/views/Chat.vue",
+        "bytes":  16056,
+        "sha256":  "73D2EC3B0EAE03C237B8DA7579648B82749DAEBD06D005F8BC9F5F632E809B88"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin-src/src/views/Contests.vue",
+        "bytes":  9570,
+        "sha256":  "3646CE9EA5911301E6C169E2DFF7F3DE195D789B5CD01E7AA8FB201C5511DB5A"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin-src/src/views/Coupons.vue",
+        "bytes":  7358,
+        "sha256":  "C39A9838DE9CC46EFCD95EF802BD89C612D220AD3A3F04B4FE591FDFEF1EF7FB"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin-src/src/views/Dashboard.vue",
+        "bytes":  12480,
+        "sha256":  "4B1D944F95D243872B348D3378D902F3353F4304157DB7D8670E743BD1B2E301"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin-src/src/views/DataMgr.vue",
+        "bytes":  22783,
+        "sha256":  "70E06BD41F7130704F3E426435FB43E013997D0C01E4C64284228ECDAABE2FF8"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin-src/src/views/Iap.vue",
+        "bytes":  12147,
+        "sha256":  "1431A301DF3018CAE7F2359B00C05919EB82E5CB0C29E299D76404D79B22B600"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin-src/src/views/Leads.vue",
+        "bytes":  7216,
+        "sha256":  "6C291276576BFB19AB699FE9C87F6A565BD81608E6927463758F9C527F79E422"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin-src/src/views/Legs.vue",
+        "bytes":  3137,
+        "sha256":  "D28AE04C610A120E6337C8025B09D5339BC99E9E581BCD68F4A28484DAB9D98A"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin-src/src/views/Notify.vue",
+        "bytes":  28074,
+        "sha256":  "E30FD800720A16A8CB754142C3CD275A8B07FC500F14FAEA0C3DBA163DC0834A"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin-src/src/views/Operators.vue",
+        "bytes":  11446,
+        "sha256":  "F171AE4840838C305F3D5099BECC4A716A47866AA650D32B6A26552FC83AA18F"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin-src/src/views/Orders.vue",
+        "bytes":  11331,
+        "sha256":  "8C945DE6C7804743E19A267A80AB3C6CFB24849C350589F6BD598397944572DE"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin-src/src/views/Overview.vue",
+        "bytes":  3603,
+        "sha256":  "A95F936DE4E42268CFACCF90BB0648E82140FDF3AF7C8552A14B159B3D4CF99C"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin-src/src/views/Params.vue",
+        "bytes":  20028,
+        "sha256":  "22F15E727ACB602B79C26D99AE780713C607B75DD7ECAAAC55BAB1AFB9AC1D57"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin-src/src/views/Points.vue",
+        "bytes":  5835,
+        "sha256":  "EACE09E42A9BC8AC01228D1DF0CEC874A26196C850C4106E711C9701855B7BA7"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin-src/src/views/Product.vue",
+        "bytes":  14775,
+        "sha256":  "A8B89B2A5654893A58BC59729FC7439A2BB6894CC8F76F0B0E73264CE404DB8A"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin-src/src/views/Recon.vue",
+        "bytes":  9230,
+        "sha256":  "2FEFFEE005A3F7075A5CE5B4947BEE06853A9B656D0847D9E58AB04E9500AD5A"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin-src/src/views/SiteMgr.vue",
+        "bytes":  19074,
+        "sha256":  "AAB040D58B3FB6F4A2BB9E16676719E7388723ABA2425181D3EBDDED9A05DDAC"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin-src/src/views/Staff.vue",
+        "bytes":  10679,
+        "sha256":  "68F293BD279807A439868191DF1166312D0FE23859178A51379833A9E3E4DABC"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin-src/src/views/System.vue",
+        "bytes":  18426,
+        "sha256":  "C969B1CE69433EE7F37F803B030FD6FEA8F2AD4B19E97C3E1C5D7F9D2FCAD96B"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin-src/src/views/Trials.vue",
+        "bytes":  4844,
+        "sha256":  "3222F4A79AD78A0B71C4F40A84B4F8A0DB47B4AEF4BAE058392FA5079CCE44FF"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/admin-src/src/views/Users.vue",
+        "bytes":  21183,
+        "sha256":  "8E8E9C141414000F6B838F97493D8FFCA53A599C0B3AF57958E99074FD66BA84"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/web/index.html",
+        "bytes":  505728,
+        "sha256":  "4CF81D493EA57E5B2402014B95AA106F7B603C061DE8F9A82299B30C5A97544F"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/web/QHEDGELOGO-512.png",
+        "bytes":  210439,
+        "sha256":  "FD35AAA4FF858EFD6077A6903429AAACE8DEB49B82E0D9D549EA5BDEE605BB89"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/web/QHEDGELOGO-mid.png",
+        "bytes":  193595,
+        "sha256":  "63E26A9BB03687059DC17B0A2216E6025EFFBA50D50C2FFF7C78BB949C8BF5F4"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/web/QHEDGELOGO-s-single.ico",
+        "bytes":  5689,
+        "sha256":  "21B7393EEEE202390AC76EA7103C01AECDBEF4342EE2BF69FC01C40CD66C7394"
+    },
+    {
+        "path":  "deploy/.deploy/qh-mt5-targeted-eager-20260821T202405Z/web/sw.js",
+        "bytes":  2102,
+        "sha256":  "B58F968D3BCB94918A9BB7CBE826BF9CB32A3A2A16D99E35FA9F4F4571EF7EEA"
+    },
+    {
+        "path":  "deploy/redacted-config/nginx/nginx.conf",
+        "bytes":  1559,
+        "sha256":  "F06ACF9D98A534A42F81E10B1CAE572F7AC2AFCBDBCE1FEE0C745805739389C6"
+    },
+    {
+        "path":  "deploy/redacted-config/nginx/sites-available/default",
+        "bytes":  2417,
+        "sha256":  "A1078290650E9F6C987336399912F4CBE2EDE8617E9B88AF9B1A614DA28EA50C"
+    },
+    {
+        "path":  "deploy/redacted-config/nginx/sites-available/qhadmin",
+        "bytes":  3846,
+        "sha256":  "0ABA492F6FBB1A5E19BE72E5FA560ECBBC279EBDC9182C4E7398BB1B578E2444"
+    },
+    {
+        "path":  "deploy/redacted-config/nginx/sites-available/qhwww",
+        "bytes":  1522,
+        "sha256":  "EC40D31A40A85EF88EF47FFFB0C88357AD709CB5A35909A723EDA6C9A624EBFA"
+    },
+    {
+        "path":  "deploy/redacted-config/nginx/sites-available/quanthedge",
+        "bytes":  1810,
+        "sha256":  "F46BDC5A87C2789E1AF2407BF8BDC9C6CB7442BCCC70E65E8716A9B58057BAC9"
+    },
+    {
+        "path":  "deploy/redacted-config/nginx/sites-enabled/qhadmin",
+        "bytes":  3846,
+        "sha256":  "0ABA492F6FBB1A5E19BE72E5FA560ECBBC279EBDC9182C4E7398BB1B578E2444"
+    },
+    {
+        "path":  "deploy/redacted-config/nginx/sites-enabled/qhwww",
+        "bytes":  1636,
+        "sha256":  "38AFC39B89A3FD2E95BBC3C9A167AABB24910ED698EBCDC1DDC46027A638BA1C"
+    },
+    {
+        "path":  "deploy/redacted-config/nginx/sites-enabled/quanthedge",
+        "bytes":  1810,
+        "sha256":  "F46BDC5A87C2789E1AF2407BF8BDC9C6CB7442BCCC70E65E8716A9B58057BAC9"
+    },
+    {
+        "path":  "deploy/redacted-config/nginx/snippets/qh-security-headers.conf",
+        "bytes":  238,
+        "sha256":  "CD197CEB5AC455586947BA2FC816AF2887B37F94F0E2E3913225EC2BCF2C9CEF"
+    },
+    {
+        "path":  "deploy/redacted-config/systemd/system/qh-ws-hub.service",
+        "bytes":  297,
+        "sha256":  "C3CCFD9254503731C7728B78EECAD2B441800EAB690E0128CFB9818B49C3E14B"
+    },
+    {
+        "path":  "deploy/redacted-config/systemd/system/quanthedge-api.service",
+        "bytes":  338,
+        "sha256":  "55AB5A4F57308443B9BE28D6497934C809CD9150F9569D0C816A82C8EBAB77E1"
+    },
+    {
+        "path":  "deploy/redacted-config/systemd/system/qh-ws-hub.service.d/10-dbdsn.conf",
+        "bytes":  38,
+        "sha256":  "46B47B8EF9E1AEEF5CF7AE485760E0F750EE77E1B43ACC7A8FB1C52A8505D1BA"
+    },
+    {
+        "path":  "deploy/redacted-config/systemd/system/quanthedge-api.service.d/bridge.conf",
+        "bytes":  153,
+        "sha256":  "2486A914F5A9775B82654410519C0E48ADFE0228CCE29AD1016D3697DAA85919"
+    },
+    {
+        "path":  "deploy/redacted-config/systemd/system/quanthedge-api.service.d/demo.conf",
+        "bytes":  61,
+        "sha256":  "2BEACB4DA708623695EE9682417DC2E92EEB73B44D7643D277B4146075C35FAA"
+    },
+    {
+        "path":  "deploy/redacted-config/systemd/system/quanthedge-api.service.d/hedge.conf",
+        "bytes":  61,
+        "sha256":  "2BEACB4DA708623695EE9682417DC2E92EEB73B44D7643D277B4146075C35FAA"
+    },
+    {
+        "path":  "deploy/redacted-config/systemd/system/quanthedge-api.service.d/latency-projection.conf",
+        "bytes":  231,
+        "sha256":  "9518E373F0A2E267DE06A5E3DBCB31B1E82F9E86B096E9B030479169BA44C442"
+    },
+    {
+        "path":  "deploy/redacted-config/systemd/system/quanthedge-api.service.d/mem-protect.conf",
+        "bytes":  65,
+        "sha256":  "F32791B50B1B7A768187AB183A95EB96E42B1882CF9CB4CD48542D9BD09C4E94"
+    },
+    {
+        "path":  "frontend/qh/index.html",
+        "bytes":  507236,
+        "sha256":  "8733D07EBDA2524A0DB72821486C693D73C89A41BE40861E348EEB82C97CD720"
+    },
+    {
+        "path":  "frontend/qh/QHEDGELOGO-512.png",
+        "bytes":  210439,
+        "sha256":  "FD35AAA4FF858EFD6077A6903429AAACE8DEB49B82E0D9D549EA5BDEE605BB89"
+    },
+    {
+        "path":  "frontend/qh/QHEDGELOGO-mid.png",
+        "bytes":  193595,
+        "sha256":  "63E26A9BB03687059DC17B0A2216E6025EFFBA50D50C2FFF7C78BB949C8BF5F4"
+    },
+    {
+        "path":  "frontend/qh/QHEDGELOGO-s-single.ico",
+        "bytes":  5689,
+        "sha256":  "21B7393EEEE202390AC76EA7103C01AECDBEF4342EE2BF69FC01C40CD66C7394"
+    },
+    {
+        "path":  "frontend/qh/sw.js",
+        "bytes":  2102,
+        "sha256":  "B58F968D3BCB94918A9BB7CBE826BF9CB32A3A2A16D99E35FA9F4F4571EF7EEA"
+    },
+    {
+        "path":  "frontend/qhadmin/favicon.ico",
+        "bytes":  5689,
+        "sha256":  "21B7393EEEE202390AC76EA7103C01AECDBEF4342EE2BF69FC01C40CD66C7394"
+    },
+    {
+        "path":  "frontend/qhadmin/index.html",
+        "bytes":  1163,
+        "sha256":  "C3837BBACFD763A6E9AB86F0C6B69247DBEBCAA2673BAD0BF9D4EF539F5F505E"
+    },
+    {
+        "path":  "frontend/qhadmin/logo-white.png",
+        "bytes":  4231,
+        "sha256":  "E1CF20CDEC7443A7DAA3D6878302903824C7434522412CD07E00C983019948F0"
+    },
+    {
+        "path":  "frontend/qhadmin/manifest.webmanifest",
+        "bytes":  486,
+        "sha256":  "DAB98D88EA8AC66DD99660A409C6DCE37CA7E0C0438A36B5FCD34A6B0C70A776"
+    },
+    {
+        "path":  "frontend/qhadmin/sw.js",
+        "bytes":  3025,
+        "sha256":  "D914088C280EAF7E40DC7F8D602BED8A883A0A0DEB36875A8E381B96E5CF5D64"
+    },
+    {
+        "path":  "frontend/qhadmin/assets/Accounts-CITygPD8.js",
+        "bytes":  9370,
+        "sha256":  "A2716331FA8D1D00C4519BA57A1D3B5EF19D746F8DADA47EEF29F83238E6ED58"
+    },
+    {
+        "path":  "frontend/qhadmin/assets/Agents-C3SeRv3A.js",
+        "bytes":  11828,
+        "sha256":  "D7DA2B86E5E996F1F5392573C6B72D405C8109FAE8E6F64E14DEC8D8EF69C332"
+    },
+    {
+        "path":  "frontend/qhadmin/assets/Agents-DH5i1zTF.css",
+        "bytes":  97,
+        "sha256":  "CFED776C5FF37D12BB7DEC508F3C5649B435849A03E32C8B9AAC521A404A21F7"
+    },
+    {
+        "path":  "frontend/qhadmin/assets/Bi-BAlLVgXl.js",
+        "bytes":  8728,
+        "sha256":  "F6F11B482245314772043AAD6CC98AA8711B7F872BC435B52FF5EA1347444452"
+    },
+    {
+        "path":  "frontend/qhadmin/assets/Bi-Cm4JZAfX.css",
+        "bytes":  352,
+        "sha256":  "D959B2C4B20AB011691DDD4B23341068FDA4CD8DD0EF7EE6F92EE6C2958288BF"
+    },
+    {
+        "path":  "frontend/qhadmin/assets/Campaigns-1k3TubrJ.css",
+        "bytes":  121,
+        "sha256":  "F1F7BF24A49F37CECF8B9AB6426EA8D9A3333A6299DEFECE5BDA7EDC71FED644"
+    },
+    {
+        "path":  "frontend/qhadmin/assets/Campaigns-BtdrISer.js",
+        "bytes":  14749,
+        "sha256":  "16BFE792CB306112982C505279E621E731201511373B6CB574927B2EDC4D625D"
+    },
+    {
+        "path":  "frontend/qhadmin/assets/ChartBox-DpJxfuHO.js",
+        "bytes":  620,
+        "sha256":  "C6ED40651D7AED0E5A6BD3FF9162F6C36792FB374B44EFA3D8DEE61C46A50F4D"
+    },
+    {
+        "path":  "frontend/qhadmin/assets/Chat-BTL9m7yt.js",
+        "bytes":  16535,
+        "sha256":  "35F826BFA018E0C665E5A9D8CFDD230192BCB5C4564DA38F032BAAD2BBA4ED1D"
+    },
+    {
+        "path":  "frontend/qhadmin/assets/Chat-ClOaiJQq.css",
+        "bytes":  396,
+        "sha256":  "AE396CF7B58EE55718D5792B33826B2CA520830EEB4BC9A6E211AE827EC6B208"
+    },
+    {
+        "path":  "frontend/qhadmin/assets/Contests-Bal6PqdU.css",
+        "bytes":  121,
+        "sha256":  "2378DF14AB9A027B6D648F6AFD15CAA31AA897F6D5E284F3D042D9B451FBA082"
+    },
+    {
+        "path":  "frontend/qhadmin/assets/Contests-CyFiVTHZ.js",
+        "bytes":  10326,
+        "sha256":  "275069081D04AE86097A0F23B12210E667EEAE6089A0DE64146EBCCD8876C26A"
+    },
+    {
+        "path":  "frontend/qhadmin/assets/Coupons-C0oXuVT-.css",
+        "bytes":  69,
+        "sha256":  "58C64E744EAF8E63A56BC0FAB6CF8DECB46550F045FEB09698A209C8B0607C0D"
+    },
+    {
+        "path":  "frontend/qhadmin/assets/Coupons-CSWm72yj.js",
+        "bytes":  8527,
+        "sha256":  "A47301CB4F55C3DD63B65EA10D4E044F2A8FDCA2B77839394FA60F7B546A3E46"
+    },
+    {
+        "path":  "frontend/qhadmin/assets/Dashboard-BerpUksY.css",
+        "bytes":  97,
+        "sha256":  "08893100D3772BF95B486576A5D3F9670038AC93A1E7F04620DA09081012A974"
+    },
+    {
+        "path":  "frontend/qhadmin/assets/Dashboard-Bi45SqA1.js",
+        "bytes":  13079,
+        "sha256":  "09F8BE5A64804E6EAA0F3499F408B752F79A7C85216C949792B5C2B20F20D5D6"
+    },
+    {
+        "path":  "frontend/qhadmin/assets/DataMgr-BzjPlJSs.css",
+        "bytes":  175,
+        "sha256":  "0E515DF4C380B2FAB4034107FEC3FA2D17FEDBBB563B46C381958226A555E1D4"
+    },
+    {
+        "path":  "frontend/qhadmin/assets/DataMgr-Dj_ZO44n.js",
+        "bytes":  22944,
+        "sha256":  "56C7561676160B5B68A73407A5BD1452B055C6C5B7D18DC36B3A9168EE83AA12"
+    },
+    {
+        "path":  "frontend/qhadmin/assets/dicts-DbSxMDD2.js",
+        "bytes":  1059,
+        "sha256":  "86A95D1E5963625EEA84415F283BC962B4432FBB5E7C38939DB2A4495608156D"
+    },
+    {
+        "path":  "frontend/qhadmin/assets/features-mYrm82YG.js",
+        "bytes":  1739,
+        "sha256":  "83F608ACD85AA8908E0619191496230E7180BE5F691AD632BF63F0AD4551C9E4"
+    },
+    {
+        "path":  "frontend/qhadmin/assets/Iap-DPBSFNc3.js",
+        "bytes":  14155,
+        "sha256":  "AEFD60E913A669262E5F2B80BA6D3BEC6DABB961D420BFCBE27A1F8350DEC17D"
+    },
+    {
+        "path":  "frontend/qhadmin/assets/index-Chkm5Ywj.js",
+        "bytes":  70766,
+        "sha256":  "2E9C097EEECC5099A7681FC443195C20D0ED6B6CA1E931ADFEF7543DCC501F6E"
+    },
+    {
+        "path":  "frontend/qhadmin/assets/index-PekZK__G.css",
+        "bytes":  7901,
+        "sha256":  "2C7F919B93947E2BB5E4544924AA4B8D510D280F57C240E845E5701CCDDCBE83"
+    },
+    {
+        "path":  "frontend/qhadmin/assets/Leads-B2bkP0Zi.js",
+        "bytes":  7956,
+        "sha256":  "C86F0E380B1C8319B8D48023378AA92DC86024E43CF14A400484E264F356C9AF"
+    },
+    {
+        "path":  "frontend/qhadmin/assets/Legs-DcLdPpFA.js",
+        "bytes":  3296,
+        "sha256":  "C3E36918F12A887E9971A1553CBC301606BBB63AC7C77D0DF0FBB1E37C703DC9"
+    },
+    {
+        "path":  "frontend/qhadmin/assets/Notify-BtjpxFFy.css",
+        "bytes":  222,
+        "sha256":  "BC2AA9DD59099CEAA75B6E5FE9ACB3479669DABAC0B093BD9AA8C46E0CC1C586"
+    },
+    {
+        "path":  "frontend/qhadmin/assets/Notify-DaQGYYQr.js",
+        "bytes":  30840,
+        "sha256":  "377D491F4FBB18176E048147C3771AC269F36260E16A209B1DD9AB71D6110BEE"
+    },
+    {
+        "path":  "frontend/qhadmin/assets/Operators-CkRWYOQh.js",
+        "bytes":  11807,
+        "sha256":  "A6CDC67EC4575BC42B98530986102CCEFCFCFAF54B547C8B4F5772845D48C41E"
+    },
+    {
+        "path":  "frontend/qhadmin/assets/Orders-CnRw_v1I.js",
+        "bytes":  11157,
+        "sha256":  "BC99D3B0C802B4816B317D7CA8BA211D0888527D4A3B5D9ED2459FFAEEC017D1"
+    },
+    {
+        "path":  "frontend/qhadmin/assets/Overview-AVQO9xfG.css",
+        "bytes":  279,
+        "sha256":  "753693D0245B8D5BD84DE954102D4FA15F8B101037F7107AA626473643635734"
+    },
+    {
+        "path":  "frontend/qhadmin/assets/Overview-CtOAM2Dp.js",
+        "bytes":  3664,
+        "sha256":  "9202DB8BF690A4FD16DC817ECD90CE9AF7642A504E776924BEAC5116CE8B8CBE"
+    },
+    {
+        "path":  "frontend/qhadmin/assets/Params-Bpq2hYHe.js",
+        "bytes":  22882,
+        "sha256":  "06812352B2FFE48B0E361EDB6A0A542191201433F6EC9756C03037ED89069FA5"
+    },
+    {
+        "path":  "frontend/qhadmin/assets/Params-btxgcOBF.css",
+        "bytes":  520,
+        "sha256":  "0D8CD558A548DC91D3A66217AB05FE6D9FA64C4A05200F799757D3BDA2C4A37C"
+    },
+    {
+        "path":  "frontend/qhadmin/assets/Points-DRiKA-bA.js",
+        "bytes":  6107,
+        "sha256":  "F6DB18E036591400FADC8C205B528A3F98B6AD31C78B61D210FDB320C9D42450"
+    },
+    {
+        "path":  "frontend/qhadmin/assets/Points-_QvWZH_W.css",
+        "bytes":  141,
+        "sha256":  "C9545A679F89471DFDAE6E114718377FC45C01807B0EB7FC9D7A912E1EDEEDEA"
+    },
+    {
+        "path":  "frontend/qhadmin/assets/Product-CEMamDWX.js",
+        "bytes":  13939,
+        "sha256":  "E91AD585488C277DEAB7BB9EA92624B5234E8D02798AD0A8E9F636553CF45250"
+    },
+    {
+        "path":  "frontend/qhadmin/assets/Product-Cz3Lr-Z1.css",
+        "bytes":  400,
+        "sha256":  "7D3987ED928D6A042A86F428D8875455CBAC0F5A24A6EC3CA241552F5582732A"
+    },
+    {
+        "path":  "frontend/qhadmin/assets/Recon-CH4xQVFE.js",
+        "bytes":  8328,
+        "sha256":  "64DFA29F7F66B554F18ED195AF82C3B58FE25E058F84497D6966050A75CB99BD"
+    },
+    {
+        "path":  "frontend/qhadmin/assets/Recon-GGktuCJh.css",
+        "bytes":  525,
+        "sha256":  "B8C1A04391D131858E1ED4DED6D86B5B3056468BC63D26223FCECCDB0E30DD8B"
+    },
+    {
+        "path":  "frontend/qhadmin/assets/SiteMgr-Dj0PIGWu.css",
+        "bytes":  251,
+        "sha256":  "898B87AC6156A23A5B68C6DEA41AF6FDA45BEE46528501F3A08231B7FF93F2F0"
+    },
+    {
+        "path":  "frontend/qhadmin/assets/SiteMgr-Dpiqlh6C.js",
+        "bytes":  21001,
+        "sha256":  "FA8EA32B71E55BEC5E3C214D9DA4D1E6847A42D0D851BB334423408719F3CB8B"
+    },
+    {
+        "path":  "frontend/qhadmin/assets/Staff-CVgt6KEL.css",
+        "bytes":  193,
+        "sha256":  "3367DAAFAA7D9D09E06CD8C8A04A7FC32F8C429DCCE4E3775C7997D8C3B8451F"
+    },
+    {
+        "path":  "frontend/qhadmin/assets/Staff-D2UkmeUJ.js",
+        "bytes":  11523,
+        "sha256":  "B843E2E7EC63F416435A0D518FEC0C72D264966E2F474D2479CE65DC004A7782"
+    },
+    {
+        "path":  "frontend/qhadmin/assets/System-C3KIfwJb.css",
+        "bytes":  716,
+        "sha256":  "3BE8059A3DA7AB9096EA42D3582483AFD7C57AAB03AD495393B9EE5DE0BB1E8A"
+    },
+    {
+        "path":  "frontend/qhadmin/assets/System-ClB5hJ1s.js",
+        "bytes":  15562,
+        "sha256":  "9889BDF14A15DC42F86AFC0EF59178E217164068E5A61F1625BEF1D21CC16887"
+    },
+    {
+        "path":  "frontend/qhadmin/assets/Trials-BzR8EMWf.js",
+        "bytes":  5370,
+        "sha256":  "B1B82723164164140B856EAA9B62B7BDCFE38DA027A6AC935CB28CA76C5FD7DC"
+    },
+    {
+        "path":  "frontend/qhadmin/assets/useLiveRefresh-DH-HgP44.js",
+        "bytes":  853,
+        "sha256":  "40B218C2870747C3BA80B8E7DD50C1EC1CC07A639C2B59C463B58C66FEBC10D0"
+    },
+    {
+        "path":  "frontend/qhadmin/assets/Users-DR95YomD.js",
+        "bytes":  21957,
+        "sha256":  "0FBB217262D9AE7AFF5BD553C207C040FF94D4B76A724949FB7AD501D33DE8CF"
+    },
+    {
+        "path":  "frontend/qhadmin/assets/UserSelect-Bk7x4Fif.js",
+        "bytes":  1471,
+        "sha256":  "0C5FF813A33B6C8DF5C222C531DE289694ACC5F67EF76B81EEB34E2E2BA2F0EF"
+    },
+    {
+        "path":  "frontend/qhadmin/assets/vendor-C3-0unKy.js",
+        "bytes":  259079,
+        "sha256":  "9FD94DFFFCA971C43E549D81252D1CDE475CC64ADA6747CD0952FD5CB197BA37"
+    },
+    {
+        "path":  "frontend/qhadmin/assets/vendor-echarts-C-j4TZen.js",
+        "bytes":  1035085,
+        "sha256":  "6936EAA1D76DB9B4A6324ABDED8B960A519011175676E26029ED6D38CF8B2AEF"
+    },
+    {
+        "path":  "frontend/qhadmin/assets/vendor-element-By8by_yx.js",
+        "bytes":  945717,
+        "sha256":  "26E11D5E5C925DBBCD480562721F7A03C9E0C3BF6BECAB8EE0846910C1AC28A2"
+    },
+    {
+        "path":  "frontend/qhadmin/assets/vendor-element-CudmXO5w.css",
+        "bytes":  357497,
+        "sha256":  "61EC4917740507D748E317747816EABA2F60A9F5A0E96528382DA7C627A5F01A"
+    },
+    {
+        "path":  "frontend/qhadmin/assets/vendor-vue-BsIJpjDD.js",
+        "bytes":  80802,
+        "sha256":  "0638D9CEE84111A0B597E2AEAB15D091B827E7F5E6ED7D86DCFB592D284B548A"
+    },
+    {
+        "path":  "frontend/qhwww/favicon.ico",
+        "bytes":  5689,
+        "sha256":  "21B7393EEEE202390AC76EA7103C01AECDBEF4342EE2BF69FC01C40CD66C7394"
+    },
+    {
+        "path":  "frontend/qhwww/index.html",
+        "bytes":  46878,
+        "sha256":  "80ED59EF2DBADC2D04F68BC75542E1F8942DA2F540119852B750FE72655931F9"
+    },
+    {
+        "path":  "frontend/qhwww/index.html.bak_07020258",
+        "bytes":  32151,
+        "sha256":  "D7F59022A3A542DD1C8BA043B7AF15977AB773E9E7A6CC16CCB0965491AAE18A"
+    },
+    {
+        "path":  "frontend/qhwww/index.html.bak_20260703_191608",
+        "bytes":  38142,
+        "sha256":  "C55B50ECF9C71B51DA15B40BB7B4F5CBF468FB48CE05B1997F8C01BD6C68A7AB"
+    },
+    {
+        "path":  "frontend/qhwww/index.html.bak_260707_170251",
+        "bytes":  44004,
+        "sha256":  "B5E73E004C3F5CF3E78207DE6FB52187C06EFB33F08BBBFCF3B7827CAC0467A7"
+    },
+    {
+        "path":  "frontend/qhwww/QHEDGELOGO-mid-single.png",
+        "bytes":  35669,
+        "sha256":  "D8CA54CEEE041FA508BF817655D4B307ED0CB87ADCCDE282628B4DDF385AD53F"
+    },
+    {
+        "path":  "frontend/qhwww/QuantHedge-Setup-1.1.0.exe",
+        "bytes":  56069384,
+        "sha256":  "9A56F5878946C2C542DEC15DB6AB5DBDAACCC575DD1D3271D6F213673948BC25"
+    },
+    {
+        "path":  "python/.gitignore",
+        "bytes":  1054,
+        "sha256":  "23B2C36BEB8EE83CE836C633FB626D8DBE0C4A127A0FFE4BD8367C7EBB57B49C"
+    },
+    {
+        "path":  "python/add_tick_fallback.py",
+        "bytes":  4540,
+        "sha256":  "776CDDE1873C3EF787701E33E9AFE627C4722888EEDA04B77C94C79A5FAF1D8C"
+    },
+    {
+        "path":  "python/add_try_except.py",
+        "bytes":  2921,
+        "sha256":  "0ABD5A72A256FD940EAEA222DA9AA59369FBF5F084C30B11E6D3F201B4087611"
+    },
+    {
+        "path":  "python/app.py",
+        "bytes":  1012972,
+        "sha256":  "24852143B8F580D8BCF79AE0777742C7898D1FA7920EBCE6D11009EAD4341961"
+    },
+    {
+        "path":  "python/app.py.backup-20260821T134314Z-qh-mt5-terminal-turbo-20260821.72",
+        "bytes":  1273524,
+        "sha256":  "8DB167E874681AABAAD04FEC124B63729A88BA90247563F451222B3DEAD22C9B"
+    },
+    {
+        "path":  "python/app.py.backup-20260821T135540Z-qh-mt5-terminal-turbo-20260821.73-pre74",
+        "bytes":  1281223,
+        "sha256":  "FCAC905F54AC7DA13033843CB5E6924B0F608F161855CCDCCE7FBB58F6934999"
+    },
+    {
+        "path":  "python/app.py.backup-20260821T140646Z-qh-mt5-terminal-turbo-20260821.74-pre75",
+        "bytes":  1281267,
+        "sha256":  "EC789B853304E4B1E8D9779C0B2BF46D98711B075FAB1F472FCF70DB90A6C3C2"
+    },
+    {
+        "path":  "python/app.py.p0_final",
+        "bytes":  522168,
+        "sha256":  "6D22AE00840F9F26EF64280735730C94878C5E42A3092BD6AE8121266EAB15F8"
+    },
+    {
+        "path":  "python/app.py.p0_traced",
+        "bytes":  522225,
+        "sha256":  "A33FA82BAE801140F2021C97704A1EE983451837F5BF9FA04C125DF7798DBD75"
+    },
+    {
+        "path":  "python/app.py.step1",
+        "bytes":  522078,
+        "sha256":  "4D9CAC1F2FAF595217AA0010359ED116A9AAC806EAEF33DEBC369248529D2773"
+    },
+    {
+        "path":  "python/channels.json",
+        "bytes":  321,
+        "sha256":  "ACA29A39E37ABBE4125549B6CB066885B56935E50A15D1819B5C4D30770E4B0A"
+    },
+    {
+        "path":  "python/connector.py",
+        "bytes":  94703,
+        "sha256":  "5CAF3F7C54CF572A98ACD1B1ABBAD62161A5670AC848686F2A4BAC44C76BA6BC"
+    },
+    {
+        "path":  "python/engine.py",
+        "bytes":  21399,
+        "sha256":  "23FADB7C28DCC7FF627BD8CF9BA7E7DD44383B31035578BBE4BA6FFE762587C6"
+    },
+    {
+        "path":  "python/migrate_p24.py",
+        "bytes":  2259,
+        "sha256":  "EA1B1E183303582B52CC718E4D07013CCE5870910BD6C9CAACA093DF974A05AB"
+    },
+    {
+        "path":  "python/migrate_p25.py",
+        "bytes":  1968,
+        "sha256":  "93B7401E5E175A96EEADCF374D25EB5E74AE78A7133B40F5DB113DC1FDA0BCC6"
+    },
+    {
+        "path":  "python/migrate_p26.py",
+        "bytes":  6338,
+        "sha256":  "AFBEFE44DE498CDC237187628B1D17A33FB58BEB9AA7A1B7E03F72CCC4578E49"
+    },
+    {
+        "path":  "python/migrate_p27.py",
+        "bytes":  2808,
+        "sha256":  "CA8D1D158221824812C1F0CC015C23B9C5E882F4991CC6EBFC393FE15CD751B1"
+    },
+    {
+        "path":  "python/migrate_p28.py",
+        "bytes":  2758,
+        "sha256":  "986EA90686824EDF0331707D1BAFFCF0116A0ADA37CA944FB13F7FC1768D22A9"
+    },
+    {
+        "path":  "python/migrate_p29.py",
+        "bytes":  2523,
+        "sha256":  "54AC89F62E375F11B23FBE9838C6C7C73168D7435C8FD4F1994F6700892338A4"
+    },
+    {
+        "path":  "python/migrate_p30.py",
+        "bytes":  2148,
+        "sha256":  "6CA9053AE8020C006D210DF5E101B6C9ED884F40CC418F4FA168901E60D48B2E"
+    },
+    {
+        "path":  "python/migrate_p31.py",
+        "bytes":  760,
+        "sha256":  "6172046EB5707D7AC85DAE6D93078788DA0F94E38F8240604F5501F88F5B3AC9"
+    },
+    {
+        "path":  "python/migrate_p32.py",
+        "bytes":  2013,
+        "sha256":  "06BAF8234B2DC095BC08E9C8095B1C045C2B6FB5DDEA5E028610E0DA96C36E39"
+    },
+    {
+        "path":  "python/modify_open_pair.py",
+        "bytes":  2378,
+        "sha256":  "7C7DC7A5EBEF5B77CDB7D17A0B6B0D03661874015C89C90C3EF7D45B84673479"
+    },
+    {
+        "path":  "python/modify_open_pair_v2.py",
+        "bytes":  2980,
+        "sha256":  "BF7B4F8775594354367EBDC2A8B0BDDEF967DC5ADD4A9C2491E854546D46BC9C"
+    },
+    {
+        "path":  "python/pairscan_universe.json",
+        "bytes":  4584,
+        "sha256":  "96DC53B186F3353477D690D2DB7379AAD5DF5624915CCC6A857E1F75C1EF622F"
+    },
+    {
+        "path":  "python/policy.py",
+        "bytes":  7802,
+        "sha256":  "83210953E9E643E89763119839207CFE2147C721568AAC3B766C5149D34B3A0B"
+    },
+    {
+        "path":  "python/qh_command_tracer.py",
+        "bytes":  18817,
+        "sha256":  "F54C547A03B57F81D4032CC53ACDD162F947038CE23FD08537D1F563FE08644D"
+    },
+    {
+        "path":  "python/QH_P0_Implementation_Guide.md",
+        "bytes":  14662,
+        "sha256":  "CD200E7CBD1B7F70C8F5DE60333063C0E06F11C2FCB8FC3DEB07B2BAF14B21FD"
+    },
+    {
+        "path":  "python/qh_p0_integration_patch.py",
+        "bytes":  9818,
+        "sha256":  "422841960F21BC3138A115D690D5E95DD711EE3B02D47774219533C802B3D946"
+    },
+    {
+        "path":  "python/qh_reconciliation_worker.py",
+        "bytes":  71487,
+        "sha256":  "A7D944BD115126ED4D8D01D9F86696DA1F39EFF0673ED27D174D530416BB2DDE"
+    },
+    {
+        "path":  "python/source-lock-manifest.json",
+        "bytes":  2923,
+        "sha256":  "5B02A3709D45DC5814B916D7E1E5FF61AAFD012C61FC4CC33BEFACA625BE37BC"
+    },
+    {
+        "path":  "python/start_reconciliation_worker.py",
+        "bytes":  2202,
+        "sha256":  "CB7E568CCC2FCA2199C64DF0B23694A8458AAC1F110807F1BCE029F386F70F95"
+    },
+    {
+        "path":  "python/tick_cache_endpoint.py",
+        "bytes":  790,
+        "sha256":  "4FFFBE90529DCCE0748B4A9DD9F980AA997AAA0F5E227C44A6D6F1A87E5F8165"
+    },
+    {
+        "path":  "python/trade_queue.py",
+        "bytes":  31348,
+        "sha256":  "073CC54A7CC4B6841E7DAD635BD7A7953BC6DE7A66E6FA0DC4E6CC4F4EDA4657"
+    },
+    {
+        "path":  "python/VERSION",
+        "bytes":  6,
+        "sha256":  "51C18DC8694861BEB47A67894E61044864214435389F6D3A274704D9566FF96C"
+    },
+    {
+        "path":  "python/admin-src/index.html",
+        "bytes":  748,
+        "sha256":  "86835A6B3A94E23E792FDDDD6E47B76362DAD90D7EC35D3696E2EA33E3221839"
+    },
+    {
+        "path":  "python/admin-src/package-lock.json",
+        "bytes":  82328,
+        "sha256":  "9381CF85B05BBC15F091F5142D7EC2B44BB3503ABB5F76CE744B7053519EBE8D"
+    },
+    {
+        "path":  "python/admin-src/package.json",
+        "bytes":  527,
+        "sha256":  "510C0023F921174BFC8D7FED19B2E69411B2B2A9C03131A6074125C7D610FFF5"
+    },
+    {
+        "path":  "python/admin-src/postcss.config.js",
+        "bytes":  31,
+        "sha256":  "0A37D0784804E398C21889267090C1BE1AD0C93DC5FDF5B21C01E980EBA37531"
+    },
+    {
+        "path":  "python/admin-src/vite.config.js",
+        "bytes":  955,
+        "sha256":  "0BE25926C647B1D719C03AA1496E5BE08F5EC8F94D1C17CECFB576377CBEB3AB"
+    },
+    {
+        "path":  "python/admin-src/public/favicon.ico",
+        "bytes":  5689,
+        "sha256":  "21B7393EEEE202390AC76EA7103C01AECDBEF4342EE2BF69FC01C40CD66C7394"
+    },
+    {
+        "path":  "python/admin-src/public/logo-white.png",
+        "bytes":  4231,
+        "sha256":  "E1CF20CDEC7443A7DAA3D6878302903824C7434522412CD07E00C983019948F0"
+    },
+    {
+        "path":  "python/admin-src/public/manifest.webmanifest",
+        "bytes":  486,
+        "sha256":  "DAB98D88EA8AC66DD99660A409C6DCE37CA7E0C0438A36B5FCD34A6B0C70A776"
+    },
+    {
+        "path":  "python/admin-src/public/sw.js",
+        "bytes":  3025,
+        "sha256":  "D914088C280EAF7E40DC7F8D602BED8A883A0A0DEB36875A8E381B96E5CF5D64"
+    },
+    {
+        "path":  "python/admin-src/src/App.vue",
+        "bytes":  41,
+        "sha256":  "042AA1D445B8B8D040129409FC4909DE05936A1A32ABF6418AC5731A3AEDBB2C"
+    },
+    {
+        "path":  "python/admin-src/src/dicts.js",
+        "bytes":  1932,
+        "sha256":  "BC89C476BA63AA3CEC132306E5B7203DF26D86B1B86F6FBEE14F1708C48046F3"
+    },
+    {
+        "path":  "python/admin-src/src/features.js",
+        "bytes":  3464,
+        "sha256":  "BD1F8951826179CEC3B867FE80FAD8907C63764569FBD94D74CB9649E4E096A6"
+    },
+    {
+        "path":  "python/admin-src/src/main.js",
+        "bytes":  2202,
+        "sha256":  "6F33CA18DADFE39333E134FA784DF9AD6FFFD9DC5D5B4B4BE1F8A35A2132CBAF"
+    },
+    {
+        "path":  "python/admin-src/src/tips.js",
+        "bytes":  35494,
+        "sha256":  "D330C59D611C0D34270DB55CB856A949A0629E113936E676CFA9A0F5EFB9CF5C"
+    },
+    {
+        "path":  "python/admin-src/src/api/index.js",
+        "bytes":  20443,
+        "sha256":  "BF127BE26035F37C823CCB0EF025286AA84254A00DE1CD50C21E28F6B09082C9"
+    },
+    {
+        "path":  "python/admin-src/src/components/ChartBox.vue",
+        "bytes":  813,
+        "sha256":  "DAA085B6FCD31794ABACF7478299E1FDA4A3D8D0EF739FCBB102091D3700C92D"
+    },
+    {
+        "path":  "python/admin-src/src/components/UserSelect.vue",
+        "bytes":  1374,
+        "sha256":  "9EF8129610F0CD13A86A8F18BDEE378367E5B05E4958B078418332B8CFCA52D0"
+    },
+    {
+        "path":  "python/admin-src/src/composables/useLiveRefresh.js",
+        "bytes":  2299,
+        "sha256":  "335FD788141D8A34160F9E096509FBB453CB023025DA968829261FCFF5F4C1D8"
+    },
+    {
+        "path":  "python/admin-src/src/directives/longpress.js",
+        "bytes":  2170,
+        "sha256":  "18F1990A39AF3FF5F47FE0AAB9E5D323953CA13EADD80C4C109368627EEB11A9"
+    },
+    {
+        "path":  "python/admin-src/src/layout/Layout.vue",
+        "bytes":  17338,
+        "sha256":  "B3EAFECC8CE89CF2F415BECDFEC1D94366AF0C3DA1293C77A81C4D885CC420A0"
+    },
+    {
+        "path":  "python/admin-src/src/locales/index.js",
+        "bytes":  982,
+        "sha256":  "BF9D44C332C5FF0A928FC68E1627777D963ED57133C175EF43B27F31EFA35114"
+    },
+    {
+        "path":  "python/admin-src/src/router/index.js",
+        "bytes":  4547,
+        "sha256":  "159B77329FCAE2694869ACC6970AD06692AA497FF36E70B5E9A17DBBA836CAA8"
+    },
+    {
+        "path":  "python/admin-src/src/styles/theme.scss",
+        "bytes":  6454,
+        "sha256":  "E2612BD2120462BAFBF07869EA6984B1CE24541F4B9819B188B2D834E0E3C5BA"
+    },
+    {
+        "path":  "python/admin-src/src/views/Accounts.vue",
+        "bytes":  8678,
+        "sha256":  "140431C54BE75054FC24950FEE34CC5BF644BD70ECEFEEC9371AD87E349026C8"
+    },
+    {
+        "path":  "python/admin-src/src/views/Agents.vue",
+        "bytes":  11323,
+        "sha256":  "64FD51F163145D9E8E0E8FE827892511EDE0A248AFBC21081340A647EA52E39D"
+    },
+    {
+        "path":  "python/admin-src/src/views/Alerts.vue",
+        "bytes":  776,
+        "sha256":  "42393BF16773553C8A9F904D5A5E393B78FE1F085FD5D23338B1DD6A12A6391C"
+    },
+    {
+        "path":  "python/admin-src/src/views/Bi.vue",
+        "bytes":  8351,
+        "sha256":  "848701F6292E7FB7AC70F5E57BF80DDB9408BDE26CAEEC4663C8D0082129DBAD"
+    },
+    {
+        "path":  "python/admin-src/src/views/Campaigns.vue",
+        "bytes":  13056,
+        "sha256":  "5343E716CC9BB142F47293FDF27CF96A815983C8C3AA7A354C183CB98BF26431"
+    },
+    {
+        "path":  "python/admin-src/src/views/Chat.vue",
+        "bytes":  16056,
+        "sha256":  "73D2EC3B0EAE03C237B8DA7579648B82749DAEBD06D005F8BC9F5F632E809B88"
+    },
+    {
+        "path":  "python/admin-src/src/views/Contests.vue",
+        "bytes":  9570,
+        "sha256":  "3646CE9EA5911301E6C169E2DFF7F3DE195D789B5CD01E7AA8FB201C5511DB5A"
+    },
+    {
+        "path":  "python/admin-src/src/views/Coupons.vue",
+        "bytes":  7358,
+        "sha256":  "C39A9838DE9CC46EFCD95EF802BD89C612D220AD3A3F04B4FE591FDFEF1EF7FB"
+    },
+    {
+        "path":  "python/admin-src/src/views/Dashboard.vue",
+        "bytes":  12480,
+        "sha256":  "4B1D944F95D243872B348D3378D902F3353F4304157DB7D8670E743BD1B2E301"
+    },
+    {
+        "path":  "python/admin-src/src/views/DataMgr.vue",
+        "bytes":  22783,
+        "sha256":  "70E06BD41F7130704F3E426435FB43E013997D0C01E4C64284228ECDAABE2FF8"
+    },
+    {
+        "path":  "python/admin-src/src/views/Iap.vue",
+        "bytes":  12147,
+        "sha256":  "1431A301DF3018CAE7F2359B00C05919EB82E5CB0C29E299D76404D79B22B600"
+    },
+    {
+        "path":  "python/admin-src/src/views/Leads.vue",
+        "bytes":  7216,
+        "sha256":  "6C291276576BFB19AB699FE9C87F6A565BD81608E6927463758F9C527F79E422"
+    },
+    {
+        "path":  "python/admin-src/src/views/Legs.vue",
+        "bytes":  3137,
+        "sha256":  "D28AE04C610A120E6337C8025B09D5339BC99E9E581BCD68F4A28484DAB9D98A"
+    },
+    {
+        "path":  "python/admin-src/src/views/Notify.vue",
+        "bytes":  28074,
+        "sha256":  "E30FD800720A16A8CB754142C3CD275A8B07FC500F14FAEA0C3DBA163DC0834A"
+    },
+    {
+        "path":  "python/admin-src/src/views/Operators.vue",
+        "bytes":  11446,
+        "sha256":  "F171AE4840838C305F3D5099BECC4A716A47866AA650D32B6A26552FC83AA18F"
+    },
+    {
+        "path":  "python/admin-src/src/views/Orders.vue",
+        "bytes":  11331,
+        "sha256":  "8C945DE6C7804743E19A267A80AB3C6CFB24849C350589F6BD598397944572DE"
+    },
+    {
+        "path":  "python/admin-src/src/views/Overview.vue",
+        "bytes":  3603,
+        "sha256":  "A95F936DE4E42268CFACCF90BB0648E82140FDF3AF7C8552A14B159B3D4CF99C"
+    },
+    {
+        "path":  "python/admin-src/src/views/Params.vue",
+        "bytes":  20028,
+        "sha256":  "22F15E727ACB602B79C26D99AE780713C607B75DD7ECAAAC55BAB1AFB9AC1D57"
+    },
+    {
+        "path":  "python/admin-src/src/views/Points.vue",
+        "bytes":  5835,
+        "sha256":  "EACE09E42A9BC8AC01228D1DF0CEC874A26196C850C4106E711C9701855B7BA7"
+    },
+    {
+        "path":  "python/admin-src/src/views/Product.vue",
+        "bytes":  14775,
+        "sha256":  "A8B89B2A5654893A58BC59729FC7439A2BB6894CC8F76F0B0E73264CE404DB8A"
+    },
+    {
+        "path":  "python/admin-src/src/views/Recon.vue",
+        "bytes":  9230,
+        "sha256":  "2FEFFEE005A3F7075A5CE5B4947BEE06853A9B656D0847D9E58AB04E9500AD5A"
+    },
+    {
+        "path":  "python/admin-src/src/views/SiteMgr.vue",
+        "bytes":  19074,
+        "sha256":  "AAB040D58B3FB6F4A2BB9E16676719E7388723ABA2425181D3EBDDED9A05DDAC"
+    },
+    {
+        "path":  "python/admin-src/src/views/Staff.vue",
+        "bytes":  10679,
+        "sha256":  "68F293BD279807A439868191DF1166312D0FE23859178A51379833A9E3E4DABC"
+    },
+    {
+        "path":  "python/admin-src/src/views/System.vue",
+        "bytes":  18426,
+        "sha256":  "C969B1CE69433EE7F37F803B030FD6FEA8F2AD4B19E97C3E1C5D7F9D2FCAD96B"
+    },
+    {
+        "path":  "python/admin-src/src/views/Trials.vue",
+        "bytes":  4844,
+        "sha256":  "3222F4A79AD78A0B71C4F40A84B4F8A0DB47B4AEF4BAE058392FA5079CCE44FF"
+    },
+    {
+        "path":  "python/admin-src/src/views/Users.vue",
+        "bytes":  21183,
+        "sha256":  "8E8E9C141414000F6B838F97493D8FFCA53A599C0B3AF57958E99074FD66BA84"
+    },
+    {
+        "path":  "python/client-src/app.ico",
+        "bytes":  5689,
+        "sha256":  "21B7393EEEE202390AC76EA7103C01AECDBEF4342EE2BF69FC01C40CD66C7394"
+    },
+    {
+        "path":  "python/client-src/App.xaml",
+        "bytes":  3203,
+        "sha256":  "B4566CDBA40CB42425852A07BBB9BAD80D5C0E32B1A9BB3DB49F3C4306F6D943"
+    },
+    {
+        "path":  "python/client-src/App.xaml.cs",
+        "bytes":  483,
+        "sha256":  "16755D436930461CAD7C6CD91EAF6DCDAF797EA682BDB519A56F2A58E2670208"
+    },
+    {
+        "path":  "python/client-src/ArbWindow.xaml",
+        "bytes":  3842,
+        "sha256":  "22A2F7155D86B8E9147C434C02970B9A294164DC48714B1DF3D9FEFE7BB89017"
+    },
+    {
+        "path":  "python/client-src/ArbWindow.xaml.cs",
+        "bytes":  3514,
+        "sha256":  "657EB5B726FACA2B8F5A42BC017C7ADCA380CB9607C0D1FE76DC65572A50A871"
+    },
+    {
+        "path":  "python/client-src/AssemblyInfo.cs",
+        "bytes":  643,
+        "sha256":  "3FAC2AF92385F676E9A941BEFD23FE38F0A5FA6167D4A3A88F07E730C5595CA3"
+    },
+    {
+        "path":  "python/client-src/ConfigWindow.xaml",
+        "bytes":  4648,
+        "sha256":  "4B0B778508C67F461FF56B883CB8BD69C4D30552DEA9AA91B60F053C59F89742"
+    },
+    {
+        "path":  "python/client-src/ConfigWindow.xaml.cs",
+        "bytes":  3480,
+        "sha256":  "EAD32FE588BC76518398807A11BD03B916C865B4EF69594D610ACB5DD409E9E7"
+    },
+    {
+        "path":  "python/client-src/confuser.crproj",
+        "bytes":  1078,
+        "sha256":  "2A7181BDAA32FE27BE588E144B74826911B15776761A7719950B3D56ACBE12EF"
+    },
+    {
+        "path":  "python/client-src/Converters.cs",
+        "bytes":  1477,
+        "sha256":  "6FD9841ECF2AAAFA3B75E153F949CA141EAD36DC6C2AB1C96E6451DD3C0DA535"
+    },
+    {
+        "path":  "python/client-src/installer.iss",
+        "bytes":  2460,
+        "sha256":  "6C2BA50F6EBA96DB86C60201D7BC145721CF573432F89397D1A5BC400DF29933"
+    },
+    {
+        "path":  "python/client-src/logo-mid.png",
+        "bytes":  193595,
+        "sha256":  "63E26A9BB03687059DC17B0A2216E6025EFFBA50D50C2FFF7C78BB949C8BF5F4"
+    },
+    {
+        "path":  "python/client-src/MainViewModel.cs",
+        "bytes":  9109,
+        "sha256":  "F8CA148F946D871E3B1EEDDB3A6CE7E924122B3AB4ED72F36DED0DEF267A941A"
+    },
+    {
+        "path":  "python/client-src/MainWindow.xaml",
+        "bytes":  9794,
+        "sha256":  "A6602EB124BF55DE668459CFF74CAEA36CBC080806FD174EE7E44A994225B116"
+    },
+    {
+        "path":  "python/client-src/MainWindow.xaml.cs",
+        "bytes":  6093,
+        "sha256":  "42EE6C35C67874C6F61C07322704003AD3748F26CDB113ED5AA22198AE421835"
+    },
+    {
+        "path":  "python/client-src/PayWindow.xaml",
+        "bytes":  3059,
+        "sha256":  "E5A0E2AB05FAF8EADED435E279CB91A143A041B59090DCCC1FEFD79BE5645DC7"
+    },
+    {
+        "path":  "python/client-src/PayWindow.xaml.cs",
+        "bytes":  3623,
+        "sha256":  "4A780B4BFEF6CF96807DF60049044DE78BDB4CA9ADF93260BB4F61C3EB25A0F5"
+    },
+    {
+        "path":  "python/client-src/QhClient.csproj",
+        "bytes":  1329,
+        "sha256":  "280DF926F547129E3B51A3C21F709939D5B2BE8D18AA0E90FBEA0555F643B157"
+    },
+    {
+        "path":  "python/client-src/StoreWindow.xaml",
+        "bytes":  3103,
+        "sha256":  "C7CAAC06C72AD0C69E3FE44F50904A62EBE5DB9780E7B9404B5F991F691995AF"
+    },
+    {
+        "path":  "python/client-src/StoreWindow.xaml.cs",
+        "bytes":  2543,
+        "sha256":  "AF5BDFD49FBC13AA4397EBAE98631419BB153AFA6630A54D31311C78D674BC0B"
+    },
+    {
+        "path":  "python/client-src/TokenPrompt.xaml",
+        "bytes":  1442,
+        "sha256":  "9D7FE6934B62BDFB0DB3A86F1F1F5C571321A40370CD60AB3E30E6A8C89BAC08"
+    },
+    {
+        "path":  "python/client-src/TokenPrompt.xaml.cs",
+        "bytes":  981,
+        "sha256":  "2D0B9ED9BDC034A17295C2AC1194C7615F6D9CA7CFEFD60541247A51BF1EE47E"
+    },
+    {
+        "path":  "python/client-src/WebShellWindow.xaml",
+        "bytes":  1574,
+        "sha256":  "DAC03398259B18C67FF0B40E63FF9EB43E56FB1E328A46B411519B64D4C01B8A"
+    },
+    {
+        "path":  "python/client-src/WebShellWindow.xaml.cs",
+        "bytes":  15023,
+        "sha256":  "714B084D5B7F09A78FE149E8DEEFE18F75BF3CFF0D27CD0D598F33813AE1B226"
+    },
+    {
+        "path":  "python/client-src/publish_fld/Microsoft.Web.WebView2.Core.xml",
+        "bytes":  630199,
+        "sha256":  "C1591A6B6DC86EDE8B348A2EAB053B9744116EF59319218E251A0235187E7F00"
+    },
+    {
+        "path":  "python/client-src/publish_fld/Microsoft.Web.WebView2.WinForms.xml",
+        "bytes":  41393,
+        "sha256":  "4B40E49AEC5DBDA597224F997D57A16645DDC2EB00F31A6329204D1853A2245A"
+    },
+    {
+        "path":  "python/client-src/publish_fld/Microsoft.Web.WebView2.Wpf.xml",
+        "bytes":  143909,
+        "sha256":  "9755A7AD501B107E7A3905D1BDAF5E062BE5B4F04390EC61429E38DC7686D7FB"
+    },
+    {
+        "path":  "python/client-src/publish_fld/QuantHedge.deps.json",
+        "bytes":  54907,
+        "sha256":  "F32B1C8AFBAF5F6C8B8F32F76A6DEDE9C1EA21AB08DD41592AF163301F941C87"
+    },
+    {
+        "path":  "python/client-src/publish_fld/QuantHedge.runtimeconfig.json",
+        "bytes":  468,
+        "sha256":  "019A0076BCF2729F4C42702C7636862E8619D9FAD2C2D6472B8DC6974CCCDB98"
+    },
+    {
+        "path":  "python/client-src/Services/ApiClient.cs",
+        "bytes":  7957,
+        "sha256":  "F92225A3F5B16B77EA4195566F632DDC9A86CFEFE17AA425FEDFC583C691E0BA"
+    },
+    {
+        "path":  "python/client-src/Services/CredStore.cs",
+        "bytes":  2421,
+        "sha256":  "EF94AF8BDB2A9639E22B4584122626F1D4AEAC95A18B9FCBD23B5510583392F0"
+    },
+    {
+        "path":  "python/client-src/Services/WsClient.cs",
+        "bytes":  3795,
+        "sha256":  "4B745E959E0A597E867F00DAD443EA6F667D8808D8F90ABDCA57533BB481730B"
+    },
+    {
+        "path":  "python/tests/testbed/fake_bridge.py",
+        "bytes":  7375,
+        "sha256":  "33A18CF67FD581904E5C0AC7D09B43F665138A4656755C897B0B477D8B35C496"
+    },
+    {
+        "path":  "python/tests/testbed/run_scenarios.py",
+        "bytes":  9699,
+        "sha256":  "5CA5C79F25370DA79EDB29526A159AA4D2DE1E41DB5D2AB8111D3B71A09CB397"
+    },
+    {
+        "path":  "rust/deployed-qh_ws_hub/Cargo.lock",
+        "bytes":  40054,
+        "sha256":  "4BE22244A21F25505F00E38D7AC3091347DE7C2EFE99580EB23C1608E7026566"
+    },
+    {
+        "path":  "rust/deployed-qh_ws_hub/Cargo.toml",
+        "bytes":  549,
+        "sha256":  "E686BDD444EB1E5F680E47496346E8E52234CFC066EA35B634A7241F80D34DD6"
+    },
+    {
+        "path":  "rust/deployed-qh_ws_hub/src/main.rs",
+        "bytes":  7823,
+        "sha256":  "7FA93479EE8DDE79983C42270997523D6B36DB6E78B84E22302C566FE84D8890"
+    },
+    {
+        "path":  "rust/source-qh_ws_hub/Cargo.lock",
+        "bytes":  40054,
+        "sha256":  "4BE22244A21F25505F00E38D7AC3091347DE7C2EFE99580EB23C1608E7026566"
+    },
+    {
+        "path":  "rust/source-qh_ws_hub/Cargo.toml",
+        "bytes":  549,
+        "sha256":  "E686BDD444EB1E5F680E47496346E8E52234CFC066EA35B634A7241F80D34DD6"
+    },
+    {
+        "path":  "rust/source-qh_ws_hub/Cargo.toml.bak_20260702_113600",
+        "bytes":  526,
+        "sha256":  "902A976CB5C935D11AC9D39CC7A1E5295C9BB03AA013DC24192544D579970D22"
+    },
+    {
+        "path":  "rust/source-qh_ws_hub/qh-ws-hub.bin.bak_20260702_113600",
+        "bytes":  1946360,
+        "sha256":  "7E59B8310FA6415B3DFEB0693944FE402BD9239B7DA97D5B7BF0ED72938735C5"
+    },
+    {
+        "path":  "rust/source-qh_ws_hub/backups/qh_ws_hub_20260819.65-20260819T164203Z/binary-before.sha256",
+        "bytes":  153,
+        "sha256":  "1D0F2F807BA4BD32C489E27247A2B743688CF9EFFE48F30CD817F36A41F597B8"
+    },
+    {
+        "path":  "rust/source-qh_ws_hub/backups/qh_ws_hub_20260819.65-20260819T164203Z/qh-ws-hub.before",
+        "bytes":  2695536,
+        "sha256":  "87186C34CF39F5B7EF148093CA799983E300B320259492205B5EAF6BAB5CE5C2"
+    },
+    {
+        "path":  "rust/source-qh_ws_hub/backups/qh_ws_hub_20260819.65-20260819T164203Z/qh-ws-hub.service.before",
+        "bytes":  335,
+        "sha256":  "BEE7AB6461C6A1866CE20BC197B8141CF89886FA61D20EBF7D73115695B53511"
+    },
+    {
+        "path":  "rust/source-qh_ws_hub/backups/qh_ws_hub_20260819.65-20260819T164203Z/unit-before.sha256",
+        "bytes":  161,
+        "sha256":  "27A4B9980D4BD43DE7091A0E7A791E421313EA6323C535D0D25A68CFB78600D8"
+    },
+    {
+        "path":  "rust/source-qh_ws_hub/releases/qh_ws_hub_20260819.65/Cargo.lock",
+        "bytes":  40054,
+        "sha256":  "4BE22244A21F25505F00E38D7AC3091347DE7C2EFE99580EB23C1608E7026566"
+    },
+    {
+        "path":  "rust/source-qh_ws_hub/releases/qh_ws_hub_20260819.65/Cargo.toml",
+        "bytes":  549,
+        "sha256":  "E686BDD444EB1E5F680E47496346E8E52234CFC066EA35B634A7241F80D34DD6"
+    },
+    {
+        "path":  "rust/source-qh_ws_hub/releases/qh_ws_hub_20260819.65/src/main.rs",
+        "bytes":  20157,
+        "sha256":  "23CE39D6AFCCE3815F38D39A01C04B2E6C93A96D6D67FAD4B5A708209709D49F"
+    },
+    {
+        "path":  "rust/source-qh_ws_hub/src/main.rs",
+        "bytes":  7823,
+        "sha256":  "7FA93479EE8DDE79983C42270997523D6B36DB6E78B84E22302C566FE84D8890"
+    },
+    {
+        "path":  "rust/source-qh_ws_hub/src/main.rs.bak_20260702_113600",
+        "bytes":  5730,
+        "sha256":  "829229A4A1D63C97C5DE148FC9FA689FCF92E234A2FD19BF4B0B19111A5BD2A1"
+    },
+    {
+        "path":  "rust/source-qh_ws_hub/src/main.rs.bak_peruser_024651",
+        "bytes":  7823,
+        "sha256":  "7FA93479EE8DDE79983C42270997523D6B36DB6E78B84E22302C566FE84D8890"
+    }
+]

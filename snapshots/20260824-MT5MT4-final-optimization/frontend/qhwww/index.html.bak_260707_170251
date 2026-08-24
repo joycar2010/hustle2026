@@ -1,0 +1,611 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Quant Hedge MT4+MT5 · 多平台对冲量化系统</title>
+<link rel="icon" type="image/x-icon" href="/favicon.ico" />
+<link rel="apple-touch-icon" href="/QHEDGELOGO-mid-single.png" />
+<meta name="description" content="Quant Hedge MT4+MT5 多平台对冲量化系统：MT4/MT5 多平台主对冲锁仓、多坑位阶梯管理、断网断电与弱网下策略照常运行、AI 套利机会分析、个性化高阶功能内购。手机 / 平板 / PC 三端登录，PC 另提供 C/S 桌面客户端。" />
+<style>
+  :root{
+    /* 护眼浅色深蓝主题 */
+    --bg:#E9ECF3;              /* 画布: 冷调灰蓝 */
+    --bg-1:#FFFFFF;            /* 卡片: 近白浮起 */
+    --bg-2:#FDFDFD;            /* 次级卡片 */
+    --line:#dde2ee;           /* 描边 cardline */
+    --teal-pale:#eaf0fa;      /* 浅蓝底 */
+    --brand:#08113A;          /* 结构主色: 深蓝(标题栏/卡头/主按钮/模态框头) */
+    --logo:#2E8BD6;           /* azure 强调 */
+    --logo-2:#57a5e0;
+    --txt:#1a2033; --txt-2:#46506e; --txt-3:#8a93aa; --green:#1aa86a; --red:#e0683a;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  body{background:var(--bg);color:var(--txt);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;line-height:1.6;-webkit-font-smoothing:antialiased;
+    background-image:linear-gradient(rgba(8,17,58,.025) 1px,transparent 1px),linear-gradient(90deg,rgba(8,17,58,.025) 1px,transparent 1px);background-size:34px 34px}
+  a{color:inherit;text-decoration:none}
+  .wrap{max-width:1180px;margin:0 auto;padding:0 20px}
+  .azure{color:var(--logo)}
+  .btn{display:inline-flex;align-items:center;gap:8px;padding:12px 22px;border-radius:10px;font-weight:700;font-size:15px;transition:.2s;cursor:pointer;border:1px solid transparent}
+  .btn-primary{background:var(--brand);color:#fff}
+  .btn-primary:hover{background:#0d1a52}
+  .btn-azure{background:var(--logo);color:#fff}
+  .btn-azure:hover{background:#2477bd}
+  .btn-ghost{border-color:var(--line);color:var(--txt-2);background:#fff}
+  .btn-ghost:hover{border-color:var(--logo);color:var(--logo)}
+  .tag{display:inline-block;font-size:12px;color:var(--logo);background:var(--teal-pale);border:1px solid rgba(46,139,214,.28);padding:4px 12px;border-radius:999px;font-weight:600}
+
+  /* nav */
+  header{position:sticky;top:0;z-index:40;background:rgba(233,236,243,.85);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+  nav{display:flex;align-items:center;justify-content:space-between;height:62px}
+  .logo{display:flex;align-items:center;gap:10px;font-weight:800;font-size:18px;color:var(--brand)}
+  .logo .mark-img{height:34px;width:auto;border-radius:8px;display:block}
+  .nav-links{display:flex;gap:26px;font-size:14px;color:var(--txt-2)}
+  .nav-links a:hover{color:var(--logo)}
+  .nav-cta{display:flex;gap:10px;align-items:center}
+  .burger{display:none;font-size:24px;color:var(--brand)}
+
+  /* hero */
+  .hero{position:relative;padding:84px 0 70px;overflow:hidden;text-align:center}
+  .hero::before{content:"";position:absolute;inset:0;background:radial-gradient(700px 360px at 50% -10%,rgba(46,139,214,.16),transparent 70%);pointer-events:none}
+  .hero h1{font-size:46px;line-height:1.18;font-weight:900;letter-spacing:-.5px;margin:18px auto;max-width:900px;color:var(--brand)}
+  .hero h1 span{color:var(--logo)}
+  .hero .sub{font-size:18px;color:var(--txt-2);max-width:720px;margin:0 auto 14px}
+  .slogan{font-size:15px;color:var(--logo);letter-spacing:4px;margin-bottom:26px;font-weight:700}
+  .hero .cta{display:flex;gap:14px;justify-content:center;flex-wrap:wrap}
+  .hero .trust{margin-top:30px;display:flex;gap:26px;justify-content:center;flex-wrap:wrap;color:var(--txt-3);font-size:13px}
+  .hero .trust b{color:var(--brand);font-size:18px;display:block}
+
+  section{padding:64px 0;border-top:1px solid var(--line)}
+  .sec-head{text-align:center;max-width:760px;margin:0 auto 42px}
+  .sec-head h2{font-size:32px;font-weight:800;margin:14px 0 10px;color:var(--brand)}
+  .sec-head p{color:var(--txt-2);font-size:16px}
+
+  .grid{display:grid;gap:18px}
+  .g4{grid-template-columns:repeat(4,1fr)}
+  .g3{grid-template-columns:repeat(3,1fr)}
+  .g2{grid-template-columns:repeat(2,1fr)}
+  .card{background:var(--bg-1);border:1px solid var(--line);border-radius:14px;padding:24px;transition:.2s;box-shadow:0 1px 3px rgba(8,17,58,.04)}
+  .card:hover{border-color:rgba(46,139,214,.45);transform:translateY(-3px);box-shadow:0 10px 26px rgba(8,17,58,.10)}
+  .card .ic{width:46px;height:46px;border-radius:11px;background:var(--teal-pale);border:1px solid rgba(46,139,214,.22);display:flex;align-items:center;justify-content:center;margin-bottom:14px}
+  .card .ic svg{width:24px;height:24px;stroke:var(--logo);fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+  .card h3{font-size:17px;margin-bottom:8px;color:var(--txt)}
+  .card p{color:var(--txt-2);font-size:14px}
+
+  /* multi-device */
+  .devices{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;text-align:center}
+  .device{background:var(--bg-1);border:1px solid var(--line);border-radius:16px;padding:34px 22px;box-shadow:0 1px 3px rgba(8,17,58,.04)}
+  .device .scr{margin:0 auto 18px;border:2px solid var(--line);border-radius:12px;background:linear-gradient(180deg,var(--teal-pale),#fff);position:relative;overflow:hidden}
+  .device .scr::after{content:"";position:absolute;left:10%;right:10%;top:16%;height:8px;border-radius:4px;background:rgba(46,139,214,.4);box-shadow:0 16px 0 rgba(70,80,110,.16),0 30px 0 rgba(70,80,110,.10)}
+  .d-phone .scr{width:90px;height:170px}
+  .d-tablet .scr{width:150px;height:160px}
+  .d-pc .scr{width:230px;height:150px}
+  .device h3{font-size:18px;margin-bottom:6px;display:flex;align-items:center;justify-content:center;gap:8px;color:var(--txt)}
+  .device h3 svg{width:20px;height:20px;stroke:var(--logo);fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+  .device p{color:var(--txt-2);font-size:14px}
+  .device .dl{margin-top:16px}
+  .device .dl small{display:block;color:var(--txt-3);font-size:12px;margin-top:8px}
+
+  /* AI feature */
+  .ai{background:linear-gradient(135deg,rgba(46,139,214,.10),rgba(26,168,106,.05));border:1px solid rgba(46,139,214,.28);border-radius:18px;padding:42px;display:grid;grid-template-columns:1.1fr .9fr;gap:36px;align-items:center}
+  .ai ul{list-style:none;margin-top:18px;display:grid;gap:12px}
+  .ai li{display:flex;gap:10px;font-size:15px;color:var(--txt)}
+  .ai li .dot{color:var(--logo);font-weight:900}
+  .ai h3{color:var(--txt)}
+  .ai-mock{background:#fff;border:1px solid var(--line);border-radius:14px;overflow:hidden;box-shadow:0 8px 24px rgba(8,17,58,.08)}
+  .ai-mock .bar{display:flex;align-items:center;gap:8px;padding:12px 14px;background:var(--brand);color:#fff;border-bottom:1px solid var(--line);font-size:13px;font-weight:700}
+  .ai-mock .bar .h{width:24px;height:24px;border-radius:6px;background:var(--logo);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:12px}
+  .ai-mock .body{padding:16px;display:grid;gap:10px;font-size:13px}
+  .row-sp{display:flex;justify-content:space-between;padding:8px 11px;border-radius:8px;background:var(--teal-pale);font-family:"Roboto Mono",monospace}
+  .row-sp b{color:var(--logo)}
+  .row-sig{padding:9px 12px;border-radius:8px;border:1px solid rgba(26,168,106,.35);background:rgba(26,168,106,.08);color:var(--txt);font-size:12.5px;line-height:1.5}
+  .row-sig .up{color:var(--green);font-weight:800}
+
+  /* modules showcase */
+  .mod{display:flex;gap:14px;align-items:flex-start;background:var(--bg-1);border:1px solid var(--line);border-radius:12px;padding:18px;box-shadow:0 1px 3px rgba(8,17,58,.04)}
+  .mod .n{flex:0 0 auto;width:34px;height:34px;border-radius:8px;background:var(--brand);border:1px solid var(--brand);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800}
+  .mod h3{font-size:15px;margin-bottom:4px;color:var(--txt)}
+  .mod p{color:var(--txt-2);font-size:13px}
+
+  /* pricing */
+  .plans{display:grid;grid-template-columns:repeat(2,1fr);gap:18px;max-width:760px;margin:0 auto}
+  .plan{background:var(--bg-1);border:1px solid var(--line);border-radius:16px;padding:30px;position:relative;box-shadow:0 1px 3px rgba(8,17,58,.04)}
+  .plan.feat{border-color:var(--logo);box-shadow:0 0 0 1px rgba(46,139,214,.3),0 10px 30px rgba(46,139,214,.10)}
+  .plan .badge{position:absolute;top:-12px;left:30px;background:var(--logo);color:#fff;font-size:12px;font-weight:800;padding:4px 12px;border-radius:999px}
+  .plan h3{font-size:20px;margin-bottom:6px;color:var(--brand)}
+  .plan .price{font-size:15px;color:var(--txt-2);margin-bottom:16px}
+  .plan ul{list-style:none;display:grid;gap:10px;margin-bottom:20px}
+  .plan li{font-size:14px;color:var(--txt-2);display:flex;gap:8px}
+  .plan li::before{content:"✓";color:var(--green);font-weight:900}
+
+  /* legal */
+  .legal{background:var(--bg-1);border:1px solid var(--line);border-radius:14px;padding:26px;color:var(--txt-3);font-size:13px;line-height:1.8;box-shadow:0 1px 3px rgba(8,17,58,.04)}
+  .legal b{color:var(--txt-2)}
+  .legal-links{margin-top:18px;text-align:center}
+
+  /* modal */
+  .modal-mask{position:fixed;inset:0;z-index:90;background:rgba(8,17,58,.42);backdrop-filter:blur(4px);display:none;align-items:center;justify-content:center;padding:20px}
+  .modal-mask.open{display:flex}
+  .modal-box{background:var(--bg-1);border:1px solid var(--line);border-radius:16px;width:100%;max-width:760px;max-height:86vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 24px 60px rgba(8,17,58,.28)}
+  .modal-head{display:flex;align-items:center;justify-content:space-between;padding:18px 22px;background:var(--brand);color:#fff}
+  .modal-head h3{font-size:18px;color:#fff}
+  .modal-head .x{background:none;border:none;color:rgba(255,255,255,.7);font-size:26px;cursor:pointer;line-height:1}
+  .modal-head .x:hover{color:#fff}
+  .modal-body{padding:24px 26px;overflow-y:auto;font-size:13.5px;color:var(--txt-2);line-height:1.95}
+  .modal-body .lead{color:var(--txt-2);margin-bottom:6px}
+  .modal-body h4{color:var(--txt);font-size:15px;margin:20px 0 6px}
+  .modal-body p{margin-bottom:7px}
+  .modal-body .warn{color:var(--red)}
+  .modal-foot{padding:16px 22px;border-top:1px solid var(--line);text-align:right}
+
+  /* 会员权益梯度 */
+  .tiers{display:grid;grid-template-columns:repeat(5,1fr);gap:14px}
+  .tier{background:var(--bg-1);border:1px solid var(--line);border-radius:14px;padding:20px 16px;position:relative;box-shadow:0 1px 3px rgba(8,17,58,.04)}
+  .tier.feat{border-color:var(--logo);box-shadow:0 0 0 1px rgba(46,139,214,.3),0 10px 30px rgba(46,139,214,.10)}
+  .tier-badge{position:absolute;top:-11px;left:50%;transform:translateX(-50%);background:var(--logo);color:#fff;font-size:11px;font-weight:800;padding:3px 10px;border-radius:999px;white-space:nowrap}
+  .tier-lv{font-size:26px;font-weight:900;letter-spacing:-.5px}
+  .tier-nm{font-size:15px;font-weight:700;color:var(--brand);margin:2px 0 12px}
+  .tier ul{list-style:none;display:grid;gap:8px}
+  .tier li{font-size:13px;color:var(--txt-2);line-height:1.6;padding-left:18px;position:relative}
+  .tier li::before{content:"✓";color:var(--green);font-weight:900;position:absolute;left:0;top:0}
+  .soon{display:inline-block;margin-left:5px;font-size:10px;font-weight:700;color:var(--logo);background:var(--teal-pale);border:1px solid rgba(46,139,214,.28);padding:0 6px;border-radius:999px;vertical-align:1px}
+  /* 积分邀请卡 */
+  .reward-card{text-align:center}
+  .reward-card .ic{margin:0 auto 14px}   /* 扁平图标徽章居中(卡片文字居中) */
+  .reward-card h3{font-size:16px;color:var(--brand);margin-bottom:8px}
+  .reward-card p{font-size:13px;color:var(--txt-2);line-height:1.6}
+  @media (max-width:900px){
+    .tiers{grid-template-columns:repeat(2,1fr)}
+    .g4{grid-template-columns:repeat(2,1fr)}
+    .g3{grid-template-columns:repeat(2,1fr)}
+    .ai{grid-template-columns:1fr;padding:28px}
+    .hero h1{font-size:34px}
+    .nav-links{display:none}
+    .nav-links.open{display:flex;flex-direction:column;align-items:flex-start;position:fixed;top:62px;left:0;right:0;background:var(--bg-1);border-bottom:1px solid var(--line);padding:16px 22px;gap:18px;z-index:39;box-shadow:0 12px 24px rgba(8,17,58,.14)}
+    .burger{display:block}
+    /* 顶栏防错位: logo 尾部长描述隐藏, 只留图标+品牌名; nav 不换行, 三段各自收敛 */
+    nav{flex-wrap:nowrap;gap:8px}
+    .logo{font-size:16px;min-width:0;flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+    .logo-tail{display:none}
+    .nav-cta{flex:0 0 auto;gap:8px}
+    .nav-cta .btn{padding:8px 12px;font-size:13px;white-space:nowrap}
+  }
+  @media (max-width:600px){
+    .g4,.g3,.g2,.plans,.devices,.tiers{grid-template-columns:1fr}
+    .hero{padding:56px 0 46px}
+    .hero h1{font-size:28px}
+    .sec-head h2{font-size:25px}
+    section{padding:48px 0}
+    /* 极窄: 登录按钮文案缩短防溢出 */
+    .logo .mark-img{height:28px}
+    .nav-cta .btn{padding:7px 10px;font-size:12px}
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <nav>
+      <a class="logo" href="#top"><img class="mark-img" src="/QHEDGELOGO-mid-single.png" alt="Quant Hedge" /> <span class="logo-name">Quant Hedge</span> <span class="azure logo-tail">MT4+MT5</span><span class="logo-tail"> 多平台套利系统</span></a>
+      <div class="nav-links" onclick="this.classList.remove('open')">
+        <a href="#features">核心功能</a>
+        <a href="#devices">多端登录</a>
+        <a href="#ai">AI 套利分析</a>
+        <a href="#member">会员权益</a>
+        <a href="#rewards">积分邀请</a>
+        <a href="#plans">版本授权</a>
+      </div>
+      <div class="nav-cta">
+        <a class="btn btn-primary" href="https://qh.hustle2026.xyz" target="_blank">登录控制台</a>
+        <span class="burger" onclick="document.querySelector('.nav-links').classList.toggle('open')">☰</span>
+      </div>
+    </nav>
+  </div>
+</header>
+
+<main id="top">
+
+  <!-- HERO -->
+  <div class="hero">
+    <div class="wrap">
+      <span class="tag">MT4 + MT5 多平台对冲量化系统</span>
+      <h1>把专业对冲量化<br>装进<span>手机 · 平板 · PC</span></h1>
+      <p class="sub">MT4 / MT5 多平台主对冲锁仓，多坑位阶梯管理。断网、断电、弱网不稳定情况下，服务端引擎常驻，策略照样跑。一处授权，多端通用。</p>
+      <div class="slogan">简单 · 实用 · 高效 · 安全 · 稳定</div>
+      <div class="cta">
+        <a class="btn btn-primary" href="https://qh.hustle2026.xyz" target="_blank">▶ 立即打开控制台</a>
+        <a class="btn btn-ghost" href="#features">了解核心功能</a>
+      </div>
+      <div class="trust">
+        <div><b>MT4+MT5</b> 多平台对冲</div>
+        <div><b>7×24</b> 断网断电策略照跑</div>
+        <div><b>3 端</b> 自适应同一体验</div>
+        <div><b>AI</b> 套利机会分析</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- FEATURES -->
+  <section id="features">
+    <div class="wrap">
+      <div class="sec-head">
+        <span class="tag">核心功能</span>
+        <h2>一套系统，覆盖对冲套利全流程</h2>
+        <p>从行情监控到主对冲锁仓，从多坑位阶梯到风控护栏，专业能力全部系统化、多端化。</p>
+      </div>
+      <div class="grid g4">
+        <div class="card">
+          <div class="ic"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="8" height="16" rx="1.5"/><rect x="13" y="4" width="8" height="16" rx="1.5"/><line x1="7" y1="9" x2="7" y2="15"/><line x1="17" y1="9" x2="17" y2="15"/></svg></div>
+          <h3>MT4+MT5 多平台对冲</h3><p>主账户与对冲账户分别接入 MT4 / MT5，主对冲锁仓、单向持仓，双腿同步对冲分散风险。</p>
+        </div>
+        <div class="card">
+          <div class="ic"><svg viewBox="0 0 24 24"><path d="M3 20h4v-5h4v-5h4v-5h6"/><circle cx="7" cy="15" r="1.4"/><circle cx="11" cy="10" r="1.4"/><circle cx="15" cy="5" r="1.4"/></svg></div>
+          <h3>多坑位阶梯管理</h3><p>累计阶梯分档，逐坑位顺序开平，每坑独立策略覆盖（买入/卖出点位、手数、启停），进度实时可见。</p>
+        </div>
+        <div class="card">
+          <div class="ic"><svg viewBox="0 0 24 24"><path d="M12 3l7 3v5c0 5-3.5 8-7 9-3.5-1-7-4-7-9V6z"/><path d="M9 12l2 2 4-4"/></svg></div>
+          <h3>断网断电照常运行</h3><p>策略引擎常驻云端服务器，与本地设备解耦。手机断网、电脑断电、弱网不稳定，服务端照样按策略执行，重连即恢复。</p>
+        </div>
+        <div class="card">
+          <div class="ic"><svg viewBox="0 0 24 24"><rect x="4" y="11" width="16" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg></div>
+          <h3>自动护栏</h3><p>裸空安全网、孤儿债务自动买回、强平收口告警、行情背离软暂停、休市自动停 / 开市自动恢复。</p>
+        </div>
+        <div class="card">
+          <div class="ic"><svg viewBox="0 0 24 24"><line x1="6" y1="20" x2="6" y2="13"/><line x1="12" y1="20" x2="12" y2="5"/><line x1="18" y1="20" x2="18" y2="9"/></svg></div>
+          <h3>行情与点差分析</h3><p>实时盘口、点差(基差)走势、正反向开仓点差曲线、区间统计与延迟监控。</p>
+        </div>
+        <div class="card">
+          <div class="ic"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M8 12l2.5 2.5L16 9"/></svg></div>
+          <h3>AI 套利机会分析</h3><p>主账户 × 对冲账户产品对基差智能评分，可套利机会一键洞察，辅助进出场决策。</p>
+        </div>
+        <div class="card">
+          <div class="ic"><svg viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="16" rx="2"/><rect x="9" y="3" width="6" height="4" rx="1"/><line x1="9" y1="11" x2="15" y2="11"/><line x1="9" y1="15" x2="14" y2="15"/></svg></div>
+          <h3>数据统计</h3><p>逐笔成交盈亏、平均点差、阶梯进度账本、持仓与权益汇总、配对成交历史一目了然。</p>
+        </div>
+        <div class="card">
+          <div class="ic"><svg viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 0-8 8"/><path d="M12 8v4l3 2"/><path d="M16 19h6M19 16v6"/></svg></div>
+          <h3>个性化高阶功能内购</h3><p>全自动进出场循环、多品种、更高坑位容量等高阶能力按需内购解锁，权益即时生效。</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- DEVICES -->
+  <section id="devices">
+    <div class="wrap">
+      <div class="sec-head">
+        <span class="tag">多端登录</span>
+        <h2>手机 · 平板 · PC，一处授权多端通用</h2>
+        <p>网页端免安装，浏览器即用；PC 另提供 C/S 桌面客户端。功能随云端实时更新，断网自动重连，弱网也能用。</p>
+      </div>
+      <div class="devices">
+        <div class="device d-phone"><div class="scr"></div><h3><svg viewBox="0 0 24 24"><rect x="7" y="2" width="10" height="20" rx="2"/><line x1="11" y1="18" x2="13" y2="18"/></svg> 手机</h3>
+          <p>单列布局 + 账户浮球，AI 套利分析随手可达，地铁里也能盯盘。</p>
+          <div class="dl"><a class="btn btn-azure" href="https://qh.hustle2026.xyz" target="_blank">手机登录控制台</a></div>
+        </div>
+        <div class="device d-tablet"><div class="scr"></div><h3><svg viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="18" rx="2"/><line x1="11" y1="18" x2="13" y2="18"/></svg> 平板</h3>
+          <p>双栏自适应，触控滑动顺手，行情与坑位策略面板并排查看。</p>
+          <div class="dl"><a class="btn btn-azure" href="https://qh.hustle2026.xyz" target="_blank">平板登录控制台</a></div>
+        </div>
+        <div class="device d-pc"><div class="scr"></div><h3><svg viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="13" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg> PC</h3>
+          <p>三栏专业布局（账户 / 行情策略 / 风控），网页与 C/S 客户端双选。</p>
+          <div class="dl">
+            <a class="btn btn-primary" href="https://qh.hustle2026.xyz" target="_blank">网页登录控制台</a>
+            <a class="btn btn-azure" href="/QuantHedge-Setup-1.1.0.exe" download style="margin-top:8px">⬇ 下载 Windows 客户端</a>
+            <small>C/S 桌面客户端 · v1.1.0 · Windows</small>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- AI 套利机会分析 -->
+  <section id="ai">
+    <div class="wrap">
+      <div class="sec-head">
+        <span class="tag">特色 · AI 套利机会分析</span>
+        <h2>内置 AI 套利分析，机会一眼看清</h2>
+        <p>基于主账户 × 对冲账户产品对的实时基差与波动，智能评分可套利机会，辅助把握进出场节奏。</p>
+      </div>
+      <div class="ai">
+        <div>
+          <h3 style="font-size:22px">让套利机会自己浮现</h3>
+          <ul>
+            <li><span class="dot">●</span> 主对冲产品对实时基差 / 点差智能评分</li>
+            <li><span class="dot">●</span> 正 / 反向开仓点差与阈值对照，进出场提示</li>
+            <li><span class="dot">●</span> 结合波动带、强平距离与延迟，风险与机会并列呈现</li>
+            <li><span class="dot">●</span> 多坑位阶梯进度联动，剩余容量与建议一目了然</li>
+            <li><span class="dot">●</span> 分析口径随策略配置热更新，始终与引擎同步</li>
+          </ul>
+          <div style="margin-top:22px"><a class="btn btn-primary" href="https://qh.hustle2026.xyz" target="_blank">进入控制台查看分析</a></div>
+        </div>
+        <div class="ai-mock">
+          <div class="bar"><span class="h">AI</span> Quant Hedge · 套利分析 <span style="margin-left:auto;color:rgba(255,255,255,.65);font-weight:500">实时</span></div>
+          <div class="body">
+            <div class="row-sp"><span>XAUUSD · 正向开仓点差</span><b>+0.42</b></div>
+            <div class="row-sp"><span>XAUUSD · 反向开仓点差</span><b>-0.06</b></div>
+            <div class="row-sig"><span class="up">机会评分 82 / 100</span>　正向基差处于近 1 小时高位，超开仓阈值，建议关注第 3 档阶梯进单。</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- MODULES -->
+  <section id="modules">
+    <div class="wrap">
+      <div class="sec-head">
+        <span class="tag">功能模块</span>
+        <h2>核心模块一览</h2>
+        <p>登录控制台后，以下模块均已系统化、多端自适应。</p>
+      </div>
+      <div class="grid g2">
+        <div class="mod"><div class="n">1</div><div><h3>控制面板</h3><p>三栏布局：主 / 对冲账户状态 · 实时行情卡片 + 多坑位阶梯策略面板 · 风险仪表盘。</p></div></div>
+        <div class="mod"><div class="n">2</div><div><h3>点差走势</h3><p>正 / 反向开仓点差历史折线 + 多档时间范围，对照开 / 平阈值把握进出场节奏。</p></div></div>
+        <div class="mod"><div class="n">3</div><div><h3>坑位账本</h3><p>逐坑位主 / 对冲订单、开仓价、开仓点差、买卖点位与获利实时映射，阶梯进度清晰。</p></div></div>
+        <div class="mod"><div class="n">4</div><div><h3>AI 套利机会分析</h3><p>主对冲产品对基差智能评分，可套利机会与建议辅助决策。</p></div></div>
+        <div class="mod"><div class="n">5</div><div><h3>风控仪表盘</h3><p>保证金率 / 风险率 / 权益汇总，裸空安全网与强平预警分级呈现。</p></div></div>
+        <div class="mod"><div class="n">6</div><div><h3>版本 / 内购中心</h3><p>包月续费、账户充值、个性化高阶功能内购，权益即时生效多端通用。</p></div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ADVANTAGES -->
+  <section>
+    <div class="wrap">
+      <div class="sec-head">
+        <span class="tag">技术优势</span>
+        <h2>为什么选择 Quant Hedge</h2>
+      </div>
+      <div class="grid g3">
+        <div class="card">
+          <div class="ic"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="8" height="16" rx="1.5"/><rect x="13" y="4" width="8" height="16" rx="1.5"/></svg></div>
+          <h3>MT4 / MT5 多平台适配</h3><p>统一对接 MT4 与 MT5 桥，主 / 对冲账户灵活映射，新增品种对配置即生效。</p>
+        </div>
+        <div class="card">
+          <div class="ic"><svg viewBox="0 0 24 24"><path d="M4 4v6h6"/><path d="M20 20v-6h-6"/><path d="M4 10a8 8 0 0 1 14-3M20 14a8 8 0 0 1-14 3"/></svg></div>
+          <h3>断网断电策略照跑</h3><p>引擎与设备解耦、常驻服务端，弱网 / 断网 / 断电不影响策略执行，重连即恢复态。</p>
+        </div>
+        <div class="card">
+          <div class="ic"><svg viewBox="0 0 24 24"><line x1="4" y1="8" x2="20" y2="8"/><line x1="4" y1="16" x2="20" y2="16"/><circle cx="9" cy="8" r="2.4"/><circle cx="15" cy="16" r="2.4"/></svg></div>
+          <h3>灵活可配 · 热生效</h3><p>阶梯档位、点差阈值、逐坑策略运行中保存即热加载，无需停机。</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- PLANS -->
+  <!-- MEMBER TIERS -->
+  <section id="member">
+    <div class="wrap">
+      <div class="sec-head">
+        <span class="tag">会员成长体系</span>
+        <h2>等级越高，交易能力越强</h2>
+        <p>从免费体验到旗舰合伙人，五级会员逐级解锁对冲能力；订阅档位与累计成长值双轨升级，就高生效。</p>
+      </div>
+      <div class="tiers">
+        <div class="tier"><div class="tier-lv" style="color:#8a93aa">L0</div><div class="tier-nm">体验交易者</div>
+          <ul><li>试用体验</li><li>单对账户 · 单币种</li><li>AI分析每日1次</li></ul></div>
+        <div class="tier"><div class="tier-lv" style="color:#909399">L1</div><div class="tier-nm">基础对冲者</div>
+          <ul><li>解锁全自动进出场</li><li>多账户纳管 2 对<span class="soon">规划中</span></li><li>AI分析每日10次</li></ul></div>
+        <div class="tier feat"><span class="tier-badge">最受欢迎</span><div class="tier-lv" style="color:#2E8BD6">L2</div><div class="tier-nm">进阶交易者</div>
+          <ul><li>多账户纳管 3 对<span class="soon">规划中</span> · 多币种</li><li>移动端 + 极速档</li><li>2端同时登录</li></ul></div>
+        <div class="tier"><div class="tier-lv" style="color:#67C23A">L3</div><div class="tier-nm">专业套利者</div>
+          <ul><li>多账户纳管 5 对<span class="soon">规划中</span> · 无限币种</li><li>AI分析无限制</li><li>1v1技术支持</li></ul></div>
+        <div class="tier"><div class="tier-lv" style="color:#E6A23C">L4</div><div class="tier-nm">旗舰合伙人</div>
+          <ul><li>多账户纳管 8 对<span class="soon">规划中</span> · 极速优先</li><li>专属对接群</li><li>顶级代理分销特权</li></ul></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- POINTS & INVITE -->
+  <section id="rewards" style="background:linear-gradient(180deg,transparent,rgba(46,139,214,.05))">
+    <div class="wrap">
+      <div class="sec-head">
+        <span class="tag">积分 · 邀请</span>
+        <h2>交易即赚积分，邀请好友再返利</h2>
+        <p>对冲积分贯穿签到、交易、消费、邀请全流程，可兑权益、可抵现金；邀请好友双方得奖励。</p>
+      </div>
+      <div class="g4">
+        <div class="card reward-card"><div class="ic"><svg viewBox="0 0 24 24"><rect x="3" y="4.5" width="18" height="16" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="8" y1="2.5" x2="8" y2="6"/><line x1="16" y1="2.5" x2="16" y2="6"/><path d="M8.5 14.5l2 2 4-4"/></svg></div><h3>每日签到</h3><p>每日 +5 分，连签7天额外 +30，天天登录天天得。</p></div>
+        <div class="card reward-card"><div class="ic"><svg viewBox="0 0 24 24"><path d="M3 17l5-5 3.5 3.5L20 7"/><path d="M20 11V7h-4"/></svg></div><h3>消费返分</h3><p>订阅/内购每消费 1U 返 10 积分，年付一次性再赠 2000。</p></div>
+        <div class="card reward-card"><div class="ic"><svg viewBox="0 0 24 24"><rect x="3" y="8" width="18" height="12" rx="1.5"/><line x1="3" y1="8" x2="21" y2="8"/><line x1="12" y1="8" x2="12" y2="20"/><path d="M12 8C12 5 9 3 7.5 4.5S8 8 12 8zM12 8c0-3 3-5 4.5-3.5S16 8 12 8z"/></svg></div><h3>积分抵现</h3><p>100 积分 = 1 USDT，下单最高抵扣订单额 30%，还可兑 AI 次数/日卡。</p></div>
+        <div class="card reward-card"><div class="ic"><svg viewBox="0 0 24 24"><circle cx="8" cy="8" r="3"/><path d="M2.5 20a5.5 5.5 0 0 1 11 0"/><circle cx="17" cy="9.5" r="2.4"/><path d="M15 20a4.6 4.6 0 0 1 6.5-4.2"/></svg></div><h3>邀请返利</h3><p>好友激活试用得 +100 分，好友首次付费再返实付 10% 积分。</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="plans">
+    <div class="wrap">
+      <div class="sec-head">
+        <span class="tag">版本与授权</span>
+        <h2>一次授权，多设备通用</h2>
+        <p>已授权用户无需重复购买；高阶功能可按需内购。具体价格与开通请通过控制台联系客服。</p>
+      </div>
+      <div class="plans">
+        <div class="plan feat">
+          <span class="badge">常用选择</span>
+          <h3>MT4+MT5 对冲套利版</h3>
+          <div class="price">黄金(XAU)主对冲锁仓 · 价格以客服报价为准</div>
+          <ul>
+            <li>MT4 / MT5 多平台主对冲</li>
+            <li>多坑位阶梯套利策略</li>
+            <li>断网断电策略照常运行</li>
+            <li>全套自动护栏与强平预警</li>
+          </ul>
+          <a class="btn btn-primary" href="https://qh.hustle2026.xyz" target="_blank">立即开通 / 体验</a>
+        </div>
+        <div class="plan">
+          <h3>高阶功能内购</h3>
+          <div class="price">按需解锁，个性化增值</div>
+          <ul>
+            <li>全自动进出场循环</li>
+            <li>更高坑位容量 / 多品种</li>
+            <li>更丰富的策略模板</li>
+            <li>专属支持</li>
+            <li>AI 套利分析 + 三端登录</li>
+          </ul>
+          <a class="btn btn-ghost" href="https://qh.hustle2026.xyz" target="_blank">控制台内购</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- LEGAL -->
+  <section>
+    <div class="wrap" style="max-width:900px">
+      <div class="sec-head"><span class="tag">法律声明</span><h2>风险提示与服务性质</h2></div>
+      <div class="legal">
+        <b>服务性质：</b>本平台为<b>纯技术工具服务</b>，仅提供行情监控、数据对比与交易执行辅助，<b>不构成任何投资建议</b>，不提供金融服务，不保证盈利。<br>
+        <b>平台中立：</b>本工具不参与用户与第三方交易平台之间的资金往来，账户与资金安全由用户自行负责。<br>
+        <b>风险警示：</b>杠杆交易风险较高，可能导致本金损失，请在充分了解风险后<b>自行评估、谨慎决策并自担风险</b>。<br>
+        <b>合法使用：</b>请在所在国家/地区法律法规允许的范围内使用本工具，因违规使用产生的一切后果由使用者承担。
+      </div>
+      <div class="legal-links">
+        <a class="btn btn-ghost" href="#" onclick="openAgreement();return false;">《软件服务协议》</a>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer style="border-top:1px solid var(--line);padding:34px 0;color:var(--txt-3);font-size:13px">
+  <div class="wrap">
+    <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:16px;align-items:center">
+      <div><span class="logo" style="font-size:16px"><img class="mark-img" src="/QHEDGELOGO-mid-single.png" alt="Quant Hedge" style="height:26px" /> Quant Hedge <span class="azure">MT4+MT5</span> 多平台套利系统</span></div>
+      <div>多平台对冲量化系统 · 行情监控 / 主对冲锁仓 / 多坑位阶梯 / AI 套利分析</div>
+    </div>
+    <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--line);text-align:center;line-height:2.1;font-size:12px;color:var(--txt-3)">
+      <div>© 2026 Quant Hedge　保留所有权利 All Rights Reserved</div>
+      <div>客服邮箱：support@hustle2026.xyz　|　商务 / 客服 QQ：000000000　|　联系电话：+86 000-0000-0000　<span>（占位，待补）</span></div>
+      <div><a href="https://beian.miit.gov.cn" target="_blank" rel="noopener" style="color:var(--txt-3)">浙ICP备 0000000000 号-0</a>　|　浙公网安备 00000000000000 号　<span>（占位，待补）</span></div>
+    </div>
+  </div>
+</footer>
+
+<!-- 软件服务协议 弹窗 -->
+<div id="agreement-mask" class="modal-mask" onclick="if(event.target===this)closeAgreement()">
+  <div class="modal-box">
+    <div class="modal-head">
+      <h3>软件服务协议</h3>
+      <button class="x" onclick="closeAgreement()">&times;</button>
+    </div>
+    <div class="modal-body">
+      <p class="lead">本协议由您（甲方，下称"用户"）与 Quant Hedge（乙方，qhwww.hustle2026.xyz 多平台对冲量化系统之提供方，下称"本平台"）共同订立。用户点击"我已阅读并知悉"或实际使用本服务，即视为已充分阅读、理解并同意本协议全部条款。</p>
+
+      <h4>第一条　声明与承诺</h4>
+      <p>1.1 用户为具备完全民事行为能力的自然人或合法设立的组织，所用资金为合法、自有且为闲置资金，并具备相应的风险识别与承受能力。</p>
+      <p>1.2 用户理解：量化 / 自动化交易仅为辅助工具，市场存在不确定性，交易结果<b>可能盈利，也可能亏损</b>。一切经本软件辅助发出的交易指令，均视为用户本人自主决策并发出，由此产生的盈亏与后果由用户自行承担。</p>
+      <p>1.3 用户承诺尊重本平台知识产权，不得复制、反编译、逆向工程、出租、转售、转让或以其他方式非法使用本软件。</p>
+      <p>1.4 用户应自行遵守其所接入各交易平台的规则；因违反平台规则导致的冻结账户、扣留收益等后果由用户承担。</p>
+      <p>1.5 本平台不提供任何投资建议，不代理操作用户资金，软件仅为辅助交易之技术工具，本平台拥有软件相关知识产权且不与用户分享盈亏。</p>
+
+      <h4>第二条　服务内容与费用</h4>
+      <p>2.1 本平台为付费软件服务，用户完成约定费用支付后获得相应使用授权；一次授权可在手机、平板、PC 多端通用。</p>
+      <p>2.2 本平台在收到费用后于合理时间内开通服务。除法律强制性规定或双方另有约定外，已收取的服务费用<b>一经支付不予退还</b>。</p>
+      <p>2.3 本平台有权根据运营需要对软件功能进行升级、调整与维护。</p>
+
+      <h4>第三条　双方权利与义务</h4>
+      <p>3.1 用户应妥善保管账号与密码，不得向第三方泄露或出借账号；因保管不善造成的损失由用户承担。</p>
+      <p>3.2 本平台软件以"现状"和"可提供"的基础提供，在法律允许范围内不对其适用性、连续性、无错误作出明示或默示担保。</p>
+      <p>3.3 本平台可对运行风险进行必要监控，但不对用户的交易决策及其所接入平台的行为负责。</p>
+
+      <h4>第四条　不可抗力与免责</h4>
+      <p>4.1 因不可抗力、第三方服务（交易所、网络、行情源、中转服务等）故障、用户设备或网络问题、恶意程序攻击、监管政策变化等非本平台可控原因导致的服务中断或损失，本平台不承担责任。</p>
+      <p>4.2 交易固有风险（滑点、点差波动、平台风控、强制平仓、本金损失等）不属于本平台责任范围。</p>
+
+      <h4>第五条　违约责任</h4>
+      <p>5.1 用户未按约支付费用的，本平台有权暂停或终止服务。</p>
+      <p>5.2 用户违反知识产权或保密义务的，本平台有权终止服务、追回费用，并要求用户支付相当于本协议总服务费用<b>【五倍】</b>的违约金；造成损失的，应另行赔偿。</p>
+
+      <h4>第六条　争议解决</h4>
+      <p>6.1 本协议的订立、效力、解释与履行均适用中华人民共和国法律。</p>
+      <p>6.2 因本协议引起的争议，双方应友好协商；协商不成的，任一方可向本平台所在地有管辖权的人民法院提起诉讼。</p>
+
+      <h4>第七条　其他</h4>
+      <p>7.1 本协议自用户点击同意或实际使用本服务之时起生效，至授权服务期限届满或依约终止时自动终止。</p>
+      <p>7.2 本协议未尽事宜，双方可另行协商签订补充协议，补充协议与本协议具有同等效力。</p>
+      <p class="warn">7.3 风险提示：杠杆交易风险较高，可能导致本金损失，请在合法合规前提下自行评估并谨慎决策。本协议为软件技术服务协议，不构成任何投资建议或盈利承诺。</p>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-primary" onclick="closeAgreement()">我已阅读并知悉</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  function openAgreement(){document.getElementById('agreement-mask').classList.add('open');document.body.style.overflow='hidden';}
+  function closeAgreement(){document.getElementById('agreement-mask').classList.remove('open');document.body.style.overflow='';}
+  document.addEventListener('keydown',function(e){if(e.key==='Escape')closeAgreement();});
+</script>
+
+<!-- AI 客服悬浮球(site=qhwww, 接 qh 后端 LLM, 数据隔离) -->
+<style>
+  #qw-fab{position:fixed;right:22px;bottom:22px;width:54px;height:54px;border-radius:50%;background:var(--brand);color:#fff;
+    display:flex;align-items:center;justify-content:center;cursor:pointer;z-index:80;box-shadow:0 6px 20px rgba(8,17,58,.3);font-size:24px}
+  #qw-fab:hover{background:#0d1a52}
+  #qw-panel{position:fixed;right:22px;bottom:88px;width:340px;height:480px;background:#fff;border:1px solid var(--line);
+    border-radius:14px;z-index:81;display:none;flex-direction:column;overflow:hidden;box-shadow:0 12px 40px rgba(8,17,58,.25)}
+  #qw-panel .hd{background:var(--brand);color:#fff;padding:12px 14px;font-weight:700;font-size:14px;display:flex;align-items:center;justify-content:space-between}
+  #qw-panel .hd .x{cursor:pointer;opacity:.8;font-size:20px;line-height:1}
+  #qw-body{flex:1;overflow-y:auto;padding:12px;background:var(--bg);font-size:13px}
+  #qw-body .b{position:relative;max-width:86%;padding:8px 11px;border-radius:9px;margin:6px 0;line-height:1.5;white-space:pre-wrap;word-break:break-word}
+  #qw-body .b.me{background:var(--logo);color:#fff;margin-left:auto}
+  #qw-body .b.ai{background:#fff;border:1px solid var(--line);color:var(--txt)}
+  #qw-body .qw-del{display:none;position:absolute;top:-7px;width:18px;height:18px;border-radius:50%;background:#fff;border:1px solid var(--line);color:#8a93a8;font-size:12px;line-height:16px;text-align:center;cursor:pointer}
+  #qw-body .b:hover .qw-del{display:block}
+  #qw-body .b.me .qw-del{left:-7px} #qw-body .b.ai .qw-del{right:-7px}
+  #qw-empty{text-align:center;color:#8a93a8;font-size:12px;padding:26px 10px}
+  #qw-foot{display:flex;gap:8px;padding:10px;border-top:1px solid var(--line)}
+  #qw-in{flex:1;border:1px solid var(--line);border-radius:8px;padding:9px 11px;font-size:13px;outline:none}
+  #qw-in:focus{border-color:var(--logo)}
+  #qw-send{background:var(--brand);color:#fff;border:none;border-radius:8px;padding:0 16px;cursor:pointer;font-weight:700}
+  .qw-hd-acts{display:flex;align-items:center;gap:10px}
+  .qw-hd-acts .qw-cnt{font-size:10px;opacity:.7}
+  .qw-hd-acts .qw-ic{cursor:pointer;opacity:.82;display:flex}
+  .qw-hd-acts .qw-ic:hover{opacity:1}
+  @media(max-width:600px){#qw-panel{width:calc(100vw - 24px);right:12px;left:12px}}
+</style>
+<div id="qw-fab" onclick="qwToggle()" title="AI 客服">
+  <svg width="26" height="26" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"/></svg></div>
+<div id="qw-panel">
+  <div class="hd"><span>AI 客服 · Quant Hedge</span>
+    <span class="qw-hd-acts">
+      <span class="qw-cnt" id="qw-cnt"></span>
+      <span class="qw-ic" onclick="qwClear()" title="清空对话">
+        <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg></span>
+      <span class="qw-ic" onclick="qwToggle()" title="关闭" style="font-size:18px;line-height:1">&times;</span>
+    </span></div>
+  <div id="qw-body"></div>
+  <div id="qw-foot"><input id="qw-in" placeholder="咨询产品 / 授权 / 功能…" onkeydown="if(event.key==='Enter')qwSend()"><button id="qw-send" onclick="qwSend()">发送</button></div>
+</div>
+<script>
+  var __qwOpen=false, __qwId=localStorage.getItem('qw_conv_id')||null, __qwMsgs=[];
+  try{ __qwMsgs=JSON.parse(localStorage.getItem('qw_history')||'[]'); }catch(e){ __qwMsgs=[]; }
+  function __qwSave(){ try{ localStorage.setItem('qw_history', JSON.stringify(__qwMsgs.slice(-200))); if(__qwId)localStorage.setItem('qw_conv_id',__qwId); }catch(e){} }
+  function __qwCnt(){ var e=document.getElementById('qw-cnt'); if(e)e.textContent=__qwMsgs.length?(__qwMsgs.length+' 条'):''; }
+  function qwToggle(){ __qwOpen=!__qwOpen; document.getElementById('qw-panel').style.display=__qwOpen?'flex':'none'; if(__qwOpen)qwRender(); }
+  function qwRender(){
+    var b=document.getElementById('qw-body'); if(!b)return; b.innerHTML='';
+    if(!__qwMsgs.length){ b.innerHTML='<div id="qw-empty">您好！我是 Quant Hedge 客服助手，<br>可介绍 MT4+MT5 多平台套利系统的功能、授权与开通。</div>'; __qwCnt(); return; }
+    __qwMsgs.forEach(function(m){
+      var d=document.createElement('div'); d.className='b '+(m.who==='me'?'me':'ai'); d.textContent=m.txt;
+      var x=document.createElement('span'); x.className='qw-del'; x.textContent='×'; x.title='删除'; x.onclick=function(){ qwDel(m.id); };
+      d.appendChild(x); b.appendChild(d);
+    });
+    b.scrollTop=b.scrollHeight; __qwCnt();
+  }
+  function qwPush(who,txt){ __qwMsgs.push({id:'m'+Date.now()+Math.random().toString(36).slice(2,5),who:who,txt:txt}); __qwSave(); qwRender(); }
+  function qwDel(id){ __qwMsgs=__qwMsgs.filter(function(m){return m.id!==id;}); __qwSave(); qwRender(); }
+  function qwClear(){ if(!__qwMsgs.length)return; if(!confirm('确定清空所有对话记录？此操作不可撤销。'))return; __qwMsgs=[]; __qwId=null; try{localStorage.removeItem('qw_conv_id');}catch(e){} __qwSave(); qwRender(); }
+  async function qwSend(){ var i=document.getElementById('qw-in'); var t=(i.value||'').trim(); if(!t)return; i.value=''; qwPush('me',t);
+    try{ var r=await fetch('/api/ai/chat',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({site:'qhwww',conversation_id:__qwId,message:t,user_id:'web'})});
+      var j=await r.json(); if(j.conversation_id){__qwId=j.conversation_id;__qwSave();}
+      qwPush('ai', j.reply||j.detail||'客服稍后联系您，如需快速对接请留下微信/手机。'); }
+    catch(e){ qwPush('ai','网络繁忙，请稍后重试'); } }
+</script>
+</body>
+</html>

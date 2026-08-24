@@ -1,0 +1,137 @@
+// Quant Hedge WebSocket HUB — 生产版 (Phase 1)
+//
+// 架构: Python 后端 _ws_broadcaster 每轮 PUBLISH 快照到 Redis `qh:ws:snapshot`,
+//   本 HUB 订阅该频道 → 扇出给所有已鉴权 WS 连接(Rust 高并发, 卸载 Python GIL)。
+//
+// 鉴权: 客户端首帧发 {"license_key":"..."}, HUB 查 Redis `qh:session:{lk}`
+//   (Python /auth/verify 登录时 setex 86400)。存在=放行, 否则 close(4003)。
+//   ⇒ WS 路径 /ws/stream、首帧鉴权、消息结构全不变 ⇒ 前端 JS 零改 ⇒ C/S 无需重生成。
+//
+// 心跳: 有连接时每 5s SET qh:ws:hub_alive=1 EX 10 → Python 据此持续算快照并 PUBLISH。
+// 新连接: 立即回 qh:ws:last_snapshot(Python 每轮 setex 的最近一帧), 免等下一个广播周期。
+//
+// 灰度/回滚: nginx /ws/stream 指向本 HUB(9091) 或 Python(8090), 改 upstream 即切, 秒级回滚。
+
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use dashmap::DashMap;
+use futures_util::{SinkExt, StreamExt};
+use tokio::net::TcpListener;
+use tokio::sync::broadcast;
+use redis::AsyncCommands;
+
+const RNS: &str = "qh:";
+
+struct Hub {
+    tx: broadcast::Sender<String>,
+    clients: DashMap<u64, ()>,
+    next_id: AtomicU64,
+}
+impl Hub {
+    fn new() -> Arc<Self> {
+        let (tx, _) = broadcast::channel(2048);
+        Arc::new(Hub { tx, clients: DashMap::new(), next_id: AtomicU64::new(1) })
+    }
+}
+
+/// 订阅 Redis qh:ws:snapshot → 广播给所有连接。断线自动重连。
+async fn redis_subscriber(hub: Arc<Hub>, url: String) {
+    loop {
+        if let Err(e) = run_sub(&hub, &url).await {
+            tracing::error!("subscriber error: {e}; reconnect in 3s");
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+    }
+}
+async fn run_sub(hub: &Arc<Hub>, url: &str) -> redis::RedisResult<()> {
+    let client = redis::Client::open(url)?;
+    let mut pubsub = client.get_async_pubsub().await?;
+    pubsub.subscribe(format!("{RNS}ws:snapshot")).await?;
+    tracing::info!("subscribed {RNS}ws:snapshot");
+    let mut stream = pubsub.on_message();
+    while let Some(msg) = stream.next().await {
+        if let Ok(payload) = msg.get_payload::<String>() {
+            let _ = hub.tx.send(payload);
+        }
+    }
+    Ok(())
+}
+
+/// 有连接时每 5s 刷 hub_alive TTL(告诉 Python 持续算快照)。
+async fn heartbeat(hub: Arc<Hub>, url: String) {
+    let client = match redis::Client::open(url) { Ok(c)=>c, Err(_)=>return };
+    loop {
+        if let Ok(mut con) = client.get_multiplexed_async_connection().await {
+            if !hub.clients.is_empty() {
+                let _: Result<(),_> = con.set_ex(format!("{RNS}ws:hub_alive"), "1", 10).await;
+            }
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+    }
+}
+
+/// 校验 license_key: Redis qh:session:{lk} 存在即有效(Python 登录时 setex)。
+async fn auth_ok(url: &str, lk: &str) -> bool {
+    if lk.is_empty() { return false; }
+    let client = match redis::Client::open(url) { Ok(c)=>c, Err(_)=>return false };
+    let mut con = match client.get_multiplexed_async_connection().await { Ok(c)=>c, Err(_)=>return false };
+    con.exists(format!("{RNS}session:{lk}")).await.unwrap_or(false)
+}
+/// 取最近一帧快照(新连接立即回)。
+async fn last_snapshot(url: &str) -> Option<String> {
+    let client = redis::Client::open(url).ok()?;
+    let mut con = client.get_multiplexed_async_connection().await.ok()?;
+    con.get(format!("{RNS}ws:last_snapshot")).await.ok()
+}
+
+async fn handle_conn(hub: Arc<Hub>, stream: tokio::net::TcpStream, url: String) {
+    let ws = match tokio_tungstenite::accept_async(stream).await { Ok(w)=>w, Err(_)=>return };
+    let (mut write, mut read) = ws.split();
+    use tokio_tungstenite::tungstenite::Message;
+
+    // 首帧鉴权(5s 超时)
+    let first = tokio::time::timeout(std::time::Duration::from_secs(5), read.next()).await;
+    let lk = match first {
+        Ok(Some(Ok(Message::Text(t)))) => serde_json::from_str::<serde_json::Value>(&t).ok()
+            .and_then(|v| v.get("license_key").and_then(|x| x.as_str()).map(String::from)).unwrap_or_default(),
+        _ => { let _ = write.send(Message::Close(None)).await; return; }
+    };
+    if !auth_ok(&url, &lk).await {
+        let _ = write.send(Message::Text("{\"type\":\"error\",\"msg\":\"auth failed\"}".into())).await;
+        let _ = write.send(Message::Close(None)).await; return;
+    }
+
+    let id = hub.next_id.fetch_add(1, Ordering::Relaxed);
+    hub.clients.insert(id, ());
+    // 立即回最近一帧
+    if let Some(snap) = last_snapshot(&url).await { let _ = write.send(Message::Text(snap)).await; }
+
+    let mut rx = hub.tx.subscribe();
+    let pump = tokio::spawn(async move {
+        while let Ok(msg) = rx.recv().await {
+            if write.send(Message::Text(msg)).await.is_err() { break; }
+        }
+    });
+    // 上行: ping / 断开
+    while let Some(m) = read.next().await { if m.is_err() { break; } }
+    pump.abort();
+    hub.clients.remove(&id);
+}
+
+#[tokio::main]
+async fn main() {
+    tracing_subscriber::fmt().init();
+    let url = std::env::var("QH_REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1:6379/3".into());
+    let bind = std::env::var("QH_HUB_BIND").unwrap_or_else(|_| "127.0.0.1:9091".into());
+    let hub = Hub::new();
+    tokio::spawn(redis_subscriber(hub.clone(), url.clone()));
+    tokio::spawn(heartbeat(hub.clone(), url.clone()));
+    let listener = TcpListener::bind(&bind).await.expect("bind");
+    tracing::info!("QH WS HUB listening on {bind}");
+    loop {
+        if let Ok((stream, _)) = listener.accept().await {
+            let (h, u) = (hub.clone(), url.clone());
+            tokio::spawn(handle_conn(h, stream, u));
+        }
+    }
+}

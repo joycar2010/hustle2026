@@ -1,0 +1,15 @@
+[Unit]
+Description=Quant Hedge WS HUB (Rust)
+After=network.target redis-server.service
+
+[Service]
+Type=simple
+User=ubuntu
+Environment=QH_REDIS_URL=redis://127.0.0.1:6379/3
+Environment=QH_HUB_BIND=127.0.0.1:9091
+ExecStart=/home/ubuntu/qh_ws_hub/target/release/qh-ws-hub
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
