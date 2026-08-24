@@ -1,5 +1,10 @@
 ﻿[
     {
+        "path":  ".gitattributes",
+        "bytes":  122,
+        "sha256":  "E96F57712AD3EC87D379D9457E46991F99554E909ED970B9866D3730951AB522"
+    },
+    {
         "path":  "EXCLUDED_LARGE_FILES.md",
         "bytes":  1295,
         "sha256":  "C162DD91E63B588B499D312F56DF38086B558B0FDE9C3F75FC39BFD6D10FCE6A"
@@ -38,6 +43,11 @@
         "path":  "C-MT5Agent/requirements.txt",
         "bytes":  63,
         "sha256":  "3A7A070505CC9F73317BB172275769C4A83C7001BC421B5C41A58AC6AD2A5F08"
+    },
+    {
+        "path":  "C-MT5Agent/__pycache__/main_v3.cpython-311.pyc",
+        "bytes":  130790,
+        "sha256":  "636CA7888C8EEA9CD3E68FD55A815635AFA03784A27196DF10D9ACA8EFC0C8A9"
     },
     {
         "path":  "D-MT4LAB/agent/deploy_no123_agent.ps1",
@@ -163,6 +173,11 @@
         "path":  "D-MT4LAB/agent/backups/watchdog-20260731T035917Z/run_agent.ps1",
         "bytes":  1677,
         "sha256":  "2D8DB5D2CCCA0FFF2E562A3A31D88B6BCFDA3705B246316F2E6944EA6716D427"
+    },
+    {
+        "path":  "D-MT4LAB/agent/__pycache__/main.cpython-311.pyc",
+        "bytes":  69364,
+        "sha256":  "DBE5A9C696B134F84F1A42F96143BEFD1BC933FD5D139132834569362FDA3BDB"
     },
     {
         "path":  "D-MT4LAB/build/filebridge-bounded-watch.py",
@@ -1198,6 +1213,11 @@
         "path":  "D-QHMT5/runtime/releases/v1/ic/app/__init__.py",
         "bytes":  38,
         "sha256":  "E1EF91E57D9ACEA875EA3FD4FDC0E964520D50F4F7CDA334C89DA60A7B3096FB"
+    },
+    {
+        "path":  "D-QHMT5/runtime/releases/v1/ic/app/__pycache__/main.cpython-311.pyc",
+        "bytes":  202998,
+        "sha256":  "9C7276938F6EE896037E0D0ABEB942848B8C05FC11CF96472624A83D49A424B7"
     },
     {
         "path":  "D-QHMT5/runtime/staged/hedge-pro-mt5-account-cache-20260811/release-manifest.json",
