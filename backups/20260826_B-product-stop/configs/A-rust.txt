@@ -1,0 +1,197 @@
+﻿ip-10-0-1-95.ap-northeast-1.compute.internal
+---systemd---
+# /etc/systemd/system/cex-engine.service
+[Unit]
+Description=CEX Trading Engine (Rust)
+After=network.target redis6.service
+Wants=redis6.service
+
+[Service]
+Type=simple
+User=ec2-user
+WorkingDirectory=/home/ec2-user/hustlecoin-cex/rust-engine
+# 启动前清掉任何不在本 service cgroup 里的孤儿实例(防多实例覆盖写 spreads)。
+# 前缀 '-' = 忽略退出码(pkill 无匹配返回 1);ExecStartPre 在 ExecStart 之前跑,只命中孤儿。
+ExecStartPre=-/usr/bin/pkill -9 -f target/release/cex-engine
+ExecStart=/home/ec2-user/hustlecoin-cex/rust-engine/target/release/cex-engine
+Environment=RUST_LOG=cex_engine=info
+Environment=REDIS_URL=redis://127.0.0.1:6379
+Restart=always
+RestartSec=3
+LimitNOFILE=1000000
+
+[Install]
+WantedBy=multi-user.target
+
+# /etc/systemd/system/cex-engine.service.d/b-warmup-runtime-depth.conf
+[Service]
+Environment=MIX_B_MARKET_WARMUP_MIN_15M_ROWS=21
+Environment=MIX_B_MARKET_WARMUP_MIN_1D_ROWS=1
+
+# /etc/systemd/system/cex-engine.service.d/b-warmup-seed.conf
+[Service]
+Environment=MIX_B_MARKET_WARMUP_SEED_FILE=/home/ec2-user/hustlecoin-cex/rust-engine/seed/b-warmup-seed.json
+Environment=MIX_B_MARKET_WARMUP_SEED_MAX_AGE_SECONDS=604800
+
+# /etc/systemd/system/cex-engine.service.d/b-warmup-stream.conf
+[Service]
+# Keep Rust stream rebuild below the Python 45s warmup deadline.
+Environment=MIX_B_MARKET_STREAM_REBUILD_DEBOUNCE_MS=2000
+
+# /etc/systemd/system/adata2-basis-sampler.service
+[Unit]
+Description=A-data-v2 (PRODUCTION) basis-sampler [权威数据面@95,cutover 0721]
+After=network.target redis6.service
+[Service]
+User=ec2-user
+WorkingDirectory=/home/ec2-user/adata-v2/src
+EnvironmentFile=/home/ec2-user/adata-v2/.env
+ExecStart=/home/ec2-user/adata-v2/venv/bin/python services/basis-sampler/app/main.py
+Restart=always
+RestartSec=10
+MemoryMax=512M
+[Install]
+WantedBy=multi-user.target
+
+# /etc/systemd/system/adata2-depth-sampler.service
+[Unit]
+Description=A-data-v2 (PRODUCTION) depth-sampler [权威数据面@95,cutover 0721]
+After=network.target redis6.service
+[Service]
+User=ec2-user
+WorkingDirectory=/home/ec2-user/adata-v2/src
+EnvironmentFile=/home/ec2-user/adata-v2/.env
+ExecStart=/home/ec2-user/adata-v2/venv/bin/python services/depth-sampler/app/main.py
+Restart=always
+RestartSec=10
+MemoryMax=512M
+[Install]
+WantedBy=multi-user.target
+
+# /etc/systemd/system/adata2-feed-cex.service
+[Unit]
+Description=A-data-v2 (PRODUCTION) feed-cex [权威数据面@95,cutover 0721]
+After=network.target redis6.service
+[Service]
+User=ec2-user
+WorkingDirectory=/home/ec2-user/adata-v2
+EnvironmentFile=/home/ec2-user/adata-v2/.env
+Environment=RUST_LOG=dcm_feed=info
+ExecStartPre=-/usr/bin/pkill -x dcm-feed
+ExecStart=/home/ec2-user/adata-v2/bin/dcm-feed
+Restart=always
+RestartSec=5
+MemoryMax=512M
+[Install]
+WantedBy=multi-user.target
+
+# /etc/systemd/system/adata2-funding-sync.service
+[Unit]
+Description=A-data-v2 (PRODUCTION) funding-sync [权威数据面@95,cutover 0721]
+After=network.target redis6.service
+[Service]
+User=ec2-user
+WorkingDirectory=/home/ec2-user/adata-v2/src
+EnvironmentFile=/home/ec2-user/adata-v2/.env
+ExecStart=/home/ec2-user/adata-v2/venv/bin/python services/funding-sync/app/main.py
+Restart=always
+RestartSec=10
+MemoryMax=512M
+[Install]
+WantedBy=multi-user.target
+
+# /etc/systemd/system/adata2-universe-sync.service
+[Unit]
+Description=A-data-v2 (PRODUCTION) universe-sync [权威数据面@95,cutover 0721]
+After=network.target redis6.service
+[Service]
+User=ec2-user
+WorkingDirectory=/home/ec2-user/adata-v2/src
+EnvironmentFile=/home/ec2-user/adata-v2/.env
+ExecStart=/home/ec2-user/adata-v2/venv/bin/python services/universe-sync/app/main.py
+Restart=always
+RestartSec=10
+MemoryMax=512M
+[Install]
+WantedBy=multi-user.target
+
+# /etc/systemd/system/adata2-event-calendar.service
+[Unit]
+Description=A-data-v2 (PRODUCTION) event-calendar [权威数据面@95,cutover 0721]
+After=network.target redis6.service
+[Service]
+User=ec2-user
+WorkingDirectory=/home/ec2-user/adata-v2/src
+EnvironmentFile=/home/ec2-user/adata-v2/.env
+ExecStart=/home/ec2-user/adata-v2/venv/bin/python services/event-calendar/app/main.py
+Restart=always
+RestartSec=10
+MemoryMax=512M
+[Install]
+WantedBy=multi-user.target
+
+# /etc/systemd/system/adata2-c3-case-collector.service
+[Unit]
+Description=A-data-v2 C3 Binance case collector and advice-only matcher
+After=network-online.target redis6.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ec2-user
+WorkingDirectory=/home/ec2-user/adata-v2/src/services/c3-case-collector/app
+Environment=PYTHONUNBUFFERED=1
+Environment=DCM_REDIS_URL=redis://127.0.0.1:6379/0
+Environment=DCM_C3_CASE_DATA_DIR=/home/ec2-user/adata-v2/data/c3-case
+Environment=DCM_C3_CASE_SAMPLE_SEC=2
+Environment=DCM_C3_CASE_FEATURE_SEC=300
+Environment=DCM_C3_CASE_WATCH_SPREAD_PCT=0.5
+Environment=DCM_C3_CASE_JUMP_SPREAD_PCT=1.0
+Environment=DCM_C3_CASE_RESET_BELOW_SEC=300
+ExecStart=/home/ec2-user/adata-v2/venv/bin/python main.py
+Restart=always
+RestartSec=10
+MemoryMax=384M
+UMask=0077
+CapabilityBoundingSet=
+LockPersonality=true
+MemoryDenyWriteExecute=true
+NoNewPrivileges=true
+PrivateDevices=true
+PrivateTmp=true
+ProtectClock=true
+ProtectControlGroups=true
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectHostname=true
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectProc=invisible
+ProcSubset=pid
+RemoveIPC=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+SystemCallArchitectures=native
+ReadWritePaths=/home/ec2-user/adata-v2/data/c3-case
+
+[Install]
+WantedBy=multi-user.target
+---etc files---
+adata2-basis-sampler.service
+adata2-c3-case-collector.service
+adata2-depth-sampler.service
+adata2-event-calendar.service
+adata2-feed-cex.service
+adata2-funding-sync.service
+adata2-input-sync.service
+adata2-shadow-compare.service
+adata2-universe-sync.service
+amazon-ssm-agent.service
+cex-engine.service
+node_exporter.service
+spread-watchdog.service
+spread-watchdog.timer
+---env names---

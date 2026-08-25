@@ -1,0 +1,380 @@
+﻿ip-10-0-1-12.ap-northeast-1.compute.internal
+---nginx---
+        listen       80;
+        listen       [::]:80;
+        server_name  _;
+        root         /usr/share/nginx/html;
+#        listen       443 ssl;
+#        listen       [::]:443 ssl;
+#        server_name  _;
+#        root         /usr/share/nginx/html;
+    listen 443 ssl;
+    server_name coin.hustle2026.xyz coinadmin.hustle2026.xyz;
+    listen 80;
+    server_name coin.hustle2026.xyz coinadmin.hustle2026.xyz;
+    listen 443 ssl;
+    server_name mix.hustle2026.xyz;
+    root /data/mix/mixadmin-web/dist;
+    location /api/v1/ai/ { proxy_pass http://mix_backend; proxy_set_header Host $host; proxy_set_header X-Real-IP $remote_addr; proxy_read_timeout 180s; proxy_send_timeout 180s; }
+    location /api/ { proxy_pass http://mix_backend; proxy_set_header Host $host; proxy_set_header X-Real-IP $remote_addr; }
+    location /ws/  { proxy_pass http://mix_ws; proxy_http_version 1.1; proxy_set_header Upgrade $http_upgrade; proxy_set_header Connection "upgrade"; proxy_read_timeout 300s; }
+    listen 443 ssl;
+    server_name mixadmin.hustle2026.xyz;
+    listen 80;
+    server_name mix.hustle2026.xyz mixadmin.hustle2026.xyz;
+    listen 80;
+    server_name user.hustle2026.xyz;
+    listen 443 ssl;
+    server_name user.hustle2026.xyz;
+    root /data/mix/user-web/dist;
+    location /api/ { proxy_pass http://127.0.0.1:8200; proxy_set_header Host $host; proxy_set_header X-Forwarded-For $remote_addr; }
+---systemd---
+# /etc/systemd/system/mix-backend.service
+[Unit]
+Description=HustleCoin Mix backend (FastAPI, port 8200)
+After=network.target
+
+[Service]
+User=ec2-user
+WorkingDirectory=/data/mix/backend
+EnvironmentFile=/data/mix/backend/.env
+ExecStart=/data/mix/backend/venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8200
+Restart=always
+RestartSec=3
+MemoryMax=1G
+
+[Install]
+WantedBy=multi-user.target
+
+# /etc/systemd/system/mix-backend.service.d/operator-default.conf
+[Service]
+Environment=MIX_DEFAULT_OPERATOR=mix
+
+# /etc/systemd/system/mix-ws.service
+[Unit]
+Description=HustleCoin Mix WS hub (Rust, qh-ws-hub mode, port 8201)
+After=network.target
+
+[Service]
+User=ec2-user
+WorkingDirectory=/data/mix/backend
+EnvironmentFile=/data/mix/backend/.env
+ExecStart=/data/mix/bin/mix-ws-hub
+Restart=always
+RestartSec=3
+MemoryMax=512M
+
+[Install]
+WantedBy=multi-user.target
+
+# /etc/systemd/system/mix-b-market-warmup.service
+[Unit]
+Description=Mix B-series Rust WS kline warmup (read-only)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ec2-user
+Group=ec2-user
+WorkingDirectory=/data/mix/backend
+Environment=RUST_LOG=info
+ExecStart=/data/mix/bin/mix-b-market-warmup-launch.sh
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+MemoryMax=512M
+
+[Install]
+WantedBy=multi-user.target
+
+# /etc/systemd/system/b-series-shadow.service
+[Unit]
+Description=HustleCoin Mix B-series persistent fail-closed Shadow producer
+After=network-online.target mix-backend.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ec2-user
+Group=ec2-user
+WorkingDirectory=/data/mix/backend
+EnvironmentFile=/data/mix/backend/.env
+Environment=MIX_B_EXECUTION_MODE=shadow
+Environment=MIX_B_WRITER_MODE=SHADOW
+Environment=MIX_B_SHADOW_DIR=/data/mix/backend/data/b_shadow
+	Environment=MIX_B_OBSERVE_ONLY_ENABLED=1
+	Environment=MIX_B_SHADOW_PARTIAL_SOURCE_OBSERVATION=1
+	# Explicitly narrow sampling to the six current Observe-only targets.  This
+	# is a sampling filter only; all order, writer, route and transfer gates
+	# below remain disabled.
+	Environment=MIX_B_SAMPLING_STRATEGY_VERSION_ALLOWLIST=1611b0d1-71f1-454d-964f-cde7af183af8,7dfcadfa-bae8-42c8-b8da-5e6eccd17c31,6fad5dde-5985-4b1d-be2d-11e638121f4d,cabbf8e3-9707-4655-a094-8b622dbb128b,99588373-6f6e-41f5-af24-0fe3feb57021,33ad42e7-47e6-4e89-aa90-eb133cde3b8e
+Environment=MIX_B_DAILY_POOL_REVISION=10
+Environment=MIX_B_MAX_SYMBOLS=2000
+Environment=MIX_B_MAX_SELECTED_SYMBOLS=1000
+Environment=MIX_B_PREFREEZE_MIN_MARKET_PAIR_COVERAGE=0.995
+Environment=MIX_B_MARKET_FEATURE_CONCURRENCY=4
+Environment=MIX_B_MARKET_FEATURE_WARMUP_CONCURRENCY=4
+Environment=MIX_B_MARKET_FEATURE_MAX_AGE_SEC=45
+Environment=MIX_B_MARKET_FEATURE_WS_ROOT=wss://fstream.binancefuture.com/stream
+Environment=MIX_B_MARKET_FEATURE_STREAMS_PER_CONNECTION=32
+Environment=MIX_B_MARKET_EXCHANGE_INFO_TTL_SEC=900
+Environment=MIX_B_MARKET_WS_IDLE_TIMEOUT_SEC=120
+Environment=MIX_B_MARKET_STREAM_ANCHOR_GRACE_SEC=1
+Environment=MIX_B_MARKET_WARM_RETRY_SEC=300
+Environment=MIX_B_MARKET_WARMUP_TRANSPORT=rust_ws
+Environment=MIX_B_MARKET_RUST_WARMUP_TIMEOUT_SEC=12
+Environment=MIX_B_MARKET_RUST_CACHE_MAX_AGE_SEC=120
+Environment=MIX_B_MARKET_RUST_CACHE_CLOCK_SKEW_SEC=10
+Environment=MIX_B_EVIDENCE_INTERVAL_SEC=900
+Environment=MIX_B_ALLOW_ORDERS=0
+Environment=MIX_B_WRITER_ENABLED=0
+Environment=MIX_B_ROUTE_AUTHORIZATION=0
+Environment=MIX_B_FUND_TRANSFER_ENABLED=0
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/data/mix/backend/venv/bin/python -m app.b_series_shadow_producer run --interval 1
+Restart=always
+RestartSec=10
+TimeoutStopSec=20
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=read-only
+ProtectSystem=full
+ReadWritePaths=/data/mix/backend/data/b_shadow
+MemoryMax=512M
+
+[Install]
+WantedBy=multi-user.target
+
+# /etc/systemd/system/b-series-shadow.service.d/b-warmup-runtime-depth.conf
+[Service]
+Environment=MIX_B_MARKET_WARMUP_MIN_15M_ROWS=21
+Environment=MIX_B_MARKET_WARMUP_MIN_1D_ROWS=1
+
+# /etc/systemd/system/b-series-paper-entry.service
+[Unit]
+Description=HustleCoin Mix B-series bounded Paper entry consumer
+After=network-online.target mix-backend.service
+Wants=network-online.target
+Requires=b-series-paper-exit.service
+BindsTo=b-series-paper-exit.service
+After=b-series-paper-exit.service
+
+[Service]
+Type=simple
+User=ec2-user
+Group=ec2-user
+WorkingDirectory=/data/mix/backend
+EnvironmentFile=/data/mix/backend/.creds/b-series-paper.env
+Environment=MIX_B_EXECUTION_MODE=shadow
+Environment=MIX_B_WRITER_MODE=SHADOW
+Environment=MIX_B_SHADOW_DIR=/data/mix/backend/data/b_shadow
+	Environment=MIX_B_OBSERVE_ONLY_ENABLED=1
+	Environment=MIX_B_SHADOW_PARTIAL_SOURCE_OBSERVATION=1
+	# Paper consumers may observe only the six current strategy identities.
+	# Execution authority is independently disabled below.
+	Environment=MIX_B_SAMPLING_STRATEGY_VERSION_ALLOWLIST=1611b0d1-71f1-454d-964f-cde7af183af8,7dfcadfa-bae8-42c8-b8da-5e6eccd17c31,6fad5dde-5985-4b1d-be2d-11e638121f4d,cabbf8e3-9707-4655-a094-8b622dbb128b,99588373-6f6e-41f5-af24-0fe3feb57021,33ad42e7-47e6-4e89-aa90-eb133cde3b8e
+Environment=MIX_B_PAPER_LEVERAGE=5
+Environment=MIX_B_PAPER_SINGLE_MARGIN_USDT=1
+Environment=MIX_B_PAPER_MAX_MARGIN_ROUNDING_USDT=0.05
+Environment=MIX_B_PAPER_MARGIN_MODE=ISOLATED
+Environment=MIX_B_PAPER_ENTRY_INTERVAL_SEC=5
+Environment=MIX_B_PAPER_ENTRY_BATCH_SIZE=10
+Environment=MIX_B_PAPER_ENTRY_PASS_TIMEOUT_SEC=4
+Environment=MIX_B_PAPER_EXIT_HEARTBEAT_MAX_AGE_SEC=3
+Environment=MIX_B_ALLOW_ORDERS=0
+Environment=MIX_B_WRITER_ENABLED=0
+Environment=MIX_B_ROUTE_AUTHORIZATION=0
+Environment=MIX_B_FUND_TRANSFER_ENABLED=0
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/data/mix/backend/venv/bin/python -m app.b_series_shadow_producer paper-entry-run --interval 5
+Restart=always
+RestartSec=3
+TimeoutStopSec=20
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=read-only
+ProtectSystem=full
+ReadWritePaths=/data/mix/backend/data/b_shadow
+MemoryMax=256M
+
+[Install]
+WantedBy=multi-user.target
+
+# /etc/systemd/system/b-series-paper-entry.service.d/b-warmup-runtime-depth.conf
+[Service]
+Environment=MIX_B_MARKET_WARMUP_MIN_15M_ROWS=21
+Environment=MIX_B_MARKET_WARMUP_MIN_1D_ROWS=1
+
+# /etc/systemd/system/b-series-paper-exit.service
+[Unit]
+Description=HustleCoin Mix B-series independent Paper exit safety loop
+After=network-online.target mix-backend.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ec2-user
+Group=ec2-user
+WorkingDirectory=/data/mix/backend
+EnvironmentFile=/data/mix/backend/.creds/b-series-paper.env
+Environment=MIX_B_EXECUTION_MODE=shadow
+Environment=MIX_B_WRITER_MODE=SHADOW
+Environment=MIX_B_SHADOW_DIR=/data/mix/backend/data/b_shadow
+	Environment=MIX_B_OBSERVE_ONLY_ENABLED=1
+	Environment=MIX_B_SHADOW_PARTIAL_SOURCE_OBSERVATION=1
+	# Paper consumers may observe only the six current strategy identities.
+	# Execution authority is independently disabled below.
+	Environment=MIX_B_SAMPLING_STRATEGY_VERSION_ALLOWLIST=1611b0d1-71f1-454d-964f-cde7af183af8,7dfcadfa-bae8-42c8-b8da-5e6eccd17c31,6fad5dde-5985-4b1d-be2d-11e638121f4d,cabbf8e3-9707-4655-a094-8b622dbb128b,99588373-6f6e-41f5-af24-0fe3feb57021,33ad42e7-47e6-4e89-aa90-eb133cde3b8e
+Environment=MIX_B_PAPER_LEVERAGE=5
+Environment=MIX_B_PAPER_SINGLE_MARGIN_USDT=1
+Environment=MIX_B_PAPER_MAX_MARGIN_ROUNDING_USDT=0.05
+Environment=MIX_B_PAPER_MARGIN_MODE=ISOLATED
+Environment=MIX_B_PAPER_INTERVAL_SEC=1
+Environment=MIX_B_ALLOW_ORDERS=0
+Environment=MIX_B_WRITER_ENABLED=0
+Environment=MIX_B_ROUTE_AUTHORIZATION=0
+Environment=MIX_B_FUND_TRANSFER_ENABLED=0
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/data/mix/backend/venv/bin/python -m app.b_series_shadow_producer paper-run --interval 1
+Restart=always
+RestartSec=3
+TimeoutStopSec=20
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=read-only
+ProtectSystem=full
+ReadWritePaths=/data/mix/backend/data/b_shadow
+MemoryMax=256M
+
+[Install]
+WantedBy=multi-user.target
+
+# /etc/systemd/system/b-series-paper-exit.service.d/b-warmup-runtime-depth.conf
+[Service]
+Environment=MIX_B_MARKET_WARMUP_MIN_15M_ROWS=21
+Environment=MIX_B_MARKET_WARMUP_MIN_1D_ROWS=1
+
+# /etc/systemd/system/b-binance-depth-ws.service
+[Unit]
+Description=Mix B Binance Futures read-only depth WebSocket shards
+After=network-online.target mix-backend.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ec2-user
+Group=ec2-user
+WorkingDirectory=/data/mix/backend
+EnvironmentFile=/home/ec2-user/dexcexmix/.env
+EnvironmentFile=/data/mix/backend/.env
+Environment=MIX_B_DEPTH_WS_ROOT=wss://fstream.binance.com/stream
+Environment=MIX_B_DEPTH_WS_STREAMS_PER_CONNECTION=40
+Environment=MIX_B_DEPTH_WS_BOOK_TTL_SEC=10
+Environment=MIX_B_DEPTH_WS_REQUEST_REFRESH_SEC=5
+Environment=MIX_B_DEPTH_WS_MAX_SYMBOLS=1000
+Environment=MIX_B_DEPTH_WS_RETRY_SEC=2
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/data/mix/backend/venv/bin/python -m app.b_binance_depth_ws
+Restart=always
+RestartSec=3
+TimeoutStopSec=20
+NoNewPrivileges=true
+MemoryMax=256M
+
+[Install]
+WantedBy=multi-user.target
+
+# /etc/systemd/system/b-binance-depth-ws.service.d/capture.conf
+[Service]
+Environment=MIX_B_DEPTH_CAPTURE_ENABLED=1
+Environment=MIX_B_DEPTH_CAPTURE_DIR=/data/mix/backend/data/b_depth_captures
+Environment=MIX_B_DEPTH_CAPTURE_EVERY_N=100
+Environment=MIX_B_DEPTH_CAPTURE_MAX_BYTES_PER_DAY=2147483648
+
+# /etc/systemd/system/b-binance-depth-ws.service.d/runtime.conf
+[Service]
+# Binance Futures combined stream host that delivers depth frames in this
+# region.  Keep the worker read-only; no REST or execution path is changed.
+Environment=MIX_B_DEPTH_WS_ROOT=wss://fstream.binancefuture.com/stream
+Environment=MIX_B_DEPTH_WS_STREAMS_PER_CONNECTION=40
+Environment=MIX_B_DEPTH_WS_MAX_SYMBOLS=1000
+Environment=MIX_B_DEPTH_WS_BOOK_TTL_SEC=10
+Environment=MIX_B_DEPTH_WS_REQUEST_REFRESH_SEC=5
+
+# /etc/systemd/system/b-research-capture.service
+[Unit]
+Description=HustleCoin Mix B-series execution-free research and market capture worker
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ec2-user
+Group=ec2-user
+WorkingDirectory=/data/mix/backend
+EnvironmentFile=/data/mix/backend/.env
+Environment=MIX_B_EXECUTION_MODE=OBSERVE_ONLY
+Environment=MIX_B_ALLOW_ORDERS=0
+Environment=MIX_B_WRITER_ENABLED=0
+Environment=MIX_B_ROUTE_AUTHORIZATION=0
+Environment=MIX_B_FUND_TRANSFER_ENABLED=0
+Environment=MIX_B_MARKET_WARMUP_TRANSPORT=rust_ws
+Environment=MIX_B_RESEARCH_CAPTURE_TRANSPORT=rust_ws
+Environment=MIX_B_RESEARCH_DATASET_ROOT=/data/mix/backend/data/b_research_datasets
+Environment=MIX_B_RESEARCH_ATTESTATION_MANIFEST=/data/mix/backend/data/b_research_attestations.json
+Environment=MIX_B_RESEARCH_LEASE_SEC=300
+Environment=MIX_B_KLINE_CAPTURE_PERIOD_SEC=60
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/data/mix/backend/venv/bin/python -m app.b_research_worker run --interval 30
+Restart=always
+RestartSec=5
+TimeoutStopSec=20
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=read-only
+ProtectSystem=full
+ReadWritePaths=/data/mix/backend/data/b_research_datasets
+MemoryMax=384M
+
+[Install]
+WantedBy=multi-user.target
+
+# /etc/systemd/system/b-research-capture.service.d/b-warmup-runtime-depth.conf
+[Service]
+Environment=MIX_B_MARKET_WARMUP_MIN_15M_ROWS=21
+Environment=MIX_B_MARKET_WARMUP_MIN_1D_ROWS=1
+
+# /etc/systemd/system/dcm-b-series-writer.service
+[Unit]
+Description=DexCexMix B-series single-leg directional Writer (fail-closed shadow)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ec2-user
+Group=ec2-user
+WorkingDirectory=/data/mix/backend
+EnvironmentFile=/data/mix/backend/.env
+Environment=MIX_B_WRITER_MODE=SHADOW
+Environment=MIX_B_ALLOW_ORDERS=0
+Environment=MIX_B_CANARY_MAX_NOTIONAL=5
+Environment=MIX_B_MAX_MARKET_AGE_SEC=3
+Environment=MIX_B_MIN_NET_EDGE_BPS=20
+Environment=MIX_B_MIN_EXPECTED_PROFIT_USDT=0.01
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/bin/bash -lc 'set -a; . /data/mix/backend/.env; export DCM_REDIS_URL="${DCM_REDIS_URL:-${MIX_REDIS_URL:-}}"; test -n "${DCM_REDIS_URL:-}"; exec /data/mix/backend/venv/bin/python /data/mix/backend/b_series_writer.py'
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=20
+MemoryMax=256M
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=read-only
+ProtectSystem=full
+ReadOnlyPaths=/data/mix/backend/.creds
+
+[Install]
+WantedBy=multi-user.target
+---env names---

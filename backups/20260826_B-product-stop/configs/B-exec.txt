@@ -1,0 +1,266 @@
+﻿ip-10-0-1-103.ap-northeast-1.compute.internal
+---systemd---
+# /etc/systemd/system/dcm-b-series-writer.service
+[Unit]
+Description=DexCexMix B-series single-leg directional Writer (fail-closed shadow)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ec2-user
+Group=ec2-user
+WorkingDirectory=/home/ec2-user/dexcexmix
+EnvironmentFile=/home/ec2-user/dexcexmix/.env
+Environment=MIX_B_WRITER_MODE=SHADOW
+Environment=MIX_B_ALLOW_ORDERS=0
+Environment=MIX_B_CANARY_MAX_NOTIONAL=10
+Environment=MIX_B_MAX_MARKET_AGE_SEC=3
+Environment=MIX_B_MIN_NET_EDGE_BPS=20
+Environment=MIX_B_MIN_EXPECTED_PROFIT_USDT=0.10
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/home/ec2-user/dexcexmix/venv/bin/python /home/ec2-user/dexcexmix/b_series_writer.py
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=20
+MemoryMax=256M
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=read-only
+ProtectSystem=full
+ReadOnlyPaths=/home/ec2-user/dexcexmix/.creds
+
+[Install]
+WantedBy=multi-user.target
+
+# /etc/systemd/system/dcm-product-writer.service
+[Unit]
+Description=DexCexMix unified product writer (C1/C2.H/C2.P/C2.C/C4/C5/C6/C7/C8, guarded armed)
+After=network-online.target dcm-exec-manager.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ec2-user
+WorkingDirectory=/home/ec2-user/dexcexmix
+EnvironmentFile=/home/ec2-user/dexcexmix/.env
+# Draining mode: close/reconcile remains live; OPEN and risk-increasing
+# overlay commands are rejected. C8 VALIDATE_ROUTE is read-only and remains
+# permitted by the Writer authority guard.
+Environment=DCM_PRODUCT_WRITER_MODE=CLOSE_ONLY
+Environment=DCM_PRODUCT_WRITER_ARMED=1
+Environment=DCM_PRODUCT_CANARY_MAX_NOTIONAL=100
+Environment=DCM_PRODUCT_ROUTE_CAP_USDT=100
+Environment=DCM_PRODUCT_WRITER_BUILD=20260731.product-dispatcher.1
+ExecStart=/home/ec2-user/dexcexmix/venv/bin/python product_writer.py
+Restart=on-failure
+RestartSec=5
+MemoryMax=256M
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
+
+# /etc/systemd/system/dcm-product-writer.service.d/dynamic-routes.conf
+[Service]
+Environment=DCM_PRODUCT_WRITER_BUILD=20260801.dynamic-route-admission.1
+
+# /etc/systemd/system/dcm-product-writer.service.d/operator-workspace.conf
+[Service]
+Environment=DCM_PRODUCT_WRITER_WORKSPACE_ID=legacy-default
+Environment=DCM_PRODUCT_WRITER_BUILD=20260731.product-dispatcher.2
+
+# /etc/systemd/system/dcm-product-writer.service.d/zz-dynamic-routes.conf
+[Service]
+Environment=DCM_PRODUCT_WRITER_BUILD=20260801.dynamic-route-admission.1
+
+# /etc/systemd/system/dcm-product-dispatcher.service
+[Unit]
+Description=DexCexMix resident C1/C2.H/C2.C/C4/C5/C6/C7/C8 Product Writer producers
+After=network-online.target dcm-product-writer.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ec2-user
+WorkingDirectory=/home/ec2-user/dexcexmix
+EnvironmentFile=/home/ec2-user/dexcexmix/.env
+Environment=DCM_PRODUCT_DISPATCHER_MAX_NOTIONAL=100
+# Non-C3 products are drained in this deployment.  CLOSE_ONLY keeps
+# protective exits, C4 revoke/redeem and C8 read-only validation resident,
+# while making any new OPEN intent impossible at the dispatcher boundary.
+Environment=DCM_PRODUCT_DISPATCHER_MODE=CLOSE_ONLY
+Environment=DCM_PRODUCT_C8_REQUESTED_MODE=CLOSE_ONLY
+Environment=DCM_PRODUCT_WRITER_WORKSPACE_ID=legacy-default
+ExecStart=/home/ec2-user/dexcexmix/venv/bin/python product_dispatcher.py
+Restart=on-failure
+RestartSec=5
+MemoryMax=256M
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
+
+# /etc/systemd/system/dcm-product-dispatcher.service.d/dynamic-admission.conf
+[Service]
+Environment=DCM_DYNAMIC_ROUTE_ADMISSION=1
+Environment=DCM_DYNAMIC_ROUTE_MAX_PER_PRODUCT=20
+Environment=DCM_C1_SIGNAL_CONFIRMATIONS=3
+Environment=DCM_C1_SIGNAL_LATCH_SEC=120
+Environment=DCM_C1_DYNAMIC_ROUTE_TTL_SEC=1800
+
+# /etc/systemd/system/dcm-product-depth-ws.service
+[Unit]
+Description=DexCexMix persistent Product Writer multi-level WebSocket books
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=ec2-user
+WorkingDirectory=/home/ec2-user/dexcexmix
+EnvironmentFile=/home/ec2-user/dexcexmix/.env
+ExecStart=/home/ec2-user/dexcexmix/venv/bin/python product_depth_ws.py
+Restart=always
+RestartSec=3
+MemoryMax=256M
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
+
+# /etc/systemd/system/dcm-b-account-risk.service
+[Unit]
+Description=DexCexMix B-series read-only Binance account risk fact collector
+After=network-online.target redis6.service dcm-cred-agent.service
+Wants=network-online.target
+
+[Service]
+User=ec2-user
+Slice=dexcexmix.slice
+MemoryMax=192M
+WorkingDirectory=/home/ec2-user/dexcexmix
+EnvironmentFile=/home/ec2-user/dexcexmix/.env
+Environment=DCM_CREDS_DIR=/home/ec2-user/dexcexmix/.creds
+Environment=MIX_B_ACCOUNT_RISK_INTERVAL_SEC=2
+Environment=MIX_B_ACCOUNT_RISK_MAX_REQUESTS=1
+Environment=MIX_B_ALLOW_ORDERS=0
+Environment=MIX_B_WRITER_MODE=SHADOW
+ExecStart=/home/ec2-user/dexcexmix/venv/bin/python /home/ec2-user/dexcexmix/services/b-account-risk/app/main.py
+Restart=always
+RestartSec=10
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=read-only
+
+[Install]
+WantedBy=multi-user.target
+
+# /etc/systemd/system/dcm-borrow-monitor.service
+[Unit]
+Description=DexCexMix borrow availability + release-window monitor (read-only)
+After=network-online.target redis6.service
+Wants=network-online.target
+
+[Service]
+User=ec2-user
+Slice=dexcexmix.slice
+MemoryMax=128M
+WorkingDirectory=/home/ec2-user/dexcexmix/src
+EnvironmentFile=/home/ec2-user/dexcexmix/.env
+ExecStart=/home/ec2-user/dexcexmix/venv/bin/python services/borrow-monitor/app/main.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+
+# /etc/systemd/system/dcm-account-snapshot.service
+[Unit]
+Description=DexCexMix account snapshot (B-only, read-only real-account reconcile feed)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=ec2-user
+Slice=dexcexmix.slice
+MemoryMax=256M
+WorkingDirectory=/home/ec2-user/dexcexmix/src
+EnvironmentFile=/home/ec2-user/dexcexmix/.env
+ExecStart=/home/ec2-user/dexcexmix/venv/bin/python services/account-snapshot/app/main.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+
+# /etc/systemd/system/dcm-treasury-router.service
+[Unit]
+Description=DexCexMix internal wallet treasury router
+After=network-online.target postgresql.service redis6.service dcm-account-snapshot.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ec2-user
+WorkingDirectory=/home/ec2-user/dexcexmix
+EnvironmentFile=/home/ec2-user/dexcexmix/.env
+EnvironmentFile=-/home/ec2-user/dexcexmix/.creds/treasury.env
+Environment=DCM_TREASURY_MODE=SHADOW
+Environment=DCM_TREASURY_POLL_SEC=10
+UMask=0077
+ExecStart=/home/ec2-user/dexcexmix/venv/bin/python treasury_router.py
+Restart=on-failure
+RestartSec=5
+MemoryMax=128M
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+
+[Install]
+WantedBy=multi-user.target
+
+# /etc/systemd/system/dcm-treasury-router.service.d/gate-canary.conf
+[Service]
+Environment=DCM_TREASURY_MODE=CANARY
+---etc files---
+amazon-ssm-agent.service
+cex-arb-engine@.service
+cex-arb-engine@.service.bak_m4
+cex-arb-engine@.service.bak_phase2d
+dcm-account-snapshot.service
+dcm-b-account-risk.service
+dcm-b-account-risk.service.bak-20260815-0613
+dcm-b-series-writer.service
+dcm-borrow-monitor.service
+dcm-c2p-autopilot.service
+dcm-c2p-autopilot.service.bak.20260802T025022Z
+dcm-c2p-autopilot.timer
+dcm-c2p-depth-ws.service
+dcm-cred-agent.service
+dcm-dual-copy-check.service
+dcm-dual-copy-check.timer
+dcm-engine-basis.service
+dcm-engine-dualperp.service
+dcm-engine-lending.service
+dcm-exec-autopilot.service
+dcm-exec-manager.service
+dcm-exec-opener.service
+dcm-exec-recon.service
+dcm-exec-repair.service
+dcm-exec-runner.service
+dcm-hl-backfill.service
+dcm-hl-backfill.timer
+dcm-io-monitor.service
+dcm-lending-advisor.service
+dcm-phase-autopilot.service
+dcm-phase-autopilot.timer
+dcm-pnl-recorder.service
+dcm-product-depth-ws.service
+dcm-product-dispatcher.service
+dcm-product-writer.service
+dcm-transfer-monitor.service
+dcm-treasury-router.service
+dexcexmix.slice
+---env names---

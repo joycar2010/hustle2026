@@ -1,0 +1,3 @@
+﻿ip-10-0-1-95.ap-northeast-1.compute.internal
+dcm_shadow|15 MB|15645719
+postgres|7703 kB|7887895

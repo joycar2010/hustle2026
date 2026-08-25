@@ -1,0 +1,4 @@
+﻿## mix...origin/mix [behind 7]
+ M mix-backend/app/c3s_autopilot.py
+?? backups/20260826_B-product-stop/
+?? mix-backend/tests/
