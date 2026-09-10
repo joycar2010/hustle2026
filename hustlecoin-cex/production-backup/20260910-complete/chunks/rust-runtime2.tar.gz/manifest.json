@@ -1,0 +1,56 @@
+{
+  "artifact": "rust-runtime2.tar.gz.age",
+  "ciphertext_bytes": 724999319,
+  "ciphertext_sha256": "0a1fb960103e34f7ff8dc245c7049e2fdc4632fbdbf5106ef95fa4d3241cc371",
+  "chunk_bytes": 94371840,
+  "parts": [
+    {
+      "part": 0,
+      "file": "part-0000.bin",
+      "bytes": 94371840,
+      "sha256": "9eef6d363a5eec9251305d02ffd4a7078e774f0fa438578b9a419791b32b7d66"
+    },
+    {
+      "part": 1,
+      "file": "part-0001.bin",
+      "bytes": 94371840,
+      "sha256": "f11359213c797fb1ec842bc2942a0f193c1e53325312b09a5c411fe9824da674"
+    },
+    {
+      "part": 2,
+      "file": "part-0002.bin",
+      "bytes": 94371840,
+      "sha256": "2b856193cbc65965da4828d9ce0cb22c4a4819cb53be66aae18761889139601d"
+    },
+    {
+      "part": 3,
+      "file": "part-0003.bin",
+      "bytes": 94371840,
+      "sha256": "92d93f3532132a49b766228e5f62a1333371111dba87f2fa69d1374a5f1670a7"
+    },
+    {
+      "part": 4,
+      "file": "part-0004.bin",
+      "bytes": 94371840,
+      "sha256": "b34e4200a57e06032cd5b9aceea22971d3fbee996253247e42c27bc7b998c900"
+    },
+    {
+      "part": 5,
+      "file": "part-0005.bin",
+      "bytes": 94371840,
+      "sha256": "9ad537c0065667fd2b7fd0345f402678cc614817776b722d9581e5ff3218c3bc"
+    },
+    {
+      "part": 6,
+      "file": "part-0006.bin",
+      "bytes": 94371840,
+      "sha256": "c4bdd4fdf3de84462c03f0a188b6fb7420f6bd9a51eac62081675f51d45b0520"
+    },
+    {
+      "part": 7,
+      "file": "part-0007.bin",
+      "bytes": 64396439,
+      "sha256": "6a641e0a29cc0f7dc69d3ee02d4c43ac82f098e1ca384eb1a2a663c670a7e07f"
+    }
+  ]
+}

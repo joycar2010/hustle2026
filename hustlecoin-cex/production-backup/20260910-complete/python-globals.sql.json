@@ -1,0 +1,14 @@
+{
+  "host": "18.176.76.127",
+  "artifact": "python-globals.sql.age",
+  "start_utc": "2026-09-10T23:01:16.209629+00:00",
+  "end_utc": "2026-09-10T23:01:17.028861+00:00",
+  "plaintext_bytes": 671,
+  "plaintext_sha256": "d02cc321aa8bfca5962c1b50361a97bedbc52d1bc0794cf268ecb434b3786bf9",
+  "encrypted_bytes": 883,
+  "encrypted_sha256": "63e9719483bfe22d224f6e90450b62f5eddab0398136871ff7911befecf8e4c1",
+  "remote_exit_code": 0,
+  "encryption_exit_code": 0,
+  "remote_warning_bytes": 66,
+  "command_id": "globals.sql"
+}

@@ -1,0 +1,78 @@
+{
+  "label": "20260910完整跑通版",
+  "created_utc": "2026-09-10T23:10:00Z",
+  "scope": "Coin Python business host and Rust market host",
+  "hosts": {
+    "python": "18.176.76.127",
+    "rust": "57.181.214.206"
+  },
+  "encryption": "age recipient using the deployment SSH public key; private identity remains outside GitHub",
+  "artifacts": [
+    {
+      "artifact": "python-config.pgdump.age",
+      "parts": 1,
+      "ciphertext_bytes": 72807,
+      "ciphertext_sha256": "af9cc270d315ac62490729517db2bc9e6840950d1898f210537f8107ae4dcf11",
+      "manifest": "chunks/python-config.pgdump/manifest.json"
+    },
+    {
+      "artifact": "python-globals.sql.age",
+      "parts": 1,
+      "ciphertext_bytes": 883,
+      "ciphertext_sha256": "63e9719483bfe22d224f6e90450b62f5eddab0398136871ff7911befecf8e4c1",
+      "manifest": "chunks/python-globals.sql/manifest.json"
+    },
+    {
+      "artifact": "python-runtime.tar.gz.age",
+      "parts": 1,
+      "ciphertext_bytes": 58297657,
+      "ciphertext_sha256": "b7bbbf0640f4ecfd52429ec071b36e5df6006d4f5a6adc3d677e658157ace3a4",
+      "manifest": "chunks/python-runtime.tar.gz/manifest.json"
+    },
+    {
+      "artifact": "rust-runtime2.tar.gz.age",
+      "parts": 8,
+      "ciphertext_bytes": 724999319,
+      "ciphertext_sha256": "0a1fb960103e34f7ff8dc245c7049e2fdc4632fbdbf5106ef95fa4d3241cc371",
+      "manifest": "chunks/rust-runtime2.tar.gz/manifest.json"
+    }
+  ],
+  "old_backup_deletion_set": [],
+  "protected_frontends": [
+    "python-business/static/spa",
+    "python-business/static/admin-spa",
+    "all historical static trees under python-business/static"
+  ],
+  "database_exports": [
+    "selected cex_trading user/rule configuration tables only (PostgreSQL 15 custom format)",
+    "pg_dumpall globals"
+  ],
+  "selected_database_tables": [
+    "users",
+    "roles",
+    "permissions",
+    "role_permissions",
+    "user_roles",
+    "sub_accounts",
+    "master_account",
+    "account_proxy_bindings",
+    "account_symbol_rules",
+    "global_rules",
+    "fund_rules",
+    "symbol_rules",
+    "rule_presets",
+    "blacklist",
+    "pending_blacklist",
+    "symbols",
+    "custom_monitor_symbols",
+    "delisting_monitor_config"
+  ],
+  "excluded_database_data": [
+    "positions, trade/order logs, balances, market/early-borrow analytics, notifications, audit/proxy health logs, and all other non-configuration tables"
+  ],
+  "limitations": [
+    "pg_restore --list was run for the selected custom dump; no isolated full restore was performed",
+    "Rust local Redis RDB is not the external shared Redis used by applications",
+    "public repository contains ciphertext and non-secret metadata only"
+  ]
+}

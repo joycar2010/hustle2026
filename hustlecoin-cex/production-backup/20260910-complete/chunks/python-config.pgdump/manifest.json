@@ -1,0 +1,14 @@
+{
+  "artifact": "python-config.pgdump.age",
+  "ciphertext_bytes": 72807,
+  "ciphertext_sha256": "af9cc270d315ac62490729517db2bc9e6840950d1898f210537f8107ae4dcf11",
+  "chunk_bytes": 94371840,
+  "parts": [
+    {
+      "part": 0,
+      "file": "part-0000.bin",
+      "bytes": 72807,
+      "sha256": "af9cc270d315ac62490729517db2bc9e6840950d1898f210537f8107ae4dcf11"
+    }
+  ]
+}
