@@ -1,0 +1,14 @@
+{
+  "host": "18.176.76.127",
+  "artifact": "python-runtime.tar.gz.age",
+  "start_utc": "2026-09-10T23:01:31.688713+00:00",
+  "end_utc": "2026-09-10T23:01:47.523707+00:00",
+  "plaintext_bytes": 58283221,
+  "plaintext_sha256": "027303fd765ddcf9016576f52d7e812a172c71af8ff066444f7c374ba0580199",
+  "encrypted_bytes": 58297657,
+  "encrypted_sha256": "b7bbbf0640f4ecfd52429ec071b36e5df6006d4f5a6adc3d677e658157ace3a4",
+  "remote_exit_code": 0,
+  "encryption_exit_code": 0,
+  "remote_warning_bytes": 0,
+  "command_id": "runtime.tar.gz"
+}

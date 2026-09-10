@@ -1,0 +1,14 @@
+{
+  "artifact": "python-globals.sql.age",
+  "ciphertext_bytes": 883,
+  "ciphertext_sha256": "63e9719483bfe22d224f6e90450b62f5eddab0398136871ff7911befecf8e4c1",
+  "chunk_bytes": 94371840,
+  "parts": [
+    {
+      "part": 0,
+      "file": "part-0000.bin",
+      "bytes": 883,
+      "sha256": "63e9719483bfe22d224f6e90450b62f5eddab0398136871ff7911befecf8e4c1"
+    }
+  ]
+}

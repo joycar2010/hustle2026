@@ -1,0 +1,14 @@
+{
+  "host": "57.181.214.206",
+  "artifact": "rust-runtime2.tar.gz.age",
+  "start_utc": "2026-09-10T22:47:18.470697+00:00",
+  "end_utc": "2026-09-10T22:49:07.349826+00:00",
+  "plaintext_bytes": 724822163,
+  "plaintext_sha256": "683b25792b6aa7dee3b50a72b1a189b57411f2e112603fa4358187a9b96892d9",
+  "encrypted_bytes": 724999319,
+  "encrypted_sha256": "0a1fb960103e34f7ff8dc245c7049e2fdc4632fbdbf5106ef95fa4d3241cc371",
+  "remote_exit_code": 0,
+  "encryption_exit_code": 0,
+  "remote_warning_bytes": 0,
+  "command_id": "runtime.tar.gz"
+}

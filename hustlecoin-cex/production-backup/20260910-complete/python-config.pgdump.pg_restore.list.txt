@@ -1,0 +1,161 @@
+;
+; Archive created at 2026-09-10 23:20:52 UTC
+;     dbname: cex_trading
+;     TOC Entries: 150
+;     Compression: 6
+;     Dump Version: 1.14-0
+;     Format: CUSTOM
+;     Integer: 4 bytes
+;     Offset: 8 bytes
+;     Dumped from database version: 15.18
+;     Dumped by pg_dump version: 15.18
+;
+;
+; Selected TOC Entries:
+;
+267; 1259 16690 TABLE public account_proxy_bindings postgres
+266; 1259 16689 SEQUENCE public account_proxy_bindings_id_seq postgres
+4672; 0 0 SEQUENCE OWNED BY public account_proxy_bindings_id_seq postgres
+233; 1259 16485 TABLE public account_symbol_rules postgres
+232; 1259 16484 SEQUENCE public account_symbol_rules_id_seq postgres
+4673; 0 0 SEQUENCE OWNED BY public account_symbol_rules_id_seq postgres
+225; 1259 16446 TABLE public blacklist postgres
+224; 1259 16445 SEQUENCE public blacklist_id_seq postgres
+4674; 0 0 SEQUENCE OWNED BY public blacklist_id_seq postgres
+303; 1259 18238 TABLE public custom_monitor_symbols postgres
+302; 1259 18237 SEQUENCE public custom_monitor_symbols_id_seq postgres
+4675; 0 0 SEQUENCE OWNED BY public custom_monitor_symbols_id_seq postgres
+301; 1259 18163 TABLE public delisting_monitor_config postgres
+300; 1259 18162 SEQUENCE public delisting_monitor_config_id_seq postgres
+4676; 0 0 SEQUENCE OWNED BY public delisting_monitor_config_id_seq postgres
+229; 1259 16464 TABLE public fund_rules postgres
+228; 1259 16463 SEQUENCE public fund_rules_id_seq postgres
+4677; 0 0 SEQUENCE OWNED BY public fund_rules_id_seq postgres
+223; 1259 16438 TABLE public global_rules postgres
+222; 1259 16437 SEQUENCE public global_rules_id_seq postgres
+4678; 0 0 SEQUENCE OWNED BY public global_rules_id_seq postgres
+221; 1259 16430 TABLE public master_account postgres
+220; 1259 16429 SEQUENCE public master_account_id_seq postgres
+4679; 0 0 SEQUENCE OWNED BY public master_account_id_seq postgres
+235; 1259 16495 TABLE public pending_blacklist postgres
+234; 1259 16494 SEQUENCE public pending_blacklist_id_seq postgres
+4680; 0 0 SEQUENCE OWNED BY public pending_blacklist_id_seq postgres
+263; 1259 16652 TABLE public permissions postgres
+262; 1259 16651 SEQUENCE public permissions_id_seq postgres
+4681; 0 0 SEQUENCE OWNED BY public permissions_id_seq postgres
+275; 1259 16760 TABLE public role_permissions postgres
+274; 1259 16759 SEQUENCE public role_permissions_id_seq postgres
+4682; 0 0 SEQUENCE OWNED BY public role_permissions_id_seq postgres
+261; 1259 16637 TABLE public roles postgres
+260; 1259 16636 SEQUENCE public roles_id_seq postgres
+4683; 0 0 SEQUENCE OWNED BY public roles_id_seq postgres
+217; 1259 16413 TABLE public rule_presets postgres
+216; 1259 16412 SEQUENCE public rule_presets_id_seq postgres
+4684; 0 0 SEQUENCE OWNED BY public rule_presets_id_seq postgres
+219; 1259 16421 TABLE public sub_accounts postgres
+218; 1259 16420 SEQUENCE public sub_accounts_id_seq postgres
+4685; 0 0 SEQUENCE OWNED BY public sub_accounts_id_seq postgres
+231; 1259 16472 TABLE public symbol_rules postgres
+230; 1259 16471 SEQUENCE public symbol_rules_id_seq postgres
+4686; 0 0 SEQUENCE OWNED BY public symbol_rules_id_seq postgres
+215; 1259 16398 TABLE public symbols postgres
+214; 1259 16397 SEQUENCE public symbols_id_seq postgres
+4687; 0 0 SEQUENCE OWNED BY public symbols_id_seq postgres
+277; 1259 16780 TABLE public user_roles postgres
+276; 1259 16779 SEQUENCE public user_roles_id_seq postgres
+4688; 0 0 SEQUENCE OWNED BY public user_roles_id_seq postgres
+243; 1259 16536 TABLE public users postgres
+242; 1259 16535 SEQUENCE public users_id_seq postgres
+4689; 0 0 SEQUENCE OWNED BY public users_id_seq postgres
+4406; 2604 16693 DEFAULT public account_proxy_bindings id postgres
+4392; 2604 16488 DEFAULT public account_symbol_rules id postgres
+4380; 2604 16449 DEFAULT public blacklist id postgres
+4417; 2604 18241 DEFAULT public custom_monitor_symbols id postgres
+4412; 2604 18166 DEFAULT public delisting_monitor_config id postgres
+4382; 2604 16467 DEFAULT public fund_rules id postgres
+4376; 2604 16441 DEFAULT public global_rules id postgres
+4374; 2604 16433 DEFAULT public master_account id postgres
+4396; 2604 16498 DEFAULT public pending_blacklist id postgres
+4404; 2604 16655 DEFAULT public permissions id postgres
+4408; 2604 16763 DEFAULT public role_permissions id postgres
+4401; 2604 16640 DEFAULT public roles id postgres
+4369; 2604 16416 DEFAULT public rule_presets id postgres
+4371; 2604 16424 DEFAULT public sub_accounts id postgres
+4385; 2604 16475 DEFAULT public symbol_rules id postgres
+4362; 2604 16401 DEFAULT public symbols id postgres
+4410; 2604 16783 DEFAULT public user_roles id postgres
+4398; 2604 16539 DEFAULT public users id postgres
+4657; 0 16690 TABLE DATA public account_proxy_bindings postgres
+4647; 0 16485 TABLE DATA public account_symbol_rules postgres
+4641; 0 16446 TABLE DATA public blacklist postgres
+4665; 0 18238 TABLE DATA public custom_monitor_symbols postgres
+4663; 0 18163 TABLE DATA public delisting_monitor_config postgres
+4643; 0 16464 TABLE DATA public fund_rules postgres
+4639; 0 16438 TABLE DATA public global_rules postgres
+4637; 0 16430 TABLE DATA public master_account postgres
+4649; 0 16495 TABLE DATA public pending_blacklist postgres
+4655; 0 16652 TABLE DATA public permissions postgres
+4659; 0 16760 TABLE DATA public role_permissions postgres
+4653; 0 16637 TABLE DATA public roles postgres
+4633; 0 16413 TABLE DATA public rule_presets postgres
+4635; 0 16421 TABLE DATA public sub_accounts postgres
+4645; 0 16472 TABLE DATA public symbol_rules postgres
+4631; 0 16398 TABLE DATA public symbols postgres
+4661; 0 16780 TABLE DATA public user_roles postgres
+4651; 0 16536 TABLE DATA public users postgres
+4690; 0 0 SEQUENCE SET public account_proxy_bindings_id_seq postgres
+4691; 0 0 SEQUENCE SET public account_symbol_rules_id_seq postgres
+4692; 0 0 SEQUENCE SET public blacklist_id_seq postgres
+4693; 0 0 SEQUENCE SET public custom_monitor_symbols_id_seq postgres
+4694; 0 0 SEQUENCE SET public delisting_monitor_config_id_seq postgres
+4695; 0 0 SEQUENCE SET public fund_rules_id_seq postgres
+4696; 0 0 SEQUENCE SET public global_rules_id_seq postgres
+4697; 0 0 SEQUENCE SET public master_account_id_seq postgres
+4698; 0 0 SEQUENCE SET public pending_blacklist_id_seq postgres
+4699; 0 0 SEQUENCE SET public permissions_id_seq postgres
+4700; 0 0 SEQUENCE SET public role_permissions_id_seq postgres
+4701; 0 0 SEQUENCE SET public roles_id_seq postgres
+4702; 0 0 SEQUENCE SET public rule_presets_id_seq postgres
+4703; 0 0 SEQUENCE SET public sub_accounts_id_seq postgres
+4704; 0 0 SEQUENCE SET public symbol_rules_id_seq postgres
+4705; 0 0 SEQUENCE SET public symbols_id_seq postgres
+4706; 0 0 SEQUENCE SET public user_roles_id_seq postgres
+4707; 0 0 SEQUENCE SET public users_id_seq postgres
+4461; 2606 16696 CONSTRAINT public account_proxy_bindings account_proxy_bindings_pkey postgres
+4442; 2606 16493 CONSTRAINT public account_symbol_rules account_symbol_rules_pkey postgres
+4436; 2606 16452 CONSTRAINT public blacklist blacklist_pkey postgres
+4476; 2606 18248 CONSTRAINT public custom_monitor_symbols custom_monitor_symbols_pkey postgres
+4474; 2606 18174 CONSTRAINT public delisting_monitor_config delisting_monitor_config_pkey postgres
+4438; 2606 16470 CONSTRAINT public fund_rules fund_rules_pkey postgres
+4434; 2606 16444 CONSTRAINT public global_rules global_rules_pkey postgres
+4432; 2606 16436 CONSTRAINT public master_account master_account_pkey postgres
+4444; 2606 16503 CONSTRAINT public pending_blacklist pending_blacklist_pkey postgres
+4446; 2606 16505 CONSTRAINT public pending_blacklist pending_blacklist_symbol_key postgres
+4457; 2606 16662 CONSTRAINT public permissions permissions_permission_code_key postgres
+4459; 2606 16660 CONSTRAINT public permissions permissions_pkey postgres
+4465; 2606 16766 CONSTRAINT public role_permissions role_permissions_pkey postgres
+4451; 2606 16646 CONSTRAINT public roles roles_pkey postgres
+4453; 2606 16650 CONSTRAINT public roles roles_role_code_key postgres
+4455; 2606 16648 CONSTRAINT public roles roles_role_name_key postgres
+4428; 2606 16419 CONSTRAINT public rule_presets rule_presets_pkey postgres
+4430; 2606 16428 CONSTRAINT public sub_accounts sub_accounts_pkey postgres
+4440; 2606 16483 CONSTRAINT public symbol_rules symbol_rules_pkey postgres
+4424; 2606 16409 CONSTRAINT public symbols symbols_pkey postgres
+4426; 2606 16411 CONSTRAINT public symbols symbols_symbol_key postgres
+4463; 2606 16698 CONSTRAINT public account_proxy_bindings uq_account_proxy_platform postgres
+4480; 2606 18250 CONSTRAINT public custom_monitor_symbols uq_custom_monitor_user_spot_futures postgres
+4467; 2606 16768 CONSTRAINT public role_permissions uq_role_permission postgres
+4470; 2606 16788 CONSTRAINT public user_roles uq_user_role postgres
+4472; 2606 16786 CONSTRAINT public user_roles user_roles_pkey postgres
+4449; 2606 16545 CONSTRAINT public users users_pkey postgres
+4477; 1259 18251 INDEX public ix_custom_monitor_symbols_user_id postgres
+4478; 1259 18252 INDEX public ix_custom_monitor_user_active postgres
+4468; 1259 16799 INDEX public ix_user_roles_user_id postgres
+4447; 1259 16546 INDEX public ix_users_username postgres
+4482; 2606 16704 FK CONSTRAINT public account_proxy_bindings account_proxy_bindings_proxy_id_fkey postgres
+4483; 2606 16699 FK CONSTRAINT public account_proxy_bindings account_proxy_bindings_sub_account_id_fkey postgres
+4481; 2606 16663 FK CONSTRAINT public permissions permissions_parent_id_fkey postgres
+4484; 2606 16774 FK CONSTRAINT public role_permissions role_permissions_permission_id_fkey postgres
+4485; 2606 16769 FK CONSTRAINT public role_permissions role_permissions_role_id_fkey postgres
+4486; 2606 16794 FK CONSTRAINT public user_roles user_roles_role_id_fkey postgres
+4487; 2606 16789 FK CONSTRAINT public user_roles user_roles_user_id_fkey postgres

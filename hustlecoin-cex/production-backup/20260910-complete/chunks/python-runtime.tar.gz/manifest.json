@@ -1,0 +1,14 @@
+{
+  "artifact": "python-runtime.tar.gz.age",
+  "ciphertext_bytes": 58297657,
+  "ciphertext_sha256": "b7bbbf0640f4ecfd52429ec071b36e5df6006d4f5a6adc3d677e658157ace3a4",
+  "chunk_bytes": 94371840,
+  "parts": [
+    {
+      "part": 0,
+      "file": "part-0000.bin",
+      "bytes": 58297657,
+      "sha256": "b7bbbf0640f4ecfd52429ec071b36e5df6006d4f5a6adc3d677e658157ace3a4"
+    }
+  ]
+}
