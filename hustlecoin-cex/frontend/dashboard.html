@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CEX Arbitrage Dashboard</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: 'Inter', -apple-system, sans-serif; }
+  .pulse { animation: pulse 2s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.6} }
+</style>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen">
+
+<nav class="bg-gray-800 border-b border-gray-700 px-6 py-3 flex items-center justify-between">
+  <div class="flex items-center gap-4">
+    <h1 class="text-xl font-bold text-white">CEX Arbitrage</h1>
+    <span id="engineBadge" class="px-3 py-1 rounded-full text-sm font-medium">--</span>
+  </div>
+  <div class="flex items-center gap-3">
+    <button id="btnPause" onclick="sendCommand('pause')" class="px-4 py-1.5 bg-yellow-600 hover:bg-yellow-500 rounded text-sm font-medium">Pause</button>
+    <button id="btnResume" onclick="sendCommand('resume')" class="px-4 py-1.5 bg-green-600 hover:bg-green-500 rounded text-sm font-medium hidden">Resume</button>
+    <span id="lastRefresh" class="text-gray-400 text-xs"></span>
+  </div>
+</nav>
+
+<main class="max-w-7xl mx-auto px-6 py-6 space-y-6">
+
+  <!-- Summary Cards -->
+  <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+    <div class="bg-gray-800 rounded-lg p-4 border border-gray-700">
+      <div class="text-gray-400 text-sm">Open Positions</div>
+      <div id="totalOpen" class="text-2xl font-bold text-white mt-1">0</div>
+    </div>
+    <div class="bg-gray-800 rounded-lg p-4 border border-gray-700">
+      <div class="text-gray-400 text-sm">Closed Positions</div>
+      <div id="totalClosed" class="text-2xl font-bold text-white mt-1">0</div>
+    </div>
+    <div class="bg-gray-800 rounded-lg p-4 border border-gray-700">
+      <div class="text-gray-400 text-sm">Total PnL (USDT)</div>
+      <div id="totalPnl" class="text-2xl font-bold mt-1">0</div>
+    </div>
+    <div class="bg-gray-800 rounded-lg p-4 border border-gray-700">
+      <div class="text-gray-400 text-sm">Active Workers</div>
+      <div id="workerCount" class="text-2xl font-bold text-white mt-1">0</div>
+    </div>
+  </div>
+
+  <!-- Workers -->
+  <div class="bg-gray-800 rounded-lg border border-gray-700">
+    <div class="px-4 py-3 border-b border-gray-700 flex justify-between items-center">
+      <h2 class="font-semibold">Workers</h2>
+    </div>
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead class="text-gray-400 text-xs uppercase">
+          <tr>
+            <th class="px-4 py-2 text-left">Scope</th>
+            <th class="px-4 py-2 text-left">Status</th>
+            <th class="px-4 py-2 text-right">Positions</th>
+            <th class="px-4 py-2 text-right">Cycles</th>
+            <th class="px-4 py-2 text-left">Last Heartbeat</th>
+            <th class="px-4 py-2 text-left">Error</th>
+            <th class="px-4 py-2 text-center">Action</th>
+          </tr>
+        </thead>
+        <tbody id="workersBody" class="divide-y divide-gray-700"></tbody>
+      </table>
+      <div id="workersEmpty" class="px-4 py-6 text-center text-gray-500 hidden">No workers running</div>
+    </div>
+  </div>
+
+  <!-- Recent Trades -->
+  <div class="bg-gray-800 rounded-lg border border-gray-700">
+    <div class="px-4 py-3 border-b border-gray-700">
+      <h2 class="font-semibold">Recent Trades</h2>
+    </div>
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead class="text-gray-400 text-xs uppercase">
+          <tr>
+            <th class="px-4 py-2 text-left">Time</th>
+            <th class="px-4 py-2 text-left">Action</th>
+            <th class="px-4 py-2 text-left">Symbol</th>
+            <th class="px-4 py-2 text-left">Side</th>
+            <th class="px-4 py-2 text-right">Quantity</th>
+            <th class="px-4 py-2 text-right">Price</th>
+            <th class="px-4 py-2 text-left">Status</th>
+            <th class="px-4 py-2 text-right">Latency</th>
+          </tr>
+        </thead>
+        <tbody id="tradesBody" class="divide-y divide-gray-700"></tbody>
+      </table>
+      <div id="tradesEmpty" class="px-4 py-6 text-center text-gray-500 hidden">No trades yet</div>
+    </div>
+  </div>
+
+  <!-- Sub-Accounts -->
+  <div class="bg-gray-800 rounded-lg border border-gray-700">
+    <div class="px-4 py-3 border-b border-gray-700">
+      <h2 class="font-semibold">Sub-Accounts</h2>
+    </div>
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead class="text-gray-400 text-xs uppercase">
+          <tr>
+            <th class="px-4 py-2 text-left">ID</th>
+            <th class="px-4 py-2 text-left">Note</th>
+            <th class="px-4 py-2 text-left">Email</th>
+            <th class="px-4 py-2 text-center">Margin</th>
+            <th class="px-4 py-2 text-center">Futures</th>
+            <th class="px-4 py-2 text-center">Proxy</th>
+            <th class="px-4 py-2 text-center">Enabled</th>
+          </tr>
+        </thead>
+        <tbody id="accountsBody" class="divide-y divide-gray-700"></tbody>
+      </table>
+    </div>
+  </div>
+
+</main>
+
+<script>
+const API = '';
+
+function statusColor(s) {
+  if (s === 'RUNNING') return 'bg-green-600';
+  if (s === 'PAUSED') return 'bg-yellow-600';
+  if (s === 'ERROR') return 'bg-red-600';
+  return 'bg-gray-600';
+}
+
+function timeAgo(ts) {
+  if (!ts) return '--';
+  const diff = (Date.now() - new Date(ts).getTime()) / 1000;
+  if (diff < 60) return Math.round(diff) + 's ago';
+  if (diff < 3600) return Math.round(diff / 60) + 'm ago';
+  return Math.round(diff / 3600) + 'h ago';
+}
+
+function fmtTime(ts) {
+  if (!ts) return '--';
+  return new Date(ts).toLocaleTimeString('zh-CN', {hour12: false});
+}
+
+function badge(ok) {
+  return ok
+    ? '<span class="text-green-400 font-medium">Yes</span>'
+    : '<span class="text-gray-500">No</span>';
+}
+
+async function refresh() {
+  try {
+    const [dashResp, accResp] = await Promise.all([
+      fetch(API + '/api/engine/dashboard'),
+      fetch(API + '/api/sub-accounts/')
+    ]);
+    const dash = await dashResp.json();
+    const accounts = await accResp.json();
+    renderDashboard(dash);
+    renderAccounts(accounts);
+    document.getElementById('lastRefresh').textContent = 'Updated ' + new Date().toLocaleTimeString('zh-CN', {hour12: false});
+  } catch (e) {
+    console.error('Refresh failed:', e);
+  }
+}
+
+function renderDashboard(d) {
+  const b = document.getElementById('engineBadge');
+  b.textContent = d.engine_status;
+  b.className = 'px-3 py-1 rounded-full text-sm font-medium text-white ' + statusColor(d.engine_status);
+
+  const isPaused = d.engine_status === 'PAUSED';
+  document.getElementById('btnPause').classList.toggle('hidden', isPaused);
+  document.getElementById('btnResume').classList.toggle('hidden', !isPaused);
+
+  document.getElementById('totalOpen').textContent = d.positions_summary.total_open;
+  document.getElementById('totalClosed').textContent = d.positions_summary.total_closed;
+
+  const pnl = parseFloat(d.positions_summary.total_pnl);
+  const pnlEl = document.getElementById('totalPnl');
+  pnlEl.textContent = pnl.toFixed(2);
+  pnlEl.className = 'text-2xl font-bold mt-1 ' + (pnl >= 0 ? 'text-green-400' : 'text-red-400');
+
+  const runningWorkers = d.workers.filter(w => w.status === 'RUNNING').length;
+  document.getElementById('workerCount').textContent = runningWorkers + '/' + d.workers.length;
+
+  const wb = document.getElementById('workersBody');
+  const we = document.getElementById('workersEmpty');
+  if (d.workers.length === 0) {
+    wb.innerHTML = '';
+    we.classList.remove('hidden');
+  } else {
+    we.classList.add('hidden');
+    wb.innerHTML = d.workers.map(w => `
+      <tr class="hover:bg-gray-750">
+        <td class="px-4 py-2 font-mono">${w.scope}</td>
+        <td class="px-4 py-2"><span class="px-2 py-0.5 rounded text-xs font-medium text-white ${statusColor(w.status)}">${w.status}</span></td>
+        <td class="px-4 py-2 text-right">${w.active_positions || 0}</td>
+        <td class="px-4 py-2 text-right font-mono">${(w.total_cycles || 0).toLocaleString()}</td>
+        <td class="px-4 py-2 text-gray-400">${timeAgo(w.last_heartbeat)}</td>
+        <td class="px-4 py-2 text-red-400 text-xs max-w-xs truncate">${w.error_message || ''}</td>
+        <td class="px-4 py-2 text-center">
+          <button onclick="sendCommand('${w.status==='RUNNING'?'pause':'resume'}','${w.scope}')"
+            class="px-2 py-0.5 rounded text-xs ${w.status==='RUNNING'?'bg-yellow-700 hover:bg-yellow-600':'bg-green-700 hover:bg-green-600'}">
+            ${w.status==='RUNNING'?'Pause':'Resume'}
+          </button>
+        </td>
+      </tr>
+    `).join('');
+  }
+
+  const tb = document.getElementById('tradesBody');
+  const te = document.getElementById('tradesEmpty');
+  if (d.recent_trades.length === 0) {
+    tb.innerHTML = '';
+    te.classList.remove('hidden');
+  } else {
+    te.classList.add('hidden');
+    tb.innerHTML = d.recent_trades.map(t => `
+      <tr class="hover:bg-gray-750">
+        <td class="px-4 py-2 text-gray-400">${fmtTime(t.created_at)}</td>
+        <td class="px-4 py-2 font-medium">${t.action}</td>
+        <td class="px-4 py-2 font-mono">${t.symbol}</td>
+        <td class="px-4 py-2 ${t.side==='BUY'?'text-green-400':'text-red-400'}">${t.side || '--'}</td>
+        <td class="px-4 py-2 text-right font-mono">${t.quantity || '--'}</td>
+        <td class="px-4 py-2 text-right font-mono">${t.price || '--'}</td>
+        <td class="px-4 py-2"><span class="px-2 py-0.5 rounded text-xs ${t.status==='SUCCESS'?'bg-green-800 text-green-300':t.status==='FAILED'?'bg-red-800 text-red-300':'bg-gray-700 text-gray-300'}">${t.status}</span></td>
+        <td class="px-4 py-2 text-right text-gray-400">${t.latency_ms ? t.latency_ms+'ms' : '--'}</td>
+      </tr>
+    `).join('');
+  }
+}
+
+function renderAccounts(accounts) {
+  const ab = document.getElementById('accountsBody');
+  ab.innerHTML = accounts.map(a => `
+    <tr class="hover:bg-gray-750">
+      <td class="px-4 py-2">${a.id}</td>
+      <td class="px-4 py-2 font-medium">${a.note}</td>
+      <td class="px-4 py-2 text-gray-400 text-xs">${a.email}</td>
+      <td class="px-4 py-2 text-center">${badge(a.margin_enabled)}</td>
+      <td class="px-4 py-2 text-center">${badge(a.futures_enabled)}</td>
+      <td class="px-4 py-2 text-center">${a.proxy_url ? '<span class="text-blue-400 text-xs">Proxy</span>' : '<span class="text-gray-500 text-xs">Direct</span>'}</td>
+      <td class="px-4 py-2 text-center">
+        <button onclick="toggleAccount(${a.id})"
+          class="px-3 py-0.5 rounded text-xs font-medium ${a.is_enabled?'bg-green-700 hover:bg-green-600 text-green-200':'bg-gray-700 hover:bg-gray-600 text-gray-300'}">
+          ${a.is_enabled ? 'Enabled' : 'Disabled'}
+        </button>
+      </td>
+    </tr>
+  `).join('');
+}
+
+async function sendCommand(action, target='global') {
+  try {
+    await fetch(API + '/api/engine/command', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({action, target})
+    });
+    setTimeout(refresh, 1000);
+  } catch(e) {
+    alert('Command failed: ' + e.message);
+  }
+}
+
+async function toggleAccount(id) {
+  try {
+    await fetch(API + '/api/sub-accounts/' + id + '/toggle', {method: 'POST'});
+    setTimeout(refresh, 500);
+  } catch(e) {
+    alert('Toggle failed: ' + e.message);
+  }
+}
+
+refresh();
+setInterval(refresh, 5000);
+</script>
+</body>
+</html>

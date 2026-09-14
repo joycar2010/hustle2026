@@ -1,0 +1,74 @@
+import client from './client'
+
+export async function getGlobalRules() {
+  const { data } = await client.get('/api/global-rules/')
+  return data
+}
+
+export async function updateGlobalRules(body: Record<string, unknown>) {
+  const { data } = await client.put('/api/global-rules/', body)
+  return data
+}
+
+export async function getFundRules() {
+  const { data } = await client.get('/api/fund-rules/')
+  return data
+}
+
+export async function updateFundRules(body: Record<string, unknown>) {
+  const { data } = await client.put('/api/fund-rules/', body)
+  return data
+}
+
+// 单事务保存 feishu + global + fund(原子 + 乐观锁);409 = 期间被他人修改
+export async function saveAllRules(body: {
+  feishu?: Record<string, unknown>
+  global_rules?: Record<string, unknown>
+  fund_rules?: Record<string, unknown>
+  expected_global_version?: number
+  expected_fund_version?: number
+}): Promise<{ global_version: number; fund_version: number; changed: number }> {
+  const { data } = await client.put('/api/rules/save-all', body)
+  return data
+}
+
+export async function getSymbolRules(size = 500) {
+  const { data } = await client.get('/api/symbol-rules/', { params: { size } })
+  return data
+}
+
+export async function getSymbolRule(symbol: string) {
+  // 无自定义规则时后端返 404(属正常,弹窗用全局兜底);__silent 抑制全局错误 toast
+  const { data } = await client.get(`/api/symbol-rules/${symbol}`, { __silent: true })
+  return data
+}
+
+export async function updateSymbolRule(symbol: string, body: Record<string, unknown>) {
+  const { data } = await client.put(`/api/symbol-rules/${symbol}`, body)
+  return data
+}
+
+export async function resetSymbolRule(symbol: string) {
+  const { data } = await client.post(`/api/symbol-rules/${symbol}/reset`)
+  return data
+}
+
+export async function deleteSymbolRule(symbol: string) {
+  const { data } = await client.delete(`/api/symbol-rules/${symbol}`)
+  return data
+}
+
+export async function getBlacklist() {
+  const { data } = await client.get('/api/blacklist/')
+  return data
+}
+
+export async function addToBlacklist(symbol: string, reason?: string) {
+  const { data } = await client.post('/api/blacklist/', { symbol, reason })
+  return data
+}
+
+export async function removeFromBlacklist(symbol: string) {
+  const { data } = await client.delete(`/api/blacklist/${symbol}`)
+  return data
+}
