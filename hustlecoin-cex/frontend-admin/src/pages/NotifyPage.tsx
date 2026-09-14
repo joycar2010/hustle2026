@@ -636,6 +636,35 @@ function BroadcastTab() {
 
 // ─── Templates Tab ───
 
+/** Build a readable Chinese sample for the template's audio audition. */
+function buildTemplatePreviewText(template: NotificationTemplate) {
+  const context = `${template.template_name} ${template.title_template} ${template.content_template}`
+  const scenarios: Array<[RegExp, string]> = [
+    [/借币|borrow/i, '借币流程已完成'],
+    [/还币|repay/i, '还币流程已完成'],
+    [/平仓|close/i, '平仓操作已完成，仓位和收益数据已经更新'],
+    [/风控|risk/i, '风控告警，请立即检查账户风险和仓位状态'],
+    [/爆仓|liquid/i, '爆仓率预警，请立即降低风险敞口'],
+    [/划转|transfer/i, '资金划转失败，请检查账户权限和余额'],
+    [/服务器|server|worker|故障|fault/i, '服务器健康检查异常，请立即联系运维人员'],
+    [/行情|market|行情未到/i, '行情数据暂未到达，请稍候并检查行情连接'],
+    [/残留|dust|BNB/i, '检测到资产残留，系统将执行小额兑换或负债转换清理'],
+    [/备份|github|backup/i, '系统备份任务已完成，备份文件已同步到代码仓库'],
+    [/错误|异常|error/i, '系统检测到异常，请查看详细日志并及时处理'],
+  ]
+  const scenario = scenarios.find(([pattern]) => pattern.test(context))?.[1] || '系统通知试听，当前服务运行正常'
+  const sample = `${template.title_template || scenario}。${template.content_template || scenario}`
+  return sample
+    .replace(/\{symbol\}/g, 'FILUSDT').replace(/\{account\}/g, '05子账户')
+    .replace(/\{qty\}/g, '20').replace(/\{amount\}/g, '50').replace(/\{pnl\}/g, '0.32')
+    .replace(/\{rate\}/g, '30').replace(/\{threshold\}/g, '20').replace(/\{level\}/g, '安全')
+    .replace(/\{action\}/g, '平仓').replace(/\{error\}/g, '接口暂时不可用').replace(/\{message\}/g, scenario)
+    .replace(/\{target\}/g, 'Python业务服务器').replace(/\{host\}/g, '18.176.76.127')
+    .replace(/\{status\}/g, '异常').replace(/\{time\}/g, '刚刚').replace(/\{source\}/g, '币安')
+    .replace(/\{url\}/g, '接口文档').replace(/\{commit\}/g, '20260914').replace(/\{age\}/g, '30')
+    .replace(/\{[^}]+\}/g, scenario)
+}
+
 function TemplatesTab() {
   const [templates, setTemplates] = useState<NotificationTemplate[]>([])
   const [loading, setLoading] = useState(true)
