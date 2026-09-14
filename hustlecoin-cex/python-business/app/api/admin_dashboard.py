@@ -192,6 +192,7 @@ STUCK_STATUSES = {
     "PENDING_BORROW", "BORROWED", "SPOT_SOLD",
     "CLOSING_FUTURES", "FUTURES_CLOSED", "CLOSING_SPOT", "SPOT_BOUGHT", "REPAYING",
 }
+STUCK_THRESHOLD_MIN = 10
 HEARTBEAT_STALE_SEC = 120
 
 
@@ -203,6 +204,11 @@ def _get_engine_health(db: Session, now: datetime) -> dict:
     for p in stuck_rows:
         updated = p.updated_at or p.created_at
         mins = int((now - updated).total_seconds() / 60) if updated else 0
+        # A position can legitimately remain in an execution state while an
+        # order settles.  Keep the admin card focused on genuinely stalled
+        # rows, matching the health monitor's ten-minute alert threshold.
+        if mins < STUCK_THRESHOLD_MIN:
+            continue
         stuck_positions.append({
             "id": p.id,
             "symbol": p.symbol,

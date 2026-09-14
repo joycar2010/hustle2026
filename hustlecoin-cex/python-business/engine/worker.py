@@ -20,6 +20,7 @@ MAX_POSITIONS_PER_ACCOUNT = 10
 MAX_PER_SYMBOL = 3
 SPREAD_FRESH_MS = 10_000   # 借币门:快照 ts 超此毫秒数视为 feed 停更/陈旧,不在死数据上开仓(与 rust 新鲜度护栏对齐)
 STALE_PENDING_BORROW_SEC = 120   # PENDING_BORROW 超此秒数视为僵尸(正常秒级转 IDLE/FAILED),每周期回收(与 orchestrator 启动回收阈值一致)
+STALE_REPAYING_SEC = 300         # REPAYING 仅为互斥认领态，超时后可安全重试
 NAKED_CHECK_INTERVAL = 0.5       # 裸空安全网检查周期(秒):0.5s 准实时发现「孤儿债务」(借币未对冲)
 IDLE_GIVEUP_MINUTES = 30         # BORROWED_IDLE 超时放弃:正阈值仓借后超此分钟仍达不到对冲阈值 → 还币止损(负阈值囤券不适用)
 AUTO_REMEDIATE = True            # 裸空全自动收口(用户已选):检测+告警+自动买回还币;False=仅检测告警
@@ -249,6 +250,9 @@ class Worker:
         # 每周期兜底:回收重启窗口内遗留、超龄的僵尸 PENDING_BORROW,否则其「排队中」overlay
         # 会让下方借币循环误判该币在途而永不重借(根因②脆弱点)。须在加载 positions/statuses 之前。
         await asyncio.to_thread(self._reclaim_stale_pending_borrow)
+        # REPAYING is a transient CAS claim. Recover claims abandoned by a
+        # process crash or an exception before the normal consumer loads rows.
+        await asyncio.to_thread(self._reclaim_stale_repaying)
 
         open_positions = await asyncio.to_thread(self._load_open_positions)
         idle_positions = await asyncio.to_thread(self._load_positions_by_status, "BORROWED_IDLE")
@@ -1212,6 +1216,40 @@ class Worker:
         except Exception as e:
             db.rollback()
             logger.error(f"reclaim_stale_pending_borrow failed (acct {self.sub_account_id}): {e}")
+            return 0
+        finally:
+            db.close()
+
+    def _reclaim_stale_repaying(self) -> int:
+        """Return abandoned REPAYING claims to the retryable state.
+
+        A repayment may take a few seconds while margin settlement catches up;
+        only claims older than the generous five-minute grace period are
+        reclaimed.  This makes worker restarts and request timeouts
+        restart-safe without touching any exchange balances.
+        """
+        db = SessionLocal()
+        try:
+            cutoff = datetime.now(timezone.utc) - timedelta(seconds=STALE_REPAYING_SEC)
+            stale = db.query(Position).filter(
+                Position.sub_account_id == self.sub_account_id,
+                Position.status == "REPAYING",
+                Position.updated_at < cutoff,
+            ).all()
+            for p in stale:
+                p.status = "PENDING_REPAY"
+                p.retry_count = (p.retry_count or 0) + 1
+                p.error_message = "stale REPAYING claim reclaimed; repayment will be retried"
+            if stale:
+                db.commit()
+                logger.warning(
+                    "Sub-account %s: reclaimed %s stale REPAYING position(s)",
+                    self.sub_account_id, len(stale),
+                )
+            return len(stale)
+        except Exception as e:
+            db.rollback()
+            logger.error("reclaim_stale_repaying failed (acct %s): %s", self.sub_account_id, e)
             return 0
         finally:
             db.close()

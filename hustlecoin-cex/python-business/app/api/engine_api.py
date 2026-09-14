@@ -1610,6 +1610,7 @@ STUCK_STATUSES = {
     "PENDING_BORROW", "BORROWED", "SPOT_SOLD",
     "CLOSING_FUTURES", "FUTURES_CLOSED", "CLOSING_SPOT", "SPOT_BOUGHT", "REPAYING",
 }
+STUCK_THRESHOLD_MIN = 10
 HEARTBEAT_STALE_SEC = 120
 
 
@@ -1688,6 +1689,12 @@ def engine_health(request: Request, db: Session = Depends(get_db)):
             mins = int((now - updated).total_seconds() / 60)
         else:
             mins = 0
+        # These are normal in-flight execution states for a few seconds.
+        # Only expose rows that have exceeded the same ten-minute threshold
+        # used by the notifier; otherwise the console labels every active
+        # child-account position as "stuck" and marks the engine degraded.
+        if mins < STUCK_THRESHOLD_MIN:
+            continue
         stuck.append(StuckPosition(
             id=p.id,
             symbol=p.symbol,

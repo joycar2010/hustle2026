@@ -1345,9 +1345,18 @@ async def execute_repay(
         await notifier.notify_error(account_note, f"repay {pos.symbol}", str(e))
     except Exception as e:
         logger.error(f"Repay failed unexpectedly: {e}", exc_info=True)
+        # REPAYING is only the CAS mutex used to prevent duplicate repayments.
+        # Any non-Binance exception (serialization/DB/notifier/network wrapper)
+        # must release it as well; otherwise the worker only consumes
+        # PENDING_REPAY and the position remains stuck forever.  The stale
+        # worker sweep is a second restart-safe backstop.
+        pos.status = "PENDING_REPAY"
+        pos.retry_count = (pos.retry_count or 0) + 1
         pos.error_message = str(e)
         db.commit()
         _publish_position_update(pos, account_note=account_note)
+        _log_trade(db, pos.id, pos.sub_account_id, "REPAY", pos.symbol,
+                   status="FAILED", error=str(e))
         await notifier.notify_error(account_note, f"repay {pos.symbol}", str(e))
     finally:
         db.close()
