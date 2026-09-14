@@ -82,3 +82,11 @@
 - Verification: local Python compilation and frontend build passed. Production login for `lxy` succeeded; `/api/engine/health` returned `HEALTHY`, `RUNNING`, five fresh workers, `uid_scope_available=true`, `spread_count=349`, and zero API errors. Production Worker is 5,043 lines after deployment. The new Dashboard bundle hash matches the local build and is served by the current index.
 - Rollback backup: `/home/ec2-user/coin-backups/market-status-rollback-20260914T160808Z/` (Worker, API/schema, and complete prior SPA archive). Existing static assets were retained; no SPA/dist files were deleted and no trading action was issued.
 - Regression rule: never deploy the shortened historical Worker or a UI bundle that exposes raw `无券`/`行情异常` labels. Preserve the explicit market-state mapping and the complete Worker source in future releases.
+
+## COIN-REG-20260914-FRONTEND-BUNDLE-CLEANUP - Archive obsolete SPA bundles
+
+- Status: Completed on 2026-09-14T16:26Z.
+- The current entry `index-B9MEsjel.js` reaches 17 hashed JS dependencies plus `index-naR2FL25.css`; 68 prior hashed JS/CSS files were unreachable historical builds.
+- Those 68 files were moved out of the public SPA directory into `/home/ec2-user/coin-backups/frontend-old-bundles-20260914T162626Z/assets/` before cleanup. No current asset, `dist` directory, Service Worker, Logo, or source file was deleted.
+- Production root and all current entry/dependency assets return HTTP 200. Both business and Worker services remain active; authenticated engine health remains `HEALTHY/RUNNING` with five workers and UID scope enabled.
+- Release rule: publish only assets reachable from the current entry manifest, archive obsolete bundles before removal, and retain the archive for rollback.
