@@ -663,6 +663,29 @@ function TemplatesTab() {
     catch (err: unknown) { addToast(extractError(err, '创建失败'), 'error') }
   }
 
+  const handlePreview = (template: NotificationTemplate) => {
+    const preset = sounds.find(s => s.key === template.sound_key)
+    if (!preset || preset.key === 'none') {
+      addToast('该模板未绑定提示音', 'info')
+      return
+    }
+    try { playSynthSound(preset.key) } catch { /* 浏览器未启用 Web Audio 时仍继续 TTS */ }
+    const text = buildTemplatePreviewText(template)
+    if (!('speechSynthesis' in window)) {
+      addToast('当前浏览器不支持语音试听', 'error')
+      return
+    }
+    const u = new SpeechSynthesisUtterance(text)
+    const persona = String(template.sound_persona_key || template.persona_key ||
+      (typeof preset.persona === 'string' ? preset.persona : preset.persona?.key || ''))
+    const royal = /royal|yujie|御姐|alert|error|risk|fault|warning/i.test(persona) ||
+      /risk|alert|error|fault|warning|爆仓|风控|故障|异常/i.test(`${template.template_name} ${template.title_template}`)
+    u.lang = 'zh-CN'; u.pitch = royal ? 0.82 : 1.16; u.rate = royal ? 0.9 : 1.04
+    const v = window.speechSynthesis.getVoices().find(x => /zh|cmn/i.test(x.lang) && /female|女|ting|xiaoxiao|yaoyao/i.test(x.name))
+    if (v) u.voice = v
+    window.speechSynthesis.cancel(); window.speechSynthesis.speak(u)
+  }
+
   if (loading) return <div className="text-muted-foreground py-8 text-center">加载中...</div>
 
   const categoryColors: Record<string, string> = { trade: 'bg-blue-500/20 text-blue-400', risk: 'bg-red-500/20 text-red-400', system: 'bg-gray-500/20 text-gray-400' }
@@ -712,6 +735,9 @@ function TemplatesTab() {
                   </td>
                   <td className="px-3 py-2.5">
                     <div className="flex gap-1">
+                      <Button size="sm" variant="ghost" title="试听提示音" aria-label="试听提示音" onClick={() => handlePreview(t)}>
+                        <Volume2 className="h-3.5 w-3.5 text-primary" />
+                      </Button>
                       <Button size="sm" variant="ghost" title="测试" onClick={() => setTestTarget(t.id)}>
                         <Send className="h-3.5 w-3.5 text-primary" />
                       </Button>

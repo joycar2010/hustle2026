@@ -843,7 +843,9 @@ export interface SoundPreset {
   key: string
   label: string
   kind?: 'legacy' | 'persona' | string
-  persona?: NotificationSoundPersona | null
+  // Legacy endpoint returns a simple sweet/royal key; newer deployments may
+  // return the expanded persona object.
+  persona?: NotificationSoundPersona | 'sweet' | 'royal' | string | null
 }
 
 export async function listSounds(includeDisabled = false) {
