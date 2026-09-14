@@ -1,3 +1,14 @@
+# HustleCoin frontend
+
+Browser and mobile icons must use the Dashboard Logo at `public/assets/logo.png`.
+See `COIN-REG-20260914-LOGO` in `../docs/regression-ledger.md` for the production fix and release rules.
+
+- `npm run check:branding` validates source icon references and the Logo cache version.
+- `npm run build` runs this check before TypeScript/Vite; existing output files are preserved.
+- Build releases into a separate new directory, for example `npm run build -- --outDir <staging-directory> --emptyOutDir false`.
+- Before deployment, run `node scripts/check-branding.mjs <vite-output-directory>`; the optional argument must point to built output, not the frontend source directory.
+- Back up production static files, copy assets without deleting older files, and publish the entry HTML last. Never restore `/favicon.svg` as the browser icon.
+
 # React + TypeScript + Vite
 
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.

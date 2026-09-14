@@ -16,7 +16,8 @@ export default defineConfig({
   },
   build: {
     outDir: '../python-business/static/spa',
-    emptyOutDir: true,
+    // Keep existing releases/assets available; see COIN-REG-20260914-LOGO.
+    emptyOutDir: false,
     rollupOptions: {
       output: {
         manualChunks(id: string) {
