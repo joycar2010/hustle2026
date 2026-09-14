@@ -1,0 +1,22 @@
+{
+  "original": "cex_trading-config-20260914.dump",
+  "bytes": 116782549,
+  "sha256": "79f4275b2a9b240f477e307341638c50668c71c301fdfd1d5a8dd1dc7798c71d",
+  "parts": [
+    {
+      "file": "part-000.bin",
+      "bytes": 52428800,
+      "sha256": "88b4942f665626a19a0ceee97e49be304d47edf4d6b197fc39487892d9d358fd"
+    },
+    {
+      "file": "part-001.bin",
+      "bytes": 52428800,
+      "sha256": "290a49e1f6dad663ba4fa4e231f377d199d71eb48eef9d13e4d135164fda9035"
+    },
+    {
+      "file": "part-002.bin",
+      "bytes": 11924949,
+      "sha256": "34ca11016a446922e31539107e1e377a32f182bee2e0d2b345fdf41e2147864a"
+    }
+  ]
+}
