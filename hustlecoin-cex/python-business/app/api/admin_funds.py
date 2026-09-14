@@ -49,9 +49,12 @@ def _position_metrics(db: Session):
     """
     owner_id = func.coalesce(Position.user_id, SubAccount.user_id)
     active = Position.status.notin_(_TERMINAL_POSITION_STATUSES)
-    # A position may have been created before open_usdt_amount was persisted;
-    # borrow_usdt_amount is the immutable fallback used by deployed_notional.
-    notional = func.coalesce(Position.open_usdt_amount, Position.borrow_usdt_amount)
+    # A position may have been created before open_usdt_amount was persisted.
+    # Some older schemas exposed borrow_usdt_amount, while the current ledger
+    # only has open_usdt_amount.  Resolve the optional column safely so the
+    # aggregate remains compatible with both schemas (and SQLite test ledgers).
+    legacy_notional = getattr(Position, "borrow_usdt_amount", Position.open_usdt_amount)
+    notional = func.coalesce(Position.open_usdt_amount, legacy_notional)
     active_rows = db.query(
         owner_id,
         func.coalesce(func.sum(notional), 0),
