@@ -99,3 +99,10 @@
 - Production deployment: updated Worker, residual checker, user dashboard source, and rebuilt SPA on 2026-09-14T17:16Z. Engine was explicitly started for lxy after restart; health now reports `HEALTHY/RUNNING`, five workers, and `uid_scope_available=true`.
 - Verification: all 13 Python regression tests pass; frontend branding check, TypeScript, and Vite build pass. Current index and Dashboard bundle return HTTP 200. No borrow, order, repay, or transfer test was issued.
 - Rollback backup: `/home/ec2-user/coin-backups/regression-audit-20260914T171630Z/`.
+
+## COIN-REG-20260914-MASTER-USDT-BALANCE - Use actual futures USDT asset for display and transfers
+
+- Root cause: the master balance API and margin balancer used Binance top-level futures `availableBalance`, which is a multi-asset USDT valuation. It exceeded the actual USDT asset balance (for example 685.69 valuation versus 580.63 USDT wallet).
+- Fix: `/api/master-account/balance` now returns `futures_usdt_wallet` and `futures_usdt_available` from the `assets[].asset=USDT` row. The dashboard's “合约可转” card displays the actual USDT wallet amount first. The balancer budgets `min(walletBalance, availableBalance)` for USDT transfers, preventing non-USDT collateral from being treated as transferable USDT.
+- Production verification: API returned `futures_usdt_wallet=580.62644022`; UI source now prefers this field. After restart and explicit engine start, health returned `HEALTHY/RUNNING` with all five workers active.
+- No manual transfer or trading operation was issued. Existing reserve gate remains in force.

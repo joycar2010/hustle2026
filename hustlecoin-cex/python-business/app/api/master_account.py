@@ -134,6 +134,18 @@ async def get_master_balance(request: Request, db: Session = Depends(get_db)):
             margin_borrowed = a.get("borrowed", "0")
             break
 
+    # In multi-asset futures mode Binance's top-level balances are USDT
+    # valuations of all collateral. Transfers are USDT asset transfers, so
+    # expose the actual USDT row for the UI and the balancer.
+    futures_usdt_wallet, futures_usdt_available = "0", "0"
+    for asset_row in futures.get("assets", []) if isinstance(futures, dict) else []:
+        if asset_row.get("asset") == "USDT":
+            futures_usdt_wallet = asset_row.get("walletBalance", "0")
+            futures_usdt_available = asset_row.get(
+                "availableBalance", asset_row.get("maxWithdrawAmount", "0")
+            )
+            break
+
     return {
         "spot_usdt_free": spot_free,
         "spot_usdt_locked": spot_locked,
@@ -144,6 +156,8 @@ async def get_master_balance(request: Request, db: Session = Depends(get_db)):
         "margin_usdt_borrowed": margin_borrowed,
         "futures_total_balance": futures.get("totalWalletBalance", "0"),
         "futures_available": futures.get("availableBalance", "0"),
+        "futures_usdt_wallet": futures_usdt_wallet,
+        "futures_usdt_available": futures_usdt_available,
         "futures_unrealized_pnl": futures.get("totalUnrealizedProfit", "0"),
     }
 

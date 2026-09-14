@@ -820,7 +820,7 @@ export function RulesPage({ onClose, embedded }: { onClose?: () => void; embedde
             <div className="flex items-center gap-5 text-[11px]">
               <span className="text-positive/80 text-[10px]">主账户</span>
               <span className="text-muted-foreground">全仓可转: <span className="text-foreground font-mono tabular-nums">{mbNum('margin_usdt_free') ?? '-'}</span></span>
-              <span className="text-muted-foreground">合约可转: <span className="text-foreground font-mono tabular-nums">{mbNum('futures_available') ?? '-'}</span></span>
+              <span className="text-muted-foreground">合约可转: <span className="text-foreground font-mono tabular-nums">{mbNum('futures_usdt_wallet') ?? mbNum('futures_usdt_available') ?? mbNum('futures_available') ?? '-'}</span></span>
               <span className="text-muted-foreground">现货可转: <span className="text-foreground font-mono tabular-nums">{mbNum('spot_usdt_free') ?? '-'}</span></span>
               <span className="text-muted-foreground/50 text-[9px]">(主账户余额;自动划转对应主账户)</span>
             </div>

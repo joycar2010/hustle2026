@@ -97,7 +97,26 @@ async def _master_source_usdt(mc: BinanceTradingClient, sources: list[str]) -> d
                                  if a.get("asset") == "USDT"), Decimal("0"))
             elif src == "futures":
                 acct = await mc.get_futures_account()
-                bal[src] = Decimal(str(acct.get("availableBalance", "0")))
+                # Top-level availableBalance is a USDT valuation across all
+                # collateral in multi-asset mode.  Transfers are USDT asset
+                # transfers, so use the USDT row's available balance to avoid
+                # overstating the amount available to child margin wallets.
+                usdt = next(
+                    (row for row in acct.get("assets", [])
+                     if str(row.get("asset") or "").upper() == "USDT"),
+                    None,
+                )
+                if usdt is not None:
+                    wallet = Decimal(str(usdt.get("walletBalance", "0") or "0"))
+                    available = Decimal(str(usdt.get(
+                        "availableBalance", usdt.get("maxWithdrawAmount", "0")
+                    ) or "0"))
+                    # Never budget more USDT than the actual USDT asset. In
+                    # multi-asset mode Binance's availableBalance can include
+                    # collateral valuation from other assets.
+                    bal[src] = min(wallet, available) if available > 0 else wallet
+                else:
+                    bal[src] = Decimal(str(acct.get("availableBalance", "0")))
         except Exception:
             bal[src] = Decimal("0")
     return bal
