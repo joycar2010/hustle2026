@@ -42,7 +42,7 @@ export function DashboardPage() {
   const [symbolRulesMap, setSymbolRulesMap] = useState<Map<string, SymbolRuleInfo>>(new Map())
   const [delistingSymbols, setDelistingSymbols] = useState<Set<string>>(new Set())
   const [riskySymbols, setRiskySymbols] = useState<Set<string>>(new Set())
-  const [accountRates, setAccountRates] = useState<Record<string, number>>({})
+  const [accountInventoryProbeRates, setAccountInventoryProbeRates] = useState<Record<string, number>>({})
 
   useEffect(() => {
     // [第三梯队] 轮询用 AbortController:慢网下撤销上一次未完成的 health 请求,避免堆叠
@@ -51,7 +51,7 @@ export function DashboardPage() {
       ctrl?.abort()
       ctrl = new AbortController()
       getEngineHealth(ctrl.signal).then((h) => {
-        setAccountRates(h.account_borrow_rates ?? {})
+        setAccountInventoryProbeRates(h.account_inventory_probe_rates ?? {})
       }).catch(() => {})
     }
     fetchThrottle()
@@ -317,7 +317,7 @@ export function DashboardPage() {
         symbolRules={symbolRulesMap}
         delistingSymbols={delistingSymbols}
         riskySymbols={riskySymbols}
-        accountRates={accountRates}
+        accountInventoryProbeRates={accountInventoryProbeRates}
         onAction={handleAction}
       />
       {showTransfer && (

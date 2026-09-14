@@ -146,3 +146,7 @@ class HealthResponse(BaseModel):
     agg_borrow_rate: float = 0.0  # Σ per-account effective borrow rate (req/s)
     single_borrow_rate: float = 0.0  # 单UID建仓速率: 单账户配速 min(borrow_rate_per_sec, UID硬顶) (req/s)
     account_borrow_rates: dict[str, float] = {}  # 逐子账户可借速率 {sub_account_id: req/s},各账户因UID消耗不同而不同
+    # available-inventory 查询速率与借币提交速率是两个独立的 Binance API
+    # 口径。Dashboard 币种行使用该字段，避免把 borrow_rate_per_sec 的
+    # 默认 2.00/次误标成查库速率。
+    account_inventory_probe_rates: dict[str, float] = {}

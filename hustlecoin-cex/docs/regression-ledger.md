@@ -47,3 +47,38 @@
 - Fix: generic repayment failures now return the row to `PENDING_REPAY`, increment `retry_count`, and write a failed repayment trade log. Workers reclaim abandoned `REPAYING` claims older than five minutes before loading pending repayments. Admin health endpoints report execution states as stuck only after ten minutes, matching the notification threshold.
 - Production proof: business and worker services are active after deployment. Read-only position query immediately after rollout reported `CLOSED=57`, `FAILED=10448`, and no `PENDING_BORROW`, `REPAYING`, or other in-flight stuck rows. No database rows were manually changed and no borrow/order/repay/close request was issued for verification.
 - Rollback backup: `/home/ec2-user/coin-backups/stuck-position-20260914T105520Z/before.tar.gz`.
+
+## COIN-REG-20260914-ROLLBACK-GUARDS - Pushed-slot order, inventory rate, and low-spread lifecycle
+
+- Status: Deployed to production on 2026-09-14T13:40Z after restoring the complete 5039-line worker/API bundle; business and worker services are active.
+- Root causes: a regression converted the pushed-symbol queue through `set/sorted`, the dashboard reused the independent borrow-submit rate (`2.00/s`) for inventory reads, and the compact worker had no low-spread pushed-list lifecycle gate.
+- Fix: Redis pushed symbols remain an insertion-ordered list across manual push, automatic push, confirmation, close cleanup, and removal; the dashboard uses that list index for slot ordering. Inventory polling has separate global/per-sub-account `inventory_probe_rate_per_sec` settings and health telemetry, with account overrides inheriting the user global value (default `3.8/s`). Automatic pushes are tagged `auto` and are removed when fresh spread is below the effective `remove_spread`; manual and legacy untagged pushes remain protected, active positions are never removed, and `allow_remove=false` keeps the symbol.
+- Migration: `aa99bb00cc11_inventory_probe_rates` is idempotent because production already contains these columns on some installations.
+- Regression rule: never deploy the shortened historical worker over the complete worker; preserve ordered queue semantics, the separate inventory rate field, and automatic/manual push origin markers in every future worker change.
+- Production backup: `/home/ec2-user/coin-backups/rollback-guards-20260914T125010Z/before.tar.gz`. The migration command was skipped after the production database rejected the repository's default `postgres` password; read-only runtime checks confirmed the existing inventory-rate columns and the application started normally.
+
+### Follow-up: supported Binance transfer route
+
+- Status: Deployed to production on 2026-09-14 at 14:22 UTC; worker active and balances verified read-only.
+- Root cause confirmed in production: Binance returns `-9000 Unsupported operation` for direct `USDT_FUTURE -> sub-account MARGIN` universal transfers. Rules and balances were valid (`hedge_via_master=true`, master futures available about `1982.83 USDT`, child margin free balances below their `300/200 USDT` floors).
+- Fix: when the configured source is the master futures wallet, first use the supported internal `UMFUTURE_MAIN` transfer into the master spot wallet, then call `SPOT -> MARGIN` universal transfer to the child. The futures reserve remains excluded from the source budget, and per-user transfer locking is unchanged. Transfer failures now emit the source, amount, target, and Binance error for diagnosis.
+- Verification: five focused margin-balancer tests pass; Python compilation passes. After restart, read-only balances were approximately `linxiaoyun01=299.995`, `02=199.996`, `03=199.997`, `04=200.000`, `05=199.998 USDT`; master futures available was `500.010 USDT`, preserving the configured 500U reserve. Worker logs recorded successful top-ups for all five accounts. No manual transfer test was issued; only the configured automatic worker path ran.
+- Rollback backup: `/home/ec2-user/coin-backups/autotransfer-route-20260914T142134Z/margin_balancer.py`.
+
+### Follow-up: reserve gate and spot repatriation
+
+- Status: Ready for production rollout after focused tests pass.
+- Correction: `base_margin_amount` is a minimum gate for the master futures wallet. It must not force the master to keep exactly that amount in futures while leaving additional transferable USDT in spot.
+- Fix: every balancing pass first sweeps transferable master spot USDT to `USDT_FUTURE` with `MAIN_UMFUTURE`. Only after that sweep, if futures available is below the configured reserve, the child transfer is blocked. If it is above the reserve, only the futures surplus may be sent to children through the supported futures→spot→child-margin bridge.
+- Safety: child top-ups no longer consume master spot directly; extra funds remain in the master futures wallet for the shared hedge leg. The configured reserve value remains user-controlled.
+- Status: Deployed to production at 2026-09-14 14:51 UTC. Each balancing cycle now sweeps master spot USDT back to the futures wallet before applying the reserve gate. Worker restarted successfully and remains active.
+- Rollback backup: `/home/ec2-user/coin-backups/autotransfer-reserve-gate-20260914T145120Z/margin_balancer.py`.
+
+## COIN-REG-20260914-MARKET-STATUS-RESTORE - Restore market status semantics after Worker/UI rollback
+
+- Status: Deployed to production on 2026-09-14T16:09Z; `cex-worker.service` and `cex-business.service` active.
+- Root cause: production had a newer complete 4,800+ line Worker than the repository's 1,300-line historical copy, but its `-3045` inventory cooldown branch published the retired `无券` status. The dashboard bundle also rendered backend labels verbatim, so `行情异常` and `无券` reappeared after previous fixes.
+- Fix: synchronized the complete production Worker back into the repository (preserving inventory throttling, ordered pushed slots, UID scope, position recovery, automatic transfer reserve gate, and residual cleanup). The inventory cooldown branch now remains `运行中`; legacy payloads are rendered as `寻币中`. UI status mapping applies `无券→寻币中` and `行情异常→行情未到` on desktop, compact, mobile, and sub-account rows, including tooltips. Dead-coin icon logic remains limited to explicit `死币`/delisting markers.
+- Verification: local Python compilation and frontend build passed. Production login for `lxy` succeeded; `/api/engine/health` returned `HEALTHY`, `RUNNING`, five fresh workers, `uid_scope_available=true`, `spread_count=349`, and zero API errors. Production Worker is 5,043 lines after deployment. The new Dashboard bundle hash matches the local build and is served by the current index.
+- Rollback backup: `/home/ec2-user/coin-backups/market-status-rollback-20260914T160808Z/` (Worker, API/schema, and complete prior SPA archive). Existing static assets were retained; no SPA/dist files were deleted and no trading action was issued.
+- Regression rule: never deploy the shortened historical Worker or a UI bundle that exposes raw `无券`/`行情异常` labels. Preserve the explicit market-state mapping and the complete Worker source in future releases.

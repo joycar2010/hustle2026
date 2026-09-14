@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import math
 import time
 from decimal import Decimal
 
@@ -614,13 +615,23 @@ def push_symbol(symbol: str, request: Request, db: Session = Depends(get_db)):
     r.expire(key, 120)
     ps_key = _user_redis_key(user_id, "pushed_symbols")
     raw = r.get(ps_key)
-    current = set(json.loads(raw)) if raw else set()
-    current.add(sym)
-    r.set(ps_key, json.dumps(sorted(current)))
+    # pushed_symbols is an ordered queue: preserve the original push order and
+    # append only newly pushed symbols.  Converting through set/sorted here
+    # silently reordered the slots alphabetically.
+    try:
+        current = list(json.loads(raw)) if raw else []
+    except Exception:
+        current = []
+    current = [str(s).upper() for s in current if s]
+    if sym not in current:
+        current.append(sym)
+    r.set(ps_key, json.dumps(current))
+    # Manual pushes are protected from the automatic low-spread lifecycle.
+    r.hset(_user_redis_key(user_id, "pushed_origin"), sym, "manual")
     r.hsetnx(_user_redis_key(user_id, "pushed_at"), sym, int(time.time()))  # 记首次推送时刻(已存在不覆盖)
     r.delete(f"engine:{user_id}:repayhold:{sym}")  # 重新推送=显式再武装,清还币暂停标记允许重借
     # 通知前端 dashboard 实时刷新推送列表(经 WS pushed_update)
-    r.publish("pushed:updates", json.dumps({"user_id": user_id, "pushed_symbols": sorted(current)}))
+    r.publish("pushed:updates", json.dumps({"user_id": user_id, "pushed_symbols": current}))
     r.publish("balance:refresh", str(user_id))   # 推送后即时刷余额/借币/现币(绕开10s轮询)
     return {"message": f"Pushed {sym}"}
 
@@ -759,12 +770,16 @@ async def remove_pushed_symbol(symbol: str, request: Request, db: Session = Depe
         _r0 = _redis()
         _ps0 = _user_redis_key(user_id, "pushed_symbols")
         _raw0 = _r0.get(_ps0)
-        _cur0 = set(json.loads(_raw0)) if _raw0 else set()
-        _cur0.discard(sym)
-        _r0.set(_ps0, json.dumps(sorted(_cur0)))
+        try:
+            _cur0 = list(json.loads(_raw0)) if _raw0 else []
+        except Exception:
+            _cur0 = []
+        _cur0 = [s for s in _cur0 if s != sym]
+        _r0.set(_ps0, json.dumps(_cur0))
         _r0.hdel(_user_redis_key(user_id, "pushed_at"), sym)
+        _r0.hdel(_user_redis_key(user_id, "pushed_origin"), sym)
         _r0.set(f"engine:{user_id}:repayhold:{sym}", "1", ex=1800)  # 阻断移除期间自动重借
-        _r0.publish("pushed:updates", json.dumps({"user_id": user_id, "pushed_symbols": sorted(_cur0)}))
+        _r0.publish("pushed:updates", json.dumps({"user_id": user_id, "pushed_symbols": _cur0}))
     except Exception as _pe:
         logger.warning(f"remove {sym}: 预摘除/挂还币暂停失败(继续还债): {_pe}")
 
@@ -846,11 +861,15 @@ async def remove_pushed_symbol(symbol: str, request: Request, db: Session = Depe
     r.expire(key, 120)
     ps_key = _user_redis_key(user_id, "pushed_symbols")
     raw = r.get(ps_key)
-    current = set(json.loads(raw)) if raw else set()
-    current.discard(sym)
-    r.set(ps_key, json.dumps(sorted(current)))
+    try:
+        current = list(json.loads(raw)) if raw else []
+    except Exception:
+        current = []
+    current = [s for s in current if s != sym]
+    r.set(ps_key, json.dumps(current))
     r.hdel(_user_redis_key(user_id, "pushed_at"), sym)  # 清推送时间戳
-    r.publish("pushed:updates", json.dumps({"user_id": user_id, "pushed_symbols": sorted(current)}))
+    r.hdel(_user_redis_key(user_id, "pushed_origin"), sym)
+    r.publish("pushed:updates", json.dumps({"user_id": user_id, "pushed_symbols": current}))
 
     # 移除即清该币的单一规则覆盖(SymbolRule + AccountSymbolRule)→ 再推进来回归全局参数。
     _purge_symbol_rules(db, user_id, sym, sub_ids)
@@ -1611,6 +1630,47 @@ STUCK_STATUSES = {
     "CLOSING_FUTURES", "FUTURES_CLOSED", "CLOSING_SPOT", "SPOT_BOUGHT", "REPAYING",
 }
 STUCK_THRESHOLD_MIN = 10
+
+
+def _inventory_probe_rates_by_account(db: Session, user_id: int) -> dict[str, float]:
+    """Return the configured available-inventory GET rate for this tenant.
+
+    This is deliberately separate from ``account_borrow_rates``: the latter is
+    the Binance borrow-submit pacing metric and historically defaulted to
+    2.00/s.  Inventory probing has its own global setting and optional
+    per-sub-account override; a null account value inherits the tenant global.
+    """
+    default_rate = 3.8
+    try:
+        from app.db.models import GlobalRules
+
+        rules = db.query(GlobalRules).filter(GlobalRules.user_id == user_id).first()
+        if rules is None:
+            rules = db.query(GlobalRules).filter(GlobalRules.user_id.is_(None)).order_by(GlobalRules.id).first()
+        raw_default = getattr(rules, "inventory_probe_rate_per_sec", None) if rules else None
+        candidate = float(raw_default) if raw_default is not None else default_rate
+        if math.isfinite(candidate) and 0 < candidate <= 10:
+            default_rate = candidate
+    except Exception:
+        pass
+
+    result: dict[str, float] = {}
+    try:
+        accounts = db.query(SubAccount).filter(
+            SubAccount.user_id == user_id,
+            SubAccount.is_enabled == True,
+        ).all()
+    except Exception:
+        return result
+    for account in accounts:
+        raw_rate = getattr(account, "inventory_probe_rate_per_sec", None)
+        try:
+            rate = default_rate if raw_rate is None else float(raw_rate)
+        except (TypeError, ValueError):
+            rate = default_rate
+        if math.isfinite(rate) and 0 < rate <= 10:
+            result[str(account.id)] = round(rate, 2)
+    return result
 HEARTBEAT_STALE_SEC = 120
 
 
@@ -1849,6 +1909,10 @@ def engine_health(request: Request, db: Session = Depends(get_db)):
     except Exception:
         pass
 
+    # Keep this metric independent from the borrow-submit pacing above.  The
+    # Dashboard uses it for the per-account "库存查询" column.
+    account_inventory_probe_rates = _inventory_probe_rates_by_account(db, user_id)
+
     return HealthResponse(
         status=overall,
         engine_status=engine_status,
@@ -1868,4 +1932,5 @@ def engine_health(request: Request, db: Session = Depends(get_db)):
         agg_borrow_rate=agg_borrow_rate,
         single_borrow_rate=single_borrow_rate,
         account_borrow_rates=account_borrow_rates,
+        account_inventory_probe_rates=account_inventory_probe_rates,
     )

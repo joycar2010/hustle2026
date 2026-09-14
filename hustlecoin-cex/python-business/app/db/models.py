@@ -74,6 +74,7 @@ class SubAccount(Base):
     max_borrow_amount = Column(Numeric(15, 2), nullable=True)
     max_order_count = Column(Integer, nullable=True)
     borrow_rate_per_sec = Column(Numeric(6, 2), nullable=True)  # per-account override; null=follow global
+    inventory_probe_rate_per_sec = Column(Numeric(6, 2), nullable=True)  # available-inventory GET rate; null=follow global
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -122,6 +123,7 @@ class GlobalRules(Base):
     stabilize_sec = Column(Numeric(6, 2), default=0)          # wait after spot sell before futures hedge
     tier_ratios = Column(String(120), default="")             # "0.5:30,0.8:30,1.2:40" (persisted)
     borrow_rate_per_sec = Column(Numeric(6, 2), default=2)    # per-account target borrow pacing (req/s)
+    inventory_probe_rate_per_sec = Column(Numeric(6, 2), default=3.8, nullable=False, server_default="3.8")
     borrow_via_otoco = Column(Boolean, default=False)         # True=借币走 coinmini 同款 IOC OTO/OTOCO;False=borrow-repay
     borrow_mode = Column(String(20), nullable=True)           # 借币方式枚举: repay/otoco/single/multi;null=回退 borrow_via_otoco(灰度兼容)
     otoco_legs = Column(Integer, default=2)                   # OTOCO 借币腿数: 1=单腿裸MARGIN_BUY(最省order-count)/2=OTO(2单撤)/3=OTOCO(3单撤)

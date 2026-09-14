@@ -48,7 +48,7 @@ interface OwlTreeTableProps {
   symbolRules?: Map<string, SymbolRuleInfo>
   delistingSymbols?: Set<string>
   riskySymbols?: Set<string>
-  accountRates?: Record<string, number>   // 逐子账户可借速率 {sub_account_id: req/s}
+  accountInventoryProbeRates?: Record<string, number>   // 逐子账户可借速率 {sub_account_id: req/s}
   onAction: (action: string, symbol: string, position?: Position, extra?: Record<string, unknown>) => void
 }
 
@@ -170,6 +170,22 @@ const STATUS_TITLES: Record<string, string> = {
   '还币暂停': '手动还币时勾选的暂停(或还币在途的短暂静默);点击状态可立即恢复,重存该币规则/重新推送亦可',
   '运行中': '有券+点差达标,挂单借币中',
 }
+
+// 后端状态值保持原样供状态机、筛选和排序使用；用户界面统一采用产品口径。
+// “无券”表示当前借贷库存尚未找到，不是故障；“行情异常”表示本轮报价尚未到达。
+const STATUS_DISPLAY_NAMES: Record<string, string> = {
+  '无券': '寻币中',
+  '行情异常': '行情未到',
+}
+function displayStatus(s: string | null | undefined): string {
+  return s ? (STATUS_DISPLAY_NAMES[s] ?? s) : ''
+}
+function statusTitle(s: string | null | undefined): string | undefined {
+  if (!s) return undefined
+  const title = STATUS_TITLES[s]
+  const display = displayStatus(s)
+  return title && display !== s ? `${display}：${title}` : title
+}
 function statusColorCls(s: string): string {
   if (s === '运行中') return 'text-positive'        // 正常运行(有券+点差达标,挂单借币中)→ 绿
   if (s === '借币停止') return 'text-negative'
@@ -240,17 +256,15 @@ const CoinHeaderRow = memo(function CoinHeaderRow({
   const dh = group.durationHours
   const dhText = dh != null ? (dh > 24 ? `${Math.floor(dh / 24)}d${Math.floor(dh % 24)}h` : `${Math.floor(dh)}h`) : '-'
 
-  // 真死币:盘口异常(价格冻结/单腿停更) 或 长窗口停更(>600s,运维口径) → 币名标红 + 💀。
+  // 真死币必须由后端明确标记（死币）或交易所退市标记确认。
   // 注意「行情陈旧」状态本身是 10 秒交易闸口径:bookTicker 仅价/量变才推,冷清时段稳态下
   // 约一半币任意时刻 >10s 无 tick(实测 stale>10s≈49%),属正常微观结构、来 tick 即恢复 ——
-  // 不能直接当死币,否则半个市场天天挂骷髅。死币须用 spread.ts 实际停更时长(>600s)判。
-  const staleSec = group.spread?.ts ? Math.floor((Date.now() - group.spread.ts) / 1000) : null
-  const DEAD_STALE_SEC = 600
-  const isDeadCoin = symbolStatus === '行情异常'
-    || (symbolStatus === '行情陈旧' && staleSec != null && staleSec > DEAD_STALE_SEC)
+  // 不能直接当死币,否则半个市场天天挂骷髅。死币须由后端明确标记或交易所退市确认。
+  // 行情异常/行情陈旧仅表示报价质量或暂时断流，下一次 WS 行情可能恢复，
+  // 不得因此显示死币图标或把币种当作退市处理。
+  const isDeadCoin = Boolean(isDelisting) || symbolStatus === '死币'
   const deadTitle = isDeadCoin
-    ? (symbolStatus === '行情异常' ? '盘口异常(价格冻结/单腿停更),已停止开仓'
-       : `行情停更 ${staleSec} 秒(>10分钟),feed 死币,已停止开仓`)
+    ? (isDelisting ? '已确认退市/下架，已停止开仓' : '引擎确认死币，已停止开仓')
     : undefined
 
   const rule = group.ruleInfo
@@ -330,7 +344,7 @@ const CoinHeaderRow = memo(function CoinHeaderRow({
         )}
         {isMobile && (
           <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[10px] leading-tight">
-            {symbolStatus && <span className={statusColorCls(symbolStatus)}>{symbolStatus}</span>}
+            {symbolStatus && <span className={statusColorCls(symbolStatus)} title={statusTitle(symbolStatus)}>{displayStatus(symbolStatus)}</span>}
             <span className={hasCustomRule ? 'text-amber-400' : 'text-muted-foreground'}>
               {hasCustomRule ? '单一规则' : '通用规则'}
             </span>
@@ -355,7 +369,7 @@ const CoinHeaderRow = memo(function CoinHeaderRow({
       {!isMobile && (
         <td className="px-1.5 py-1 text-right whitespace-nowrap text-[10px]">
           {compact && symbolStatus ? (
-            <span className={statusColorCls(symbolStatus)} title={STATUS_TITLES[symbolStatus]}>{symbolStatus}</span>
+            <span className={statusColorCls(symbolStatus)} title={statusTitle(symbolStatus)}>{displayStatus(symbolStatus)}</span>
           ) : group.pushTime ? (
             <span className="text-muted-foreground">推 {group.pushTime}</span>
           ) : group.pushedAtText ? (
@@ -394,7 +408,7 @@ const CoinHeaderRow = memo(function CoinHeaderRow({
         </td>
       )}
       {/* 速率 — 已下沉到各子账户行(per-account 速率),币种行此列留空占位保持对齐 */}
-      {!isMobile && <td className="px-1 py-1"></td>}
+      {!isMobile && <td className="px-1 py-1 text-right whitespace-nowrap text-[10px] text-foreground" title="各子账户 available-inventory 查询目标速率；一次请求返回账户全部资产库存">查库</td>}
       {/* 移/还 — allow_remove / allow_repay 文字指示 */}
       {!isMobile && (
         <td className="px-1 py-1 text-center whitespace-nowrap text-[10px]">
@@ -441,7 +455,7 @@ const SubAccountRow = memo(function SubAccountRow({
   symbolStatus,
   marketInfo,
   restriction,
-  accountRate,
+  accountInventoryProbeRate,
   onContextMenu,
   onDoubleClick,
   onMobileMenu,
@@ -455,7 +469,7 @@ const SubAccountRow = memo(function SubAccountRow({
   symbolStatus?: string | null
   marketInfo?: MarketInfo
   restriction?: { label: string; remaining: number }
-  accountRate?: number
+  accountInventoryProbeRate?: number
   onContextMenu: (e: React.MouseEvent, symbol: string, position: Position) => void
   onDoubleClick: (symbol: string, subAccountId?: number) => void
   onMobileMenu: (e: React.MouseEvent | React.TouchEvent, symbol: string, position?: Position) => void
@@ -496,7 +510,7 @@ const SubAccountRow = memo(function SubAccountRow({
         <div className="whitespace-nowrap">
           ↳ {pos.account_note || `#${pos.sub_account_id}`}
           {isMobile && symbolStatus && (
-            <span className={cn('ml-1.5 text-[10px]', statusColorCls(symbolStatus))}>{symbolStatus}</span>
+            <span className={cn('ml-1.5 text-[10px]', statusColorCls(symbolStatus))} title={statusTitle(symbolStatus)}>{displayStatus(symbolStatus)}</span>
           )}
           {isMobile && !symbolStatus && (
             <span className="ml-1.5 text-[10px] text-muted-foreground">{durationText(pos.opened_at)}</span>
@@ -661,7 +675,7 @@ const SubAccountRow = memo(function SubAccountRow({
               >还币暂停{holdMin ? `(${holdMin}分)` : ''}</span>
             )
           })() : symbolStatus ? (
-            <span className={statusColorCls(symbolStatus)} title={STATUS_TITLES[symbolStatus]}>{symbolStatus}</span>
+            <span className={statusColorCls(symbolStatus)} title={statusTitle(symbolStatus)}>{displayStatus(symbolStatus)}</span>
           ) : (
             <span className="text-muted-foreground">{durationText(pos.opened_at)}</span>
           )}
@@ -679,11 +693,11 @@ const SubAccountRow = memo(function SubAccountRow({
       )}
       {/* 单 — 子账户行留空 */}
       {!isMobile && <td className="px-0.5 py-0.5"></td>}
-      {/* 速率 — 该子账户 per-account 可借速率(各账户因 UID 消耗不同而不同) */}
+      {/* 查库速率 — 该子账户 available-inventory GET 目标速率 */}
       {!isMobile && (
         <td className="px-1 py-0.5 text-right tabular-nums font-mono text-[10px] text-foreground"
-            title="该子账户当前 UID 权重余量下每秒可发起的借币次数(各账户独立)">
-          {accountRate != null && accountRate > 0 ? `${accountRate.toFixed(2)}次` : '-'}
+            title="该子账户 available-inventory 查询目标速率；一次请求返回账户全部资产库存，不是借币提交速率">
+          {accountInventoryProbeRate != null && accountInventoryProbeRate > 0 ? `${accountInventoryProbeRate.toFixed(2)}次` : '-'}
         </td>
       )}
       {/* 移/还 — 封禁倒计时 */}
@@ -728,7 +742,7 @@ const BORROW_DISPLAY_KEY = 'hc_borrow_display_mode'
 // 币种行点差陈旧阈值(ms):某币 ts 落后全表最新 ts 超过此值视为陈旧(就近值变灰),与 /spreads 默认 300s 一致
 const DASH_SPREAD_STALE_MS = 300_000
 
-export function OwlTreeTable({ positions, pushedSymbols, pushedAt, symbolRules, delistingSymbols, riskySymbols, accountRates, onAction }: OwlTreeTableProps) {
+export function OwlTreeTable({ positions, pushedSymbols, pushedAt, symbolRules, delistingSymbols, riskySymbols, accountInventoryProbeRates, onAction }: OwlTreeTableProps) {
   const spreads = useSpreadStore((s) => s.spreads)
   const spreadsLastTs = useSpreadStore((s) => s.lastUpdateTs)
   // 就近点差缓存: WS 断流/某币 ts 过期时,保留最后一次有效点差(不闪不清零,标记陈旧),
@@ -775,6 +789,14 @@ export function OwlTreeTable({ positions, pushedSymbols, pushedAt, symbolRules, 
   }, [])
 
   const pushedSet = useMemo(() => new Set(pushedSymbols), [pushedSymbols])
+  // Redis/API stores pushed_symbols as an insertion-ordered queue.  Keep a
+  // stable index so the slot rows follow push order instead of falling back to
+  // the previous alphabetical sort.
+  const pushedOrder = useMemo(() => {
+    const order = new Map<string, number>()
+    pushedSymbols.forEach((symbol, index) => order.set(symbol, index))
+    return order
+  }, [pushedSymbols])
 
   const balanceMap = useMemo(() => {
     const m = new Map<number, AccountBalance>()
@@ -947,13 +969,21 @@ export function OwlTreeTable({ positions, pushedSymbols, pushedAt, symbolRules, 
     }
 
     result.sort((a, b) => {
-      if (a.positions.length !== b.positions.length) return b.positions.length - a.positions.length
+      // Pushed rows are the visible slots: retain their insertion order from
+      // the API, including rows with/without a position.  This also prevents
+      // a later alphabetic sort from moving a manually pushed coin.
       if (a.isPushed !== b.isPushed) return a.isPushed ? -1 : 1
-      return (a.symbol < b.symbol ? -1 : 1)
+      if (a.isPushed && b.isPushed) {
+        const ai = pushedOrder.get(a.symbol) ?? Number.MAX_SAFE_INTEGER
+        const bi = pushedOrder.get(b.symbol) ?? Number.MAX_SAFE_INTEGER
+        if (ai !== bi) return ai - bi
+      }
+      if (a.positions.length !== b.positions.length) return b.positions.length - a.positions.length
+      return a.symbol === b.symbol ? 0 : (a.symbol < b.symbol ? -1 : 1)
     })
 
     return result
-  }, [spreads, spreadsLastTs, positions, search, pushedSet, pushedAt, showPositionsOnly, balanceMap, symbolRules])
+  }, [spreads, spreadsLastTs, positions, search, pushedSet, pushedOrder, pushedAt, showPositionsOnly, balanceMap, symbolRules])
 
   const toggle = useCallback((symbol: string) => {
     setExpanded(prev => {
@@ -1079,7 +1109,7 @@ export function OwlTreeTable({ positions, pushedSymbols, pushedAt, symbolRules, 
                   symbolStatuses={symbolStatuses}
                   restrictions={restrictions}
                   marketData={marketData}
-                  accountRates={accountRates}
+                  accountInventoryProbeRates={accountInventoryProbeRates}
                   onToggle={toggle}
                   onContextMenu={handleContextMenu}
                   onDoubleClick={handleDoubleClick}
@@ -1145,7 +1175,7 @@ const CoinGroupRows = memo(function CoinGroupRows({
   symbolStatuses,
   restrictions,
   marketData,
-  accountRates,
+  accountInventoryProbeRates,
   onToggle,
   onContextMenu,
   onDoubleClick,
@@ -1166,7 +1196,7 @@ const CoinGroupRows = memo(function CoinGroupRows({
   symbolStatuses: Map<string, string>
   restrictions: Map<number, { label: string; remaining: number; updatedAt: number }>
   marketData: Map<string, MarketInfo>
-  accountRates?: Record<string, number>
+  accountInventoryProbeRates?: Record<string, number>
   onToggle: (symbol: string) => void
   onContextMenu: (e: React.MouseEvent, symbol: string, position?: Position) => void
   onDoubleClick: (symbol: string, subAccountId?: number) => void
@@ -1226,7 +1256,7 @@ const CoinGroupRows = memo(function CoinGroupRows({
             symbolStatus={posStatus}
             restriction={posRestriction}
             marketInfo={marketData.get(pos.symbol)}
-            accountRate={accountRates?.[String(pos.sub_account_id)]}
+            accountInventoryProbeRate={accountInventoryProbeRates?.[String(pos.sub_account_id)]}
             onContextMenu={onContextMenu}
             onDoubleClick={onDoubleClick}
             onMobileMenu={onMobileMenu}
@@ -1266,7 +1296,7 @@ const CoinGroupRows = memo(function CoinGroupRows({
               symbolStatus={acctStatus}
               restriction={acctRestriction}
               marketInfo={marketData.get(group.symbol)}
-              accountRate={accountRates?.[String(bal.account_id)]}
+              accountInventoryProbeRate={accountInventoryProbeRates?.[String(bal.account_id)]}
               onContextMenu={onContextMenu}
               onDoubleClick={onDoubleClick}
               onMobileMenu={onMobileMenu}

@@ -103,6 +103,21 @@ async def _master_source_usdt(mc: BinanceTradingClient, sources: list[str]) -> d
     return bal
 
 
+async def _sweep_master_spot_to_futures(mc) -> Decimal:
+    """归集主账户现货 USDT 到合约钱包，供对冲腿使用。"""
+    bal = await _master_source_usdt(mc, ["spot"])
+    amount = bal.get("spot", Decimal("0")).quantize(Decimal("0.01"), rounding=ROUND_DOWN)
+    if amount <= 0:
+        return Decimal("0")
+    try:
+        await mc.transfer("MAIN_UMFUTURE", "USDT", amount)
+        logger.info("master spot→futures sweep: +%s USDT", amount)
+        return amount
+    except Exception as exc:
+        logger.warning("master spot→futures sweep failed amount=%s: %s", amount, exc)
+        return Decimal("0")
+
+
 async def _xfer_master_to_sub(mc, amount, sources, reserve, sub_email) -> Decimal:
     """主账户(按 transfer_order 源)→ 子 MARGIN,累计补足 amount。
     护栏:总划入封顶 = min(amount, 主账户总可用 − reserve);护住主账户保留下限。返回实划总额。"""
@@ -114,36 +129,73 @@ async def _xfer_master_to_sub(mc, amount, sources, reserve, sub_email) -> Decima
         lock = asyncio.Lock()
         mc._auto_transfer_lock = lock
     async with lock:
-        bal = await _master_source_usdt(mc, sources)
-        total = sum(bal.values())
-        # Keep the configured master reserve globally and also keep at least
-        # that reserve in the futures wallet. This prevents child top-ups from
-        # consuming the margin needed by the shared hedge leg.
-        futures_surplus = max(Decimal("0"), bal.get("futures", Decimal("0")) - reserve)
-        source_budget = sum(bal.get(src, Decimal("0")) for src in sources if src != "futures") + futures_surplus
-        budget = min(max(Decimal("0"), total - reserve), source_budget)
+        # Always read both wallets for the sweep/gate, even if an older
+        # transfer_order omitted spot or futures from its source list.
+        read_sources = list(dict.fromkeys([*sources, "spot", "futures"]))
+        bal = await _master_source_usdt(mc, read_sources)
+        # The configured lower limit is a gate on the master's futures wallet,
+        # not a target that leaves the remainder stranded in spot. Repatriate
+        # transferable master spot USDT into futures first so the hedge leg can
+        # use it. Then only the futures surplus above the configured limit may
+        # fund child accounts.
+        spot_free = bal.get("spot", Decimal("0"))
+        spot_amt = spot_free.quantize(Decimal("0.01"), rounding=ROUND_DOWN)
+        if spot_amt > 0:
+            try:
+                await mc.transfer("MAIN_UMFUTURE", "USDT", spot_amt)
+                logger.info("master spot→futures sweep: +%s USDT", spot_amt)
+                bal = await _master_source_usdt(mc, read_sources)
+            except Exception as exc:
+                logger.warning("master spot→futures sweep failed amount=%s: %s", spot_amt, exc)
+
+        futures_available = bal.get("futures", Decimal("0"))
+        if futures_available < reserve:
+            logger.info(
+                "master->sub blocked: futures available %s is below configured reserve %s",
+                futures_available, reserve,
+            )
+            return Decimal("0")
+
+        # Do not consume spot/margin directly. All child funding is sourced
+        # from the futures surplus after the spot sweep.
+        futures_surplus = max(Decimal("0"), futures_available - reserve)
+        budget = futures_surplus
         remaining = min(amount, budget).quantize(Decimal("0.01"), rounding=ROUND_DOWN)
         if remaining <= 0:
             return Decimal("0")
         moved = Decimal("0")
-        for src in sources:
+        for src in ("futures",):
             if remaining <= 0:
                 break
-            available = bal.get(src, Decimal("0"))
-            if src == "futures":
-                available = max(Decimal("0"), available - reserve)
+            available = max(Decimal("0"), bal.get(src, Decimal("0")) - reserve)
             amt = min(remaining, available).quantize(Decimal("0.01"), rounding=ROUND_DOWN)
             if amt <= 0:
                 continue
             try:
-                await mc.universal_transfer(
-                    asset="USDT", amount=amt,
-                    from_account_type=_UT[src], to_account_type="MARGIN",
-                    from_email=None, to_email=sub_email,
-                )
+                if src == "futures":
+                    # Binance does not support a direct USDT_FUTURE ->
+                    # sub-account MARGIN universal transfer (-9000).
+                    # Move the protected surplus to the master's SPOT wallet
+                    # first, then use the supported SPOT -> sub MARGIN leg.
+                    await mc.transfer("UMFUTURE_MAIN", "USDT", amt)
+                    await mc.universal_transfer(
+                        asset="USDT", amount=amt,
+                        from_account_type="SPOT", to_account_type="MARGIN",
+                        from_email=None, to_email=sub_email,
+                    )
+                else:
+                    await mc.universal_transfer(
+                        asset="USDT", amount=amt,
+                        from_account_type=_UT[src], to_account_type="MARGIN",
+                        from_email=None, to_email=sub_email,
+                    )
                 moved += amt
                 remaining -= amt
-            except Exception:
+            except Exception as exc:
+                logger.warning(
+                    "master->sub transfer failed source=%s amount=%s target=%s: %s",
+                    src, amt, sub_email, exc,
+                )
                 continue
         return moved
 
@@ -196,12 +248,15 @@ async def auto_balance_margin(sub_client, sub_id, user_id, fund_rules,
     need_floor = (not need_topup) and floor > 0 and free < floor
     need_excess = (not need_topup and not need_floor and not has_open_position
                    and floor > 0 and free > floor and level > Decimal("2"))
-    if not (need_topup or need_floor or need_excess):
-        return
-
     from engine.trading.master_client import get_master_futures_client
     mc = await get_master_futures_client(user_id)
     if mc is None:
+        return
+
+    # Sweep spot surplus on every balancing cycle so master hedge collateral
+    # is consolidated even when no child currently needs a top-up.
+    await _sweep_master_spot_to_futures(mc)
+    if not (need_topup or need_floor or need_excess):
         return
 
     if need_topup:
