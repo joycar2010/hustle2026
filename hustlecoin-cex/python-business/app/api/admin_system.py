@@ -533,19 +533,17 @@ def git_rollback(req: GitCommitRequest, request: Request):
 @router.post("/git-delete")
 def git_delete_commit(req: GitCommitRequest, request: Request):
     require_super_admin(request)
-
+    root = _repo_root()
     try:
-        subprocess.check_output(
-            ["git", "revert", req.commit_hash, "--no-edit"],
-            stderr=subprocess.STDOUT, timeout=30,
-        )
-        result = subprocess.check_output(
-            ["git", "push", "origin", f"HEAD:{_BRANCH}"],
-            stderr=subprocess.STDOUT, timeout=60,
-        ).decode()
+        unmerged = subprocess.check_output(["git", "diff", "--name-only", "--diff-filter=U"], cwd=root, stderr=subprocess.DEVNULL, timeout=10).decode().splitlines()
+        if unmerged:
+            for cmd in (("revert", "--abort"), ("merge", "--abort"), ("rebase", "--abort")):
+                subprocess.run(["git", *cmd], cwd=root, timeout=30, check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.check_output(["git", "revert", req.commit_hash, "--no-edit"], cwd=root, stderr=subprocess.STDOUT, timeout=60)
+        result = subprocess.check_output(["git", "push", "origin", f"HEAD:{_BRANCH}"], cwd=root, stderr=subprocess.STDOUT, timeout=120).decode(errors="replace")
         return {"status": "success", "output": result[:500]}
     except subprocess.CalledProcessError as e:
-        return {"status": "error", "output": e.output.decode()[:500] if e.output else str(e)}
+        return {"status": "error", "output": e.output.decode(errors="replace")[:500] if e.output else str(e)}
 
 
 # ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚ÂÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚ÂÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚ÂÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ Database Management ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚ÂÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚ÂÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚ÂÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬
