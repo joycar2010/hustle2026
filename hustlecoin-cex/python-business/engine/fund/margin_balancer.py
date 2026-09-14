@@ -16,7 +16,7 @@
     不再全失败,也绝不抽穿保留下限。
 
 划转用主账户 key 的 universal_transfer(主=None、子=SubAccount.email)。
-安全默认:single_transfer_amount 为空/0 → 该子账户自动平衡禁用。所有异常吞掉(不崩 worker)。
+单一规则为空时按「子账户单一规则 → 用户通用资金规则 → 系统默认」继承单笔划转和风控阈值；保底额仍需子账户明确设置。所有异常吞掉(不崩 worker)。
 """
 from __future__ import annotations
 
@@ -31,6 +31,39 @@ from engine.trading.binance_trading import BinanceTradingClient
 logger = logging.getLogger(__name__)
 
 _UT = {"spot": "SPOT", "futures": "USDT_FUTURE", "margin": "MARGIN"}
+
+_DEFAULT_TRANSFER_AMOUNT = Decimal("500")
+_DEFAULT_RISK_THRESHOLD = Decimal("1.5")
+
+
+def _positive(value) -> Decimal | None:
+    """Return a positive decimal or None for an unset/disabled value."""
+    if value is None:
+        return None
+    try:
+        value = Decimal(str(value))
+    except Exception:
+        return None
+    return value if value > 0 else None
+
+
+def _effective_balance_policy(cfg: dict, fund_rules) -> tuple[Decimal, Decimal, Decimal]:
+    """Resolve sub-account -> user common rule -> system default precedence.
+
+    A blank sub-account transfer amount used to disable auto-balance even when
+    the user-level common rule had a value.  Blank values now inherit the
+    common FundRules value, then the documented system defaults.  The floor is
+    intentionally opt-in per sub-account: it is a target for the child margin
+    wallet, not the master's reserve.
+    """
+    amount = (_positive(cfg.get("chunk"))
+              or _positive(getattr(fund_rules, "single_transfer_amount", None))
+              or _DEFAULT_TRANSFER_AMOUNT)
+    risk = (_positive(cfg.get("risk_threshold"))
+            or _positive(getattr(fund_rules, "risk_value_threshold", None))
+            or _DEFAULT_RISK_THRESHOLD)
+    floor = _positive(cfg.get("floor")) or Decimal("0")
+    return amount, risk, floor
 
 
 def _load_sub_cfg(sub_id: int) -> dict | None:
@@ -73,30 +106,46 @@ async def _master_source_usdt(mc: BinanceTradingClient, sources: list[str]) -> d
 async def _xfer_master_to_sub(mc, amount, sources, reserve, sub_email) -> Decimal:
     """主账户(按 transfer_order 源)→ 子 MARGIN,累计补足 amount。
     护栏:总划入封顶 = min(amount, 主账户总可用 − reserve);护住主账户保留下限。返回实划总额。"""
-    bal = await _master_source_usdt(mc, sources)
-    total = sum(bal.values())
-    budget = max(Decimal("0"), total - reserve)   # 可供自动平衡动用的总额(护住保留下限)
-    remaining = min(amount, budget).quantize(Decimal("0.01"), rounding=ROUND_DOWN)
-    if remaining <= 0:
-        return Decimal("0")
-    moved = Decimal("0")
-    for src in sources:
+    # Workers for one user share the master client. Serialize the balance
+    # snapshot and transfers so concurrent sub-accounts cannot spend the same
+    # master surplus based on stale snapshots.
+    lock = getattr(mc, "_auto_transfer_lock", None)
+    if lock is None:
+        lock = asyncio.Lock()
+        mc._auto_transfer_lock = lock
+    async with lock:
+        bal = await _master_source_usdt(mc, sources)
+        total = sum(bal.values())
+        # Keep the configured master reserve globally and also keep at least
+        # that reserve in the futures wallet. This prevents child top-ups from
+        # consuming the margin needed by the shared hedge leg.
+        futures_surplus = max(Decimal("0"), bal.get("futures", Decimal("0")) - reserve)
+        source_budget = sum(bal.get(src, Decimal("0")) for src in sources if src != "futures") + futures_surplus
+        budget = min(max(Decimal("0"), total - reserve), source_budget)
+        remaining = min(amount, budget).quantize(Decimal("0.01"), rounding=ROUND_DOWN)
         if remaining <= 0:
-            break
-        amt = min(remaining, bal.get(src, Decimal("0"))).quantize(Decimal("0.01"), rounding=ROUND_DOWN)
-        if amt <= 0:
-            continue
-        try:
-            await mc.universal_transfer(
-                asset="USDT", amount=amt,
-                from_account_type=_UT[src], to_account_type="MARGIN",
-                from_email=None, to_email=sub_email,
-            )
-            moved += amt
-            remaining -= amt
-        except Exception:
-            continue
-    return moved
+            return Decimal("0")
+        moved = Decimal("0")
+        for src in sources:
+            if remaining <= 0:
+                break
+            available = bal.get(src, Decimal("0"))
+            if src == "futures":
+                available = max(Decimal("0"), available - reserve)
+            amt = min(remaining, available).quantize(Decimal("0.01"), rounding=ROUND_DOWN)
+            if amt <= 0:
+                continue
+            try:
+                await mc.universal_transfer(
+                    asset="USDT", amount=amt,
+                    from_account_type=_UT[src], to_account_type="MARGIN",
+                    from_email=None, to_email=sub_email,
+                )
+                moved += amt
+                remaining -= amt
+            except Exception:
+                continue
+        return moved
 
 
 async def _xfer_sub_to_master(mc, amount, sources, sub_email) -> bool:
@@ -121,13 +170,7 @@ async def auto_balance_margin(sub_client, sub_id, user_id, fund_rules,
     cfg = await asyncio.to_thread(_load_sub_cfg, sub_id)
     if not cfg:
         return
-    chunk = cfg["chunk"]
-    if chunk is None or Decimal(str(chunk)) <= 0:
-        return  # 未设单笔划 = 该子账户自动平衡禁用(安全默认)
-    chunk = Decimal(str(chunk))
-    floor = Decimal(str(cfg["floor"])) if cfg["floor"] is not None else Decimal("0")
-    risk_thr = (Decimal(str(cfg["risk_threshold"])) if cfg["risk_threshold"] is not None
-                else Decimal(str(fund_rules.risk_value_threshold)))
+    chunk, risk_thr, floor = _effective_balance_policy(cfg, fund_rules)
     reserve = Decimal(str(getattr(fund_rules, "base_margin_amount", 0) or 0))   # 主账户保留下限
     sub_email = cfg["email"]
 

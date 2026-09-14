@@ -26,7 +26,8 @@ AUTO_REMEDIATE = True            # 裸空全自动收口(用户已选):检测+�
 
 
 class Worker:
-    def __init__(self, sub_account_id: int, config: ConfigLoader, spread_feed: SpreadFeed):
+    def __init__(self, sub_account_id: int, config: ConfigLoader, spread_feed: SpreadFeed,
+                 user_id: int | None = None):
         self.sub_account_id = sub_account_id
         self.config = config
         self.spread_feed = spread_feed
@@ -45,7 +46,10 @@ class Worker:
         self._symbol_futures_volumes: dict[str, float] = {}   # symbol -> 合约24h成交量(USDT),双腿量过滤用
         self._above_since: dict[str, datetime] = {}   # symbol -> 点差首次超借币阈时间(filter_duration_ms 防抖)
         self._removed_ban: dict[str, datetime] = {}   # symbol -> 退出时间(removed_cooldown_minutes 再借冷却)
-        self._user_id: int | None = None
+        # Newer orchestrators pass the owning user explicitly; older callers
+        # rely on the account row loaded in run(). Accept both during rolling
+        # deployments so a worker cannot crash before margin balancing starts.
+        self._user_id: int | None = user_id
         self._account_max_borrow: Decimal | None = None
         self._account_max_positions: int | None = None
         self._account_borrow_rate: Decimal | None = None
@@ -59,7 +63,7 @@ class Worker:
             return
 
         account_note = account_info["note"]
-        self._user_id = account_info.get("user_id")
+        self._user_id = account_info.get("user_id") or self._user_id
         self._account_max_borrow = account_info.get("max_borrow_amount")
         self._account_max_positions = account_info.get("max_positions")
         self._account_borrow_rate = account_info.get("borrow_rate_per_sec")

@@ -851,7 +851,7 @@ export function RulesPage({ onClose, embedded }: { onClose?: () => void; embedde
                   <th className="px-1.5 py-1.5 text-right font-medium">可转</th>
                   <th className="px-1.5 py-1.5 text-right font-medium">风险</th>
                   <th className="px-1.5 py-1.5 text-right font-medium" title="风控预警阈值:保证金水平低于此值即软暂停该子账户下单;有值则覆盖全局「风险值阈值」。已接入引擎生效">风控阈</th>
-                  <th className="px-1.5 py-1.5 text-right font-medium" title="风险值低于风控阈时,每周期从主账户(按划转顺序)补入该金额 USDT 到子账户保证金,直到风险值恢复;留空=该子账户不自动平衡。需 hedge_via_master + 主账户有余额。已接入引擎生效">单笔划</th>
+                  <th className="px-1.5 py-1.5 text-right font-medium" title="风险值低于风控阈时,每周期从主账户(按划转顺序)补入该金额 USDT 到子账户保证金,直到风险值恢复;留空按用户通用资金规则继承,再回退系统默认500 USDT。需 hedge_via_master + 主账户有余额。已接入引擎生效">单笔划</th>
                   <th className="px-1.5 py-1.5 text-right font-medium" title="子账户保证金保底 USDT:低于此从主账户补足;无持仓且富余时把多余划回主账户(保底留此额)。已接入引擎生效">保底额</th>
                   <th className="px-1.5 py-1.5 text-right font-medium" title="该子账户单笔下单额(USDT):有值则覆盖全局「单笔金额」;优先级 单币种规则 > 子账户 > 全局。已接入引擎生效">挂单单笔</th>
                   <th className="px-1.5 py-1.5 text-right font-medium" title="每账户借币金额上限(USDT,=maxBorrowable 封顶)，留空跟随全局;此列已接入引擎生效">金额限制</th>
@@ -899,7 +899,7 @@ export function RulesPage({ onClose, embedded }: { onClose?: () => void; embedde
             </table>
           </div>
           <p className="text-[9px] text-muted-foreground/50 px-1">
-            全列已接入引擎:风控阈(风险下限,触发自动补保证金/下单暂停)、单笔划(每次从主账户补入额)、保底额(子账户保证金保底)、挂单单笔(覆盖全局下单额)、金额限制(借币封顶)。主→子自动平衡需 hedge_via_master + 主账户 USDT 充足;留空「单笔划」=该子账户不自动平衡(仅手动划转)。
+            全列已接入引擎:风控阈(风险下限,触发自动补保证金/下单暂停)、单笔划(每次从主账户补入额)、保底额(子账户保证金保底)、挂单单笔(覆盖全局下单额)、金额限制(借币封顶)。规则优先级为子账户单一规则 &gt; 用户通用资金规则 &gt; 系统默认;主→子自动平衡需 hedge_via_master + 主账户 USDT 充足,并为主账户合约保留安全余额。
           </p>
         </div>
 
