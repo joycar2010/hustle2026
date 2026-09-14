@@ -38,25 +38,30 @@ async def run_bnb_check(
             except Exception as be:
                 logger.warning(f"set_bnb_burn(on) failed for {account_note}: {be}")
 
-        # 2) BNB 低额自动补:free < 数量 且 ≤ 数量×触发%  → 买入固定数量
-        balances = await client.get_bnb_balance()
-        bnb_free = balances.get("margin", Decimal("0"))
-        trigger = rules.bnb_min_quantity * rules.bnb_buy_trigger_pct / 100
-        if bnb_free <= trigger and rules.bnb_buy_amount > 0:
-            logger.info(f"BNB low ({bnb_free} ≤ {trigger}), buying {rules.bnb_buy_amount}")
-            try:
-                await client.spot_market_buy_qty("BNBUSDT", rules.bnb_buy_amount)
-                await notifier.send("BNB购买", f"账户: {account_note}\n购买: {rules.bnb_buy_amount} BNB",
-                                    throttle_key=f"bnbbuy:{account_note}")
-            except Exception as be:
-                logger.warning(f"BNB top-up buy failed {account_note}: {be}")
+        # BNB 抵扣关闭时不应因余额阈值触发买入、余额告警或 dust 兑换。
+        # 旧逻辑只把开关用于 set_bnb_burn，导致关闭抵扣仍周期性买 BNB，
+        # 余额不足时持续刷 Binance -2010。债务偿还仍单独保留，避免遗留 BNB 借款累积利息。
+        if bnb_burn_enabled:
+            balances = await client.get_bnb_balance()
+            bnb_free = balances.get("margin", Decimal("0"))
+            trigger = rules.bnb_min_quantity * rules.bnb_buy_trigger_pct / 100
+            if bnb_free <= trigger and rules.bnb_buy_amount > 0:
+                logger.info(f"BNB low ({bnb_free} ≤ {trigger}), buying {rules.bnb_buy_amount}")
+                try:
+                    await client.spot_market_buy_qty("BNBUSDT", rules.bnb_buy_amount)
+                    await notifier.send("BNB购买", f"账户: {account_note}\n购买: {rules.bnb_buy_amount} BNB",
+                                        throttle_key=f"bnbbuy:{account_note}")
+                except Exception as be:
+                    logger.warning(f"BNB top-up buy failed {account_note}: {be}")
 
         # 3) BNB 欠款自动还款(持有不足则买入补足再还)
         if rules.bnb_debt_auto_repay:
             await _repay_bnb_debt(client, rules, notifier, account_note)
 
-        # 4) 小额资产兑换 BNB(dust→BNB)
-        await _convert_dust_to_bnb(client, notifier, account_note)
+        # 4) 小额资产兑换 BNB(dust→BNB) 仅在抵扣开启时运行。
+        # Do not call the asset-wide Binance dust endpoint from a periodic
+        # task. Only the explicit dashboard action may convert a proven,
+        # sub-5U residual after checking spot-wallet ownership.
 
     except Exception as e:
         logger.warning(f"BNB manager error: {e}")

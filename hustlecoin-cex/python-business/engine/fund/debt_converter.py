@@ -12,16 +12,57 @@
 from __future__ import annotations
 
 import logging
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 from app.db.session import SessionLocal
 from engine.models import Position
 
 logger = logging.getLogger(__name__)
 
-_ACTIVE_STATUS = ("PENDING_BORROW", "BORROWED_IDLE", "HEDGING", "SPOT_SOLD", "OPEN", "PENDING_REPAY")
+# A debt conversion pass is allowed to touch only balances that have no
+# lifecycle owner. Every status other than these two explicit terminal states
+# remains protected, including OPEN, PENDING_REPAY, and unresolved/transition
+# states from an interrupted borrow or hedge.
+_TERMINAL_POSITION_STATUSES = ("CLOSED", "FAILED")
 _SKIP_ASSETS = {"USDT", "BNB"}
-_MAX_DUST_USDT = Decimal("50")   # 单币残留债清理名义上限(超过视为非尾单,不自动动)
+_MAX_DUST_USDT = Decimal("50")   # 单币残留债清理名义上限(超过视为非尾单,不自动清)
+
+
+async def _spot_min_notional(client, symbol: str) -> Decimal | None:
+    """Read the exchange minimum for a market buy without guessing an order.
+
+    Binance has exposed this constraint as both ``NOTIONAL`` and the older
+    ``MIN_NOTIONAL`` filter.  A missing/invalid value is treated as unknown so
+    the residual cleaner fails closed instead of submitting a request that is
+    likely to be rejected with ``-1013``.
+    """
+    getter = getattr(client, "_get_spot_filters", None)
+    if not callable(getter):
+        return None
+    try:
+        filters = await getter(symbol)
+    except Exception:
+        return None
+    if not isinstance(filters, dict):
+        return None
+    raw = filters.get("min_notional")
+    if raw is None:
+        # Accept the exchange spelling when a lightweight client forwards the
+        # raw filter map without normalizing it first.
+        raw = filters.get("minNotional")
+    if raw is None:
+        for name in ("NOTIONAL", "MIN_NOTIONAL"):
+            entry = filters.get(name)
+            if isinstance(entry, dict):
+                entry = entry.get("minNotional")
+            if entry is not None:
+                raw = entry
+                break
+    try:
+        value = Decimal(str(raw))
+    except (TypeError, ValueError, InvalidOperation):
+        return None
+    return value if value.is_finite() and value > 0 else None
 
 
 def _bases_with_active_position(sub_id: int) -> set[str]:
@@ -29,7 +70,10 @@ def _bases_with_active_position(sub_id: int) -> set[str]:
     try:
         rows = db.query(Position.base_asset).filter(
             Position.sub_account_id == sub_id,
-            Position.status.in_(_ACTIVE_STATUS),
+            # Any non-terminal row, including an unresolved borrow submission,
+            # owns the asset. Debt conversion must never alter account-level
+            # principal while that ownership is unresolved.
+            Position.status.notin_(_TERMINAL_POSITION_STATUSES),
         ).distinct().all()
         return {r[0] for r in rows if r[0]}
     finally:
@@ -79,7 +123,44 @@ async def run_debt_convert(client, sub_id, spread_feed, notifier, account_note) 
             usdt_free = next((Decimal(str(x.get("free", "0"))) for x in mi.get("userAssets", [])
                               if x.get("asset") == "USDT"), Decimal("0"))
             if shortfall * price > usdt_free:
+                # Repay the portion already in the account even when there
+                # is not enough USDT to buy the remaining gap.  This reduces
+                # debt without creating a rejected market order.
+                if free_coin > 0:
+                    try:
+                        await client.margin_repay(asset, free_coin)
+                    except Exception as exc:
+                        logger.debug(
+                            "debt_convert %s: free-balance repay with low USDT failed: %s",
+                            account_note, exc,
+                        )
                 continue  # USDT 不足,不自动借,跳过(留人工/下轮)
+            min_notional = await _spot_min_notional(client, symbol)
+            if min_notional is None or shortfall * price < min_notional:
+                # Do not repeat a market order that Binance will reject.  Any
+                # coin already available can still be repaid safely; only the
+                # unbuyable tail remains visible for a later/manual cleanup.
+                if free_coin > 0:
+                    try:
+                        await client.margin_repay(asset, free_coin)
+                    except Exception as exc:
+                        logger.debug(
+                            "debt_convert %s: partial free-balance repay failed: %s",
+                            account_note, exc,
+                        )
+                detail = (
+                    f"{asset} 缺口名义约 {shortfall * price:.4f}U，"
+                    f"Binance 最小下单额未知或为 {min_notional or '未知'}U；未发起买单，剩余债务待人工处理"
+                )
+                try:
+                    await notifier.send(
+                        "残留负债等待最小下单额",
+                        f"账户: {account_note}\n{detail}",
+                        throttle_key=f"debtconv:minnotional:{account_note}:{asset}",
+                    )
+                except Exception:
+                    pass
+                continue
             await client.spot_market_buy_qty(symbol, shortfall)
             await client.margin_repay(asset, borrowed)
             await notifier.send("残留负债清理",

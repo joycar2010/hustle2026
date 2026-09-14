@@ -499,6 +499,7 @@ class Worker:
         last_borrow_scan = 0
         last_clock_check = 0
         last_inspection = 0
+        last_residual_check = 0
         last_futmargin_check = 0
         last_balance_check = 0
         last_debtconv_check = 0
@@ -611,6 +612,19 @@ class Worker:
                         from engine.fund.inspection import run_inspection
                         await run_inspection(self._redis, self._notifier)
                         last_inspection = now
+
+                    # Closed positions can leave a proven, debt-free margin
+                    # remainder below Binance's spot minimum.  Run the
+                    # provenance-gated residual scan on the requested
+                    # half-hour cadence; it transfers only isolated terminal
+                    # dust to spot and converts it to BNB, never active funds.
+                    if now - last_residual_check > 1800:
+                        from engine.fund.reconcile_checker import run_terminal_residual_scan
+                        await run_terminal_residual_scan(
+                            self._trading_client, self._redis, self.sub_account_id,
+                            self._notifier, account_note,
+                        )
+                        last_residual_check = now
 
                     if now - last_funding_check > 1800:
                         from engine.fund.funding_collector import collect_funding_fees

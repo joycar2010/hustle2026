@@ -90,3 +90,12 @@
 - Those 68 files were moved out of the public SPA directory into `/home/ec2-user/coin-backups/frontend-old-bundles-20260914T162626Z/assets/` before cleanup. No current asset, `dist` directory, Service Worker, Logo, or source file was deleted.
 - Production root and all current entry/dependency assets return HTTP 200. Both business and Worker services remain active; authenticated engine health remains `HEALTHY/RUNNING` with five workers and UID scope enabled.
 - Release rule: publish only assets reachable from the current entry manifest, archive obsolete bundles before removal, and retain the archive for rollback.
+
+## COIN-REG-20260914-2DAY-AUDIT - Restore account-rule display and scheduled residual scan
+
+- Audit window: commits from 2026-09-12 through 2026-09-14. The largest change was `2ff1306`, which restored the complete Worker (about 1,372 lines to 5,043 lines); subsequent commits did not remove its rule reload, ordered push, transfer reserve, position recovery, or market status logic.
+- Confirmed gap: the dashboard loaded only user-level `SymbolRule` rows. A valid per-subaccount `AccountSymbolRule` therefore affected execution but the coin row still said `通用规则`. `DashboardPage` now merges real account overrides from each owned subaccount and marks that symbol `单一规则`; empty placeholder rows remain `通用规则`.
+- Confirmed gap: `run_terminal_residual_scan` and provenance-gated margin-dust conversion existed but were never scheduled by Worker. Worker now runs this scan every 1,800 seconds; it requires no active position, zero debt, matching CLOSED provenance, isolated wallet balance, and Binance-supported dust conversion before acting.
+- Production deployment: updated Worker, residual checker, user dashboard source, and rebuilt SPA on 2026-09-14T17:16Z. Engine was explicitly started for lxy after restart; health now reports `HEALTHY/RUNNING`, five workers, and `uid_scope_available=true`.
+- Verification: all 13 Python regression tests pass; frontend branding check, TypeScript, and Vite build pass. Current index and Dashboard bundle return HTTP 200. No borrow, order, repay, or transfer test was issued.
+- Rollback backup: `/home/ec2-user/coin-backups/regression-audit-20260914T171630Z/`.

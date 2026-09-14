@@ -13,6 +13,7 @@ import { getPositions, getPushedSymbols, removePushedSymbol, pushSymbol, manualC
 import { getSubAccounts, clearSubAccount } from '@/api/accounts'
 import { getSpreads } from '@/api/spreads'
 import { addToBlacklist, getSymbolRules } from '@/api/rules'
+import { getAccountSymbolRules } from '@/api/accountSymbolRules'
 import { getCoins } from '@/api/coins'
 import { confirmDialog } from '@/components/ui/confirm'
 import { useToastStore } from '@/components/ui/toast'
@@ -68,7 +69,7 @@ export function DashboardPage() {
   }, [])
 
   const refreshSymbolRules = useCallback(() => {
-    getSymbolRules(500).then((data: { items?: Array<{ symbol: string; allow_remove: boolean; allow_repay: boolean; open_spread: number | null; close_spread: number | null; order_amount: number | null; close_funding_ratio: number | null; source: string }> }) => {
+    getSymbolRules(500).then(async (data: { items?: Array<{ symbol: string; allow_remove: boolean; allow_repay: boolean; open_spread: number | null; close_spread: number | null; order_amount: number | null; close_funding_ratio: number | null; source: string }> }) => {
       const m = new Map<string, SymbolRuleInfo>()
       for (const r of data.items || []) {
         m.set(r.symbol, {
@@ -80,6 +81,39 @@ export function DashboardPage() {
           close_funding_ratio: r.close_funding_ratio ?? null,
           source: r.source || 'global',
         })
+      }
+      // Account-level rules are overrides too.  The old dashboard only loaded
+      // SymbolRule rows, so a rule saved for one sub-account still displayed
+      // “通用规则” on the coin row.  Merge any real account override into the
+      // symbol map so the row and the rules dialog agree immediately.
+      const currentAccounts = await getSubAccounts(true).catch(() => [])
+      const accountRules = await Promise.all(
+        currentAccounts.map((a: SubAccount) => getAccountSymbolRules(a.id).catch(() => [])),
+      )
+      for (const rules of accountRules) {
+        for (const r of rules) {
+          const hasOverride = [r.open_spread, r.close_spread, r.order_amount, r.close_funding_ratio, r.remove_spread, r.repay_spread, r.max_borrow_amount]
+            .some((v) => v !== null && v !== undefined && v !== '')
+          if (!hasOverride) continue
+          if (!m.has(r.symbol)) {
+            m.set(r.symbol, {
+              allow_remove: true,
+              allow_repay: true,
+              open_spread: r.open_spread == null ? null : Number(r.open_spread),
+              close_spread: r.close_spread == null ? null : Number(r.close_spread),
+              order_amount: r.order_amount == null ? null : Number(r.order_amount),
+              close_funding_ratio: r.close_funding_ratio == null ? null : Number(r.close_funding_ratio),
+              source: 'custom',
+            })
+          } else {
+            const current = m.get(r.symbol)!
+            current.source = 'custom'
+            if (current.open_spread == null && r.open_spread != null) current.open_spread = Number(r.open_spread)
+            if (current.close_spread == null && r.close_spread != null) current.close_spread = Number(r.close_spread)
+            if (current.order_amount == null && r.order_amount != null) current.order_amount = Number(r.order_amount)
+            if (current.close_funding_ratio == null && r.close_funding_ratio != null) current.close_funding_ratio = Number(r.close_funding_ratio)
+          }
+        }
       }
       setSymbolRulesMap(m)
     }).catch(() => {})
