@@ -619,26 +619,7 @@ def table_data(table_name: str, request: Request, db: Session = Depends(get_db))
 @router.post("/database/backup")
 def database_backup(request: Request):
     require_super_admin(request)
-
-    # Use the same bounded, atomic rotation policy as the scheduled backup.
-    # The old implementation wrote an uncompressed .sql file into the
-    # application checkout and committed every copy to git, which allowed a
-    # single admin click to exhaust the root volume.
-    script = os.environ.get(
-        "CEX_BACKUP_SCRIPT",
-        "/home/ec2-user/coin-project/deploy/scripts/rotate_postgres_backups.sh",
-    )
-    try:
-        result = subprocess.run(
-            [script], capture_output=True, text=True, timeout=300,
-            env=os.environ.copy(), check=False,
-        )
-        output = (result.stdout or "") + (result.stderr or "")
-        if result.returncode != 0:
-            return {"status": "error", "output": output[-1000:]}
-        return {"status": "success", "output": output[-1000:]}
-    except (OSError, subprocess.TimeoutExpired) as e:
-        return {"status": "error", "output": str(e)}
+    return {"status": "disabled", "output": "PostgreSQL compressed rotation is disabled by policy; existing backups were preserved"}
 
 
 @router.post("/database/cleanup")
@@ -813,6 +794,7 @@ async def test_aicoin(request: Request, db: Session = Depends(get_db)):
     except Exception as e:
         safe = redact_aicoin_error(e)
         raise HTTPException(status_code=502, detail=f"AiCoin API ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¨ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¿ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¾ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â½ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¥ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¥ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¤ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â±ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¨ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â´ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¥: {safe}")
+
 
 
 
