@@ -147,8 +147,8 @@ function speakNotification(title: string, content: string, sound: string) {
     const utter = new SpeechSynthesisUtterance(`${title || '系统通知'}。${content || ''}`)
     utter.lang = 'zh-CN'
     const risk = /alert|error|risk|fault|warning/i.test(sound)
-    utter.rate = risk ? 0.9 : 1.04
-    utter.pitch = risk ? 0.8 : 1.16
+    utter.rate = risk ? 0.84 : 1.12
+    utter.pitch = risk ? 0.68 : 1.30
     const voices = window.speechSynthesis.getVoices()
     const voice = voices.find(v => /zh|cmn/i.test(v.lang) && /female|女|ting|xiaoxiao|yaoyao/i.test(v.name)) || voices.find(v => /zh|cmn/i.test(v.lang))
     if (voice) utter.voice = voice

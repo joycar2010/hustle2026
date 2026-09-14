@@ -657,7 +657,7 @@ function buildTemplatePreviewText(template: NotificationTemplate) {
   return sample
     .replace(/\{symbol\}/g, 'FILUSDT').replace(/\{account\}/g, '05子账户')
     .replace(/\{qty\}/g, '20').replace(/\{amount\}/g, '50').replace(/\{pnl\}/g, '0.32')
-    .replace(/\{rate\}/g, '30').replace(/\{threshold\}/g, '20').replace(/\{level\}/g, '安全')
+    .replace(/\{rate\}/g, '30').replace(/\{threshold\}/g, '20').replace(/\{level\}/g, '安全').replace(/\{similarity\}/g, '86')
     .replace(/\{action\}/g, '平仓').replace(/\{error\}/g, '接口暂时不可用').replace(/\{message\}/g, scenario)
     .replace(/\{target\}/g, 'Python业务服务器').replace(/\{host\}/g, '18.176.76.127')
     .replace(/\{status\}/g, '异常').replace(/\{time\}/g, '刚刚').replace(/\{source\}/g, '币安')
@@ -709,7 +709,7 @@ function TemplatesTab() {
       (typeof preset.persona === 'string' ? preset.persona : preset.persona?.key || ''))
     const royal = /royal|yujie|御姐|alert|error|risk|fault|warning/i.test(persona) ||
       /risk|alert|error|fault|warning|爆仓|风控|故障|异常/i.test(`${template.template_name} ${template.title_template}`)
-    u.lang = 'zh-CN'; u.pitch = royal ? 0.82 : 1.16; u.rate = royal ? 0.9 : 1.04
+    u.lang = 'zh-CN'; u.pitch = royal ? 0.68 : 1.30; u.rate = royal ? 0.84 : 1.12
     const v = window.speechSynthesis.getVoices().find(x => /zh|cmn/i.test(x.lang) && /female|女|ting|xiaoxiao|yaoyao/i.test(x.name))
     if (v) u.voice = v
     window.speechSynthesis.cancel(); window.speechSynthesis.speak(u)
@@ -1101,7 +1101,7 @@ function SoundsTab() {
       : s.key === 'success'
         ? '甜妹提示：平仓已完成，收益和还币状态已更新。'
         : '甜妹提示：借币和开仓流程已完成，正在持续监控。')
-    u.lang = 'zh-CN'; u.pitch = s.key === 'alert' || s.key === 'error' ? 0.82 : 1.16; u.rate = s.key === 'alert' || s.key === 'error' ? 0.9 : 1.04
+    u.lang = 'zh-CN'; u.pitch = s.key === 'alert' || s.key === 'error' ? 0.68 : 1.30; u.rate = s.key === 'alert' || s.key === 'error' ? 0.84 : 1.12
     const v = window.speechSynthesis.getVoices().find(x => /zh|cmn/i.test(x.lang) && /female|女|ting|xiaoxiao|yaoyao/i.test(x.name))
     if (v) u.voice = v
     window.speechSynthesis.cancel(); window.speechSynthesis.speak(u)

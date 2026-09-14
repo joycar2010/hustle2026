@@ -42,6 +42,44 @@ _SSH_USER = "ec2-user"
 _RUST_PROJECT_DIR = os.getenv("CEX_RUST_PROJECT_DIR", "/home/ec2-user/coin-project")
 _VERSION_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "VERSION")
 
+# ``git-history`` reads the local ``origin/coin`` tracking ref.  Production
+# repositories are long lived, so that ref can lag behind GitHub after a
+# backup is pushed from another host (for example, the newly-created final
+# snapshot).  Refresh the tracking ref opportunistically before listing
+# commits.  Keep a short TTL so opening the version page repeatedly does not
+# issue a network fetch for every request.
+_git_fetch_lock = threading.Lock()
+_git_fetch_at = 0.0
+
+
+def _refresh_git_tracking_ref(root: str, ttl: float = 30.0) -> None:
+    global _git_fetch_at
+    now = time.monotonic()
+    if now - _git_fetch_at < ttl:
+        return
+    if not _git_fetch_lock.acquire(blocking=False):
+        return
+    try:
+        # Fetch only the coin branch and tags are unnecessary for the history
+        # table.  A failed/timeout fetch is intentionally ignored; callers
+        # still use the last known tracking ref and return a useful response.
+        subprocess.run(
+            [
+                "git", "fetch", "--no-tags", "origin",
+                f"+refs/heads/{_BRANCH}:refs/remotes/origin/{_BRANCH}",
+            ],
+            cwd=root,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=15,
+            check=False,
+        )
+    except Exception:
+        pass
+    finally:
+        _git_fetch_at = now
+        _git_fetch_lock.release()
+
 
 def _local_ops_metrics() -> dict:
     try:
@@ -382,6 +420,10 @@ def git_history(request: Request):
 
     try:
         root = _repo_root()
+        # Keep the list in sync with the GitHub branch.  Previously this API
+        # only read a stale local ``origin/coin`` ref, which hid commits pushed
+        # by the backup job on another host until an unrelated fetch occurred.
+        _refresh_git_tracking_ref(root)
         try:
             ref = subprocess.check_output(["git", "rev-parse", "--verify", "origin/coin"], cwd=root, stderr=subprocess.DEVNULL, timeout=5).decode().strip()
         except Exception:
