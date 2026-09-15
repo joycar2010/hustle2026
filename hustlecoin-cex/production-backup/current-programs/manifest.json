@@ -1,0 +1,40 @@
+{
+  "schema": 1,
+  "job_id": "5a32653dbf424a3f8c0aaeb02486e9fd",
+  "message": "召回提前借币与自定义币种监控；修复双服务器完整程序备份及 GitHub coin 提交历史自动刷新",
+  "captured_at": "2026-09-15T17:50:59.213051+00:00",
+  "hosts": [
+    {
+      "role": "python",
+      "host": "18.176.76.127",
+      "project": "/home/ec2-user/hustlecoin-cex/hustlecoin-cex",
+      "file_count": 1072,
+      "captured_at": "2026-09-15T17:50:56.373127+00:00",
+      "parts": [
+        {
+          "name": "python.tar.gz.part000",
+          "size": 7374489,
+          "sha256": "996437b93b520ef6c32aeb0a621c0a0c0bfbc5cad7e9cfcfa20f117b31b307f0"
+        }
+      ]
+    },
+    {
+      "role": "rust",
+      "host": "57.181.214.206",
+      "project": "/home/ec2-user/hustlecoin-cex/hustlecoin-cex",
+      "file_count": 406,
+      "captured_at": "2026-09-15T17:50:58.796478+00:00",
+      "parts": [
+        {
+          "name": "rust.tar.gz.part000",
+          "size": 2587751,
+          "sha256": "accb087910fcf3729ff7199a3d684af51d7343392a8fa4005453eb2b51cd9214"
+        }
+      ]
+    }
+  ],
+  "domains": [
+    "coin.hustle2026.xyz",
+    "coinadmin.hustle2026.xyz"
+  ]
+}
