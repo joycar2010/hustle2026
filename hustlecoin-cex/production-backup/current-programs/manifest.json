@@ -1,20 +1,20 @@
 {
   "schema": 1,
-  "job_id": "5a32653dbf424a3f8c0aaeb02486e9fd",
-  "message": "召回提前借币与自定义币种监控；修复双服务器完整程序备份及 GitHub coin 提交历史自动刷新",
-  "captured_at": "2026-09-15T17:50:59.213051+00:00",
+  "job_id": "a9b3cba0e0f24c9b9df1ea02cc6a71fb",
+  "message": "260920修复借币流程和划转功能",
+  "captured_at": "2026-09-19T17:44:05.531272+00:00",
   "hosts": [
     {
       "role": "python",
       "host": "18.176.76.127",
       "project": "/home/ec2-user/hustlecoin-cex/hustlecoin-cex",
-      "file_count": 1072,
-      "captured_at": "2026-09-15T17:50:56.373127+00:00",
+      "file_count": 1238,
+      "captured_at": "2026-09-19T17:44:02.488128+00:00",
       "parts": [
         {
           "name": "python.tar.gz.part000",
-          "size": 7374489,
-          "sha256": "996437b93b520ef6c32aeb0a621c0a0c0bfbc5cad7e9cfcfa20f117b31b307f0"
+          "size": 8777268,
+          "sha256": "e13da1d7aa35c4b17716ca49688b3af2fbf355b8a7e73c55656df107574842e7"
         }
       ]
     },
@@ -23,12 +23,12 @@
       "host": "57.181.214.206",
       "project": "/home/ec2-user/hustlecoin-cex/hustlecoin-cex",
       "file_count": 406,
-      "captured_at": "2026-09-15T17:50:58.796478+00:00",
+      "captured_at": "2026-09-19T17:44:05.101424+00:00",
       "parts": [
         {
           "name": "rust.tar.gz.part000",
           "size": 2587751,
-          "sha256": "accb087910fcf3729ff7199a3d684af51d7343392a8fa4005453eb2b51cd9214"
+          "sha256": "3cff9d2e491aa575f3a7adede6594a98197126955ea861360495c588844f6082"
         }
       ]
     }
