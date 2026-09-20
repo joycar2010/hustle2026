@@ -3,7 +3,7 @@
   "role": "rust",
   "project": "/home/ec2-user/hustlecoin-cex/hustlecoin-cex",
   "host": "57.181.214.206",
-  "captured_at": "2026-09-19T17:44:05.101424+00:00",
+  "captured_at": "2026-09-20T18:18:15.372674+00:00",
   "services": {
     "cex-engine.service": {
       "MainPID": "911101",
