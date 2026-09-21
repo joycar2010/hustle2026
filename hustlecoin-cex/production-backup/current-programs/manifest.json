@@ -1,20 +1,20 @@
 {
   "schema": 1,
-  "job_id": "41825a315fb2448e8a7b594e32254856",
-  "message": "查库速率按币均分前端接线修复",
-  "captured_at": "2026-09-21T06:10:53.098856+00:00",
+  "job_id": "419a4d23550f4802834bbc5c336c8fda",
+  "message": "弹窗「金额限制」旁实时「当前累计已用 / 剩余可借」",
+  "captured_at": "2026-09-21T16:16:30.821554+00:00",
   "hosts": [
     {
       "role": "python",
       "host": "18.176.76.127",
       "project": "/home/ec2-user/hustlecoin-cex/hustlecoin-cex",
-      "file_count": 1308,
-      "captured_at": "2026-09-21T06:10:49.856379+00:00",
+      "file_count": 1321,
+      "captured_at": "2026-09-21T16:16:27.373552+00:00",
       "parts": [
         {
           "name": "python.tar.gz.part000",
-          "size": 9212632,
-          "sha256": "754d1f22901bf3491ed4d9ab82e86bd75eaefa5a844f49ac1f66053b4dcce7af"
+          "size": 9296868,
+          "sha256": "2cf417d639ed043d05acbae630f4793fae1e8fbefe9b98391d3690071adb8471"
         }
       ]
     },
@@ -23,12 +23,12 @@
       "host": "57.181.214.206",
       "project": "/home/ec2-user/hustlecoin-cex/hustlecoin-cex",
       "file_count": 406,
-      "captured_at": "2026-09-21T06:10:52.569100+00:00",
+      "captured_at": "2026-09-21T16:16:30.443482+00:00",
       "parts": [
         {
           "name": "rust.tar.gz.part000",
-          "size": 2587751,
-          "sha256": "b262755cb7f5246966cf430340c7a59a1aacac024d5f5e8bb328690e91a18910"
+          "size": 2587750,
+          "sha256": "0a1f7771be2d0da9e45c3e9bce87042fdbff70581c4eb8c83ffd3a9a5d555fa2"
         }
       ]
     }
