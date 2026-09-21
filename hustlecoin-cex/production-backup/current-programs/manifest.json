@@ -1,20 +1,20 @@
 {
   "schema": 1,
-  "job_id": "7be6a21629e646b19f2c0378faf38442",
-  "message": "主控台UI数据展示位置调整以及风险率低于风控阈却不自动划转保护中」误拦合理高点差",
-  "captured_at": "2026-09-21T05:44:42.784333+00:00",
+  "job_id": "41825a315fb2448e8a7b594e32254856",
+  "message": "查库速率按币均分前端接线修复",
+  "captured_at": "2026-09-21T06:10:53.098856+00:00",
   "hosts": [
     {
       "role": "python",
       "host": "18.176.76.127",
       "project": "/home/ec2-user/hustlecoin-cex/hustlecoin-cex",
-      "file_count": 1295,
-      "captured_at": "2026-09-21T05:44:39.589632+00:00",
+      "file_count": 1308,
+      "captured_at": "2026-09-21T06:10:49.856379+00:00",
       "parts": [
         {
           "name": "python.tar.gz.part000",
-          "size": 9129412,
-          "sha256": "29e0f381f442ac12a60ae2781f47f38ee089d306c8bf4416f65977309248cd10"
+          "size": 9212632,
+          "sha256": "754d1f22901bf3491ed4d9ab82e86bd75eaefa5a844f49ac1f66053b4dcce7af"
         }
       ]
     },
@@ -23,12 +23,12 @@
       "host": "57.181.214.206",
       "project": "/home/ec2-user/hustlecoin-cex/hustlecoin-cex",
       "file_count": 406,
-      "captured_at": "2026-09-21T05:44:42.352245+00:00",
+      "captured_at": "2026-09-21T06:10:52.569100+00:00",
       "parts": [
         {
           "name": "rust.tar.gz.part000",
-          "size": 2587752,
-          "sha256": "db1c24e1764a6e5004ad1a7fb2212c6918e7dbc99a66d89234669790f4d281d9"
+          "size": 2587751,
+          "sha256": "b262755cb7f5246966cf430340c7a59a1aacac024d5f5e8bb328690e91a18910"
         }
       ]
     }

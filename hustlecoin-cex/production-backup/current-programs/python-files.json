@@ -3,7 +3,7 @@
   "role": "python",
   "project": "/home/ec2-user/hustlecoin-cex/hustlecoin-cex",
   "host": "18.176.76.127",
-  "captured_at": "2026-09-21T05:44:39.589632+00:00",
+  "captured_at": "2026-09-21T06:10:49.856379+00:00",
   "services": {
     "cex-business.service": {
       "MainPID": "1990554",
@@ -4914,7 +4914,7 @@
       "path": "project/python-business/static/spa/index.html",
       "source": "/home/ec2-user/hustlecoin-cex/hustlecoin-cex/python-business/static/spa/index.html",
       "size": 1352,
-      "sha256": "42382b4c9d0a8626f885c05fc745e4639aeda129cffedde7390233136faf2b04",
+      "sha256": "7c526dacd77a6369b38d55ed88f8c76bda2564f82e1abf343202f8027682fe33",
       "mode": 420
     },
     {
@@ -5083,6 +5083,13 @@
       "source": "/home/ec2-user/hustlecoin-cex/hustlecoin-cex/python-business/static/spa/assets/AccountsPage-C7lxYIbn.js",
       "size": 38897,
       "sha256": "aab60782286c389c59300138ce1dd2e1ae4bc4f00ba1aca04e403554dba7e2f8",
+      "mode": 420
+    },
+    {
+      "path": "project/python-business/static/spa/assets/AccountsPage-CDlegNel.js",
+      "source": "/home/ec2-user/hustlecoin-cex/hustlecoin-cex/python-business/static/spa/assets/AccountsPage-CDlegNel.js",
+      "size": 38907,
+      "sha256": "789552a27bf0781ca641c78bd0b9dc156c9c2a55c5fee45d52bb6bda8c5fda1f",
       "mode": 420
     },
     {
@@ -5380,6 +5387,13 @@
       "mode": 420
     },
     {
+      "path": "project/python-business/static/spa/assets/BlacklistPage-XY7pa6Nn.js",
+      "source": "/home/ec2-user/hustlecoin-cex/hustlecoin-cex/python-business/static/spa/assets/BlacklistPage-XY7pa6Nn.js",
+      "size": 7476,
+      "sha256": "2a0d8492b6f79a7726f99a3241ab670cf45c77f561021390acb25f3a85fd1311",
+      "mode": 420
+    },
+    {
       "path": "project/python-business/static/spa/assets/BlacklistPage-a0BZDLAz.js",
       "source": "/home/ec2-user/hustlecoin-cex/hustlecoin-cex/python-business/static/spa/assets/BlacklistPage-a0BZDLAz.js",
       "size": 6800,
@@ -5552,6 +5566,13 @@
       "source": "/home/ec2-user/hustlecoin-cex/hustlecoin-cex/python-business/static/spa/assets/CoinManagementPage-G4kE_H3A.js",
       "size": 6626,
       "sha256": "1e518a956067b553663d00c927929ce6f5da133364afa4679b62df2766d1da91",
+      "mode": 420
+    },
+    {
+      "path": "project/python-business/static/spa/assets/CoinManagementPage-IfR7znCx.js",
+      "source": "/home/ec2-user/hustlecoin-cex/hustlecoin-cex/python-business/static/spa/assets/CoinManagementPage-IfR7znCx.js",
+      "size": 6626,
+      "sha256": "e8caf9ef034b5ddf08c5341d9836ce5ac06ec47aedd41caac271c900014a3fbe",
       "mode": 420
     },
     {
@@ -5737,6 +5758,13 @@
       "mode": 420
     },
     {
+      "path": "project/python-business/static/spa/assets/DashboardPage-DzMEDZd9.js",
+      "source": "/home/ec2-user/hustlecoin-cex/hustlecoin-cex/python-business/static/spa/assets/DashboardPage-DzMEDZd9.js",
+      "size": 108757,
+      "sha256": "be70117611a1eb2e3221991fb0e3ea1f2dd51ce5041e591b9db1dd743edf6788",
+      "mode": 420
+    },
+    {
       "path": "project/python-business/static/spa/assets/DashboardPage-TZx4o9cJ.js",
       "source": "/home/ec2-user/hustlecoin-cex/hustlecoin-cex/python-business/static/spa/assets/DashboardPage-TZx4o9cJ.js",
       "size": 92826,
@@ -5769,6 +5797,13 @@
       "source": "/home/ec2-user/hustlecoin-cex/hustlecoin-cex/python-business/static/spa/assets/DashboardPage-wbqrD1PT.js",
       "size": 95279,
       "sha256": "5ea24bb24cf8f576700af8683c30c7dd93e7de78465722c209c3f4c8a4194740",
+      "mode": 420
+    },
+    {
+      "path": "project/python-business/static/spa/assets/HistoryPage-4G5SCP5w.js",
+      "source": "/home/ec2-user/hustlecoin-cex/hustlecoin-cex/python-business/static/spa/assets/HistoryPage-4G5SCP5w.js",
+      "size": 22916,
+      "sha256": "664d7904b606cbcb2c9a963d16929edb0edbf5665a3f980d75c85dd3052f1851",
       "mode": 420
     },
     {
@@ -5989,6 +6024,13 @@
       "mode": 420
     },
     {
+      "path": "project/python-business/static/spa/assets/RulesPage-BP1hJnyp.js",
+      "source": "/home/ec2-user/hustlecoin-cex/hustlecoin-cex/python-business/static/spa/assets/RulesPage-BP1hJnyp.js",
+      "size": 38120,
+      "sha256": "5804e229d02fce4933fbcf37bfdf34c4d6fa4bd13f3c7ba59b9f11a649ffdc26",
+      "mode": 420
+    },
+    {
       "path": "project/python-business/static/spa/assets/RulesPage-BS_ZytuX.js",
       "source": "/home/ec2-user/hustlecoin-cex/hustlecoin-cex/python-business/static/spa/assets/RulesPage-BS_ZytuX.js",
       "size": 38123,
@@ -6182,6 +6224,13 @@
       "source": "/home/ec2-user/hustlecoin-cex/hustlecoin-cex/python-business/static/spa/assets/SettingsPage-BJAEvKGh.js",
       "size": 6290,
       "sha256": "f5be8fc9b74e91b14f615b22f67ae608cdc5859181395e183cf72d5cfa619d2f",
+      "mode": 420
+    },
+    {
+      "path": "project/python-business/static/spa/assets/SettingsPage-BKbDvPAD.js",
+      "source": "/home/ec2-user/hustlecoin-cex/hustlecoin-cex/python-business/static/spa/assets/SettingsPage-BKbDvPAD.js",
+      "size": 6509,
+      "sha256": "37f94c7be8e09f5061e98b2bcc8e0c33543cc2cc2a61dc8398930ade7b1c4631",
       "mode": 420
     },
     {
@@ -6514,6 +6563,13 @@
       "mode": 420
     },
     {
+      "path": "project/python-business/static/spa/assets/SpreadsPage-DuMwOcV9.js",
+      "source": "/home/ec2-user/hustlecoin-cex/hustlecoin-cex/python-business/static/spa/assets/SpreadsPage-DuMwOcV9.js",
+      "size": 35723,
+      "sha256": "4610417f27f11273cdb1ff967d179393d9fe234cc13d4d2436828156825a4e0e",
+      "mode": 420
+    },
+    {
       "path": "project/python-business/static/spa/assets/SpreadsPage-EoCj9ub9.js",
       "source": "/home/ec2-user/hustlecoin-cex/hustlecoin-cex/python-business/static/spa/assets/SpreadsPage-EoCj9ub9.js",
       "size": 18479,
@@ -6581,6 +6637,13 @@
       "source": "/home/ec2-user/hustlecoin-cex/hustlecoin-cex/python-business/static/spa/assets/badge-BxjggoVv.js",
       "size": 809,
       "sha256": "f7cccae4fab73ecb305567dd4c273a30f1799dfd5bd021f75d5ac60a15d562b6",
+      "mode": 420
+    },
+    {
+      "path": "project/python-business/static/spa/assets/badge-C7TP1gGH.js",
+      "source": "/home/ec2-user/hustlecoin-cex/hustlecoin-cex/python-business/static/spa/assets/badge-C7TP1gGH.js",
+      "size": 809,
+      "sha256": "2c324d50b1413eda7c747fb429d00c57b9804115077e78b634401665fc2f661f",
       "mode": 420
     },
     {
@@ -6913,6 +6976,13 @@
       "mode": 420
     },
     {
+      "path": "project/python-business/static/spa/assets/coins-ZKaHd4c8.js",
+      "source": "/home/ec2-user/hustlecoin-cex/hustlecoin-cex/python-business/static/spa/assets/coins-ZKaHd4c8.js",
+      "size": 475,
+      "sha256": "4ddab26cdfe0a96da56b9a9d4f22b02d4080bd31d135dd7d62ee6810213189c2",
+      "mode": 420
+    },
+    {
       "path": "project/python-business/static/spa/assets/coins-ZxvyHG2P.js",
       "source": "/home/ec2-user/hustlecoin-cex/hustlecoin-cex/python-business/static/spa/assets/coins-ZxvyHG2P.js",
       "size": 475,
@@ -7151,6 +7221,13 @@
       "mode": 420
     },
     {
+      "path": "project/python-business/static/spa/assets/index-mMuF48OV.js",
+      "source": "/home/ec2-user/hustlecoin-cex/hustlecoin-cex/python-business/static/spa/assets/index-mMuF48OV.js",
+      "size": 94746,
+      "sha256": "478b615a21b43e71a49f1c03c5c803dd59fcc6ec1f3d9dfc423c12c193e4a9de",
+      "mode": 420
+    },
+    {
       "path": "project/python-business/static/spa/assets/index-naR2FL25.css",
       "source": "/home/ec2-user/hustlecoin-cex/hustlecoin-cex/python-business/static/spa/assets/index-naR2FL25.css",
       "size": 51729,
@@ -7253,6 +7330,13 @@
       "source": "/home/ec2-user/hustlecoin-cex/hustlecoin-cex/python-business/static/spa/assets/rules-BqtI_NAK.js",
       "size": 778,
       "sha256": "b1b8e1e8ba9c5a57b95968c4cd6101902a68735304c9d9354aac31ef433af4e0",
+      "mode": 420
+    },
+    {
+      "path": "project/python-business/static/spa/assets/rules-C3E5tNRw.js",
+      "source": "/home/ec2-user/hustlecoin-cex/hustlecoin-cex/python-business/static/spa/assets/rules-C3E5tNRw.js",
+      "size": 778,
+      "sha256": "83da2012beeb7ca20aa1e1958648832a43d89d1600d56ab4c2d45c960c1d9619",
       "mode": 420
     },
     {
@@ -7386,6 +7470,13 @@
       "source": "/home/ec2-user/hustlecoin-cex/hustlecoin-cex/python-business/static/spa/assets/spreads-7Qr3qIYv.js",
       "size": 131,
       "sha256": "85314f183034bcbc33e76b9d9ad1a9109d78824d2364314606945cb0b8eb91e1",
+      "mode": 420
+    },
+    {
+      "path": "project/python-business/static/spa/assets/spreads-B4ltnRhw.js",
+      "source": "/home/ec2-user/hustlecoin-cex/hustlecoin-cex/python-business/static/spa/assets/spreads-B4ltnRhw.js",
+      "size": 131,
+      "sha256": "4503e588e9362dc24804a547eeef5a0b4afa2124c8025ef31a91364119995b13",
       "mode": 420
     },
     {
@@ -9083,6 +9174,6 @@
       "mode": 420
     }
   ],
-  "file_count": 1295,
+  "file_count": 1308,
   "excluded": "Credentials, dependencies/build caches, database/market data and historical archives"
 }
