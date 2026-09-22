@@ -1,20 +1,20 @@
 {
   "schema": 1,
-  "job_id": "419a4d23550f4802834bbc5c336c8fda",
-  "message": "弹窗「金额限制」旁实时「当前累计已用 / 剩余可借」",
-  "captured_at": "2026-09-21T16:16:30.821554+00:00",
+  "job_id": "95aac21c0df645799d7d8eaa60a9dea8",
+  "message": "C2 给对冲前加了独立 REST 双轴点差交叉确认防 WS 单源幻价插针，C3 用\"预还闲币+活债驱动批量买还环\"破解了 FORM -3087 平台抵押封顶导致的平仓死锁（10736 已还清关仓），C1 加了行情链路整体死亡时自动暂停借/开/平并显示红色「熔断中」横幅的全局熔断器（含快照刷新 5s→2s 提速）",
+  "captured_at": "2026-09-22T18:08:13.920014+00:00",
   "hosts": [
     {
       "role": "python",
       "host": "18.176.76.127",
       "project": "/home/ec2-user/hustlecoin-cex/hustlecoin-cex",
-      "file_count": 1321,
-      "captured_at": "2026-09-21T16:16:27.373552+00:00",
+      "file_count": 1335,
+      "captured_at": "2026-09-22T18:08:10.709483+00:00",
       "parts": [
         {
           "name": "python.tar.gz.part000",
-          "size": 9296868,
-          "sha256": "2cf417d639ed043d05acbae630f4793fae1e8fbefe9b98391d3690071adb8471"
+          "size": 9402167,
+          "sha256": "69746b226b823c82fa19b5b8ee3b2971dfda92efac3b265969aa7bc768ee7209"
         }
       ]
     },
@@ -23,12 +23,12 @@
       "host": "57.181.214.206",
       "project": "/home/ec2-user/hustlecoin-cex/hustlecoin-cex",
       "file_count": 406,
-      "captured_at": "2026-09-21T16:16:30.443482+00:00",
+      "captured_at": "2026-09-22T18:08:13.412451+00:00",
       "parts": [
         {
           "name": "rust.tar.gz.part000",
-          "size": 2587750,
-          "sha256": "0a1f7771be2d0da9e45c3e9bce87042fdbff70581c4eb8c83ffd3a9a5d555fa2"
+          "size": 2587751,
+          "sha256": "06baa0fcecf9dec99da70ba51e0ba922bb477b3d01c83165d1af9210a7fb5522"
         }
       ]
     }
