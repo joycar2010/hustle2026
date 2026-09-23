@@ -1,20 +1,20 @@
 {
   "schema": 1,
-  "job_id": "95aac21c0df645799d7d8eaa60a9dea8",
-  "message": "C2 给对冲前加了独立 REST 双轴点差交叉确认防 WS 单源幻价插针，C3 用\"预还闲币+活债驱动批量买还环\"破解了 FORM -3087 平台抵押封顶导致的平仓死锁（10736 已还清关仓），C1 加了行情链路整体死亡时自动暂停借/开/平并显示红色「熔断中」横幅的全局熔断器（含快照刷新 5s→2s 提速）",
-  "captured_at": "2026-09-22T18:08:13.920014+00:00",
+  "job_id": "efcf2782422342c9b92338ea9e199c1a",
+  "message": "第一轮是聚合行右键菜单给已完成平仓的 PENDING_REPAY 仓也放了必然失败的「强制平仓」按钮（已改为按状态只显示可执行动作+逐笔中文状态标签），第二轮是规则弹窗把「未设置」渲染成绿色「允还」而手动推送币种的真实语义是未显式开启即禁止（已改为 默认灰/允绿/禁红 三态 chip，未设置一点即显式允许）——顺带查明那两笔 FIL 卡待还币纯属规则从未落库，并非还币功能故障。",
+  "captured_at": "2026-09-23T05:31:06.545208+00:00",
   "hosts": [
     {
       "role": "python",
       "host": "18.176.76.127",
       "project": "/home/ec2-user/hustlecoin-cex/hustlecoin-cex",
-      "file_count": 1335,
-      "captured_at": "2026-09-22T18:08:10.709483+00:00",
+      "file_count": 1375,
+      "captured_at": "2026-09-23T05:31:03.009137+00:00",
       "parts": [
         {
           "name": "python.tar.gz.part000",
-          "size": 9402167,
-          "sha256": "69746b226b823c82fa19b5b8ee3b2971dfda92efac3b265969aa7bc768ee7209"
+          "size": 9670782,
+          "sha256": "1be73aeef6d02741bb925db5ac17c1405eafe6b2eb1196d14b637eb6e1807561"
         }
       ]
     },
@@ -23,12 +23,12 @@
       "host": "57.181.214.206",
       "project": "/home/ec2-user/hustlecoin-cex/hustlecoin-cex",
       "file_count": 406,
-      "captured_at": "2026-09-22T18:08:13.412451+00:00",
+      "captured_at": "2026-09-23T05:31:06.099314+00:00",
       "parts": [
         {
           "name": "rust.tar.gz.part000",
           "size": 2587751,
-          "sha256": "06baa0fcecf9dec99da70ba51e0ba922bb477b3d01c83165d1af9210a7fb5522"
+          "sha256": "c98f023c283a25d385de857779ad5a405aef25336525b41cfde7e03fea5cf719"
         }
       ]
     }
