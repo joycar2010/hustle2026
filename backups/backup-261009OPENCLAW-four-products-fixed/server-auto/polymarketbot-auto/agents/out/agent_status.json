@@ -1,0 +1,110 @@
+{
+ "ts": 1791560710.626,
+ "roles": {
+  "review": {
+   "status": "running",
+   "kind": "agent",
+   "queue_depth": 0,
+   "heartbeat_ts": 1791560614.591,
+   "workflow_stage": "completed",
+   "duration_ms": 93,
+   "n_reviews": 0
+  },
+  "search": {
+   "status": "running",
+   "kind": "agent",
+   "queue_depth": 0,
+   "heartbeat_ts": 1791560614.685,
+   "workflow_stage": "completed",
+   "duration_ms": 718,
+   "n_degraded": 0
+  },
+  "whale": {
+   "status": "running",
+   "kind": "agent",
+   "queue_depth": 0,
+   "heartbeat_ts": 1791560615.403,
+   "workflow_stage": "completed",
+   "duration_ms": 167,
+   "whale_trades": 8147
+  },
+  "shill": {
+   "status": "running",
+   "kind": "agent",
+   "queue_depth": 0,
+   "heartbeat_ts": 1791560615.571,
+   "workflow_stage": "completed",
+   "duration_ms": 3228
+  },
+  "risk": {
+   "status": "running",
+   "kind": "agent",
+   "queue_depth": 0,
+   "heartbeat_ts": 1791560618.799,
+   "workflow_stage": "completed",
+   "duration_ms": 276,
+   "n_proposals": 0
+  },
+  "sniper": {
+   "status": "running",
+   "kind": "agent",
+   "queue_depth": 0,
+   "heartbeat_ts": 1791560619.075,
+   "workflow_stage": "completed",
+   "duration_ms": 308,
+   "n_proposals": 0
+  },
+  "exit": {
+   "status": "running",
+   "kind": "agent",
+   "queue_depth": 0,
+   "heartbeat_ts": 1791560619.384,
+   "workflow_stage": "completed",
+   "duration_ms": 1,
+   "total_exits": 235,
+   "total_positions": 956,
+   "exit_rate": 0.2458,
+   "n_proposals": 0
+  },
+  "rug": {
+   "status": "running",
+   "kind": "agent",
+   "queue_depth": 0,
+   "heartbeat_ts": 1791560619.385,
+   "workflow_stage": "completed",
+   "duration_ms": 6,
+   "anomalies": 1,
+   "total_1h": 3388,
+   "skips_1h": 3376,
+   "n_proposals": 0
+  },
+  "weather": {
+   "status": "running",
+   "kind": "agent",
+   "queue_depth": 0,
+   "heartbeat_ts": 1791560619.392,
+   "workflow_stage": "completed",
+   "duration_ms": 361,
+   "total_buys": 6,
+   "n_proposals": 1
+  },
+  "sports": {
+   "status": "running",
+   "kind": "agent",
+   "queue_depth": 0,
+   "heartbeat_ts": 1791560619.754,
+   "workflow_stage": "completed",
+   "duration_ms": 781,
+   "total_buys": 3,
+   "n_proposals": 1
+  },
+  "desk": {
+   "status": "running",
+   "kind": "agent",
+   "queue_depth": 0,
+   "heartbeat_ts": 1791560620.535,
+   "workflow_stage": "completed",
+   "duration_ms": 90090
+  }
+ }
+}

@@ -1,0 +1,9 @@
+# SHA-256 checksums generated locally after transfer from 18.179.50.168
+02f95199a82e1bb5ad3d6932c8eb00fb6b6872008bb61ded66f2463807277b8c  database/trades-auto.snapshot.db
+ef2f7c8f78a6fbd074902b82b7ee70859eb834a5c03745991061edd0ae603d8b  database/p0-shadow-btc.snapshot.db
+b0289cca4dc2591e68881d884bb124d151f817309d6f7a758bce9e9c924119fb  database/p0-shadow-btc-contaminated.snapshot.db
+0467924063e8a778e141f1142fca7bb20f49306cb6dcd7a483dd71fd8a1b5dfb  database/trades.snapshot.db
+fd4c9fda9cd3f9ae7c962b0ddf37232294d55580e1aa165aa06129b8549389eb  database/sidecars/p0-shadow-btc.db-shm
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  database/sidecars/p0-shadow-btc.db-wal
+393276f28f3635200d3d4d2f66105437837bb2cc0865e8fbd7f13e0a095ff0be  database/sidecars/trades-auto.db-shm
+945cbbb4bd054cde09c1d63c1e38351ad97d6538663df7bb2d0187f17ff0d1f2  database/sidecars/trades-auto.db-wal
