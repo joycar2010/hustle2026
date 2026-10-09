@@ -1,0 +1,76 @@
+{
+ "ts": 1789758646.613,
+ "roles": {
+  "review": {
+   "status": "running",
+   "kind": "agent",
+   "queue_depth": 0,
+   "heartbeat_ts": 1789758620.613,
+   "workflow_stage": "completed",
+   "duration_ms": 35,
+   "n_reviews": 1
+  },
+  "search": {
+   "status": "running",
+   "kind": "agent",
+   "queue_depth": 0,
+   "heartbeat_ts": 1789758620.649,
+   "workflow_stage": "completed",
+   "duration_ms": 25,
+   "n_degraded": 0
+  },
+  "whale": {
+   "status": "running",
+   "kind": "agent",
+   "queue_depth": 0,
+   "heartbeat_ts": 1789758620.674,
+   "workflow_stage": "completed",
+   "duration_ms": 159,
+   "whale_trades": 8147
+  },
+  "shill": {
+   "status": "running",
+   "kind": "agent",
+   "queue_depth": 0,
+   "heartbeat_ts": 1789758620.833,
+   "workflow_stage": "completed",
+   "duration_ms": 76
+  },
+  "risk": {
+   "status": "external",
+   "kind": "external",
+   "queue_depth": 0,
+   "heartbeat_ts": 1789758620.909,
+   "workflow_stage": "fast-loop (deterministic)"
+  },
+  "sniper": {
+   "status": "external",
+   "kind": "external",
+   "queue_depth": 0,
+   "heartbeat_ts": 1789758620.909,
+   "workflow_stage": "fast-loop (deterministic)"
+  },
+  "exit": {
+   "status": "external",
+   "kind": "external",
+   "queue_depth": 0,
+   "heartbeat_ts": 1789758620.909,
+   "workflow_stage": "fast-loop (deterministic)"
+  },
+  "rug": {
+   "status": "external",
+   "kind": "external",
+   "queue_depth": 0,
+   "heartbeat_ts": 1789758620.909,
+   "workflow_stage": "fast-loop (deterministic)"
+  },
+  "desk": {
+   "status": "running",
+   "kind": "agent",
+   "queue_depth": 0,
+   "heartbeat_ts": 1789758620.909,
+   "workflow_stage": "completed",
+   "duration_ms": 25703
+  }
+ }
+}
