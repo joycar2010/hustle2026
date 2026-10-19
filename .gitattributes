@@ -1,1 +1,2 @@
 backups/backup-261009OPENCLAW-four-products-fixed/database/*.db filter=lfs diff=lfs merge=lfs -text
+backups/backup-261019-profit-damage/database/*.db filter=lfs diff=lfs merge=lfs -text
