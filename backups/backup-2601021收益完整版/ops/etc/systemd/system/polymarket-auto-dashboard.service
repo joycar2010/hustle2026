@@ -1,0 +1,10 @@
+[Unit]
+After=network.target
+[Service]
+User=ec2-user
+WorkingDirectory=/home/ec2-user/polymarketbot-auto
+EnvironmentFile=/home/ec2-user/polymarketbot-auto/.env
+ExecStart=/home/ec2-user/polymarketbot-auto/.venv/bin/uvicorn server.dashboard:app --host 127.0.0.1 --port 8887
+Restart=always
+[Install]
+WantedBy=multi-user.target

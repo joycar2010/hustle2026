@@ -1,0 +1,67 @@
+[
+  {
+    "path": "p0-shadow-btc-contaminated-20260912_152601.db",
+    "bytes": 65536,
+    "sha256": "b0289cca4dc2591e68881d884bb124d151f817309d6f7a758bce9e9c924119fb",
+    "quick_check": "ok",
+    "tables": {
+      "decisions": 162,
+      "orders": 4,
+      "resolutions": 1
+    },
+    "public": false,
+    "snapshot_completed_utc": "2026-10-21T05:01:26Z"
+  },
+  {
+    "path": "p0-shadow-btc.db",
+    "bytes": 134623232,
+    "sha256": "ef2f7c8f78a6fbd074902b82b7ee70859eb834a5c03745991061edd0ae603d8b",
+    "quick_check": "ok",
+    "tables": {
+      "decisions": 634288,
+      "orders": 10959,
+      "resolutions": 2567
+    },
+    "public": false,
+    "snapshot_completed_utc": "2026-10-21T05:01:32Z"
+  },
+  {
+    "path": "trades-auto.db",
+    "bytes": 919678976,
+    "sha256": "9ab6fd3af0e05b48f1e7930197d21ea7479a673aeefe3f1cb47d45c536d86af3",
+    "quick_check": "ok",
+    "tables": {
+      "decisions": 3380527,
+      "orders": 7049,
+      "resolutions": 5079
+    },
+    "public": false,
+    "snapshot_completed_utc": "2026-10-21T05:01:45Z"
+  },
+  {
+    "path": "trades-auto.db.bak-hygiene-20260919-184911",
+    "bytes": 21770240,
+    "sha256": "332350ae6392038f6348b9efcddc7072d16e2ef8920a3cc29db2653de7382053",
+    "quick_check": "ok",
+    "tables": {
+      "decisions": 103852,
+      "orders": 1028,
+      "resolutions": 319
+    },
+    "public": false,
+    "snapshot_completed_utc": "2026-10-21T05:01:46Z"
+  },
+  {
+    "path": "trades.db",
+    "bytes": 32768,
+    "sha256": "0467924063e8a778e141f1142fca7bb20f49306cb6dcd7a483dd71fd8a1b5dfb",
+    "quick_check": "ok",
+    "tables": {
+      "decisions": 0,
+      "orders": 0,
+      "resolutions": 0
+    },
+    "public": false,
+    "snapshot_completed_utc": "2026-10-21T05:01:46Z"
+  }
+]

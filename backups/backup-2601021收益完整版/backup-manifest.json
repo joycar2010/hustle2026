@@ -1,0 +1,18 @@
+{
+  "label": "2601021收益完整版",
+  "host": "18.179.50.168",
+  "domain": "polyauto.hustle2026.xyz",
+  "started_utc": "2026-10-21T05:01:25Z",
+  "completed_utc": "2026-10-21T05:04:17Z",
+  "sqlite_databases": 5,
+  "encrypted_archive_members": 11709,
+  "frontend_files": 192,
+  "frontend_unchanged": true,
+  "service_state_unchanged": true,
+  "encryption": "AES-256-CBC, PBKDF2-SHA256/200000; encrypt-then-HMAC-SHA256",
+  "restore_key_on_server": "/home/ec2-user/backups/polyauto-2601021-complete/private/restore.key",
+  "redacted_files": 1,
+  "secret_scan_files": 524,
+  "secret_scan_hits": 0,
+  "ciphertext_hmac_verified": true
+}
