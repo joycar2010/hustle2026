@@ -1,0 +1,18 @@
+{
+  "label": "261022当日亏损熔断修复版",
+  "host": "18.179.50.168",
+  "domain": "polyauto.hustle2026.xyz",
+  "started_utc": "2026-10-21T17:33:40Z",
+  "completed_utc": "2026-10-21T17:37:48Z",
+  "sqlite_databases": 5,
+  "encrypted_archive_members": 11817,
+  "frontend_files": 207,
+  "frontend_unchanged": true,
+  "service_state_unchanged": true,
+  "encryption": "AES-256-CBC, PBKDF2-SHA256/200000; encrypt-then-HMAC-SHA256",
+  "restore_key_on_server": "/home/ec2-user/backups/polyauto-261022-loss-circuit/private/restore.key",
+  "redacted_files": 1,
+  "secret_scan_files": 616,
+  "secret_scan_hits": 0,
+  "ciphertext_hmac_verified": true
+}

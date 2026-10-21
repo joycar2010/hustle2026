@@ -1,0 +1,28 @@
+### polymarket-auto-btc-paper.service
+MainPID=2257655
+ExecStart={ path=/home/ec2-user/polymarketbot-auto/scripts/run_paper_asset.sh ; argv[]=/home/ec2-user/polymarketbot-auto/scripts/run_paper_asset.sh BTC ; ignore_errors=no ; start_time=[Sun 2026-10-11 04:44:56 UTC] ; stop_time=[n/a] ; pid=2257655 ; code=(null) ; status=0/0 }
+EnvironmentFiles=/home/ec2-user/polymarketbot-auto/.env (ignore_errors=no)
+ActiveState=active
+SubState=running
+ActiveEnterTimestamp=Sun 2026-10-11 04:44:56 UTC
+### polymarket-auto-eth-paper.service
+MainPID=2257656
+ExecStart={ path=/home/ec2-user/polymarketbot-auto/scripts/run_paper_asset.sh ; argv[]=/home/ec2-user/polymarketbot-auto/scripts/run_paper_asset.sh ETH ; ignore_errors=no ; start_time=[Sun 2026-10-11 04:44:56 UTC] ; stop_time=[n/a] ; pid=2257656 ; code=(null) ; status=0/0 }
+EnvironmentFiles=/home/ec2-user/polymarketbot-auto/.env (ignore_errors=no)
+ActiveState=active
+SubState=running
+ActiveEnterTimestamp=Sun 2026-10-11 04:44:56 UTC
+### polymarket-auto-dashboard.service
+MainPID=2182351
+ExecStart={ path=/home/ec2-user/polymarketbot-auto/.venv/bin/uvicorn ; argv[]=/home/ec2-user/polymarketbot-auto/.venv/bin/uvicorn server.dashboard:app --host 127.0.0.1 --port 8887 ; ignore_errors=no ; start_time=[Fri 2026-10-09 16:18:14 UTC] ; stop_time=[n/a] ; pid=2182351 ; code=(null) ; status=0/0 }
+EnvironmentFiles=/home/ec2-user/polymarketbot-auto/.env (ignore_errors=no)
+ActiveState=active
+SubState=running
+ActiveEnterTimestamp=Fri 2026-10-09 16:18:14 UTC
+### polymarket-auto-openclaw-paper.service
+MainPID=2182287
+ExecStart={ path=/home/ec2-user/polymarketbot-auto/.venv/bin/python ; argv[]=/home/ec2-user/polymarketbot-auto/.venv/bin/python /home/ec2-user/polymarketbot-auto/scripts/run_openclaw_paper.py ; ignore_errors=no ; start_time=[Fri 2026-10-09 16:17:04 UTC] ; stop_time=[n/a] ; pid=2182287 ; code=(null) ; status=0/0 }
+EnvironmentFiles=/home/ec2-user/polymarketbot-auto/.env (ignore_errors=no)
+ActiveState=active
+SubState=running
+ActiveEnterTimestamp=Fri 2026-10-09 16:17:04 UTC

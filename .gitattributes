@@ -3,3 +3,5 @@ backups/backup-2601020收益修复版/database/*.db filter=lfs diff=lfs merge=lf
 backups/backup-261019-profit-damage/database/*.db filter=lfs diff=lfs merge=lfs -text
 backups/backup-2601021收益完整版/** -text
 backups/backup-2601021收益完整版/*.enc filter=lfs diff=lfs merge=lfs -text
+backups/backup-261022当日亏损熔断修复版/** -text
+backups/backup-261022当日亏损熔断修复版/*.enc filter=lfs diff=lfs merge=lfs -text
