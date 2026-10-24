@@ -1,0 +1,20 @@
+[Unit]
+Description=Polymarket BTC paper trading (no real orders)
+Wants=network-online.target
+After=network-online.target polymarket-dashboard.service
+
+[Service]
+Type=simple
+User=ec2-user
+WorkingDirectory=/home/ec2-user/polymarketbot
+ExecStart=/bin/bash /home/ec2-user/polymarketbot/scripts/run_paper_service.sh
+Restart=on-failure
+RestartSec=10
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+SyslogIdentifier=polymarket-paper
+
+[Install]
+WantedBy=multi-user.target

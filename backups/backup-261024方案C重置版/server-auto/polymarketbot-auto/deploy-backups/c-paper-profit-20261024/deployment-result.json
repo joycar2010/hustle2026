@@ -1,0 +1,35 @@
+{
+  "deployed_ts": 1792811998.4988403,
+  "elapsed_sec": 33.02,
+  "worker_pid": "3230285",
+  "mode": "paper",
+  "risk_state": "OK",
+  "risk_snapshot": {
+    "asset": "BTC",
+    "state": "OK",
+    "worker_state": "RUNNING",
+    "new_entries_blocked": false,
+    "resume_policy": "ASIA_SHANGHAI_MIDNIGHT",
+    "position_count": 1,
+    "position_value_usd": 1.97,
+    "open_orders": 0,
+    "open_order_notional_usd": 0.0,
+    "exposure_ratio": 0.0,
+    "circuit_reason": null,
+    "daily_realized_usd": 3.0998,
+    "global_daily_realized_usd": 3.099812000000005,
+    "asset_daily_realized_usd": {
+      "BTC": 3.0998
+    },
+    "daily_realized_profit_fraction": 0.12,
+    "daily_realized_profit_limit_usd": 12.0,
+    "max_daily_loss_fraction": 0.01,
+    "max_open_positions": 3,
+    "updated_at": 1792811997.2852032
+  },
+  "paper_btc": {
+    "realized_usd": 3.0998,
+    "wins": 47,
+    "losses": 10
+  }
+}

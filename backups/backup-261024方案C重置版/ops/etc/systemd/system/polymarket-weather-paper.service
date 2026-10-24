@@ -1,0 +1,21 @@
+[Unit]
+Description=Polymarket weather paper scanner (no real orders)
+Wants=network-online.target
+After=network-online.target polymarket-dashboard.service
+
+[Service]
+Type=simple
+User=ec2-user
+WorkingDirectory=/home/ec2-user/polymarketbot
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/home/ec2-user/polymarketbot/.venv/bin/python -m bot.weather_main
+Restart=on-failure
+RestartSec=30
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+SyslogIdentifier=polymarket-weather-paper
+
+[Install]
+WantedBy=multi-user.target

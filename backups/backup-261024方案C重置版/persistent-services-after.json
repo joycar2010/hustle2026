@@ -1,0 +1,18 @@
+{
+  "polymarket-auto-btc-paper.service": {
+    "MainPID": "3230285",
+    "ActiveState": "active"
+  },
+  "polymarket-auto-dashboard.service": {
+    "MainPID": "3230384",
+    "ActiveState": "active"
+  },
+  "polymarket-auto-openclaw-paper.service": {
+    "MainPID": "2661617",
+    "ActiveState": "active"
+  },
+  "polymarket-dashboard.service": {
+    "MainPID": "3231862",
+    "ActiveState": "active"
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "label": "261024方案C重置版",
+  "host": "18.179.50.168",
+  "domains": [
+    "poly.hustle2026.xyz",
+    "polyauto.hustle2026.xyz"
+  ],
+  "started_utc": "2026-10-24T04:56:09Z",
+  "completed_utc": "2026-10-24T05:05:04Z",
+  "sqlite_databases": 10,
+  "archive_members": 25933,
+  "frontend_files": 310,
+  "frontend_unchanged": true,
+  "service_state_unchanged": true,
+  "persistent_services_unchanged": true,
+  "secret_scan_hits": 0,
+  "source_files": 1359,
+  "redacted_files": 0,
+  "archive_sha256": "0fc5a65dd0f3bee9bf42621245e53c61d53c5a85cf631f20dcb4165db15536a0",
+  "archive_bytes": 703483088,
+  "archive_roundtrip_verified": true,
+  "ciphertext_hmac_verified": true,
+  "encryption": "AES-256-CBC/PBKDF2-SHA256-200000 + encrypt-then-HMAC-SHA256",
+  "restore_key_server": "/home/ec2-user/backups/poly-261024-c-reset/private/restore.key",
+  "production_btc_source": "/home/ec2-user/polymarketbot-auto/releases/c-paper-profit-20261024",
+  "production_btc_database": "/home/ec2-user/polymarketbot-auto/trades-auto.db",
+  "service_note": "Timed agents may run/finish naturally; backup issued no service start/stop/restart.",
+  "historical_env_files_private_only": []
+}

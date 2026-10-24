@@ -1,0 +1,10 @@
+{
+  "deployed_ts": 1792816010.2408412,
+  "backup": "/home/ec2-user/polymarketbot-auto/deploy-backups/shadow-cards-20261024",
+  "old_asset_files_preserved": 35,
+  "new_assets": [
+    "index-CewUPXZa.js",
+    "index-CNxWacBo.css"
+  ],
+  "index_sha256": "6d2a1c9e73cd0e50eaa54f58af580a294e29695421181b73c65464980e520c98"
+}

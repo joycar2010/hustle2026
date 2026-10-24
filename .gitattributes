@@ -5,3 +5,5 @@ backups/backup-2601021收益完整版/** -text
 backups/backup-2601021收益完整版/*.enc filter=lfs diff=lfs merge=lfs -text
 backups/backup-261022当日亏损熔断修复版/** -text
 backups/backup-261022当日亏损熔断修复版/*.enc filter=lfs diff=lfs merge=lfs -text
+backups/backup-261024方案C重置版/** -text
+backups/backup-261024方案C重置版/*.enc filter=lfs diff=lfs merge=lfs -text
