@@ -1,0 +1,20 @@
+[Unit]
+Description=CEX Trading Worker (Borrow/Open/Close Cycle)
+After=network-online.target postgresql.service
+Wants=network-online.target postgresql.service
+
+[Service]
+Type=simple
+User=ec2-user
+WorkingDirectory=/home/ec2-user/coin-project/python-business
+EnvironmentFile=/etc/cex/business.env
+ExecStart=/home/ec2-user/cex-venv/bin/python -m engine
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+TimeoutStopSec=90
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target

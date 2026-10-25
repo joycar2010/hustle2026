@@ -1,18 +1,16 @@
 [Unit]
-Description=CEX Trading Engine (Rust)
-After=network.target redis6.service
-Wants=redis6.service
+Description=CEX Trading Engine (Rust Canary)
+After=network-online.target redis6.service
+Wants=network-online.target redis6.service
 
 [Service]
 Type=simple
 User=ec2-user
-WorkingDirectory=/home/ec2-user/hustlecoin-cex/rust-engine
-ExecStart=/home/ec2-user/hustlecoin-cex/rust-engine/target/release/cex-engine
-Environment=RUST_LOG=cex_engine=info
-Environment=REDIS_URL=redis://127.0.0.1:6379
+WorkingDirectory=/home/ec2-user/coin-project/rust-engine
+EnvironmentFile=/etc/cex/rust.env
+ExecStart=/home/ec2-user/coin-project/rust-engine/target/release/cex-engine
 Restart=always
 RestartSec=3
-WatchdogSec=120
 LimitNOFILE=1000000
 
 [Install]
