@@ -1,0 +1,1 @@
+import{gt as e}from"./index-x5q2EWgy.js";async function t(t){let{data:n}=await e.get(`/api/spreads`,{signal:t});return n}export{t};

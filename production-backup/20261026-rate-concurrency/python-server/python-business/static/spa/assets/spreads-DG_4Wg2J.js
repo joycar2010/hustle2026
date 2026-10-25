@@ -1,0 +1,1 @@
+import{_t as e}from"./index-zodsFfNQ.js";async function t(t){let{data:n}=await e.get(`/api/spreads`,{signal:t});return n}export{t};

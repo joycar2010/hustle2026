@@ -1,0 +1,1 @@
+import{gt as e}from"./index-BVCVLOyX.js";async function t(t){let{data:n}=await e.get(`/api/spreads`,{signal:t});return n}export{t};

@@ -1,0 +1,1 @@
+import{mt as e}from"./index-DxLv5U29.js";async function t(t){let{data:n}=await e.get(`/api/spreads`,{signal:t});return n}export{t};

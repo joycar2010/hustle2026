@@ -1,0 +1,1 @@
+import{ht as e}from"./index-transfer-cross-v3.js";async function t(t){let{data:n}=await e.get(`/api/spreads`,{signal:t});return n}export{t};
