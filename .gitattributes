@@ -7,3 +7,4 @@ backups/backup-261022当日亏损熔断修复版/** -text
 backups/backup-261022当日亏损熔断修复版/*.enc filter=lfs diff=lfs merge=lfs -text
 backups/backup-261024方案C重置版/** -text
 backups/backup-261024方案C重置版/*.enc filter=lfs diff=lfs merge=lfs -text
+backups/backup-261025-original-BTC-single-product/database/*.tar.gz filter=lfs diff=lfs merge=lfs -text
