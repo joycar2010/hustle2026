@@ -1,16 +1,20 @@
 # 双服务器程序备份
 
-第一轮是聚合行右键菜单给已完成平仓的 PENDING_REPAY 仓也放了必然失败的「强制平仓」按钮（已改为按状态只显示可执行动作+逐笔中文状态标签），第二轮是规则弹窗把「未设置」渲染成绿色「允还」而手动推送币种的真实语义是未显式开启即禁止（已改为 默认灰/允绿/禁红 三态 chip，未设置一点即显式允许）——顺带查明那两笔 FIL 卡待还币纯属规则从未落库，并非还币功能故障。
+20261027修复规则保存OK版
 
-当前运行目录的源码、前后端程序、static/dist/public 和 Rust 运行二进制均在对应主机归档内。
-每个文件和归档分片的 SHA-256 见 manifest.json 与 *-files.json。
-凭证、数据库、行情数据、依赖缓存和旧备份不在本次程序备份范围。
+本归档记录当前生产双主机的前端、后端、源程序、生产静态资源和 Rust 运行二进制：
 
-恢复到独立目录：先按编号拼接分片，校验 SHA-256，再解压；不要覆盖正在运行的系统。
+- Python 业务主机：`18.176.76.127`
+- Rust 交易主机：`57.181.214.206`
+- 域名：`coin.hustle2026.xyz`、`coinadmin.hustle2026.xyz`
+
+`python-files.json`、`rust-files.json` 和 `manifest.json` 记录每个文件及归档分片的 SHA-256。归档不包含凭证、环境变量、数据库、运行时行情数据、依赖缓存、Rust `target` 构建缓存或历史备份目录；当前 `static/spa`、`static/admin-spa`、前端 `public` 资源和 Rust release 二进制均已包含。
+
+恢复到独立目录时先校验分片哈希，再解压；不要覆盖正在运行的系统：
+
 ```sh
-cat python.tar.gz.part* > python.tar.gz
-cat rust.tar.gz.part* > rust.tar.gz
+sha256sum python.tar.gz.part000 rust.tar.gz.part000
 mkdir python-restore rust-restore
-tar -xzf python.tar.gz -C python-restore
-tar -xzf rust.tar.gz -C rust-restore
+tar -xzf python.tar.gz.part000 -C python-restore
+tar -xzf rust.tar.gz.part000 -C rust-restore
 ```

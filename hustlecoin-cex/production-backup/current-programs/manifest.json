@@ -1,40 +1,53 @@
 {
-  "schema": 1,
-  "job_id": "efcf2782422342c9b92338ea9e199c1a",
-  "message": "第一轮是聚合行右键菜单给已完成平仓的 PENDING_REPAY 仓也放了必然失败的「强制平仓」按钮（已改为按状态只显示可执行动作+逐笔中文状态标签），第二轮是规则弹窗把「未设置」渲染成绿色「允还」而手动推送币种的真实语义是未显式开启即禁止（已改为 默认灰/允绿/禁红 三态 chip，未设置一点即显式允许）——顺带查明那两笔 FIL 卡待还币纯属规则从未落库，并非还币功能故障。",
-  "captured_at": "2026-09-23T05:31:06.545208+00:00",
-  "hosts": [
-    {
-      "role": "python",
-      "host": "18.176.76.127",
-      "project": "/home/ec2-user/hustlecoin-cex/hustlecoin-cex",
-      "file_count": 1375,
-      "captured_at": "2026-09-23T05:31:03.009137+00:00",
-      "parts": [
-        {
-          "name": "python.tar.gz.part000",
-          "size": 9670782,
-          "sha256": "1be73aeef6d02741bb925db5ac17c1405eafe6b2eb1196d14b637eb6e1807561"
-        }
-      ]
-    },
-    {
-      "role": "rust",
-      "host": "57.181.214.206",
-      "project": "/home/ec2-user/hustlecoin-cex/hustlecoin-cex",
-      "file_count": 406,
-      "captured_at": "2026-09-23T05:31:06.099314+00:00",
-      "parts": [
-        {
-          "name": "rust.tar.gz.part000",
-          "size": 2587751,
-          "sha256": "c98f023c283a25d385de857779ad5a405aef25336525b41cfde7e03fea5cf719"
-        }
-      ]
-    }
-  ],
-  "domains": [
-    "coin.hustle2026.xyz",
-    "coinadmin.hustle2026.xyz"
-  ]
+    "schema":  1,
+    "job_id":  "d7002b6f48084565a563fd4ca62d32bc",
+    "message":  "20261027修复规则保存OK版",
+    "captured_at":  "2026-10-26T17:16:03.9462482Z",
+    "hosts":  [
+                  {
+                      "role":  "python",
+                      "host":  "18.176.76.127",
+                      "project":  "/home/ec2-user/hustlecoin-cex/hustlecoin-cex",
+                      "file_count":  1149,
+                      "archive":  {
+                                      "name":  "python.tar.gz.part000",
+                                      "size":  7622332,
+                                      "sha256":  "26efd84d404e22ac2fce200610d6a9e97523ecf7219ef97956d9673fef21e644"
+                                  },
+                      "static":  {
+                                     "spa_index_sha256":  "3f5a05e6bad87cd5e5f5fe49fc7cd7818bb33acfdc53b1d70bc52077e1ee1b66",
+                                     "admin_spa_index_sha256":  "479d87c760f9370691994b0f2aaad441a9f327df1bd32097e1806ee71f2d6773",
+                                     "spa_asset_count":  505,
+                                     "admin_spa_asset_count":  78
+                                 }
+                  },
+                  {
+                      "role":  "rust",
+                      "host":  "57.181.214.206",
+                      "project":  "/home/ec2-user/hustlecoin-cex/hustlecoin-cex",
+                      "file_count":  43,
+                      "archive":  {
+                                      "name":  "rust.tar.gz.part000",
+                                      "size":  1181894,
+                                      "sha256":  "db49a3aaf310eed2c32186c17372bf6d427fa81a0c4e608a91eedc0b4291e0af"
+                                  }
+                  }
+              ],
+    "domains":  [
+                    "coin.hustle2026.xyz",
+                    "coinadmin.hustle2026.xyz"
+                ],
+    "excluded":  [
+                     "credentials and environment files",
+                     "databases and runtime data",
+                     "dependency caches and node_modules",
+                     "Rust target build cache",
+                     "historical backup directories"
+                 ],
+    "artifacts":  {
+                      "python_manifest":  "python-files.json",
+                      "rust_manifest":  "rust-files.json",
+                      "python_archive":  "python.tar.gz.part000",
+                      "rust_archive":  "rust.tar.gz.part000"
+                  }
 }
