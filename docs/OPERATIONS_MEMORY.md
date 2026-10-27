@@ -53,3 +53,13 @@
 - 双域名备份目录：`backups/backup-261024方案C重置版`。完整原文件及数据库保存在 Git LFS 加密归档；Git 可查阅树是脱敏副本。
 - 本次恢复密钥本机路径：`C:\Users\Administrator\poly-backup-keys\261024\restore.key`，不得加入 Git。服务器副本为 `/home/ec2-user/backups/poly-261024-c-reset/private/restore.key`。
 - 继续使用 `D:\Dev\MixCodex\repo-poly` 的 Windows Git 认证。优先追加提交、保留旧历史；无覆盖必要时使用普通 fast-forward 推送。
+
+## 2026-10-27：生产 D 参数与四组影子备份
+
+- 生产 BTC 仍在 `releases/c-paper-profit-20261024` 执行，路径名未变；实际参数已同步 D：0.84–0.90、90–150 秒入场、30% 止损 / 确认 2 次、150 秒止损窗口。生产为 Paper、实盘关闭、日亏损熔断关闭、日止盈 10%。
+- 当前 A/B/C/D 在 `/home/ec2-user/paper-ab/20261026T110000Z`，各组独立 `ab.db`；四组日亏损 1%、日止盈 12%。旧 A/B/C 目录继续留存，不混入生产账本。
+- 备份标签为 `261027影子D组策略优化版`，仓库目录 `backups/backup-261027影子D组策略优化版`。范围仅 polyauto 域名，包含整个应用、整个 paper-ab、真实网站目录、全部 dist 和 13 个 SQLite 一致性快照。
+- 此版本实际网站资源与应用 `ui/dist` 不是同一集合，恢复当前页面用 `web-roots/polyauto.hustle2026.xyz`，两套均保留。
+- 服务器备份目录 `/home/ec2-user/backups/polyauto-261027-shadow-d`。完整原件与敏感配置只在 AES/PBKDF2+HMAC 加密归档；通过 Git LFS 保存，公开副本已脱敏。
+- 恢复密钥独立放在本机 `C:\Users\Administrator\poly-backup-keys\261027\restore.key` 及服务器备份的 `private/restore.key`；不得提交 Git。
+- 继续使用 `D:\Dev\MixCodex\repo-poly` 的 Windows Git 凭据追加推送 `poly`，不在服务器新增 GitHub 凭据。

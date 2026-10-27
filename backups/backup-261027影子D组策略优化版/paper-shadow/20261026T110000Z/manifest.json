@@ -1,0 +1,52 @@
+{
+  "created_utc": "2026-10-26T11:00:00Z",
+  "mode": "paper",
+  "production_untouched": true,
+  "groups": {
+    "A": {
+      "phase": "P1",
+      "label": "当前策略基线",
+      "description": "120-180秒入场；止损仅最后90秒",
+      "overrides": {
+        "REVERSAL_EXIT_WINDOW_SEC": "90",
+        "SECONDS_BEFORE_CLOSE": "180",
+        "MIN_T_REMAINING_SEC": "120",
+        "REVERSAL_HELD_BID_DRAWDOWN": "0.40"
+      }
+    },
+    "B": {
+      "phase": "P1",
+      "label": "入场即保护",
+      "description": "其它参数同A；入场后立即监控止损",
+      "overrides": {
+        "REVERSAL_EXIT_WINDOW_SEC": "180",
+        "SECONDS_BEFORE_CLOSE": "180",
+        "MIN_T_REMAINING_SEC": "120",
+        "REVERSAL_HELD_BID_DRAWDOWN": "0.40"
+      }
+    },
+    "C": {
+      "phase": "P2",
+      "label": "晚窗入场",
+      "description": "90-150秒入场；入场后立即监控止损",
+      "overrides": {
+        "REVERSAL_EXIT_WINDOW_SEC": "150",
+        "SECONDS_BEFORE_CLOSE": "150",
+        "MIN_T_REMAINING_SEC": "90",
+        "REVERSAL_HELD_BID_DRAWDOWN": "0.40"
+      }
+    },
+    "D": {
+      "phase": "P2",
+      "label": "晚窗+较紧止损",
+      "description": "90-150秒入场；回撤30%/确认2次",
+      "overrides": {
+        "REVERSAL_EXIT_WINDOW_SEC": "150",
+        "SECONDS_BEFORE_CLOSE": "150",
+        "MIN_T_REMAINING_SEC": "90",
+        "REVERSAL_HELD_BID_DRAWDOWN": "0.30"
+      }
+    }
+  },
+  "source": "/home/ec2-user/polymarketbot-auto/releases/c-paper-profit-20261024"
+}

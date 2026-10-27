@@ -1,0 +1,184 @@
+[
+  {
+    "archive_path": "server-auto/polymarketbot-auto/p0-shadow-btc-contaminated-20260912_152601.db",
+    "source_path": "/home/ec2-user/polymarketbot-auto/p0-shadow-btc-contaminated-20260912_152601.db",
+    "bytes": 65536,
+    "sha256": "b0289cca4dc2591e68881d884bb124d151f817309d6f7a758bce9e9c924119fb",
+    "quick_check": "ok",
+    "tables": {
+      "decisions": 162,
+      "orders": 4,
+      "resolutions": 1
+    },
+    "snapshot_completed_utc": "2026-10-27T05:18:59Z",
+    "storage": "encrypted archive only"
+  },
+  {
+    "archive_path": "server-auto/polymarketbot-auto/p0-shadow-btc.db",
+    "source_path": "/home/ec2-user/polymarketbot-auto/p0-shadow-btc.db",
+    "bytes": 134623232,
+    "sha256": "ef2f7c8f78a6fbd074902b82b7ee70859eb834a5c03745991061edd0ae603d8b",
+    "quick_check": "ok",
+    "tables": {
+      "decisions": 634288,
+      "orders": 10959,
+      "resolutions": 2567
+    },
+    "snapshot_completed_utc": "2026-10-27T05:19:01Z",
+    "storage": "encrypted archive only"
+  },
+  {
+    "archive_path": "server-auto/polymarketbot-auto/trades-auto.db",
+    "source_path": "/home/ec2-user/polymarketbot-auto/trades-auto.db",
+    "bytes": 964780032,
+    "sha256": "1bb22c67dc5b06b289b7b16370cddc26bbd30dc676ad2696c308e08fa4f69b26",
+    "quick_check": "ok",
+    "tables": {
+      "decisions": 3578349,
+      "orders": 7366,
+      "resolutions": 5281
+    },
+    "snapshot_completed_utc": "2026-10-27T05:19:29Z",
+    "storage": "encrypted archive only"
+  },
+  {
+    "archive_path": "server-auto/polymarketbot-auto/trades-auto.db.bak-hygiene-20260919-184911",
+    "source_path": "/home/ec2-user/polymarketbot-auto/trades-auto.db.bak-hygiene-20260919-184911",
+    "bytes": 21770240,
+    "sha256": "332350ae6392038f6348b9efcddc7072d16e2ef8920a3cc29db2653de7382053",
+    "quick_check": "ok",
+    "tables": {
+      "decisions": 103852,
+      "orders": 1028,
+      "resolutions": 319
+    },
+    "snapshot_completed_utc": "2026-10-27T05:19:29Z",
+    "storage": "encrypted archive only"
+  },
+  {
+    "archive_path": "server-auto/polymarketbot-auto/trades.db",
+    "source_path": "/home/ec2-user/polymarketbot-auto/trades.db",
+    "bytes": 32768,
+    "sha256": "0467924063e8a778e141f1142fca7bb20f49306cb6dcd7a483dd71fd8a1b5dfb",
+    "quick_check": "ok",
+    "tables": {
+      "decisions": 0,
+      "orders": 0,
+      "resolutions": 0
+    },
+    "snapshot_completed_utc": "2026-10-27T05:19:29Z",
+    "storage": "encrypted archive only"
+  },
+  {
+    "archive_path": "paper-shadow/20261022T020933Z/A/ab.db",
+    "source_path": "/home/ec2-user/paper-ab/20261022T020933Z/A/ab.db",
+    "bytes": 12910592,
+    "sha256": "9dce9ac7dfdde0273f0003e68435aeec3c71007c86bab641518241e112442c40",
+    "quick_check": "ok",
+    "tables": {
+      "decisions": 57722,
+      "orders": 296,
+      "resolutions": 200
+    },
+    "snapshot_completed_utc": "2026-10-27T05:19:30Z",
+    "storage": "encrypted archive only"
+  },
+  {
+    "archive_path": "paper-shadow/20261022T020933Z/B/ab.db",
+    "source_path": "/home/ec2-user/paper-ab/20261022T020933Z/B/ab.db",
+    "bytes": 22102016,
+    "sha256": "2f2058754b99640b11065d0f61b9d366460bc085d472adc0a5e3c5adcc316664",
+    "quick_check": "ok",
+    "tables": {
+      "decisions": 98810,
+      "orders": 116,
+      "resolutions": 86
+    },
+    "snapshot_completed_utc": "2026-10-27T05:19:31Z",
+    "storage": "encrypted archive only"
+  },
+  {
+    "archive_path": "paper-shadow/20261022T020933Z/C/ab.db",
+    "source_path": "/home/ec2-user/paper-ab/20261022T020933Z/C/ab.db",
+    "bytes": 19087360,
+    "sha256": "62e14b9112d8025cb680b6dda417174a74d2c542853826eeed2bc0a3ca0a0831",
+    "quick_check": "ok",
+    "tables": {
+      "decisions": 84412,
+      "orders": 230,
+      "resolutions": 158
+    },
+    "snapshot_completed_utc": "2026-10-27T05:19:31Z",
+    "storage": "encrypted archive only"
+  },
+  {
+    "archive_path": "paper-shadow/20261022T020933Z/trades-auto.snapshot.db",
+    "source_path": "/home/ec2-user/paper-ab/20261022T020933Z/trades-auto.snapshot.db",
+    "bytes": 923963392,
+    "sha256": "8748712455a8ba40637ce76915e9e05afcfe1052a4aa48bad2c48c461c351598",
+    "quick_check": "ok",
+    "tables": {
+      "decisions": 3399733,
+      "orders": 7128,
+      "resolutions": 5123
+    },
+    "snapshot_completed_utc": "2026-10-27T05:20:20Z",
+    "storage": "encrypted archive only"
+  },
+  {
+    "archive_path": "paper-shadow/20261026T110000Z/A/ab.db",
+    "source_path": "/home/ec2-user/paper-ab/20261026T110000Z/A/ab.db",
+    "bytes": 12165120,
+    "sha256": "c166efd13f18274d40819156964f16473f79b651fe2067a0108292175bcedf2a",
+    "quick_check": "ok",
+    "tables": {
+      "decisions": 53617,
+      "orders": 13,
+      "resolutions": 7
+    },
+    "snapshot_completed_utc": "2026-10-27T05:20:20Z",
+    "storage": "encrypted archive only"
+  },
+  {
+    "archive_path": "paper-shadow/20261026T110000Z/B/ab.db",
+    "source_path": "/home/ec2-user/paper-ab/20261026T110000Z/B/ab.db",
+    "bytes": 10330112,
+    "sha256": "62df354475ddfe418587acff0c2c4072099468df72170b723197b4d6f540ebcc",
+    "quick_check": "ok",
+    "tables": {
+      "decisions": 45628,
+      "orders": 84,
+      "resolutions": 57
+    },
+    "snapshot_completed_utc": "2026-10-27T05:20:20Z",
+    "storage": "encrypted archive only"
+  },
+  {
+    "archive_path": "paper-shadow/20261026T110000Z/C/ab.db",
+    "source_path": "/home/ec2-user/paper-ab/20261026T110000Z/C/ab.db",
+    "bytes": 8589312,
+    "sha256": "77bab2aa399168cef924447e4662bcefd2cb99c305de2a5c96420df7dea5ae5c",
+    "quick_check": "ok",
+    "tables": {
+      "decisions": 37368,
+      "orders": 79,
+      "resolutions": 55
+    },
+    "snapshot_completed_utc": "2026-10-27T05:20:20Z",
+    "storage": "encrypted archive only"
+  },
+  {
+    "archive_path": "paper-shadow/20261026T110000Z/D/ab.db",
+    "source_path": "/home/ec2-user/paper-ab/20261026T110000Z/D/ab.db",
+    "bytes": 8343552,
+    "sha256": "448a99dca61d4e6062f498de84e8e0194e5db11986f514c836178e2751d7eacd",
+    "quick_check": "ok",
+    "tables": {
+      "decisions": 36286,
+      "orders": 65,
+      "resolutions": 45
+    },
+    "snapshot_completed_utc": "2026-10-27T05:20:21Z",
+    "storage": "encrypted archive only"
+  }
+]

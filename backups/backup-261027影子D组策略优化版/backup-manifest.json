@@ -1,0 +1,31 @@
+{
+  "label": "261027影子D组策略优化版",
+  "host": "18.179.50.168",
+  "domains": [
+    "polyauto.hustle2026.xyz"
+  ],
+  "started_utc": "2026-10-27T05:18:56Z",
+  "completed_utc": "2026-10-27T05:25:38Z",
+  "sqlite_databases": 13,
+  "archive_members": 13523,
+  "frontend_files": 285,
+  "frontend_unchanged": true,
+  "frontend_encrypted_only_files": 0,
+  "service_state_unchanged": true,
+  "persistent_services_unchanged": true,
+  "service_note": "Timer-driven agents may start/finish naturally; no service start/stop/restart was issued by this backup.",
+  "secret_scan_hits": 0,
+  "source_files": 1675,
+  "redacted_files": 0,
+  "archive_sha256": "efb6f23fc5e0fcee228e0bd5ae144b70b4f617f44ddf2a69179205b23260bcde",
+  "archive_bytes": 647980000,
+  "archive_roundtrip_verified": true,
+  "ciphertext_hmac_verified": true,
+  "encryption": "AES-256-CBC/PBKDF2-SHA256-200000 + encrypt-then-HMAC-SHA256",
+  "restore_key_server": "/home/ec2-user/backups/polyauto-261027-shadow-d/private/restore.key",
+  "production_btc_source": "/home/ec2-user/polymarketbot-auto/releases/c-paper-profit-20261024",
+  "production_btc_database": "/home/ec2-user/polymarketbot-auto/trades-auto.db",
+  "production_profile": "D parameters; Paper; daily loss disabled; daily profit 10%",
+  "active_shadow_root": "/home/ec2-user/paper-ab/20261026T110000Z",
+  "shadow_profiles": "A/B/C/D Paper; daily loss 1%; daily profit 12%"
+}

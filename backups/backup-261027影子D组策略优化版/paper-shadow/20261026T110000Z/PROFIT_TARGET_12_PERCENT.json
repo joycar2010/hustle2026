@@ -1,0 +1,30 @@
+{
+  "backup": "/home/ec2-user/backups/shadow-abcd-profit12-20261027T043800Z",
+  "utc": "2026-10-27T04:38:16.146869+00:00",
+  "profit_fraction": 0.12,
+  "archived_old_profit_latches": [
+    "D"
+  ],
+  "services": {
+    "A": {
+      "MainPID": "3613497",
+      "WorkingDirectory": "/home/ec2-user/paper-ab/20261026T110000Z/A",
+      "ActiveState": "active"
+    },
+    "B": {
+      "MainPID": "3613498",
+      "WorkingDirectory": "/home/ec2-user/paper-ab/20261026T110000Z/B",
+      "ActiveState": "active"
+    },
+    "C": {
+      "MainPID": "3613499",
+      "WorkingDirectory": "/home/ec2-user/paper-ab/20261026T110000Z/C",
+      "ActiveState": "active"
+    },
+    "D": {
+      "MainPID": "3613500",
+      "WorkingDirectory": "/home/ec2-user/paper-ab/20261026T110000Z/D",
+      "ActiveState": "active"
+    }
+  }
+}

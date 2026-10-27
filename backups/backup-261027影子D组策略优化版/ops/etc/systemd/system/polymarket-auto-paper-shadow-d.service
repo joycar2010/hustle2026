@@ -1,0 +1,19 @@
+[Unit]
+Description=polyauto Paper shadow D BTC
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ec2-user
+WorkingDirectory=/home/ec2-user/paper-ab/20261026T110000Z/D
+ExecStart=/home/ec2-user/paper-ab/20261026T110000Z/D/run.sh
+Restart=always
+RestartSec=10
+TimeoutStopSec=20
+StandardOutput=append:/home/ec2-user/paper-ab/20261026T110000Z/D/run.log
+StandardError=append:/home/ec2-user/paper-ab/20261026T110000Z/D/run.log
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
