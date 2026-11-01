@@ -1,0 +1,26 @@
+{
+  "backup": "/home/ec2-user/backups/polyauto-before-prod-d-20261027T041707Z",
+  "utc": "2026-10-27T04:18:21.702358+00:00",
+  "env_updates": {
+    "SECONDS_BEFORE_CLOSE": "150",
+    "MIN_T_REMAINING_SEC": "90",
+    "REVERSAL_EXIT_WINDOW_SEC": "150",
+    "REVERSAL_HELD_BID_DRAWDOWN": "0.30",
+    "BTC_REVERSAL_HELD_BID_DRAWDOWN": "0.30",
+    "MAX_DAILY_LOSS_FRACTION": "0",
+    "MAX_DAILY_REALIZED_PROFIT_FRACTION": "0.10",
+    "MAX_DAILY_REALIZED_PROFIT_USD": "0"
+  },
+  "services": {
+    "polymarket-auto-btc-paper.service": {
+      "MainPID": "3611107",
+      "WorkingDirectory": "/home/ec2-user/polymarketbot-auto/releases/c-paper-profit-20261024",
+      "ActiveState": "active"
+    },
+    "polymarket-auto-dashboard.service": {
+      "MainPID": "3611108",
+      "WorkingDirectory": "/home/ec2-user/polymarketbot-auto",
+      "ActiveState": "active"
+    }
+  }
+}

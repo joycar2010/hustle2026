@@ -1,0 +1,11 @@
+[Unit]
+After=network.target
+[Service]
+User=ec2-user
+WorkingDirectory=/home/ec2-user/polymarketbot-auto
+EnvironmentFile=/home/ec2-user/polymarketbot-auto/.env
+Environment=PYTHONPATH=/home/ec2-user/polymarketbot-auto
+ExecStart=/home/ec2-user/polymarketbot-auto/scripts/run_paper_asset.sh ETH
+Restart=on-failure
+[Install]
+WantedBy=multi-user.target

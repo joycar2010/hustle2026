@@ -1,0 +1,33 @@
+{
+  "created_utc": "2026-10-31T04:49:05.477002+00:00",
+  "mode": "paper",
+  "production_untouched": true,
+  "p1_run_id": "20261031T044902Z",
+  "measurement_timezone": "Asia/Shanghai",
+  "paper_equity_usd": 100,
+  "live_enabled": false,
+  "groups": {
+    "A": {
+      "phase": "P1",
+      "label": "Paper A · 当前基线",
+      "variant": "baseline",
+      "path": "A",
+      "config_manifest_version": "P1-20261031"
+    },
+    "B": {
+      "phase": "P1",
+      "label": "Paper B · 持仓保护",
+      "variant": "continuous-protection",
+      "path": "B",
+      "config_manifest_version": "P1-20261031"
+    }
+  },
+  "legacy_groups": {
+    "C": "保留原 Paper 账本",
+    "D": "保留原 Paper 账本",
+    "E": "保留原 Paper 保护账本",
+    "F": "保留原 Paper 保护账本",
+    "G": "保留原 Paper 保护账本",
+    "H": "保留原 Paper 保护账本"
+  }
+}

@@ -10,3 +10,4 @@ backups/backup-261024方案C重置版/*.enc filter=lfs diff=lfs merge=lfs -text
 backups/backup-261025-original-BTC-single-product/database/*.tar.gz filter=lfs diff=lfs merge=lfs -text
 backups/backup-261027影子D组策略优化版/** -text
 backups/backup-261027影子D组策略优化版/*.enc filter=lfs diff=lfs merge=lfs -text
+backups/backup-261101回测10%八策略测试评估版/poly-complete.tar.gz.enc filter=lfs diff=lfs merge=lfs -text

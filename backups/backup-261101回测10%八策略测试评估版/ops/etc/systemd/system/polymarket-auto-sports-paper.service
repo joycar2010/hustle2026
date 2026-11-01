@@ -1,0 +1,11 @@
+[Unit]
+After=network.target
+[Service]
+User=ec2-user
+WorkingDirectory=/home/ec2-user/polymarketbot-auto
+EnvironmentFile=/home/ec2-user/polymarketbot-auto/.env
+Environment=PYTHONPATH=/home/ec2-user/polymarketbot-auto
+ExecStart=/home/ec2-user/polymarketbot-auto/.venv/bin/python scripts/run_sports_paper.py
+Restart=always
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,31 @@
+{
+  "label": "261101回测10%八策略测试评估版",
+  "host": "18.179.50.168",
+  "domains": [
+    "polyauto.hustle2026.xyz"
+  ],
+  "started_utc": "2026-11-01T06:09:16Z",
+  "completed_utc": "2026-11-01T06:20:57Z",
+  "sqlite_databases": 31,
+  "archive_members": 1998,
+  "frontend_files": 85,
+  "frontend_unchanged": true,
+  "frontend_encrypted_only_files": 0,
+  "service_state_unchanged": true,
+  "persistent_services_unchanged": true,
+  "service_note": "Timer-driven agents may start/finish naturally; no service start/stop/restart was issued by this backup.",
+  "secret_scan_hits": 0,
+  "source_files": 1594,
+  "redacted_files": 0,
+  "archive_sha256": "1732add184ba83ae88fbaeadd1199f1df28d7d426086f45f668919a0bae68401",
+  "archive_bytes": 1509427072,
+  "archive_roundtrip_verified": true,
+  "ciphertext_hmac_verified": true,
+  "encryption": "AES-256-CBC/PBKDF2-SHA256-200000 + encrypt-then-HMAC-SHA256",
+  "restore_key_server": "/home/ec2-user/backups/polyauto-261101-backtest-10pct-eight-strategy/private/restore.key",
+  "production_btc_source": "/home/ec2-user/polymarketbot-auto/releases/c-paper-profit-20261024",
+  "production_btc_database": "/home/ec2-user/polymarketbot-auto/trades-auto.db",
+  "production_profile": "Current active polyauto BTC release and dashboard state; see services-before/after and encrypted runtime .env for exact effective values",
+  "active_shadow_root": "/home/ec2-user/paper-ab/20261026T110000Z",
+  "shadow_profiles": "Paper shadow files retained when present; exact values remain in encrypted runtime configuration"
+}

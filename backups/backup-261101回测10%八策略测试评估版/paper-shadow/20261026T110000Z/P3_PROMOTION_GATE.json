@@ -1,0 +1,15 @@
+{
+  "schema_version": "p3-promotion-gate-v1",
+  "run_id": "20261031T044902Z",
+  "status": "BLOCKED_PENDING_PAPER_WINDOW",
+  "live_enabled": false,
+  "requirements": [
+    "P1至少48小时且覆盖趋势、震荡和高波动样本",
+    "净PnL含费用/滑点为正",
+    "止损率和最大回撤不高于基线",
+    "平均止损/平均赢家比下降",
+    "配置哈希、SQLite完整性和审计指标全部通过",
+    "人工复核后才允许任何实盘变更"
+  ],
+  "promotion_action": "不自动开启实盘"
+}

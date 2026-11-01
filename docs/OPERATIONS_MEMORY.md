@@ -63,3 +63,28 @@
 - 服务器备份目录 `/home/ec2-user/backups/polyauto-261027-shadow-d`。完整原件与敏感配置只在 AES/PBKDF2+HMAC 加密归档；通过 Git LFS 保存，公开副本已脱敏。
 - 恢复密钥独立放在本机 `C:\Users\Administrator\poly-backup-keys\261027\restore.key` 及服务器备份的 `private/restore.key`；不得提交 Git。
 - 继续使用 `D:\Dev\MixCodex\repo-poly` 的 Windows Git 凭据追加推送 `poly`，不在服务器新增 GitHub 凭据。
+
+
+## 2026-11-01：polytest 同步 polyauto 生产BTC及每日历史修复
+
+- polytest当前服务器18.177.149.23；旧35.78.246.81失效。不要触碰该机另一个域名的polymarket-auto-*服务。
+- BTC服务polymarket-test-btc-paper.service已切至`/home/ec2-user/polymarketbot-test/releases/polyauto-d-20261101`，drop-in为90-polyauto-d.conf。30个bot Python源码及manifest脚本取自polyauto实际运行release，31文件哈希一致、169项有效配置一致。
+- 当前策略D：0.84–0.90，剩余90–150秒入场，delta±10，入场/止损确认2次，止损10%（150秒窗口），风险2%，本金100美元，日亏5%，日盈8%；Paper且实盘关闭，Kelly关闭。失效旧别名BTC_REVERSAL_HELD_BID_DRAWDOWN同步为0.10。
+- Dashboard仍从`releases/85056d2-20261025`运行、端口8897，继续使用它原来的bot.store/risk接口，禁止直接覆盖其bot目录为新worker源码，否则dashboard会缺少旧会计接口而崩溃。
+- 账本`releases/85056d2-20261025/trades-test.db`及原熔断/止盈sidecars原地保留，无清理、无复制生产钱包凭据。新launcher将bot_btc.pid、bot.mode和runtime-manifest.json写回旧dashboard release目录（上级BASE目录root所有，不可写）。
+- 策略保存API同时更新dashboard ROOT/.env和systemd实际worker.env，原子备份保存，异步重启并核验新PID、Paper命令、账本及6项风控配置。实际同值保存/重启测试约1.48秒通过。
+- 每日历史改为只读FIFO投影/2秒短缓存；UI合并请求、30秒缓存复用、15秒超时、分页及刷新按钮。8天旧历史完全一致；内部11毫秒首次/2毫秒命中，线上PC/手机0.20–0.27秒，缓存重开约0.14秒。止损状态正确显示150秒窗口，保留所有历史事件。
+- 50项worker+42项历史/风控回归及18项线上浏览器检查通过。发布资源index-DxQIIagm.js、index-DLPKg7Ji.css；所有旧dist资源保留。
+- 完整本机备份`/home/ec2-user/polymarketbot-test/backups/strategy-history-sync-20261101T035338Z`：源码/配置/全部dist及站点、unit、SQLite一致性备份；含敏感配置，禁止明文提交Git。
+- 生产18.179.50.168 BTC进程PID458255未变；目标机另一域名BTC/dashboard5265/5267、OpenClaw13530未变。收益不可据同步保证，需积累独立Paper样本。
+
+## 2026-11-01：polyauto 当前版本备份（261101回测10%八策略测试评估版）
+
+- 服务器 `18.179.50.168`，域名 `polyauto.hustle2026.xyz`；本次只读采集，没有停止、重启或切换任何服务。采集前后生产 BTC PID 458255、Dashboard PID 466277 保持不变。
+- 当前 BTC 活动 release 为 `/home/ec2-user/polymarketbot-auto/releases/c-paper-profit-20261024`，生产账本为 `/home/ec2-user/polymarketbot-auto/trades-auto.db`。
+- GitHub 公开树路径：`backups/backup-261101回测10%八策略测试评估版`。包含当前后端/策略/Agent/脚本/测试/UI 源码、应用 dist、Nginx 实际网站静态文件、脱敏 systemd/Nginx 信息、SQLite 清单和 SHA-256 校验。
+- 31 个 SQLite 数据库通过 SQLite Backup API 快照并 `quick_check=ok`；原始数据库不放明文 Git 树，全部保存在 `poly-complete.tar.gz.enc` 加密归档中。归档大小 1,509,427,072 字节，服务器端解密回读和 HMAC 校验通过。
+- 加密归档采用 AES-256-CBC + PBKDF2-SHA256 200000 轮，并使用独立 HMAC-SHA256；明文 `.env`、钱包/API/LLM 密钥、Dashboard 控制令牌、TLS 私钥和恢复密钥未提交 Git。
+- 恢复密钥仅在服务器 `/home/ec2-user/backups/polyauto-261101-backtest-10pct-eight-strategy/private/restore.key` 和本机 `C:\Users\Administrator\poly-backup-keys\261101\restore.key`，禁止复制到仓库或聊天。
+- 备份说明和恢复工具见该备份目录 `README.md`、`restore_archive.py`；恢复前必须先验证 HMAC、清单和 SQLite 完整性，再在空临时目录中解密，不得直接覆盖运行中的账本或服务。
+

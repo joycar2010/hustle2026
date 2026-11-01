@@ -1,0 +1,9 @@
+{
+  " started_utc\: \2026-10-22T02:20:54Z\,
+ \window_hours\: 48,
+ \live_orders\: false,
+ \A\: {\source\: \current polyauto worker\, \db\: \A/ab.db\, \parameters\: \current .env\},
+ \B\: {\source\: \f70d89b 2601020收益修复版\, \db\: \B/ab.db\, \min_entry_price\: 0.88, \max_entry_price\: 0.90, \up_min_entry_price\: 0.88, \up_max_entry_price\: 0.90, \reversal_held_bid_drawdown\: 0.30, \reversal_exit_require_btc_reversal\: true, \reversal_confirm_checks\: 2, \confirm_checks\: 2, \max_daily_loss_fraction\: 0.01, \BTC_LIVE_ENABLED\: false},
+ \snapshot\: \trades-auto.snapshot.db\,
+ \monitor\: \metrics.jsonl\
+}

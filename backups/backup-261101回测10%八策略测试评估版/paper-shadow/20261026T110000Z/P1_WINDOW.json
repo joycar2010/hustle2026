@@ -1,0 +1,16 @@
+{
+  "schema_version": "p1-paper-ab-window-v1",
+  "run_id": "20261031T044902Z",
+  "mode": "paper",
+  "live_enabled": false,
+  "started_at": "2026-10-31T04:49:02+00:00",
+  "minimum_observation_end": "2026-11-02T04:49:02+00:00",
+  "target_observation_end": "2026-11-03T04:49:02+00:00",
+  "timezone": "Asia/Shanghai",
+  "capital_usd": 100,
+  "groups": {
+    "A": "baseline",
+    "B": "continuous-protection"
+  },
+  "status": "COLLECTING"
+}

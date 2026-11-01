@@ -1,0 +1,11 @@
+[Unit]
+Description=Run MISPRICE H P2 audit every 5 minutes
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=5min
+Unit=polymarket-auto-paper-misprice-h-audit.service
+Persistent=true
+
+[Install]
+WantedBy=timers.target

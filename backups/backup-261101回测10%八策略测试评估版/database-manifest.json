@@ -1,0 +1,467 @@
+[
+  {
+    "archive_path": "database-snapshots/server-auto/polymarketbot-auto/backups/history-misprice-h-20261101T032904Z/H-trades-before.db",
+    "source_path": "/home/ec2-user/polymarketbot-auto/backups/history-misprice-h-20261101T032904Z/H-trades-before.db",
+    "source_archive_path": "server-auto/polymarketbot-auto/backups/history-misprice-h-20261101T032904Z/H-trades-before.db",
+    "bytes": 5730304,
+    "sha256": "4027d2df1f85a61be1b6648403912847772a41799932896b34b4842a7908e7ef",
+    "quick_check": "ok",
+    "tables": {
+      "decisions": 24053,
+      "orders": 2,
+      "resolutions": 0
+    },
+    "snapshot_completed_utc": "2026-11-01T06:09:23Z",
+    "storage": "encrypted archive only"
+  },
+  {
+    "archive_path": "server-auto/polymarketbot-auto/p0-shadow-btc-contaminated-20260912_152601.db",
+    "source_path": "/home/ec2-user/polymarketbot-auto/p0-shadow-btc-contaminated-20260912_152601.db",
+    "source_archive_path": "server-auto/polymarketbot-auto/p0-shadow-btc-contaminated-20260912_152601.db",
+    "bytes": 65536,
+    "sha256": "b0289cca4dc2591e68881d884bb124d151f817309d6f7a758bce9e9c924119fb",
+    "quick_check": "ok",
+    "tables": {
+      "decisions": 162,
+      "orders": 4,
+      "resolutions": 1
+    },
+    "snapshot_completed_utc": "2026-11-01T06:09:24Z",
+    "storage": "encrypted archive only"
+  },
+  {
+    "archive_path": "server-auto/polymarketbot-auto/p0-shadow-btc.db",
+    "source_path": "/home/ec2-user/polymarketbot-auto/p0-shadow-btc.db",
+    "source_archive_path": "server-auto/polymarketbot-auto/p0-shadow-btc.db",
+    "bytes": 134623232,
+    "sha256": "ef2f7c8f78a6fbd074902b82b7ee70859eb834a5c03745991061edd0ae603d8b",
+    "quick_check": "ok",
+    "tables": {
+      "decisions": 634288,
+      "orders": 10959,
+      "resolutions": 2567
+    },
+    "snapshot_completed_utc": "2026-11-01T06:09:26Z",
+    "storage": "encrypted archive only"
+  },
+  {
+    "archive_path": "database-snapshots/server-auto/polymarketbot-auto/private/loss-threshold-3pct-20261029T054022Z/A.snapshot.db",
+    "source_path": "/home/ec2-user/polymarketbot-auto/private/loss-threshold-3pct-20261029T054022Z/A.snapshot.db",
+    "source_archive_path": "server-auto/polymarketbot-auto/private/loss-threshold-3pct-20261029T054022Z/A.snapshot.db",
+    "bytes": 34299904,
+    "sha256": "9414ffa597daee5f10d6152942ae8cba2dca26013666e60629954392037e2012",
+    "quick_check": "ok",
+    "tables": {
+      "decisions": 150374,
+      "orders": 123,
+      "resolutions": 77
+    },
+    "snapshot_completed_utc": "2026-11-01T06:09:26Z",
+    "storage": "encrypted archive only"
+  },
+  {
+    "archive_path": "database-snapshots/server-auto/polymarketbot-auto/private/loss-threshold-3pct-20261029T054022Z/B.snapshot.db",
+    "source_path": "/home/ec2-user/polymarketbot-auto/private/loss-threshold-3pct-20261029T054022Z/B.snapshot.db",
+    "source_archive_path": "server-auto/polymarketbot-auto/private/loss-threshold-3pct-20261029T054022Z/B.snapshot.db",
+    "bytes": 29548544,
+    "sha256": "7732e3d22dd99b615c1aeeb629cdc47b173d07954d888627ffcf6db4650050b4",
+    "quick_check": "ok",
+    "tables": {
+      "decisions": 130057,
+      "orders": 265,
+      "resolutions": 179
+    },
+    "snapshot_completed_utc": "2026-11-01T06:09:27Z",
+    "storage": "encrypted archive only"
+  },
+  {
+    "archive_path": "database-snapshots/server-auto/polymarketbot-auto/private/loss-threshold-3pct-20261029T054022Z/C.snapshot.db",
+    "source_path": "/home/ec2-user/polymarketbot-auto/private/loss-threshold-3pct-20261029T054022Z/C.snapshot.db",
+    "source_archive_path": "server-auto/polymarketbot-auto/private/loss-threshold-3pct-20261029T054022Z/C.snapshot.db",
+    "bytes": 24834048,
+    "sha256": "1e26ad75e297200628d0e4317c6cfd66849e1e60baaa553934bf63d22b3b6c8a",
+    "quick_check": "ok",
+    "tables": {
+      "decisions": 107753,
+      "orders": 289,
+      "resolutions": 207
+    },
+    "snapshot_completed_utc": "2026-11-01T06:09:27Z",
+    "storage": "encrypted archive only"
+  },
+  {
+    "archive_path": "database-snapshots/server-auto/polymarketbot-auto/private/loss-threshold-3pct-20261029T054022Z/D.snapshot.db",
+    "source_path": "/home/ec2-user/polymarketbot-auto/private/loss-threshold-3pct-20261029T054022Z/D.snapshot.db",
+    "source_archive_path": "server-auto/polymarketbot-auto/private/loss-threshold-3pct-20261029T054022Z/D.snapshot.db",
+    "bytes": 23785472,
+    "sha256": "be5d1982b56d7ce50092c70c1d6d6a1f9684e111d5c0d0c062be543bb7c1c3a5",
+    "quick_check": "ok",
+    "tables": {
+      "decisions": 103052,
+      "orders": 291,
+      "resolutions": 183
+    },
+    "snapshot_completed_utc": "2026-11-01T06:09:27Z",
+    "storage": "encrypted archive only"
+  },
+  {
+    "archive_path": "database-snapshots/server-auto/polymarketbot-auto/private/loss-threshold-3pct-20261029T054022Z/E.snapshot.db",
+    "source_path": "/home/ec2-user/polymarketbot-auto/private/loss-threshold-3pct-20261029T054022Z/E.snapshot.db",
+    "source_archive_path": "server-auto/polymarketbot-auto/private/loss-threshold-3pct-20261029T054022Z/E.snapshot.db",
+    "bytes": 8499200,
+    "sha256": "dfe5960f3919d0160ceab519435a2113f9e27c7a0bacd62dfa137ba4d8076e05",
+    "quick_check": "ok",
+    "tables": {
+      "decisions": 37457,
+      "orders": 79,
+      "resolutions": 47
+    },
+    "snapshot_completed_utc": "2026-11-01T06:09:27Z",
+    "storage": "encrypted archive only"
+  },
+  {
+    "archive_path": "database-snapshots/server-auto/polymarketbot-auto/private/loss-threshold-3pct-20261029T054022Z/F.snapshot.db",
+    "source_path": "/home/ec2-user/polymarketbot-auto/private/loss-threshold-3pct-20261029T054022Z/F.snapshot.db",
+    "source_archive_path": "server-auto/polymarketbot-auto/private/loss-threshold-3pct-20261029T054022Z/F.snapshot.db",
+    "bytes": 9072640,
+    "sha256": "d68c2e6eb888262ee96b4e0f8acb0b96d5557cc7d5ce937199fe79144bf14830",
+    "quick_check": "ok",
+    "tables": {
+      "decisions": 40030,
+      "orders": 77,
+      "resolutions": 47
+    },
+    "snapshot_completed_utc": "2026-11-01T06:09:28Z",
+    "storage": "encrypted archive only"
+  },
+  {
+    "archive_path": "database-snapshots/server-auto/polymarketbot-auto/private/loss-threshold-3pct-20261029T054022Z/G.snapshot.db",
+    "source_path": "/home/ec2-user/polymarketbot-auto/private/loss-threshold-3pct-20261029T054022Z/G.snapshot.db",
+    "source_archive_path": "server-auto/polymarketbot-auto/private/loss-threshold-3pct-20261029T054022Z/G.snapshot.db",
+    "bytes": 8409088,
+    "sha256": "c8c47b72774d55aaa5addacaa60a385fab69cc689d6902d41429fc40a6463aaa",
+    "quick_check": "ok",
+    "tables": {
+      "decisions": 35331,
+      "orders": 106,
+      "resolutions": 62
+    },
+    "snapshot_completed_utc": "2026-11-01T06:09:28Z",
+    "storage": "encrypted archive only"
+  },
+  {
+    "archive_path": "database-snapshots/server-auto/polymarketbot-auto/private/loss-threshold-3pct-20261029T054022Z/H.snapshot.db",
+    "source_path": "/home/ec2-user/polymarketbot-auto/private/loss-threshold-3pct-20261029T054022Z/H.snapshot.db",
+    "source_archive_path": "server-auto/polymarketbot-auto/private/loss-threshold-3pct-20261029T054022Z/H.snapshot.db",
+    "bytes": 9854976,
+    "sha256": "76e65a14cb6cde47a3346112f41fe20e49d42e82543c5315609fc61d5887ae7f",
+    "quick_check": "ok",
+    "tables": {
+      "decisions": 39942,
+      "orders": 77,
+      "resolutions": 43
+    },
+    "snapshot_completed_utc": "2026-11-01T06:09:28Z",
+    "storage": "encrypted archive only"
+  },
+  {
+    "archive_path": "database-snapshots/server-auto/polymarketbot-auto/private/loss-threshold-3pct-20261029T054022Z/production.snapshot.db",
+    "source_path": "/home/ec2-user/polymarketbot-auto/private/loss-threshold-3pct-20261029T054022Z/production.snapshot.db",
+    "source_archive_path": "server-auto/polymarketbot-auto/private/loss-threshold-3pct-20261029T054022Z/production.snapshot.db",
+    "bytes": 977620992,
+    "sha256": "071da1ab707134d718c27936670a21bb925ae872884b022370431a7f48b4e4ee",
+    "quick_check": "ok",
+    "tables": {
+      "decisions": 3634443,
+      "orders": 7488,
+      "resolutions": 5357
+    },
+    "snapshot_completed_utc": "2026-11-01T06:09:50Z",
+    "storage": "encrypted archive only"
+  },
+  {
+    "archive_path": "database-snapshots/server-auto/polymarketbot-auto/private/misprice-h-p0-20261031T200000Z/H/trades.db",
+    "source_path": "/home/ec2-user/polymarketbot-auto/private/misprice-h-p0-20261031T200000Z/H/trades.db",
+    "source_archive_path": "server-auto/polymarketbot-auto/private/misprice-h-p0-20261031T200000Z/H/trades.db",
+    "bytes": 35545088,
+    "sha256": "a3650dfbabde3b198277fa5f4e91b4dda791dbae8962885fea56d53e0498cdbb",
+    "quick_check": "ok",
+    "tables": {
+      "decisions": 144247,
+      "orders": 342,
+      "resolutions": 218
+    },
+    "snapshot_completed_utc": "2026-11-01T06:09:50Z",
+    "storage": "encrypted archive only"
+  },
+  {
+    "archive_path": "database-snapshots/server-auto/polymarketbot-auto/private/misprice-h-p0-20261031T200000Z/old-trades.db",
+    "source_path": "/home/ec2-user/polymarketbot-auto/private/misprice-h-p0-20261031T200000Z/old-trades.db",
+    "source_archive_path": "server-auto/polymarketbot-auto/private/misprice-h-p0-20261031T200000Z/old-trades.db",
+    "bytes": 35577856,
+    "sha256": "07667e9a7b8a63bf2ed8b51354a423b74ecc475e974e41f076f64505ad591504",
+    "quick_check": "ok",
+    "tables": {
+      "decisions": 144359,
+      "orders": 342,
+      "resolutions": 218
+    },
+    "snapshot_completed_utc": "2026-11-01T06:09:51Z",
+    "storage": "encrypted archive only"
+  },
+  {
+    "archive_path": "database-snapshots/server-auto/polymarketbot-auto/private/p0-p1-paper-ab-rebuild-20261031T044902Z/A-old/ab.db",
+    "source_path": "/home/ec2-user/polymarketbot-auto/private/p0-p1-paper-ab-rebuild-20261031T044902Z/A-old/ab.db",
+    "source_archive_path": "server-auto/polymarketbot-auto/private/p0-p1-paper-ab-rebuild-20261031T044902Z/A-old/ab.db",
+    "bytes": 55029760,
+    "sha256": "569de4bf9b9d6218732f6f45a5069b61c77acebbfda8c7b04bb9a777f7779d6c",
+    "quick_check": "ok",
+    "tables": {
+      "decisions": 241272,
+      "orders": 238,
+      "resolutions": 152
+    },
+    "snapshot_completed_utc": "2026-11-01T06:09:52Z",
+    "storage": "encrypted archive only"
+  },
+  {
+    "archive_path": "database-snapshots/server-auto/polymarketbot-auto/private/p0-p1-paper-ab-rebuild-20261031T044902Z/A-previous-live/ab.db",
+    "source_path": "/home/ec2-user/polymarketbot-auto/private/p0-p1-paper-ab-rebuild-20261031T044902Z/A-previous-live/ab.db",
+    "source_archive_path": "server-auto/polymarketbot-auto/private/p0-p1-paper-ab-rebuild-20261031T044902Z/A-previous-live/ab.db",
+    "bytes": 55029760,
+    "sha256": "569de4bf9b9d6218732f6f45a5069b61c77acebbfda8c7b04bb9a777f7779d6c",
+    "quick_check": "ok",
+    "tables": {
+      "decisions": 241272,
+      "orders": 238,
+      "resolutions": 152
+    },
+    "snapshot_completed_utc": "2026-11-01T06:09:52Z",
+    "storage": "encrypted archive only"
+  },
+  {
+    "archive_path": "database-snapshots/server-auto/polymarketbot-auto/private/p0-p1-paper-ab-rebuild-20261031T044902Z/B-old/ab.db",
+    "source_path": "/home/ec2-user/polymarketbot-auto/private/p0-p1-paper-ab-rebuild-20261031T044902Z/B-old/ab.db",
+    "source_archive_path": "server-auto/polymarketbot-auto/private/p0-p1-paper-ab-rebuild-20261031T044902Z/B-old/ab.db",
+    "bytes": 50487296,
+    "sha256": "9231241dfbbdb581530000eedc1aaa171565768347d8e8d60ac06c40cfed42e3",
+    "quick_check": "ok",
+    "tables": {
+      "decisions": 222195,
+      "orders": 403,
+      "resolutions": 265
+    },
+    "snapshot_completed_utc": "2026-11-01T06:09:53Z",
+    "storage": "encrypted archive only"
+  },
+  {
+    "archive_path": "database-snapshots/server-auto/polymarketbot-auto/private/p0-p1-paper-ab-rebuild-20261031T044902Z/B-previous-live/ab.db",
+    "source_path": "/home/ec2-user/polymarketbot-auto/private/p0-p1-paper-ab-rebuild-20261031T044902Z/B-previous-live/ab.db",
+    "source_archive_path": "server-auto/polymarketbot-auto/private/p0-p1-paper-ab-rebuild-20261031T044902Z/B-previous-live/ab.db",
+    "bytes": 50487296,
+    "sha256": "9231241dfbbdb581530000eedc1aaa171565768347d8e8d60ac06c40cfed42e3",
+    "quick_check": "ok",
+    "tables": {
+      "decisions": 222195,
+      "orders": 403,
+      "resolutions": 265
+    },
+    "snapshot_completed_utc": "2026-11-01T06:09:54Z",
+    "storage": "encrypted archive only"
+  },
+  {
+    "archive_path": "database-snapshots/server-auto/polymarketbot-auto/private/p0-p2-paper-ab-20261031T030543Z/ab.db",
+    "source_path": "/home/ec2-user/polymarketbot-auto/private/p0-p2-paper-ab-20261031T030543Z/ab.db",
+    "source_archive_path": "server-auto/polymarketbot-auto/private/p0-p2-paper-ab-20261031T030543Z/ab.db",
+    "bytes": 49934336,
+    "sha256": "293c3b83795bdc2c8e914aa6ad2bcb48335b2a22116eace047ff766d23be46fb",
+    "quick_check": "ok",
+    "tables": {
+      "decisions": 219800,
+      "orders": 395,
+      "resolutions": 259
+    },
+    "snapshot_completed_utc": "2026-11-01T06:09:55Z",
+    "storage": "encrypted archive only"
+  },
+  {
+    "archive_path": "database-snapshots/server-auto/polymarketbot-auto/private/p0-p2-paper-ab-20261031T030543Z/trades-auto.db",
+    "source_path": "/home/ec2-user/polymarketbot-auto/private/p0-p2-paper-ab-20261031T030543Z/trades-auto.db",
+    "source_archive_path": "server-auto/polymarketbot-auto/private/p0-p2-paper-ab-20261031T030543Z/trades-auto.db",
+    "bytes": 991334400,
+    "sha256": "5730316b2b3b2b6ed1ab304a090adb377ae95a00fe098dc5f23afb80417eb087",
+    "quick_check": "ok",
+    "tables": {
+      "decisions": 3694023,
+      "orders": 7596,
+      "resolutions": 5421
+    },
+    "snapshot_completed_utc": "2026-11-01T06:10:17Z",
+    "storage": "encrypted archive only"
+  },
+  {
+    "archive_path": "server-auto/polymarketbot-auto/trades-auto.db",
+    "source_path": "/home/ec2-user/polymarketbot-auto/trades-auto.db",
+    "source_archive_path": "server-auto/polymarketbot-auto/trades-auto.db",
+    "bytes": 998088704,
+    "sha256": "25d4cfcb6198e4d931855a6f352807877c357e5c563c7179a4b01ad68bf8e31d",
+    "quick_check": "ok",
+    "tables": {
+      "decisions": 3722641,
+      "orders": 7712,
+      "resolutions": 5505
+    },
+    "snapshot_completed_utc": "2026-11-01T06:10:33Z",
+    "storage": "encrypted archive only"
+  },
+  {
+    "archive_path": "server-auto/polymarketbot-auto/trades-auto.db.bak-hygiene-20260919-184911",
+    "source_path": "/home/ec2-user/polymarketbot-auto/trades-auto.db.bak-hygiene-20260919-184911",
+    "source_archive_path": "server-auto/polymarketbot-auto/trades-auto.db.bak-hygiene-20260919-184911",
+    "bytes": 21770240,
+    "sha256": "332350ae6392038f6348b9efcddc7072d16e2ef8920a3cc29db2653de7382053",
+    "quick_check": "ok",
+    "tables": {
+      "decisions": 103852,
+      "orders": 1028,
+      "resolutions": 319
+    },
+    "snapshot_completed_utc": "2026-11-01T06:10:33Z",
+    "storage": "encrypted archive only"
+  },
+  {
+    "archive_path": "server-auto/polymarketbot-auto/trades.db",
+    "source_path": "/home/ec2-user/polymarketbot-auto/trades.db",
+    "source_archive_path": "server-auto/polymarketbot-auto/trades.db",
+    "bytes": 32768,
+    "sha256": "0467924063e8a778e141f1142fca7bb20f49306cb6dcd7a483dd71fd8a1b5dfb",
+    "quick_check": "ok",
+    "tables": {
+      "decisions": 0,
+      "orders": 0,
+      "resolutions": 0
+    },
+    "snapshot_completed_utc": "2026-11-01T06:10:33Z",
+    "storage": "encrypted archive only"
+  },
+  {
+    "archive_path": "paper-shadow/20261022T020933Z/A/ab.db",
+    "source_path": "/home/ec2-user/paper-ab/20261022T020933Z/A/ab.db",
+    "source_archive_path": "paper-shadow/20261022T020933Z/A/ab.db",
+    "bytes": 12910592,
+    "sha256": "9dce9ac7dfdde0273f0003e68435aeec3c71007c86bab641518241e112442c40",
+    "quick_check": "ok",
+    "tables": {
+      "decisions": 57722,
+      "orders": 296,
+      "resolutions": 200
+    },
+    "snapshot_completed_utc": "2026-11-01T06:10:36Z",
+    "storage": "encrypted archive only"
+  },
+  {
+    "archive_path": "paper-shadow/20261022T020933Z/B/ab.db",
+    "source_path": "/home/ec2-user/paper-ab/20261022T020933Z/B/ab.db",
+    "source_archive_path": "paper-shadow/20261022T020933Z/B/ab.db",
+    "bytes": 22102016,
+    "sha256": "2f2058754b99640b11065d0f61b9d366460bc085d472adc0a5e3c5adcc316664",
+    "quick_check": "ok",
+    "tables": {
+      "decisions": 98810,
+      "orders": 116,
+      "resolutions": 86
+    },
+    "snapshot_completed_utc": "2026-11-01T06:10:37Z",
+    "storage": "encrypted archive only"
+  },
+  {
+    "archive_path": "paper-shadow/20261022T020933Z/C/ab.db",
+    "source_path": "/home/ec2-user/paper-ab/20261022T020933Z/C/ab.db",
+    "source_archive_path": "paper-shadow/20261022T020933Z/C/ab.db",
+    "bytes": 19087360,
+    "sha256": "62e14b9112d8025cb680b6dda417174a74d2c542853826eeed2bc0a3ca0a0831",
+    "quick_check": "ok",
+    "tables": {
+      "decisions": 84412,
+      "orders": 230,
+      "resolutions": 158
+    },
+    "snapshot_completed_utc": "2026-11-01T06:10:37Z",
+    "storage": "encrypted archive only"
+  },
+  {
+    "archive_path": "paper-shadow/20261022T020933Z/trades-auto.snapshot.db",
+    "source_path": "/home/ec2-user/paper-ab/20261022T020933Z/trades-auto.snapshot.db",
+    "source_archive_path": "paper-shadow/20261022T020933Z/trades-auto.snapshot.db",
+    "bytes": 923963392,
+    "sha256": "8748712455a8ba40637ce76915e9e05afcfe1052a4aa48bad2c48c461c351598",
+    "quick_check": "ok",
+    "tables": {
+      "decisions": 3399733,
+      "orders": 7128,
+      "resolutions": 5123
+    },
+    "snapshot_completed_utc": "2026-11-01T06:10:57Z",
+    "storage": "encrypted archive only"
+  },
+  {
+    "archive_path": "paper-shadow/20261026T110000Z/A/ab.db",
+    "source_path": "/home/ec2-user/paper-ab/20261026T110000Z/A/ab.db",
+    "source_archive_path": "paper-shadow/20261026T110000Z/A/ab.db",
+    "bytes": 8208384,
+    "sha256": "7a84463b114e9cb8a90e6d54afb228cc540426b1cd82f11fcc1af35c39d3cce4",
+    "quick_check": "ok",
+    "tables": {
+      "decisions": 35207,
+      "orders": 115,
+      "resolutions": 81
+    },
+    "snapshot_completed_utc": "2026-11-01T06:10:57Z",
+    "storage": "encrypted archive only"
+  },
+  {
+    "archive_path": "paper-shadow/20261026T110000Z/B/ab.db",
+    "source_path": "/home/ec2-user/paper-ab/20261026T110000Z/B/ab.db",
+    "source_archive_path": "paper-shadow/20261026T110000Z/B/ab.db",
+    "bytes": 8204288,
+    "sha256": "13f29440fdbaf611f34f4691fdbb270ba3a215e2f5948523d08e0db06a7fdde0",
+    "quick_check": "ok",
+    "tables": {
+      "decisions": 35119,
+      "orders": 113,
+      "resolutions": 81
+    },
+    "snapshot_completed_utc": "2026-11-01T06:10:57Z",
+    "storage": "encrypted archive only"
+  },
+  {
+    "archive_path": "paper-shadow/20261026T110000Z/C/ab.db",
+    "source_path": "/home/ec2-user/paper-ab/20261026T110000Z/C/ab.db",
+    "source_archive_path": "paper-shadow/20261026T110000Z/C/ab.db",
+    "bytes": 51085312,
+    "sha256": "3942506ed7ddfe3ecf3ea8a6c1306fd03bc5e5e39ca9cebcd42ad99819f3ef40",
+    "quick_check": "ok",
+    "tables": {
+      "decisions": 221504,
+      "orders": 517,
+      "resolutions": 369
+    },
+    "snapshot_completed_utc": "2026-11-01T06:10:58Z",
+    "storage": "encrypted archive only"
+  },
+  {
+    "archive_path": "paper-shadow/20261026T110000Z/D/ab.db",
+    "source_path": "/home/ec2-user/paper-ab/20261026T110000Z/D/ab.db",
+    "source_archive_path": "paper-shadow/20261026T110000Z/D/ab.db",
+    "bytes": 49209344,
+    "sha256": "b44b4955150021c70a9fcaf6887cd8e8e7f9e53af7cfa863a1b782eee158660d",
+    "quick_check": "ok",
+    "tables": {
+      "decisions": 213160,
+      "orders": 531,
+      "resolutions": 343
+    },
+    "snapshot_completed_utc": "2026-11-01T06:10:59Z",
+    "storage": "encrypted archive only"
+  }
+]

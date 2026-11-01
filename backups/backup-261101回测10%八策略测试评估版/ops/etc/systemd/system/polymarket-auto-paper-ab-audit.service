@@ -1,0 +1,10 @@
+[Unit]
+Description=polyauto P2 Paper A/B read-only audit
+After=network-online.target
+Wants=network-online.target
+[Service]
+Type=oneshot
+User=ec2-user
+WorkingDirectory=/home/ec2-user/paper-ab/20261026T110000Z
+Environment=PYTHONPATH=/home/ec2-user/paper-ab/20261026T110000Z/A
+ExecStart=/home/ec2-user/polymarketbot-auto/.venv/bin/python /home/ec2-user/paper-ab/paper_ab_audit.py

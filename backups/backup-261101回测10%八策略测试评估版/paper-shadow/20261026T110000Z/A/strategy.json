@@ -1,0 +1,1 @@
+{"mode":"paper","phase":"P1","label":"Paper A · 当前基线","description":"与生产 D 配置一致：0.84–0.90、90–150 秒、delta ±10、确认 2 次、30% 回撤止损。","capital_usd":100,"parameters":{"entry_window":"90-150s","drawdown":"0.30","confirm_checks":2,"delta":"±10","risk_fraction":0.02,"daily_loss_fraction":0.03,"daily_profit_fraction":0.12,"live_enabled":false,"variant":"baseline"}}

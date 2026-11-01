@@ -1,0 +1,32 @@
+[Unit]
+Description=BTC isolated Paper protection experiment G
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ec2-user
+WorkingDirectory=/home/ec2-user/paper-protection/20261028T080000Z/G
+EnvironmentFile=/home/ec2-user/paper-protection/20261028T080000Z/G/.env
+ExecStart=/home/ec2-user/polymarketbot-auto/.venv/bin/python -m bot.protection_runner
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=10
+KillMode=control-group
+UMask=0077
+Nice=10
+CPUWeight=20
+MemoryMax=300M
+TasksMax=32
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/ec2-user/paper-protection/20261028T080000Z/G
+InaccessiblePaths=/home/ec2-user/polymarketbot-auto/.env /home/ec2-user/polymarketbot-auto/private /home/ec2-user/polymarketbot-auto/releases/c-paper-profit-20261024/.env /home/ec2-user/paper-ab
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+LogRateLimitIntervalSec=30s
+LogRateLimitBurst=200
+
+[Install]
+WantedBy=multi-user.target

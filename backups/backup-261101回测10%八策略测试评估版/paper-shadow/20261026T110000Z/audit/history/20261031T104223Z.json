@@ -1,0 +1,360 @@
+{
+  "schema_version": "p2-paper-ab-audit-v1",
+  "generated_at": "2026-10-31T10:42:15.194895+00:00",
+  "timezone": "Asia/Shanghai",
+  "mode": "paper",
+  "live_enabled": false,
+  "binance_source": "live",
+  "lanes": {
+    "production": {
+      "lane": "production",
+      "db_path": "/home/ec2-user/polymarketbot-auto/trades-auto.db",
+      "manifest": {
+        "profile": "D-production",
+        "started_at": 1793417706.4050944,
+        "config_hash": "4500f959996751c598b437e6b02ce1d431ade688847d72026d5543b7036ac46f",
+        "paper_run_id": null,
+        "paper_variant": null,
+        "timezone": "Asia/Shanghai"
+      },
+      "days": [
+        {
+          "day": "2026-10-31",
+          "measurement_start_ts": 1793417706.4050944,
+          "pnl_usd": 1.5677,
+          "wins": 23,
+          "losses": 6,
+          "pending": 1,
+          "buy_count": 30,
+          "exit_count": 6,
+          "stop_exit_count": 6,
+          "decision_count": 6851,
+          "skip_risk_count": 0,
+          "stale_signal_count": 5,
+          "avg_entry_t_remaining_sec": 132.36,
+          "binance_proxy": {
+            "orders": 30,
+            "available": 30,
+            "5m": {
+              "count": 30,
+              "favorable_pct": 53.33,
+              "avg_forward_pct": 0.0021
+            },
+            "15m": {
+              "count": 29,
+              "favorable_pct": 41.38,
+              "avg_forward_pct": 0.0017
+            },
+            "30m": {
+              "count": 27,
+              "favorable_pct": 37.04,
+              "avg_forward_pct": 0.0144
+            }
+          }
+        },
+        {
+          "day": "2026-10-30",
+          "measurement_start_ts": 1793289600.0,
+          "pnl_usd": -3.2237,
+          "wins": 11,
+          "losses": 6,
+          "pending": 1,
+          "buy_count": 17,
+          "exit_count": 6,
+          "stop_exit_count": 6,
+          "decision_count": 35164,
+          "skip_risk_count": 1121,
+          "stale_signal_count": 2,
+          "avg_entry_t_remaining_sec": 132.95,
+          "binance_proxy": {
+            "orders": 17,
+            "available": 17,
+            "5m": {
+              "count": 17,
+              "favorable_pct": 29.41,
+              "avg_forward_pct": -0.0217
+            },
+            "15m": {
+              "count": 17,
+              "favorable_pct": 11.76,
+              "avg_forward_pct": -0.1206
+            },
+            "30m": {
+              "count": 17,
+              "favorable_pct": 35.29,
+              "avg_forward_pct": -0.2013
+            }
+          }
+        },
+        {
+          "day": "2026-10-29",
+          "measurement_start_ts": 1793203200.0,
+          "pnl_usd": -3.63,
+          "wins": 9,
+          "losses": 5,
+          "pending": 1,
+          "buy_count": 14,
+          "exit_count": 5,
+          "stop_exit_count": 5,
+          "decision_count": 33525,
+          "skip_risk_count": 1049,
+          "stale_signal_count": 5,
+          "avg_entry_t_remaining_sec": 133.39,
+          "binance_proxy": {
+            "orders": 14,
+            "available": 14,
+            "5m": {
+              "count": 14,
+              "favorable_pct": 35.71,
+              "avg_forward_pct": -0.0157
+            },
+            "15m": {
+              "count": 14,
+              "favorable_pct": 50.0,
+              "avg_forward_pct": -0.0185
+            },
+            "30m": {
+              "count": 14,
+              "favorable_pct": 57.14,
+              "avg_forward_pct": -0.0541
+            }
+          }
+        },
+        {
+          "day": "2026-10-28",
+          "measurement_start_ts": 1793116800.0,
+          "pnl_usd": -4.971,
+          "wins": 71,
+          "losses": 20,
+          "pending": 1,
+          "buy_count": 90,
+          "exit_count": 20,
+          "stop_exit_count": 20,
+          "decision_count": 31685,
+          "skip_risk_count": 502,
+          "stale_signal_count": 4,
+          "avg_entry_t_remaining_sec": 161.9,
+          "binance_proxy": {
+            "orders": 90,
+            "available": 90,
+            "5m": {
+              "count": 90,
+              "favorable_pct": 43.33,
+              "avg_forward_pct": 0.0038
+            },
+            "15m": {
+              "count": 90,
+              "favorable_pct": 46.67,
+              "avg_forward_pct": 0.0138
+            },
+            "30m": {
+              "count": 90,
+              "favorable_pct": 41.11,
+              "avg_forward_pct": 0.0158
+            }
+          }
+        },
+        {
+          "day": "2026-10-27",
+          "measurement_start_ts": 1793030400.0,
+          "pnl_usd": -1.6606,
+          "wins": 14,
+          "losses": 5,
+          "pending": 1,
+          "buy_count": 20,
+          "exit_count": 5,
+          "stop_exit_count": 5,
+          "decision_count": 28646,
+          "skip_risk_count": 844,
+          "stale_signal_count": 0,
+          "avg_entry_t_remaining_sec": 158.02,
+          "binance_proxy": {
+            "orders": 20,
+            "available": 20,
+            "5m": {
+              "count": 20,
+              "favorable_pct": 60.0,
+              "avg_forward_pct": 0.0192
+            },
+            "15m": {
+              "count": 20,
+              "favorable_pct": 55.0,
+              "avg_forward_pct": 0.0372
+            },
+            "30m": {
+              "count": 20,
+              "favorable_pct": 25.0,
+              "avg_forward_pct": 0.0831
+            }
+          }
+        },
+        {
+          "day": "2026-10-26",
+          "measurement_start_ts": 1792944000.0,
+          "pnl_usd": -2.0265,
+          "wins": 18,
+          "losses": 5,
+          "pending": 1,
+          "buy_count": 23,
+          "exit_count": 5,
+          "stop_exit_count": 5,
+          "decision_count": 43982,
+          "skip_risk_count": 1255,
+          "stale_signal_count": 1,
+          "avg_entry_t_remaining_sec": 160.01,
+          "binance_proxy": {
+            "orders": 23,
+            "available": 0,
+            "5m": {
+              "count": 0
+            },
+            "15m": {
+              "count": 0
+            },
+            "30m": {
+              "count": 0
+            }
+          }
+        },
+        {
+          "day": "2026-10-25",
+          "measurement_start_ts": 1792857600.0,
+          "pnl_usd": -3.2225,
+          "wins": 7,
+          "losses": 5,
+          "pending": 1,
+          "buy_count": 10,
+          "exit_count": 5,
+          "stop_exit_count": 5,
+          "decision_count": 48799,
+          "skip_risk_count": 1694,
+          "stale_signal_count": 0,
+          "avg_entry_t_remaining_sec": 164.61,
+          "binance_proxy": {
+            "orders": 10,
+            "available": 0,
+            "5m": {
+              "count": 0
+            },
+            "15m": {
+              "count": 0
+            },
+            "30m": {
+              "count": 0
+            }
+          }
+        }
+      ],
+      "integrity": "ok"
+    },
+    "paper_a": {
+      "lane": "paper_a",
+      "db_path": "/home/ec2-user/paper-ab/20261026T110000Z/A/ab.db",
+      "manifest": {
+        "profile": "A",
+        "started_at": 1793422352.59408,
+        "config_hash": "76a9a2176b278994bb9348f995487a7bf6187dac7a9ceb6a6fc64fb5810402eb",
+        "paper_run_id": "20261031T044902Z",
+        "paper_variant": "baseline",
+        "timezone": "Asia/Shanghai"
+      },
+      "days": [
+        {
+          "day": "2026-10-31",
+          "measurement_start_ts": 1793422142.0,
+          "pnl_usd": 1.6902,
+          "wins": 22,
+          "losses": 6,
+          "pending": 1,
+          "buy_count": 29,
+          "exit_count": 6,
+          "stop_exit_count": 6,
+          "decision_count": 8022,
+          "skip_risk_count": 0,
+          "stale_signal_count": 0,
+          "avg_entry_t_remaining_sec": 129.84,
+          "binance_proxy": {
+            "orders": 29,
+            "available": 29,
+            "5m": {
+              "count": 29,
+              "favorable_pct": 51.72,
+              "avg_forward_pct": -0.0003
+            },
+            "15m": {
+              "count": 28,
+              "favorable_pct": 39.29,
+              "avg_forward_pct": 0.0117
+            },
+            "30m": {
+              "count": 26,
+              "favorable_pct": 46.15,
+              "avg_forward_pct": 0.0176
+            }
+          }
+        }
+      ],
+      "integrity": "ok"
+    },
+    "paper_b": {
+      "lane": "paper_b",
+      "db_path": "/home/ec2-user/paper-ab/20261026T110000Z/B/ab.db",
+      "manifest": {
+        "profile": "B",
+        "started_at": 1793422311.2869525,
+        "config_hash": "70763db979edfed748895bdf2c85f5bcc068505ac50051657f08d668ce6c572b",
+        "paper_run_id": "20261031T044902Z",
+        "paper_variant": "continuous-protection",
+        "timezone": "Asia/Shanghai"
+      },
+      "days": [
+        {
+          "day": "2026-10-31",
+          "measurement_start_ts": 1793422142.0,
+          "pnl_usd": 1.5738,
+          "wins": 22,
+          "losses": 6,
+          "pending": 1,
+          "buy_count": 29,
+          "exit_count": 6,
+          "stop_exit_count": 6,
+          "decision_count": 8059,
+          "skip_risk_count": 0,
+          "stale_signal_count": 0,
+          "avg_entry_t_remaining_sec": 129.59,
+          "binance_proxy": {
+            "orders": 29,
+            "available": 29,
+            "5m": {
+              "count": 29,
+              "favorable_pct": 51.72,
+              "avg_forward_pct": -0.0003
+            },
+            "15m": {
+              "count": 28,
+              "favorable_pct": 39.29,
+              "avg_forward_pct": 0.0117
+            },
+            "30m": {
+              "count": 26,
+              "favorable_pct": 46.15,
+              "avg_forward_pct": 0.0176
+            }
+          }
+        }
+      ],
+      "integrity": "ok"
+    }
+  },
+  "p2_metrics": [
+    "net_pnl_usd",
+    "win_loss",
+    "stop_exit_rate",
+    "avg_entry_t_remaining_sec",
+    "skip_risk_count",
+    "stale_signal_count",
+    "binance_proxy_forward_5m_15m_30m",
+    "config_hash",
+    "db_integrity"
+  ]
+}

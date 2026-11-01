@@ -1,0 +1,82 @@
+{
+ "meta": {
+  "generated_utc": "2026-09-18T18:12:24+00:00",
+  "prior_strength": 20,
+  "lambda": 0.25,
+  "cap_fraction": 0.1,
+  "min_obs": 50,
+  "min_edge": 0.003,
+  "fee_model": "0.07 * ask * (1 - ask) per share",
+  "observation_unit": "one (market, side) pair per pocket (dedup'd ticks)"
+ },
+ "table": {
+  "BTC": {
+   "30-60s": {
+    "0.96": {
+     "fraction": 0.0,
+     "kelly_full": 0.0,
+     "p_hat": 0.971,
+     "edge": 0.0021,
+     "n": 3
+    },
+    "0.98": {
+     "fraction": 0.0,
+     "kelly_full": 0.0,
+     "p_hat": 0.9934,
+     "edge": 0.0121,
+     "n": 41
+    }
+   },
+   "60-90s": {
+    "0.96": {
+     "fraction": 0.0,
+     "kelly_full": 0.0,
+     "p_hat": 0.9727,
+     "edge": 0.0007,
+     "n": 2
+    },
+    "0.98": {
+     "fraction": 0.1,
+     "kelly_full": 0.7349,
+     "p_hat": 0.9951,
+     "edge": 0.0136,
+     "n": 61
+    }
+   }
+  },
+  "ETH": {
+   "30-60s": {
+    "0.96": {
+     "fraction": 0.0,
+     "kelly_full": 0.0,
+     "p_hat": 0.9727,
+     "edge": 0.0007,
+     "n": 2
+    },
+    "0.98": {
+     "fraction": 0.0,
+     "kelly_full": 0.0,
+     "p_hat": 0.9902,
+     "edge": 0.0089,
+     "n": 21
+    }
+   },
+   "60-90s": {
+    "0.96": {
+     "fraction": 0.0,
+     "kelly_full": 0.0,
+     "p_hat": 0.975,
+     "edge": 0.003,
+     "n": 4
+    },
+    "0.98": {
+     "fraction": 0.1,
+     "kelly_full": 0.7058,
+     "p_hat": 0.9946,
+     "edge": 0.0129,
+     "n": 53
+    }
+   }
+  }
+ }
+}
