@@ -1,6 +1,5 @@
 [
   {
-    "archive_path": "database-snapshots/server-auto/polymarketbot-auto/backups/history-misprice-h-20261101T032904Z/H-trades-before.db",
     "source_path": "/home/ec2-user/polymarketbot-auto/backups/history-misprice-h-20261101T032904Z/H-trades-before.db",
     "source_archive_path": "server-auto/polymarketbot-auto/backups/history-misprice-h-20261101T032904Z/H-trades-before.db",
     "bytes": 5730304,
@@ -12,10 +11,9 @@
       "resolutions": 0
     },
     "snapshot_completed_utc": "2026-11-01T06:09:23Z",
-    "storage": "encrypted archive only"
+    "storage": "not submitted; metadata only"
   },
   {
-    "archive_path": "server-auto/polymarketbot-auto/p0-shadow-btc-contaminated-20260912_152601.db",
     "source_path": "/home/ec2-user/polymarketbot-auto/p0-shadow-btc-contaminated-20260912_152601.db",
     "source_archive_path": "server-auto/polymarketbot-auto/p0-shadow-btc-contaminated-20260912_152601.db",
     "bytes": 65536,
@@ -27,10 +25,9 @@
       "resolutions": 1
     },
     "snapshot_completed_utc": "2026-11-01T06:09:24Z",
-    "storage": "encrypted archive only"
+    "storage": "not submitted; metadata only"
   },
   {
-    "archive_path": "server-auto/polymarketbot-auto/p0-shadow-btc.db",
     "source_path": "/home/ec2-user/polymarketbot-auto/p0-shadow-btc.db",
     "source_archive_path": "server-auto/polymarketbot-auto/p0-shadow-btc.db",
     "bytes": 134623232,
@@ -42,10 +39,9 @@
       "resolutions": 2567
     },
     "snapshot_completed_utc": "2026-11-01T06:09:26Z",
-    "storage": "encrypted archive only"
+    "storage": "not submitted; metadata only"
   },
   {
-    "archive_path": "database-snapshots/server-auto/polymarketbot-auto/private/loss-threshold-3pct-20261029T054022Z/A.snapshot.db",
     "source_path": "/home/ec2-user/polymarketbot-auto/private/loss-threshold-3pct-20261029T054022Z/A.snapshot.db",
     "source_archive_path": "server-auto/polymarketbot-auto/private/loss-threshold-3pct-20261029T054022Z/A.snapshot.db",
     "bytes": 34299904,
@@ -57,10 +53,9 @@
       "resolutions": 77
     },
     "snapshot_completed_utc": "2026-11-01T06:09:26Z",
-    "storage": "encrypted archive only"
+    "storage": "not submitted; metadata only"
   },
   {
-    "archive_path": "database-snapshots/server-auto/polymarketbot-auto/private/loss-threshold-3pct-20261029T054022Z/B.snapshot.db",
     "source_path": "/home/ec2-user/polymarketbot-auto/private/loss-threshold-3pct-20261029T054022Z/B.snapshot.db",
     "source_archive_path": "server-auto/polymarketbot-auto/private/loss-threshold-3pct-20261029T054022Z/B.snapshot.db",
     "bytes": 29548544,
@@ -72,10 +67,9 @@
       "resolutions": 179
     },
     "snapshot_completed_utc": "2026-11-01T06:09:27Z",
-    "storage": "encrypted archive only"
+    "storage": "not submitted; metadata only"
   },
   {
-    "archive_path": "database-snapshots/server-auto/polymarketbot-auto/private/loss-threshold-3pct-20261029T054022Z/C.snapshot.db",
     "source_path": "/home/ec2-user/polymarketbot-auto/private/loss-threshold-3pct-20261029T054022Z/C.snapshot.db",
     "source_archive_path": "server-auto/polymarketbot-auto/private/loss-threshold-3pct-20261029T054022Z/C.snapshot.db",
     "bytes": 24834048,
@@ -87,10 +81,9 @@
       "resolutions": 207
     },
     "snapshot_completed_utc": "2026-11-01T06:09:27Z",
-    "storage": "encrypted archive only"
+    "storage": "not submitted; metadata only"
   },
   {
-    "archive_path": "database-snapshots/server-auto/polymarketbot-auto/private/loss-threshold-3pct-20261029T054022Z/D.snapshot.db",
     "source_path": "/home/ec2-user/polymarketbot-auto/private/loss-threshold-3pct-20261029T054022Z/D.snapshot.db",
     "source_archive_path": "server-auto/polymarketbot-auto/private/loss-threshold-3pct-20261029T054022Z/D.snapshot.db",
     "bytes": 23785472,
@@ -102,10 +95,9 @@
       "resolutions": 183
     },
     "snapshot_completed_utc": "2026-11-01T06:09:27Z",
-    "storage": "encrypted archive only"
+    "storage": "not submitted; metadata only"
   },
   {
-    "archive_path": "database-snapshots/server-auto/polymarketbot-auto/private/loss-threshold-3pct-20261029T054022Z/E.snapshot.db",
     "source_path": "/home/ec2-user/polymarketbot-auto/private/loss-threshold-3pct-20261029T054022Z/E.snapshot.db",
     "source_archive_path": "server-auto/polymarketbot-auto/private/loss-threshold-3pct-20261029T054022Z/E.snapshot.db",
     "bytes": 8499200,
@@ -117,10 +109,9 @@
       "resolutions": 47
     },
     "snapshot_completed_utc": "2026-11-01T06:09:27Z",
-    "storage": "encrypted archive only"
+    "storage": "not submitted; metadata only"
   },
   {
-    "archive_path": "database-snapshots/server-auto/polymarketbot-auto/private/loss-threshold-3pct-20261029T054022Z/F.snapshot.db",
     "source_path": "/home/ec2-user/polymarketbot-auto/private/loss-threshold-3pct-20261029T054022Z/F.snapshot.db",
     "source_archive_path": "server-auto/polymarketbot-auto/private/loss-threshold-3pct-20261029T054022Z/F.snapshot.db",
     "bytes": 9072640,
@@ -132,10 +123,9 @@
       "resolutions": 47
     },
     "snapshot_completed_utc": "2026-11-01T06:09:28Z",
-    "storage": "encrypted archive only"
+    "storage": "not submitted; metadata only"
   },
   {
-    "archive_path": "database-snapshots/server-auto/polymarketbot-auto/private/loss-threshold-3pct-20261029T054022Z/G.snapshot.db",
     "source_path": "/home/ec2-user/polymarketbot-auto/private/loss-threshold-3pct-20261029T054022Z/G.snapshot.db",
     "source_archive_path": "server-auto/polymarketbot-auto/private/loss-threshold-3pct-20261029T054022Z/G.snapshot.db",
     "bytes": 8409088,
@@ -147,10 +137,9 @@
       "resolutions": 62
     },
     "snapshot_completed_utc": "2026-11-01T06:09:28Z",
-    "storage": "encrypted archive only"
+    "storage": "not submitted; metadata only"
   },
   {
-    "archive_path": "database-snapshots/server-auto/polymarketbot-auto/private/loss-threshold-3pct-20261029T054022Z/H.snapshot.db",
     "source_path": "/home/ec2-user/polymarketbot-auto/private/loss-threshold-3pct-20261029T054022Z/H.snapshot.db",
     "source_archive_path": "server-auto/polymarketbot-auto/private/loss-threshold-3pct-20261029T054022Z/H.snapshot.db",
     "bytes": 9854976,
@@ -162,10 +151,9 @@
       "resolutions": 43
     },
     "snapshot_completed_utc": "2026-11-01T06:09:28Z",
-    "storage": "encrypted archive only"
+    "storage": "not submitted; metadata only"
   },
   {
-    "archive_path": "database-snapshots/server-auto/polymarketbot-auto/private/loss-threshold-3pct-20261029T054022Z/production.snapshot.db",
     "source_path": "/home/ec2-user/polymarketbot-auto/private/loss-threshold-3pct-20261029T054022Z/production.snapshot.db",
     "source_archive_path": "server-auto/polymarketbot-auto/private/loss-threshold-3pct-20261029T054022Z/production.snapshot.db",
     "bytes": 977620992,
@@ -177,10 +165,9 @@
       "resolutions": 5357
     },
     "snapshot_completed_utc": "2026-11-01T06:09:50Z",
-    "storage": "encrypted archive only"
+    "storage": "not submitted; metadata only"
   },
   {
-    "archive_path": "database-snapshots/server-auto/polymarketbot-auto/private/misprice-h-p0-20261031T200000Z/H/trades.db",
     "source_path": "/home/ec2-user/polymarketbot-auto/private/misprice-h-p0-20261031T200000Z/H/trades.db",
     "source_archive_path": "server-auto/polymarketbot-auto/private/misprice-h-p0-20261031T200000Z/H/trades.db",
     "bytes": 35545088,
@@ -192,10 +179,9 @@
       "resolutions": 218
     },
     "snapshot_completed_utc": "2026-11-01T06:09:50Z",
-    "storage": "encrypted archive only"
+    "storage": "not submitted; metadata only"
   },
   {
-    "archive_path": "database-snapshots/server-auto/polymarketbot-auto/private/misprice-h-p0-20261031T200000Z/old-trades.db",
     "source_path": "/home/ec2-user/polymarketbot-auto/private/misprice-h-p0-20261031T200000Z/old-trades.db",
     "source_archive_path": "server-auto/polymarketbot-auto/private/misprice-h-p0-20261031T200000Z/old-trades.db",
     "bytes": 35577856,
@@ -207,10 +193,9 @@
       "resolutions": 218
     },
     "snapshot_completed_utc": "2026-11-01T06:09:51Z",
-    "storage": "encrypted archive only"
+    "storage": "not submitted; metadata only"
   },
   {
-    "archive_path": "database-snapshots/server-auto/polymarketbot-auto/private/p0-p1-paper-ab-rebuild-20261031T044902Z/A-old/ab.db",
     "source_path": "/home/ec2-user/polymarketbot-auto/private/p0-p1-paper-ab-rebuild-20261031T044902Z/A-old/ab.db",
     "source_archive_path": "server-auto/polymarketbot-auto/private/p0-p1-paper-ab-rebuild-20261031T044902Z/A-old/ab.db",
     "bytes": 55029760,
@@ -222,10 +207,9 @@
       "resolutions": 152
     },
     "snapshot_completed_utc": "2026-11-01T06:09:52Z",
-    "storage": "encrypted archive only"
+    "storage": "not submitted; metadata only"
   },
   {
-    "archive_path": "database-snapshots/server-auto/polymarketbot-auto/private/p0-p1-paper-ab-rebuild-20261031T044902Z/A-previous-live/ab.db",
     "source_path": "/home/ec2-user/polymarketbot-auto/private/p0-p1-paper-ab-rebuild-20261031T044902Z/A-previous-live/ab.db",
     "source_archive_path": "server-auto/polymarketbot-auto/private/p0-p1-paper-ab-rebuild-20261031T044902Z/A-previous-live/ab.db",
     "bytes": 55029760,
@@ -237,10 +221,9 @@
       "resolutions": 152
     },
     "snapshot_completed_utc": "2026-11-01T06:09:52Z",
-    "storage": "encrypted archive only"
+    "storage": "not submitted; metadata only"
   },
   {
-    "archive_path": "database-snapshots/server-auto/polymarketbot-auto/private/p0-p1-paper-ab-rebuild-20261031T044902Z/B-old/ab.db",
     "source_path": "/home/ec2-user/polymarketbot-auto/private/p0-p1-paper-ab-rebuild-20261031T044902Z/B-old/ab.db",
     "source_archive_path": "server-auto/polymarketbot-auto/private/p0-p1-paper-ab-rebuild-20261031T044902Z/B-old/ab.db",
     "bytes": 50487296,
@@ -252,10 +235,9 @@
       "resolutions": 265
     },
     "snapshot_completed_utc": "2026-11-01T06:09:53Z",
-    "storage": "encrypted archive only"
+    "storage": "not submitted; metadata only"
   },
   {
-    "archive_path": "database-snapshots/server-auto/polymarketbot-auto/private/p0-p1-paper-ab-rebuild-20261031T044902Z/B-previous-live/ab.db",
     "source_path": "/home/ec2-user/polymarketbot-auto/private/p0-p1-paper-ab-rebuild-20261031T044902Z/B-previous-live/ab.db",
     "source_archive_path": "server-auto/polymarketbot-auto/private/p0-p1-paper-ab-rebuild-20261031T044902Z/B-previous-live/ab.db",
     "bytes": 50487296,
@@ -267,10 +249,9 @@
       "resolutions": 265
     },
     "snapshot_completed_utc": "2026-11-01T06:09:54Z",
-    "storage": "encrypted archive only"
+    "storage": "not submitted; metadata only"
   },
   {
-    "archive_path": "database-snapshots/server-auto/polymarketbot-auto/private/p0-p2-paper-ab-20261031T030543Z/ab.db",
     "source_path": "/home/ec2-user/polymarketbot-auto/private/p0-p2-paper-ab-20261031T030543Z/ab.db",
     "source_archive_path": "server-auto/polymarketbot-auto/private/p0-p2-paper-ab-20261031T030543Z/ab.db",
     "bytes": 49934336,
@@ -282,10 +263,9 @@
       "resolutions": 259
     },
     "snapshot_completed_utc": "2026-11-01T06:09:55Z",
-    "storage": "encrypted archive only"
+    "storage": "not submitted; metadata only"
   },
   {
-    "archive_path": "database-snapshots/server-auto/polymarketbot-auto/private/p0-p2-paper-ab-20261031T030543Z/trades-auto.db",
     "source_path": "/home/ec2-user/polymarketbot-auto/private/p0-p2-paper-ab-20261031T030543Z/trades-auto.db",
     "source_archive_path": "server-auto/polymarketbot-auto/private/p0-p2-paper-ab-20261031T030543Z/trades-auto.db",
     "bytes": 991334400,
@@ -297,10 +277,9 @@
       "resolutions": 5421
     },
     "snapshot_completed_utc": "2026-11-01T06:10:17Z",
-    "storage": "encrypted archive only"
+    "storage": "not submitted; metadata only"
   },
   {
-    "archive_path": "server-auto/polymarketbot-auto/trades-auto.db",
     "source_path": "/home/ec2-user/polymarketbot-auto/trades-auto.db",
     "source_archive_path": "server-auto/polymarketbot-auto/trades-auto.db",
     "bytes": 998088704,
@@ -312,10 +291,9 @@
       "resolutions": 5505
     },
     "snapshot_completed_utc": "2026-11-01T06:10:33Z",
-    "storage": "encrypted archive only"
+    "storage": "not submitted; metadata only"
   },
   {
-    "archive_path": "server-auto/polymarketbot-auto/trades-auto.db.bak-hygiene-20260919-184911",
     "source_path": "/home/ec2-user/polymarketbot-auto/trades-auto.db.bak-hygiene-20260919-184911",
     "source_archive_path": "server-auto/polymarketbot-auto/trades-auto.db.bak-hygiene-20260919-184911",
     "bytes": 21770240,
@@ -327,10 +305,9 @@
       "resolutions": 319
     },
     "snapshot_completed_utc": "2026-11-01T06:10:33Z",
-    "storage": "encrypted archive only"
+    "storage": "not submitted; metadata only"
   },
   {
-    "archive_path": "server-auto/polymarketbot-auto/trades.db",
     "source_path": "/home/ec2-user/polymarketbot-auto/trades.db",
     "source_archive_path": "server-auto/polymarketbot-auto/trades.db",
     "bytes": 32768,
@@ -342,10 +319,9 @@
       "resolutions": 0
     },
     "snapshot_completed_utc": "2026-11-01T06:10:33Z",
-    "storage": "encrypted archive only"
+    "storage": "not submitted; metadata only"
   },
   {
-    "archive_path": "paper-shadow/20261022T020933Z/A/ab.db",
     "source_path": "/home/ec2-user/paper-ab/20261022T020933Z/A/ab.db",
     "source_archive_path": "paper-shadow/20261022T020933Z/A/ab.db",
     "bytes": 12910592,
@@ -357,10 +333,9 @@
       "resolutions": 200
     },
     "snapshot_completed_utc": "2026-11-01T06:10:36Z",
-    "storage": "encrypted archive only"
+    "storage": "not submitted; metadata only"
   },
   {
-    "archive_path": "paper-shadow/20261022T020933Z/B/ab.db",
     "source_path": "/home/ec2-user/paper-ab/20261022T020933Z/B/ab.db",
     "source_archive_path": "paper-shadow/20261022T020933Z/B/ab.db",
     "bytes": 22102016,
@@ -372,10 +347,9 @@
       "resolutions": 86
     },
     "snapshot_completed_utc": "2026-11-01T06:10:37Z",
-    "storage": "encrypted archive only"
+    "storage": "not submitted; metadata only"
   },
   {
-    "archive_path": "paper-shadow/20261022T020933Z/C/ab.db",
     "source_path": "/home/ec2-user/paper-ab/20261022T020933Z/C/ab.db",
     "source_archive_path": "paper-shadow/20261022T020933Z/C/ab.db",
     "bytes": 19087360,
@@ -387,10 +361,9 @@
       "resolutions": 158
     },
     "snapshot_completed_utc": "2026-11-01T06:10:37Z",
-    "storage": "encrypted archive only"
+    "storage": "not submitted; metadata only"
   },
   {
-    "archive_path": "paper-shadow/20261022T020933Z/trades-auto.snapshot.db",
     "source_path": "/home/ec2-user/paper-ab/20261022T020933Z/trades-auto.snapshot.db",
     "source_archive_path": "paper-shadow/20261022T020933Z/trades-auto.snapshot.db",
     "bytes": 923963392,
@@ -402,10 +375,9 @@
       "resolutions": 5123
     },
     "snapshot_completed_utc": "2026-11-01T06:10:57Z",
-    "storage": "encrypted archive only"
+    "storage": "not submitted; metadata only"
   },
   {
-    "archive_path": "paper-shadow/20261026T110000Z/A/ab.db",
     "source_path": "/home/ec2-user/paper-ab/20261026T110000Z/A/ab.db",
     "source_archive_path": "paper-shadow/20261026T110000Z/A/ab.db",
     "bytes": 8208384,
@@ -417,10 +389,9 @@
       "resolutions": 81
     },
     "snapshot_completed_utc": "2026-11-01T06:10:57Z",
-    "storage": "encrypted archive only"
+    "storage": "not submitted; metadata only"
   },
   {
-    "archive_path": "paper-shadow/20261026T110000Z/B/ab.db",
     "source_path": "/home/ec2-user/paper-ab/20261026T110000Z/B/ab.db",
     "source_archive_path": "paper-shadow/20261026T110000Z/B/ab.db",
     "bytes": 8204288,
@@ -432,10 +403,9 @@
       "resolutions": 81
     },
     "snapshot_completed_utc": "2026-11-01T06:10:57Z",
-    "storage": "encrypted archive only"
+    "storage": "not submitted; metadata only"
   },
   {
-    "archive_path": "paper-shadow/20261026T110000Z/C/ab.db",
     "source_path": "/home/ec2-user/paper-ab/20261026T110000Z/C/ab.db",
     "source_archive_path": "paper-shadow/20261026T110000Z/C/ab.db",
     "bytes": 51085312,
@@ -447,10 +417,9 @@
       "resolutions": 369
     },
     "snapshot_completed_utc": "2026-11-01T06:10:58Z",
-    "storage": "encrypted archive only"
+    "storage": "not submitted; metadata only"
   },
   {
-    "archive_path": "paper-shadow/20261026T110000Z/D/ab.db",
     "source_path": "/home/ec2-user/paper-ab/20261026T110000Z/D/ab.db",
     "source_archive_path": "paper-shadow/20261026T110000Z/D/ab.db",
     "bytes": 49209344,
@@ -462,6 +431,6 @@
       "resolutions": 343
     },
     "snapshot_completed_utc": "2026-11-01T06:10:59Z",
-    "storage": "encrypted archive only"
+    "storage": "not submitted; metadata only"
   }
 ]
