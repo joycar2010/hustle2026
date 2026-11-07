@@ -1,0 +1,27 @@
+{
+  "label": "261107实盘测试初版",
+  "domain": "polytest.hustle2026.xyz",
+  "source_host": "18.177.149.23",
+  "dns_verified_source_host": "18.177.149.23",
+  "requested_host_correction": "18.179.50.168 does not serve polytest; it serves polyauto/poly according to Nginx and DNS.",
+  "collected_utc": "2026-11-07T08:09:27.151585+00:00",
+  "source_roots": {
+    "backend": "/home/ec2-user/polymarketbot-test/releases/polyauto-d-20261101/{bot,server,scripts,docs,runtime-manifest.json}",
+    "ui_source": "/home/ec2-user/polymarketbot-test/releases/85056d2-20261025/ui",
+    "deployed_dist": "/var/www/polytest-releases/polytest-chain-pnl-fix-20261107T042500Z"
+  },
+  "included": [
+    "后端 bot/server/scripts/docs 源程序",
+    "前端 src、构建配置、package-lock、dist 和 dist-btc-only",
+    "当前 Nginx 发布目录全部静态文件",
+    "polytest Nginx 与 systemd 服务配置"
+  ],
+  "excluded": [
+    "数据库文件及 SQLite WAL/SHM",
+    ".env 原文和所有密钥/令牌",
+    ".venv、node_modules、日志、PID、运行时缓存"
+  ],
+  "frontend_dist_preserved": true,
+  "file_count_before_manifest": 108,
+  "bytes_before_manifest": 4226092
+}

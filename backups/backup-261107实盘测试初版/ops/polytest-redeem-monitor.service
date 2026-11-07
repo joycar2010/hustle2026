@@ -1,0 +1,17 @@
+[Unit]
+Description=Polytest read-only Polymarket redemption monitor
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ec2-user
+WorkingDirectory=/home/ec2-user/poly-redeem-monitor
+Environment=POLYMARKET_PROXY_WALLET=0x76080d5de1eba3c09564b589948a20bc770d3aad
+Environment=REDEEM_LEDGER_PATH=/home/ec2-user/poly-redeem-monitor/state/candidates.db
+ExecStart=/usr/bin/python3 /home/ec2-user/poly-redeem-monitor/redeem_worker.py --ledger /home/ec2-user/poly-redeem-monitor/state/candidates.db
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/ec2-user/poly-redeem-monitor/state

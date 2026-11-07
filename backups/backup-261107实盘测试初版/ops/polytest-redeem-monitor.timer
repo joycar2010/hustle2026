@@ -1,0 +1,12 @@
+[Unit]
+Description=Run Polytest read-only redemption monitor every 30 seconds
+
+[Timer]
+OnBootSec=15s
+OnUnitActiveSec=30s
+AccuracySec=5s
+Persistent=true
+Unit=polytest-redeem-monitor.service
+
+[Install]
+WantedBy=timers.target

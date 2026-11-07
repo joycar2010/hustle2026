@@ -1,0 +1,20 @@
+[Unit]
+Description=polytest 85056d2 btc-paper (isolated Paper)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ec2-user
+WorkingDirectory=/home/ec2-user/polymarketbot-test/releases/85056d2-20261025
+EnvironmentFile=/home/ec2-user/polymarketbot-test/releases/85056d2-20261025/.env
+Environment=PYTHONPATH=/home/ec2-user/polymarketbot-test/releases/85056d2-20261025
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/bash /home/ec2-user/polymarketbot-test/releases/85056d2-20261025/scripts/run_paper_asset.sh BTC
+Restart=on-failure
+RestartSec=10
+UMask=0077
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target
