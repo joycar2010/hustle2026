@@ -1,0 +1,9 @@
+[Unit]
+Description=Run polyauto P2 Paper A/B audit every 5 minutes
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=5min
+Unit=polymarket-auto-paper-ab-audit.service
+Persistent=true
+[Install]
+WantedBy=timers.target

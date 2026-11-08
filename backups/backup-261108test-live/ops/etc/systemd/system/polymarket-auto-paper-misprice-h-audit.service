@@ -1,0 +1,16 @@
+[Unit]
+Description=Audit MISPRICE H Paper lane
+After=polymarket-auto-paper-protection-h.service
+
+[Service]
+Type=oneshot
+User=ec2-user
+WorkingDirectory=/home/ec2-user/paper-protection/20261028T080000Z/H
+Environment=PYTHONPATH=/home/ec2-user/paper-protection/misprice-h-20261031T200000Z/code
+Environment=MISPRICE_CODE_ROOT=/home/ec2-user/paper-protection/misprice-h-20261031T200000Z/code
+ExecStart=/home/ec2-user/polymarketbot-auto/.venv/bin/python /home/ec2-user/paper-protection/20261028T080000Z/H/misprice_paper_audit.py
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/ec2-user/paper-protection/20261028T080000Z/H

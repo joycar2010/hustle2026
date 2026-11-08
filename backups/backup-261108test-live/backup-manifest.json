@@ -1,0 +1,52 @@
+﻿{
+    "label":  "261108test实盘完善版",
+    "source_server":  "18.179.50.168",
+    "domain":  "polyauto.hustle2026.xyz",
+    "captured_utc":  "2026-11-08T11:06:20Z",
+    "source_root":  "/home/ec2-user/polymarketbot-auto",
+    "frontend_root":  "/var/www/polyauto.hustle2026.xyz",
+    "git_branch":  "poly",
+    "contents":  {
+                     "server_auto":  {
+                                         "files":  323,
+                                         "bytes":  35978080,
+                                         "includes":  [
+                                                          "bot",
+                                                          "server",
+                                                          "scripts",
+                                                          "agents",
+                                                          "backtest",
+                                                          "docs",
+                                                          "research",
+                                                          "tests",
+                                                          "ui source",
+                                                          "ui/dist*",
+                                                          "root program manifests"
+                                                      ]
+                                     },
+                     "webroot":  {
+                                     "files":  40,
+                                     "bytes":  13405585
+                                 },
+                     "operations":  {
+                                        "files":  24,
+                                        "bytes":  16125
+                                    }
+                 },
+    "archive_sha256":  {
+                           "server_auto":  "94A511045BF49D04E7078E9B2CBCD0138E9356338429964DF9A4643B185B17B2",
+                           "webroot":  "3CDBF70FCDDB74A605785EC9CEE06C1C6370CF44FE5E12349CA6AD2DB22374D1",
+                           "operations":  "2D24D46017C1E1ABA4BDFB5679A5B823EC35DF02B9F3B04802C086B11CA63C58"
+                       },
+    "excluded":  [
+                     "all .env values; only environment.redacted schema",
+                     "database files and SQLite WAL/SHM",
+                     "private keys, PEM/key files, API tokens",
+                     "virtualenvs, node_modules, caches, logs, runtime state, historical backup trees"
+                 ],
+    "validation":  {
+                       "database_committed":  false,
+                       "secrets_committed":  false,
+                       "frontend_dist_preserved":  true
+                   }
+}
