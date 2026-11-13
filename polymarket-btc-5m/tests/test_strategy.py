@@ -38,6 +38,13 @@ def _cfg(**overrides) -> Config:
         max_open_positions=1,
         paper_bankroll_usd=200.0,
         live_trading_enabled=False,
+        mode="late_edge",
+        maker_pair_cost_max=0.98,
+        maker_quote_shares=10.0,
+        maker_start_delay_sec=15.0,
+        maker_stop_before_end_sec=45.0,
+        maker_touch_fill_sec=8.0,
+        maker_max_imbalance_shares=20.0,
         data_dir=__import__("pathlib").Path("/tmp"),
     )
     base.update(overrides)

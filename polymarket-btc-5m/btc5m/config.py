@@ -64,10 +64,24 @@ class Config:
     paper_bankroll_usd: float
     live_trading_enabled: bool
 
+    # late_edge | maker
+    mode: str
+
+    # Maker bilateral MM (paper)
+    maker_pair_cost_max: float
+    maker_quote_shares: float
+    maker_start_delay_sec: float
+    maker_stop_before_end_sec: float
+    maker_touch_fill_sec: float
+    maker_max_imbalance_shares: float
+
     data_dir: Path
 
 
 def load() -> Config:
+    mode = os.getenv("MODE", "late_edge").strip().lower() or "late_edge"
+    if mode not in {"late_edge", "maker"}:
+        mode = "late_edge"
     return Config(
         private_key=os.getenv("PRIVATE_KEY", "").strip(),
         funder_address=os.getenv("FUNDER_ADDRESS", "").strip(),
@@ -98,5 +112,12 @@ def load() -> Config:
         max_open_positions=max(_int("MAX_OPEN_POSITIONS", 1), 1),
         paper_bankroll_usd=_float("PAPER_BANKROLL_USD", 200.0),
         live_trading_enabled=_bool("LIVE_TRADING_ENABLED", False),
+        mode=mode,
+        maker_pair_cost_max=_float("MAKER_PAIR_COST_MAX", 0.98),
+        maker_quote_shares=max(_float("MAKER_QUOTE_SHARES", 10.0), 5.0),
+        maker_start_delay_sec=_float("MAKER_START_DELAY_SEC", 15.0),
+        maker_stop_before_end_sec=_float("MAKER_STOP_BEFORE_END_SEC", 45.0),
+        maker_touch_fill_sec=_float("MAKER_TOUCH_FILL_SEC", 8.0),
+        maker_max_imbalance_shares=_float("MAKER_MAX_IMBALANCE_SHARES", 20.0),
         data_dir=ROOT / "data",
     )

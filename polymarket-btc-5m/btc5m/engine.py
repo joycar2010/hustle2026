@@ -8,6 +8,7 @@ from typing import Optional
 
 from btc5m.book import fetch_book
 from btc5m.config import Config
+from btc5m.fees import taker_fee_usd
 from btc5m.markets import LiveMarket, fetch_live_market, fmt_utc, next_window_eta
 from btc5m.resolver import gamma_winner_side, paper_pnl
 from btc5m.risk import RiskState, allowed_to_trade, note_fill, note_resolution
@@ -88,27 +89,41 @@ class Engine:
                 else:
                     continue
 
+            fee = float(row["fee_usd"] or 0.0)
             pnl = paper_pnl(row["side"], row["size"], row["entry_price"], winner)
+            net = pnl - fee
             exit_price = 1.0 if row["side"].upper() == winner else 0.0
-            self.store.close_position(row["id"], exit_price=exit_price, pnl_usd=pnl)
-            note_resolution(self.risk, pnl)
+            self.store.close_position(
+                row["id"],
+                exit_price=exit_price,
+                pnl_usd=pnl,
+                fee_usd=fee,
+                pnl_net_usd=net,
+            )
+            note_resolution(self.risk, net)
             self.store.log(
                 "resolve",
                 {
                     "position_id": row["id"],
                     "winner": winner,
                     "pnl_usd": pnl,
+                    "fee_usd": fee,
+                    "pnl_net_usd": net,
                     "side": row["side"],
                     "entry": row["entry_price"],
+                    "liquidity": row["liquidity"] if "liquidity" in row.keys() else "taker",
+                    "strategy": row["strategy"] if "strategy" in row.keys() else "late_edge",
                 },
                 market_slug=slug,
             )
             log.info(
-                "RESOLVED %s side=%s winner=%s pnl=%+.2f day_pnl=%+.2f",
+                "RESOLVED %s side=%s winner=%s gross=%+.2f fee=%.2f net=%+.2f day=%+.2f",
                 slug,
                 row["side"],
                 winner,
                 pnl,
+                fee,
+                net,
                 self.risk.realized_pnl_usd,
             )
 
@@ -130,6 +145,7 @@ class Engine:
         filled_size = decision.size
         avg_price = decision.price
         status = "paper_fill"
+        liquidity = "taker"
 
         if self.live:
             from btc5m.orders import place_buy_fok
@@ -166,6 +182,7 @@ class Engine:
             avg_price = result.avg_price or decision.price
             status = result.status
 
+        fee = taker_fee_usd(float(avg_price), float(filled_size), self.cfg.taker_fee_rate)
         pos_id = self.store.open_position(
             market_slug=market.market_slug,
             condition_id=market.condition_id,
@@ -175,6 +192,23 @@ class Engine:
             entry_price=float(avg_price),
             dry_run=not self.live,
             order_id=order_id,
+            fee_usd=fee,
+            liquidity=liquidity,
+            strategy="late_edge",
+        )
+        self.store.record_fill(
+            market_slug=market.market_slug,
+            condition_id=market.condition_id,
+            side=decision.side,
+            token_id=decision.token_id,
+            size=float(filled_size),
+            price=float(avg_price),
+            fee_usd=fee,
+            liquidity=liquidity,
+            strategy="late_edge",
+            dry_run=not self.live,
+            order_id=order_id,
+            note=decision.reason,
         )
         note_fill(self.risk, float(filled_size) * float(avg_price))
         self.state.entered_markets.add(market.condition_id)
@@ -185,6 +219,7 @@ class Engine:
                 "side": decision.side,
                 "price": avg_price,
                 "size": filled_size,
+                "fee_usd": fee,
                 "edge": decision.net_edge,
                 "status": status,
                 "reason": decision.reason,
@@ -192,13 +227,14 @@ class Engine:
             market.market_slug,
         )
         log.info(
-            "%s ENTRY #%s %s %s@%.2f x%.0f edge=%.4f",
+            "%s ENTRY #%s %s %s@%.2f x%.0f fee=%.4f edge=%.4f",
             "LIVE" if self.live else "PAPER",
             pos_id,
             market.market_slug,
             decision.side,
             avg_price,
             filled_size,
+            fee,
             decision.net_edge or 0.0,
         )
 

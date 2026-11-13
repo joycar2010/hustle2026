@@ -2,103 +2,89 @@
 
 针对 [Polymarket](https://polymarket.com) 的 **Bitcoin Up or Down 5m** 市场（`series_slug=btc-up-or-down-5m`）的自动交易机器人。
 
-默认 **纸面交易（paper）**，不会下真单。实盘需同时满足：`--live` + `.env` 中 `LIVE_TRADING_ENABLED=true`。
+默认 **纸面交易（paper）**，不会下真单。实盘需同时满足：`--live` + `.env` 中 `LIVE_TRADING_ENABLED=true`（仅 `late_edge`）。
 
-## 策略概要
+## 两种模式
 
-**尾盘边缘收敛（late-window edge scalp）**
+### 1) `maker`（推荐纸面主路径）— 双边做市
 
-1. 按 slug `btc-updown-5m-<unix_start>` 定位当前 5 分钟窗口  
-2. 轮询 CLOB Up/Down 盘口  
-3. 用 OKX / Coinbase / Kraken 现货相对窗口开盘价的 Δ，过滤方向  
-4. 在收盘前 `ENTRY_WINDOW_SEC`～`MIN_T_REMAINING_SEC` 秒内：  
-   - 一侧 ask 落在 `[MIN_ENTRY_PRICE, MAX_ENTRY_PRICE]`  
-   - `net_edge = 1 - ask - fee` 且 `fee = 0.07 × ask × (1-ask)` ≥ `MIN_NET_EDGE`  
-   - 连续确认 `CONFIRM_CHECKS` 次  
-   → FOK 买入该侧，持有到结算  
+对齐 X / 公开成交研究中更常见的赚钱形态：
 
-风控：单笔名义上限、每日亏损熔断、每窗最多一仓。
+1. 窗口开始后短暂延迟，在 Up/Down **两侧挂虚拟买单**
+2. 约束 `up_bid + down_bid ≤ MAKER_PAIR_COST_MAX`（默认 0.98）
+3. 纸面成交模型：盘口穿越（`ask ≤ bid`）或挂在 touch 持续 `MAKER_TOUCH_FILL_SEC` 秒
+4. 库存失衡时减挂重仓侧；收盘前 `MAKER_STOP_BEFORE_END_SEC` 停止挂单，持有到结算
+5. 结算：成对部分赚 `1 - pair_cost`，残仓按胜负方向记账；**maker 手续费 = 0**
 
-> 结算真源是 Chainlink BTC/USD TWAP。本程序现货 Δ 只是方向过滤器，不保证盈利。
+```bash
+python -m btc5m --mode maker          # 持续
+python -m btc5m --mode maker --once -v
+bash scripts/run_maker_paper.sh
+```
 
-## 快速开始（纸面）
+数据写入 `data/maker_paper.db`。
+
+### 2) `late_edge` — 尾盘边缘收敛（taker）
+
+收盘前窗口内，在扣费后仍有 `net_edge` 时 FOK 买入一侧并持有到结算。会按 `crypto_fees_v2` 记 **taker fee**。
+
+```bash
+python -m btc5m --mode late_edge
+# 或 MODE=late_edge
+```
+
+## 费后审计报表（方案 1）
+
+每笔 fill / position / maker session 记录名义、手续费、毛利、净利：
+
+```bash
+python -m btc5m report --mode maker
+python -m btc5m report --mode late_edge
+python -m btc5m report --day 2026-11-13
+```
+
+示例输出字段：`notional / gross / fees / rebate≈ / net / WR / ROI`。
+
+## 快速开始
 
 ```bash
 cd polymarket-btc-5m
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+pip install -e .
 
-# 单次决策
-python -m btc5m --once -v
-
-# 持续纸面运行
-bash scripts/run_paper.sh
-# 或: python -m btc5m
+cp .env.example .env   # 默认 MODE=maker
+python -m btc5m --mode maker --once -v
 ```
 
-决策与持仓写入 `data/paper.db`。
-
-## 实盘准备
-
-1. 新建专用钱包，在 polymarket.com 登录并充值（CLOB V2 / pUSD）  
-2. 复制配置：
-
-```bash
-cp .env.example .env
-# 填入 PRIVATE_KEY、FUNDER_ADDRESS（deposit wallet）
-```
-
-3. 派生 API 凭证：
-
-```bash
-python scripts/derive_api_creds.py
-# 把打印的 API_KEY / API_SECRET / API_PASSPHRASE 写入 .env
-```
-
-4. 开启实盘开关并启动：
-
-```bash
-# .env
-LIVE_TRADING_ENABLED=true
-
-bash scripts/run_live.sh
-```
-
-注意：Polymarket 有地理限制；不要用 VPN 规避。实盘有本金风险，建议先小额。
-
-## 配置要点（`.env`）
+## Maker 配置
 
 | 变量 | 默认 | 含义 |
 |------|------|------|
-| `ENTRY_WINDOW_SEC` | 60 | 距收盘多少秒内开始观察 |
-| `MIN_T_REMAINING_SEC` | 12 | 距收盘少于此秒数不再开仓 |
-| `MIN_ENTRY_PRICE` / `MAX_ENTRY_PRICE` | 0.75 / 0.95 | 可买 ask 区间 |
-| `MIN_NET_EDGE` | 0.02 | 扣费后最低净边缘 |
-| `UP_MIN_DELTA_USD` | 15 | 买 Up 所需现货涨幅 |
-| `DOWN_MAX_DELTA_USD` | -15 | 买 Down 所需现货跌幅 |
-| `ORDER_SHARES` | 10 | 下单股数（交易所最小 5） |
-| `MAX_ORDER_USD` | 15 | 单笔名义上限 |
-| `DAILY_LOSS_LIMIT_USD` | 40 | 日亏损熔断 |
+| `MAKER_PAIR_COST_MAX` | 0.98 | 双边挂单价之和上限 |
+| `MAKER_QUOTE_SHARES` | 10 | 每侧挂单股数 |
+| `MAKER_START_DELAY_SEC` | 15 | 开窗后等待再报价 |
+| `MAKER_STOP_BEFORE_END_SEC` | 45 | 收盘前停止挂单 |
+| `MAKER_TOUCH_FILL_SEC` | 8 | touch 持续多久视为纸面成交 |
+| `MAKER_MAX_IMBALANCE_SHARES` | 20 | 库存失衡上限 |
+
+## 实盘（仅 late_edge）
+
+Maker 引擎本版 **仅纸面**。`late_edge` 实盘：
+
+1. 填 `.env` 钱包与 API（`python scripts/derive_api_creds.py`）
+2. `LIVE_TRADING_ENABLED=true`
+3. `python -m btc5m --mode late_edge --live`
+
+注意地理限制与本金风险；公开数据显示多数 taker 长期亏损。
 
 ## 测试
 
 ```bash
-pip install pytest
 pytest -q
-```
-
-## 目录
-
-```
-polymarket-btc-5m/
-  btc5m/          # 核心代码
-  scripts/        # 启停与派生凭证
-  tests/
-  data/           # 运行时 SQLite
-  .env.example
 ```
 
 ## 免责声明
 
-本程序仅供研究与自动化实验。预测市场与加密交易有显著亏损风险；策略不保证收益；请遵守当地法律与 Polymarket 服务条款。
+研究与自动化实验用途。预测市场有亏损风险；纸面成交模型无法等价真实 queue；策略不保证收益。
