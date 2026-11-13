@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "polymarket-btc-5m"
+version = "1.0.0"
+description = "Polymarket BTC 5-minute Up/Down automated trading bot"
+requires-python = ">=3.11"
+dependencies = [
+  "py-clob-client-v2>=1.0,<2.0",
+  "requests>=2.31",
+  "python-dotenv>=1.0",
+  "web3>=6.0,<8.0",
+]
+
+[tool.setuptools.packages.find]
+include = ["btc5m*"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
