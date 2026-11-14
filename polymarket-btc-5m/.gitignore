@@ -4,6 +4,7 @@ __pycache__/
 *.pyc
 data/*.db
 data/*.db-*
+data/heartbeat_*.json
 .pytest_cache/
 *.egg-info/
 dist/

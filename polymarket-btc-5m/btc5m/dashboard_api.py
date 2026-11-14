@@ -17,9 +17,12 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from btc5m.book import fetch_book
+from btc5m.calibration import load_bucket_stats
 from btc5m.config import ROOT, load
+from btc5m.heartbeat import status_report
 from btc5m.markets import fetch_live_market
 from btc5m.signal import fetch_btc_signal
+from btc5m.audit import fill_quality_report, maker_pair_residual_report
 
 app = FastAPI(title="Poly BTC 5m Paper Dashboard", docs_url=None, redoc_url=None)
 app.add_middleware(
@@ -59,8 +62,8 @@ def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
 def _summarize_group(group: str) -> dict[str, Any]:
     path = _db_path(group)
     meta = {
-        "A": {"label": "A · late_edge", "version": "p0-fix", "mode": "late_edge"},
-        "B": {"label": "B · maker", "version": "p0-fix", "mode": "maker"},
+        "A": {"label": "A · late_edge", "version": "p1-p2", "mode": "late_edge"},
+        "B": {"label": "B · maker", "version": "p1-p2", "mode": "maker"},
     }[group.upper()]
     out: dict[str, Any] = {
         **meta,
@@ -155,6 +158,7 @@ def index() -> FileResponse:
 @app.get("/api/health")
 def health() -> dict[str, Any]:
     cfg = load()
+    hb = status_report(cfg.data_dir, stale_sec=cfg.heartbeat_stale_sec)
     return {
         "ok": True,
         "mode": "PAPER",
@@ -162,7 +166,54 @@ def health() -> dict[str, Any]:
         "live_trading_enabled": cfg.live_trading_enabled,
         "db_exists": (cfg.data_dir / "paper.db").exists(),
         "maker_db_exists": (cfg.data_dir / "maker_paper.db").exists(),
+        "heartbeat": hb,
         "ts": time.time(),
+    }
+
+
+@app.get("/api/heartbeat")
+def heartbeat() -> dict[str, Any]:
+    cfg = load()
+    return status_report(cfg.data_dir, stale_sec=cfg.heartbeat_stale_sec)
+
+
+@app.get("/api/calibration")
+def calibration(group: str = Query("A")) -> dict[str, Any]:
+    cfg = load()
+    path = _db_path(group)
+    buckets = load_bucket_stats(
+        path,
+        lookback_sec=cfg.bucket_lookback_sec,
+        min_samples=cfg.bucket_min_samples,
+        fee_rate=cfg.taker_fee_rate,
+        wr_buffer=cfg.bucket_wr_buffer,
+    )
+    return {
+        "group": group.upper(),
+        "db_path": str(path),
+        "buckets": [
+            {
+                "lo": b.lo,
+                "hi": b.hi,
+                "n": b.n,
+                "wins": b.wins,
+                "wr": b.wr,
+                "required_wr": b.required_wr,
+                "net_pnl_usd": b.net_pnl_usd,
+                "banned": b.banned,
+                "reason": b.reason,
+            }
+            for b in buckets
+        ],
+    }
+
+
+@app.get("/api/maker/quality")
+def maker_quality() -> dict[str, Any]:
+    path = _db_path("B")
+    return {
+        "pair_residual": maker_pair_residual_report(path),
+        "fill_quality": fill_quality_report(path),
     }
 
 
@@ -269,6 +320,8 @@ def state() -> dict[str, Any]:
                     "delta_usd": sig.delta_usd,
                     "side": sig.signal_side,
                     "source": sig.source,
+                    "venue_count": sig.venue_count,
+                    "consensus": sig.consensus,
                 }
             except Exception as exc:  # noqa: BLE001
                 errors.append(f"signal: {exc}")
@@ -307,9 +360,15 @@ def state() -> dict[str, Any]:
             "paper_bankroll_usd": cfg.paper_bankroll_usd,
             "live_trading_enabled": cfg.live_trading_enabled,
             "late_edge_hard_ban_price": cfg.late_edge_hard_ban_price,
+            "bucket_calibration_enabled": cfg.bucket_calibration_enabled,
+            "signal_require_consensus": cfg.signal_require_consensus,
+            "signal_min_venues": cfg.signal_min_venues,
             "maker_pair_cost_max": cfg.maker_pair_cost_max,
+            "maker_pair_profit_min": cfg.maker_pair_profit_min,
             "maker_flatten_residual": cfg.maker_flatten_residual,
             "maker_allow_crossed_fills": cfg.maker_allow_crossed_fills,
+            "heartbeat_stale_sec": cfg.heartbeat_stale_sec,
         },
+        "heartbeat": status_report(cfg.data_dir, stale_sec=cfg.heartbeat_stale_sec),
         "errors": errors,
     }

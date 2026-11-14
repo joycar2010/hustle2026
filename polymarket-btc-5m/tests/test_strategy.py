@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import sqlite3
+import time
+from pathlib import Path
+
 from btc5m.book import TopOfBook
 from btc5m.config import Config
 from btc5m.markets import LiveMarket
@@ -32,6 +36,8 @@ def _cfg(**overrides) -> Config:
         up_min_delta_usd=15.0,
         down_max_delta_usd=-15.0,
         price_hosts="okx",
+        signal_require_consensus=False,
+        signal_min_venues=1,
         order_shares=10.0,
         max_order_usd=15.0,
         daily_loss_limit_usd=40.0,
@@ -41,7 +47,12 @@ def _cfg(**overrides) -> Config:
         mode="late_edge",
         late_edge_hard_ban_price=0.90,
         late_edge_edge_safety=1.25,
+        bucket_calibration_enabled=False,
+        bucket_lookback_sec=7 * 86400.0,
+        bucket_min_samples=8,
+        bucket_wr_buffer=0.02,
         maker_pair_cost_max=0.97,
+        maker_pair_profit_min=0.02,
         maker_quote_shares=10.0,
         maker_start_delay_sec=15.0,
         maker_stop_before_end_sec=60.0,
@@ -49,15 +60,14 @@ def _cfg(**overrides) -> Config:
         maker_max_imbalance_shares=10.0,
         maker_allow_crossed_fills=False,
         maker_flatten_residual=True,
-        data_dir=__import__("pathlib").Path("/tmp"),
+        heartbeat_stale_sec=120.0,
+        data_dir=Path("/tmp"),
     )
     base.update(overrides)
     return Config(**base)
 
 
 def _market(t_left: float = 30.0) -> LiveMarket:
-    import time
-
     end = time.time() + t_left
     start = end - 300
     return LiveMarket(
@@ -72,6 +82,19 @@ def _market(t_left: float = 30.0) -> LiveMarket:
         min_size=5,
         neg_risk=False,
         enable_order_book=True,
+    )
+
+
+def _signal(side: str = "UP", delta: float = 30.0, *, consensus: bool = True, venues: int = 2) -> BtcSignal:
+    return BtcSignal(
+        ts=0,
+        source="test",
+        price_to_beat=100,
+        current_price=100 + delta,
+        delta_usd=delta,
+        signal_side=side,
+        venue_count=venues,
+        consensus=consensus,
     )
 
 
@@ -125,14 +148,7 @@ def test_buy_after_confirm_with_delta():
     market = _market(t_left=25)
     up = TopOfBook(0.80, 50, 0.85, 50)
     down = TopOfBook(0.01, 50, 0.99, 50)
-    signal = BtcSignal(
-        ts=0,
-        source="test",
-        price_to_beat=100,
-        current_price=130,
-        delta_usd=30,
-        signal_side="UP",
-    )
+    signal = _signal("UP", 30)
     d1 = decide(cfg, market, up, down, signal, state, already_in_market=False)
     assert d1.action == "SKIP"
     assert "confirm 1/2" in d1.reason
@@ -140,3 +156,67 @@ def test_buy_after_confirm_with_delta():
     assert d2.action == "BUY"
     assert d2.side == "UP"
     assert d2.price == 0.85
+
+
+def test_blocks_failed_consensus():
+    cfg = _cfg(delta_filter_enabled=True, confirm_checks=1, signal_min_venues=2)
+    state = StrategyState()
+    d = decide(
+        cfg,
+        _market(t_left=25),
+        TopOfBook(0.80, 50, 0.85, 50),
+        TopOfBook(0.01, 50, 0.99, 50),
+        _signal("UP", 30, consensus=False, venues=2),
+        state,
+        already_in_market=False,
+    )
+    assert d.action == "SKIP"
+    assert "consensus" in d.reason
+
+
+def test_bucket_calibration_ban(tmp_path: Path):
+    db = tmp_path / "paper.db"
+    conn = sqlite3.connect(db)
+    conn.execute(
+        """
+        CREATE TABLE positions (
+          id INTEGER PRIMARY KEY,
+          status TEXT,
+          entry_price REAL,
+          closed_ts REAL,
+          pnl_usd REAL,
+          pnl_net_usd REAL
+        )
+        """
+    )
+    now = time.time()
+    # 8 losses in 0.85-0.90 → WR=0 << required → ban
+    for i in range(8):
+        conn.execute(
+            "INSERT INTO positions VALUES (?,?,?,?,?,?)",
+            (i + 1, "closed", 0.87, now, -8.0, -8.5),
+        )
+    conn.commit()
+    conn.close()
+
+    cfg = _cfg(
+        delta_filter_enabled=False,
+        confirm_checks=1,
+        max_entry_price=0.90,
+        min_net_edge=0.05,
+        bucket_calibration_enabled=True,
+        bucket_min_samples=8,
+    )
+    state = StrategyState()
+    d = decide(
+        cfg,
+        _market(t_left=25),
+        TopOfBook(0.80, 50, 0.87, 50),
+        TopOfBook(0.01, 50, 0.99, 50),
+        None,
+        state,
+        already_in_market=False,
+        db_path=db,
+    )
+    assert d.action == "SKIP"
+    assert "bucket_cal_ban" in d.reason

@@ -56,6 +56,8 @@ class Config:
     up_min_delta_usd: float
     down_max_delta_usd: float
     price_hosts: str
+    signal_require_consensus: bool
+    signal_min_venues: int
 
     order_shares: float
     max_order_usd: float
@@ -67,12 +69,17 @@ class Config:
     # late_edge | maker
     mode: str
 
-    # Late-edge risk gates (P0-A)
+    # Late-edge risk gates (P0-A / P1 calibration)
     late_edge_hard_ban_price: float
     late_edge_edge_safety: float
+    bucket_calibration_enabled: bool
+    bucket_lookback_sec: float
+    bucket_min_samples: int
+    bucket_wr_buffer: float
 
     # Maker bilateral MM (paper)
     maker_pair_cost_max: float
+    maker_pair_profit_min: float
     maker_quote_shares: float
     maker_start_delay_sec: float
     maker_stop_before_end_sec: float
@@ -80,6 +87,9 @@ class Config:
     maker_max_imbalance_shares: float
     maker_allow_crossed_fills: bool
     maker_flatten_residual: bool
+
+    # P2 observability
+    heartbeat_stale_sec: float
 
     data_dir: Path
 
@@ -113,6 +123,8 @@ def load() -> Config:
         up_min_delta_usd=_float("UP_MIN_DELTA_USD", 25.0),
         down_max_delta_usd=_float("DOWN_MAX_DELTA_USD", -25.0),
         price_hosts=os.getenv("PRICE_HOSTS", "okx,coinbase,kraken"),
+        signal_require_consensus=_bool("SIGNAL_REQUIRE_CONSENSUS", True),
+        signal_min_venues=max(_int("SIGNAL_MIN_VENUES", 2), 1),
         order_shares=max(_float("ORDER_SHARES", 10.0), 5.0),
         max_order_usd=_float("MAX_ORDER_USD", 15.0),
         daily_loss_limit_usd=_float("DAILY_LOSS_LIMIT_USD", 40.0),
@@ -120,17 +132,21 @@ def load() -> Config:
         paper_bankroll_usd=_float("PAPER_BANKROLL_USD", 200.0),
         live_trading_enabled=_bool("LIVE_TRADING_ENABLED", False),
         mode=mode,
-        # hard ban bucket that empirically destroyed A expectancy
         late_edge_hard_ban_price=_float("LATE_EDGE_HARD_BAN_PRICE", 0.90),
         late_edge_edge_safety=_float("LATE_EDGE_EDGE_SAFETY", 1.25),
+        bucket_calibration_enabled=_bool("BUCKET_CALIBRATION_ENABLED", True),
+        bucket_lookback_sec=_float("BUCKET_LOOKBACK_SEC", 7 * 86400.0),
+        bucket_min_samples=max(_int("BUCKET_MIN_SAMPLES", 8), 1),
+        bucket_wr_buffer=_float("BUCKET_WR_BUFFER", 0.02),
         maker_pair_cost_max=_float("MAKER_PAIR_COST_MAX", 0.97),
+        maker_pair_profit_min=_float("MAKER_PAIR_PROFIT_MIN", 0.02),
         maker_quote_shares=max(_float("MAKER_QUOTE_SHARES", 10.0), 5.0),
         maker_start_delay_sec=_float("MAKER_START_DELAY_SEC", 15.0),
         maker_stop_before_end_sec=_float("MAKER_STOP_BEFORE_END_SEC", 60.0),
         maker_touch_fill_sec=_float("MAKER_TOUCH_FILL_SEC", 12.0),
-        # one clip max imbalance; complete the other leg only
         maker_max_imbalance_shares=_float("MAKER_MAX_IMBALANCE_SHARES", 10.0),
         maker_allow_crossed_fills=_bool("MAKER_ALLOW_CROSSED_FILLS", False),
         maker_flatten_residual=_bool("MAKER_FLATTEN_RESIDUAL", True),
+        heartbeat_stale_sec=_float("HEARTBEAT_STALE_SEC", 120.0),
         data_dir=ROOT / "data",
     )

@@ -1,14 +1,14 @@
-"""BTC spot signal vs the 5-minute window open price.
+"""BTC price signal vs the 5-minute window open.
 
-Resolution uses Chainlink BTC/USD TWAP. For paper/live decisioning we use
-liquid spot venues (OKX / Coinbase / Kraken) as a fast proxy of direction.
+Resolution uses Chainlink BTC/USD TWAP. We approximate direction with a
+multi-venue median (OKX / Coinbase / Kraken) for robustness; optional
+consensus requires agreeing side across venues.
 """
 from __future__ import annotations
 
+import statistics
 import time
 from dataclasses import dataclass
-from typing import Optional
-
 import requests
 
 from btc5m.config import Config
@@ -26,8 +26,12 @@ class BtcSignal:
     current_price: float
     delta_usd: float
     signal_side: str
+    venue_count: int = 1
+    consensus: bool = True
 
     def allows(self, side: str, *, up_min: float, down_max: float) -> bool:
+        if not self.consensus:
+            return False
         if side == "UP":
             return self.delta_usd >= up_min
         if side == "DOWN":
@@ -37,7 +41,9 @@ class BtcSignal:
     def describe(self) -> str:
         return (
             f"btc Δ={self.delta_usd:+.2f} px={self.current_price:.2f} "
-            f"beat={self.price_to_beat:.2f} side={self.signal_side} src={self.source}"
+            f"beat={self.price_to_beat:.2f} side={self.signal_side} "
+            f"src={self.source} venues={self.venue_count} "
+            f"consensus={'Y' if self.consensus else 'N'}"
         )
 
 
@@ -52,7 +58,6 @@ def _okx_spot() -> float:
 
 
 def _okx_open(start_ts: float) -> float:
-    # OKX candles: [ts, o, h, l, c, vol, ...] newest first; ts in ms
     after_ms = int((start_ts + 60) * 1000)
     r = requests.get(
         "https://www.okx.com/api/v5/market/history-candles",
@@ -64,9 +69,8 @@ def _okx_open(start_ts: float) -> float:
     target = int(start_ts * 1000)
     for row in rows:
         if int(row[0]) == target:
-            return float(row[1])  # open
+            return float(row[1])
     if rows:
-        # closest candle open
         rows = sorted(rows, key=lambda x: abs(int(x[0]) - target))
         return float(rows[0][1])
     raise RuntimeError("okx: no candle for window open")
@@ -114,7 +118,6 @@ _SPOTTERS = {
 _OPENERS = {
     "okx": _okx_open,
     "kraken": _kraken_open,
-    # Coinbase spot-only; reuse okx/kraken for open when coinbase listed first.
 }
 
 
@@ -122,23 +125,24 @@ def _hosts(cfg: Config) -> list[str]:
     return [h.strip().lower() for h in cfg.price_hosts.split(",") if h.strip()]
 
 
-def _current_price(cfg: Config) -> tuple[float, str]:
+def _spot_all(cfg: Config) -> list[tuple[str, float]]:
     now = time.time()
-    errors: list[str] = []
+    out: list[tuple[str, float]] = []
     for host in _hosts(cfg):
-        cached = _spot_cache.get(host)
-        if cached and now - cached[0] <= 0.8:
-            return cached[1], host
         fn = _SPOTTERS.get(host)
         if not fn:
+            continue
+        cached = _spot_cache.get(host)
+        if cached and now - cached[0] <= 0.8:
+            out.append((host, cached[1]))
             continue
         try:
             px = fn()
             _spot_cache[host] = (now, px)
-            return px, host
-        except Exception as exc:  # noqa: BLE001 — try next venue
-            errors.append(f"{host}:{exc}")
-    raise RuntimeError("spot price failed: " + "; ".join(errors))
+            out.append((host, px))
+        except Exception:  # noqa: BLE001
+            continue
+    return out
 
 
 def _open_price(cfg: Config, market: LiveMarket) -> tuple[float, str]:
@@ -160,28 +164,50 @@ def _open_price(cfg: Config, market: LiveMarket) -> tuple[float, str]:
         except Exception as exc:  # noqa: BLE001
             errors.append(f"{host}:{exc}")
 
-    # Last resort: use first available spot as beat (degrades delta quality)
-    px, host = _current_price(cfg)
-    out = (px, f"{host}-spot-fallback")
+    spots = _spot_all(cfg)
+    if not spots:
+        raise RuntimeError("open price failed: " + "; ".join(errors))
+    px = statistics.median([p for _, p in spots])
+    out = (px, "median-spot-fallback")
     _open_cache[key] = out
     return out
 
 
+def _side_from_delta(delta: float, cfg: Config) -> str:
+    if delta >= cfg.up_min_delta_usd:
+        return "UP"
+    if delta <= cfg.down_max_delta_usd:
+        return "DOWN"
+    return "FLAT"
+
+
 def fetch_btc_signal(cfg: Config, market: LiveMarket) -> BtcSignal:
     beat, open_src = _open_price(cfg, market)
-    spot, spot_src = _current_price(cfg)
+    spots = _spot_all(cfg)
+    if not spots:
+        raise RuntimeError("spot price failed on all venues")
+
+    values = [p for _, p in spots]
+    spot = statistics.median(values)
     delta = spot - beat
-    if delta >= cfg.up_min_delta_usd:
-        side = "UP"
-    elif delta <= cfg.down_max_delta_usd:
-        side = "DOWN"
+    side = _side_from_delta(delta, cfg)
+
+    # Per-venue sides for consensus (same beat). Directed venues must agree.
+    venue_sides = [_side_from_delta(p - beat, cfg) for _, p in spots]
+    if cfg.signal_require_consensus and side in {"UP", "DOWN"}:
+        directed = [s for s in venue_sides if s != "FLAT"]
+        consensus = bool(directed) and all(s == side for s in directed)
     else:
-        side = "FLAT"
+        consensus = True
+
+    names = "+".join(h for h, _ in spots)
     return BtcSignal(
         ts=time.time(),
-        source=f"{spot_src}/{open_src}",
+        source=f"median({names})/{open_src}",
         price_to_beat=beat,
         current_price=spot,
         delta_usd=delta,
         signal_side=side,
+        venue_count=len(spots),
+        consensus=consensus,
     )

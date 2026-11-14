@@ -9,6 +9,7 @@ from typing import Optional
 from btc5m.book import fetch_book
 from btc5m.config import Config
 from btc5m.fees import taker_fee_usd
+from btc5m.heartbeat import write_heartbeat
 from btc5m.markets import LiveMarket, fetch_live_market, fmt_utc, next_window_eta
 from btc5m.resolver import gamma_winner_side, paper_pnl
 from btc5m.risk import RiskState, allowed_to_trade, note_fill, note_resolution
@@ -276,6 +277,7 @@ class Engine:
             signal,
             self.state,
             already_in_market=already,
+            db_path=self.store.path,
         )
         self.store.log(
             "decision",
@@ -292,6 +294,15 @@ class Engine:
                 "t_left": market.t_remaining(),
             },
             market.market_slug,
+        )
+
+        write_heartbeat(
+            self.cfg.data_dir,
+            mode="late_edge",
+            market_slug=market.market_slug,
+            detail=decision.reason[:200],
+            pnl_usd=self.risk.realized_pnl_usd,
+            open_positions=self.risk.open_positions,
         )
 
         if decision.action == "BUY":

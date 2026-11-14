@@ -18,6 +18,7 @@ from typing import Optional
 from btc5m.book import TopOfBook, fetch_book
 from btc5m.config import Config
 from btc5m.fees import maker_rebate_estimate
+from btc5m.heartbeat import write_heartbeat
 from btc5m.markets import LiveMarket, fetch_live_market, fetch_market_by_slug, fmt_utc, next_window_eta
 from btc5m.resolver import gamma_winner_side
 from btc5m.risk import RiskState, allowed_to_trade, note_resolution
@@ -38,6 +39,25 @@ class Quote:
 
 
 @dataclass
+class FillQuality:
+    touch: int = 0
+    crossed: int = 0
+    skipped_imbalance: int = 0
+    flatten: int = 0
+
+    def as_dict(self) -> dict:
+        total = self.touch + self.crossed
+        return {
+            "touch": self.touch,
+            "crossed": self.crossed,
+            "skipped_imbalance": self.skipped_imbalance,
+            "flatten": self.flatten,
+            "total_fills": total,
+            "crossed_rate": (self.crossed / total) if total else 0.0,
+        }
+
+
+@dataclass
 class MakerState:
     session_id: int
     market: LiveMarket
@@ -51,6 +71,7 @@ class MakerState:
     quotes: dict[str, Quote] = field(default_factory=dict)
     quoting: bool = True
     flattened: bool = False
+    fill_quality: FillQuality = field(default_factory=FillQuality)
 
 
 def _round_tick(price: float, tick: float) -> float:
@@ -146,12 +167,17 @@ class MakerEngine:
         self.risk.realized_pnl_usd = self.store.day_realized_pnl(day_start)
         self.risk.open_positions = len(self.store.open_maker_sessions())
 
+    def _effective_pair_max(self) -> float:
+        """P1: pair-profit first — cap = min(config max, 1 - min_profit)."""
+        by_profit = 1.0 - max(self.cfg.maker_pair_profit_min, 0.0)
+        return min(self.cfg.maker_pair_cost_max, by_profit)
+
     def _target_bids(
         self, market: LiveMarket, up: TopOfBook, down: TopOfBook, state: MakerState
     ) -> tuple[Optional[float], Optional[float]]:
         """Choose resting buy prices with pair-cost and inventory constraints."""
         tick = market.tick_size
-        max_pair = self.cfg.maker_pair_cost_max
+        max_pair = self._effective_pair_max()
         # Fair-ish anchors from book
         up_anchor = up.best_bid if up.best_bid is not None else 0.45
         down_anchor = down.best_bid if down.best_bid is not None else 0.45
@@ -171,24 +197,19 @@ class MakerEngine:
         up_avg = _avg(state.up_cost, state.up_shares) if state.up_shares else up_q
         dn_avg = _avg(state.down_cost, state.down_shares) if state.down_shares else down_q
 
-        # P0-B: once one side fills, ONLY quote the missing leg (complete the pair)
+        # P0/P1: once one side fills, ONLY quote the missing leg (complete the pair)
         if up_sh > dn_sh:
-            # need DOWN only; cap so pair stays under max
             down_q = min(down_q, _round_tick(max_pair - up_avg, tick))
-            if down_q < tick:
+            if down_q < tick or (up_avg + down_q) > max_pair + 1e-9:
                 return None, None
-            if up_sh - dn_sh >= self.cfg.maker_max_imbalance_shares:
-                return None, down_q
             return None, down_q
         if dn_sh > up_sh:
             up_q = min(up_q, _round_tick(max_pair - dn_avg, tick))
-            if up_q < tick:
+            if up_q < tick or (dn_avg + up_q) > max_pair + 1e-9:
                 return None, None
-            if dn_sh - up_sh >= self.cfg.maker_max_imbalance_shares:
-                return up_q, None
             return up_q, None
 
-        # Flat inventory: quote both under pair cap
+        # Flat inventory: quote both under pair cap (pair profit priority)
         if up_q + down_q > max_pair:
             half = _round_tick(max_pair / 2.0, tick)
             up_q = min(up_q, half)
@@ -213,6 +234,7 @@ class MakerEngine:
 
         filled = False
         reason = ""
+        fill_kind = ""
         # Crossed fills are optional — they behaved like aggressive taker in paper
         # and piled one-sided inventory during trends.
         if (
@@ -221,6 +243,7 @@ class MakerEngine:
             and book.best_ask <= q.price + 1e-12
         ):
             filled = True
+            fill_kind = "crossed"
             reason = f"crossed ask={book.best_ask:.2f}<=bid={q.price:.2f}"
         else:
             at_touch = book.best_bid is not None and abs(book.best_bid - q.price) <= 1e-12
@@ -229,6 +252,7 @@ class MakerEngine:
                     q.at_touch_since = now
                 elif now - q.at_touch_since >= self.cfg.maker_touch_fill_sec:
                     filled = True
+                    fill_kind = "touch"
                     reason = (
                         f"touch {now - q.at_touch_since:.1f}s "
                         f"bid={q.price:.2f} best_bid={book.best_bid:.2f}"
@@ -244,6 +268,7 @@ class MakerEngine:
         tentative_dn = state.down_shares + (q.size if side == "DOWN" else 0.0)
         if abs(tentative_up - tentative_dn) > self.cfg.maker_max_imbalance_shares + 1e-9:
             state.quotes.pop(side, None)
+            state.fill_quality.skipped_imbalance += 1
             log.info(
                 "MAKER SKIP FILL %s %s — imbalance cap %.0f (would be %.0f/%.0f)",
                 state.market.market_slug,
@@ -264,6 +289,11 @@ class MakerEngine:
         else:
             state.down_shares += size
             state.down_cost += notional
+
+        if fill_kind == "crossed":
+            state.fill_quality.crossed += 1
+        else:
+            state.fill_quality.touch += 1
 
         self.store.record_fill(
             market_slug=state.market.market_slug,
@@ -287,6 +317,11 @@ class MakerEngine:
             down_cost_usd=state.down_cost,
             up_fee_usd=state.up_fee,
             down_fee_usd=state.down_fee,
+        )
+        self.store.log(
+            "maker_fill_quality",
+            {"session_id": state.session_id, "kind": fill_kind, **state.fill_quality.as_dict()},
+            state.market.market_slug,
         )
         state.quotes.pop(side, None)
         log.info(
@@ -423,6 +458,7 @@ class MakerEngine:
             state.down_cost = max(state.down_cost - residual * avg, 0.0)
         state.flatten_pnl_usd += pnl
         state.flattened = True
+        state.fill_quality.flatten += 1
         self.store.update_maker_inventory(
             state.session_id,
             up_shares=state.up_shares,
@@ -609,6 +645,14 @@ class MakerEngine:
             # P0-B: flatten unpaired residual instead of gambling to resolution
             if self.cfg.maker_flatten_residual:
                 self._flatten_residual(state, up, down)
+            write_heartbeat(
+                self.cfg.data_dir,
+                mode="maker",
+                market_slug=market.market_slug,
+                detail=f"stopped quoting t_left={t_left:.0f}s flatten={state.flatten_pnl_usd:+.2f}",
+                pnl_usd=self.risk.realized_pnl_usd,
+                open_positions=self.risk.open_positions,
+            )
             return
 
         # Detect fills on resting quotes first
@@ -620,9 +664,21 @@ class MakerEngine:
 
         uq = state.quotes.get("UP")
         dq = state.quotes.get("DOWN")
+        fq = state.fill_quality.as_dict()
+        write_heartbeat(
+            self.cfg.data_dir,
+            mode="maker",
+            market_slug=market.market_slug,
+            detail=(
+                f"inv={state.up_shares:.0f}/{state.down_shares:.0f} "
+                f"fills touch={fq['touch']} crossed={fq['crossed']}"
+            ),
+            pnl_usd=self.risk.realized_pnl_usd,
+            open_positions=self.risk.open_positions,
+        )
         log.info(
             "MAKER %s t_left=%.0fs quotes up=%s dn=%s pair=%s | "
-            "book up %s/%s dn %s/%s | inv %.0f/%.0f",
+            "book up %s/%s dn %s/%s | inv %.0f/%.0f | fill_q touch=%d crossed=%d",
             market.market_slug,
             t_left,
             f"{uq.price:.2f}" if uq else "-",
@@ -634,6 +690,8 @@ class MakerEngine:
             down.best_ask,
             state.up_shares,
             state.down_shares,
+            fq["touch"],
+            fq["crossed"],
         )
 
     def run(self, *, once: bool = False) -> None:

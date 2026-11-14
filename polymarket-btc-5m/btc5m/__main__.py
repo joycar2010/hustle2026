@@ -1,7 +1,8 @@
-"""CLI entry: python -m btc5m [--mode late_edge|maker] [--live] [--once] [report] [-v]."""
+"""CLI entry: python -m btc5m [--mode late_edge|maker] [--live] [--once] [report|heartbeat|stress] [-v]."""
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import sys
 
@@ -16,8 +17,8 @@ def main(argv: list[str] | None = None) -> int:
         "command",
         nargs="?",
         default="run",
-        choices=["run", "report", "dashboard"],
-        help="run trading loop (default), fee-aware report, or dashboard API",
+        choices=["run", "report", "dashboard", "heartbeat", "stress"],
+        help="run trading loop (default), fee-aware report, dashboard, heartbeat, or stress",
     )
     parser.add_argument(
         "--mode",
@@ -39,6 +40,18 @@ def main(argv: list[str] | None = None) -> int:
         "--day",
         default=None,
         help="For report: UTC day YYYY-MM-DD (default: today)",
+    )
+    parser.add_argument(
+        "--slip-ticks",
+        type=float,
+        default=1.0,
+        help="For stress: adverse entry slip in ticks (default 1)",
+    )
+    parser.add_argument(
+        "--fee-mult",
+        type=float,
+        default=1.0,
+        help="For stress: fee multiplier (default 1.0)",
     )
     parser.add_argument(
         "-v",
@@ -63,12 +76,34 @@ def main(argv: list[str] | None = None) -> int:
         db = cfg.data_dir / (
             "maker_paper.db" if mode == "maker" else ("live.db" if args.live else "paper.db")
         )
-        # Also show both DBs if present
-        print_report(db, day=args.day)
+        print_report(db, day=args.day, fee_rate=cfg.taker_fee_rate)
         other = cfg.data_dir / ("paper.db" if mode == "maker" else "maker_paper.db")
         if other.exists() and other != db:
             print()
-            print_report(other, day=args.day)
+            print_report(other, day=args.day, fee_rate=cfg.taker_fee_rate)
+        return 0
+
+    if args.command == "heartbeat":
+        from btc5m.heartbeat import status_report
+
+        report = status_report(
+            cfg.data_dir,
+            stale_sec=cfg.heartbeat_stale_sec,
+        )
+        print(json.dumps(report, indent=2))
+        return 0 if report.get("ok") else 2
+
+    if args.command == "stress":
+        from btc5m.stress import format_stress, stress_late_edge_db
+
+        db = cfg.data_dir / ("live.db" if args.live else "paper.db")
+        result = stress_late_edge_db(
+            db,
+            slip_ticks=args.slip_ticks,
+            fee_rate=cfg.taker_fee_rate,
+            fee_mult=args.fee_mult,
+        )
+        print(format_stress(result))
         return 0
 
     if args.command == "dashboard":
