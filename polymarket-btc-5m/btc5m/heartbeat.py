@@ -63,7 +63,7 @@ def read_heartbeat(data_dir: Path, mode: str) -> Optional[Heartbeat]:
 def status_report(
     data_dir: Path,
     *,
-    modes: tuple[str, ...] = ("late_edge", "maker"),
+    modes: tuple[str, ...] = ("late_edge", "maker", "split_sell"),
     stale_sec: float = 120.0,
 ) -> dict[str, Any]:
     groups: dict[str, Any] = {}

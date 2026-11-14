@@ -4,20 +4,17 @@
 
 默认 **纸面交易（paper）**，不会下真单。实盘需同时满足：`--live` + `.env` 中 `LIVE_TRADING_ENABLED=true`（仅 `late_edge`）。
 
-## P0 → P1/P2（v1.3）
+## P0 → P4（v1.4）
 
-针对 poly.hustle2026.xyz A/B Paper 亏损：
-
-- **A late_edge**：`MAX_ENTRY_PRICE=0.88`，硬禁 `≥0.90`，`MIN_NET_EDGE=0.08`，确认×3，Δ±25  
-- **P1 A**：入场价分桶 WR 熔断；多源 median + 共识信号；纸面强制记 taker fee  
-- **B maker**：只补缺腿、失衡≤10、关闭 crossed 成交、收盘前残仓按买一强平  
-- **P1 B**：成对利润优先（`MAKER_PAIR_PROFIT_MIN`）、成交质量统计  
-- **P2**：报表拆桶/配对/残仓；`heartbeat` 告警；摩擦压力测试；dashboard `/api/calibration` `/api/heartbeat`  
+- **A late_edge**：价格帽/硬禁 + 分桶熔断 + **P3 lead-hold 表 / 开盘缺口 / 末分钟 projected TWAP**  
+- **B maker**：缺腿补齐、pair profit、残仓强平  
+- **C split_sell（推荐主路径）**：纸面 **mint→双边 ask→lean→merge/redeem**（对齐 spork30）  
+- **P2**：`report` / `heartbeat` / `stress`；dashboard A/B/C  
 
 ```bash
+python -m btc5m --mode split_sell
 python -m btc5m report
 python -m btc5m heartbeat
-python -m btc5m stress
 ```
 
 部署：`PEM=... HOST=ec2-user@18.179.50.168 bash scripts/deploy_polydex.sh`

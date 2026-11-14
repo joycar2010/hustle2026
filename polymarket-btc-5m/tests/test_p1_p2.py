@@ -9,7 +9,7 @@ from btc5m.calibration import bucket_ban_reason, load_bucket_stats, required_wr_
 from btc5m.heartbeat import read_heartbeat, status_report, write_heartbeat
 from btc5m.maker import MakerEngine, settle_maker_pnl
 from btc5m.stress import stress_late_edge_db
-from btc5m.config import Config
+from conftest import make_cfg
 
 
 def test_required_wr_rises_with_price():
@@ -124,65 +124,10 @@ def test_maker_pair_profit_min_tightens_cap():
     assert r["gross_pnl_usd"] > 0
 
 
-def _cfg(tmp_path: Path, **overrides) -> Config:
-    base = dict(
-        private_key="",
-        funder_address="",
-        signature_type=3,
-        chain_id=137,
-        api_key="",
-        api_secret="",
-        api_passphrase="",
-        clob_host="https://clob.polymarket.com",
-        gamma_host="https://gamma-api.polymarket.com",
-        polygon_rpc="https://polygon-rpc.com",
-        series_slug="btc-up-or-down-5m",
-        entry_window_sec=60.0,
-        min_t_remaining_sec=12.0,
-        min_entry_price=0.75,
-        max_entry_price=0.88,
-        min_net_edge=0.08,
-        taker_fee_rate=0.07,
-        confirm_checks=3,
-        poll_interval_sec=1.0,
-        delta_filter_enabled=True,
-        up_min_delta_usd=25.0,
-        down_max_delta_usd=-25.0,
-        price_hosts="okx",
-        signal_require_consensus=True,
-        signal_min_venues=2,
-        order_shares=10.0,
-        max_order_usd=15.0,
-        daily_loss_limit_usd=40.0,
-        max_open_positions=1,
-        paper_bankroll_usd=200.0,
-        live_trading_enabled=False,
-        mode="maker",
-        late_edge_hard_ban_price=0.90,
-        late_edge_edge_safety=1.25,
-        bucket_calibration_enabled=True,
-        bucket_lookback_sec=7 * 86400.0,
-        bucket_min_samples=8,
-        bucket_wr_buffer=0.02,
-        maker_pair_cost_max=0.97,
-        maker_pair_profit_min=0.03,
-        maker_quote_shares=10.0,
-        maker_start_delay_sec=15.0,
-        maker_stop_before_end_sec=60.0,
-        maker_touch_fill_sec=12.0,
-        maker_max_imbalance_shares=10.0,
-        maker_allow_crossed_fills=False,
-        maker_flatten_residual=True,
-        heartbeat_stale_sec=120.0,
-        data_dir=tmp_path,
-    )
-    base.update(overrides)
-    return Config(**base)
-
-
 def test_maker_effective_pair_max_uses_profit_floor(tmp_path: Path):
-    eng = MakerEngine(_cfg(tmp_path))
-    # max(0.97, via profit 1-0.03=0.97) → 0.97; with profit_min=0.05 → 0.95
+    eng = MakerEngine(make_cfg(data_dir=tmp_path, maker_pair_profit_min=0.03))
     assert abs(eng._effective_pair_max() - 0.97) < 1e-9
-    eng2 = MakerEngine(_cfg(tmp_path, maker_pair_profit_min=0.05, maker_pair_cost_max=0.97))
+    eng2 = MakerEngine(
+        make_cfg(data_dir=tmp_path, maker_pair_profit_min=0.05, maker_pair_cost_max=0.97)
+    )
     assert abs(eng2._effective_pair_max() - 0.95) < 1e-9

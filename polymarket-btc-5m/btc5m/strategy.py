@@ -1,4 +1,4 @@
-"""Late-window fee-aware edge strategy for BTC 5m Up/Down."""
+"""Late-window + opening-gap fee-aware edge strategy for BTC 5m Up/Down."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -8,6 +8,7 @@ from typing import Optional
 from btc5m.book import TopOfBook
 from btc5m.calibration import bucket_ban_reason
 from btc5m.config import Config
+from btc5m.lead_table import edge_after_fee, hold_win_rate, is_cheap_vs_hold
 from btc5m.markets import LiveMarket
 from btc5m.signal import BtcSignal
 
@@ -22,6 +23,7 @@ class Decision:
     fee: Optional[float] = None
     net_edge: Optional[float] = None
     reason: str = ""
+    phase: str = ""  # late | opening_gap
 
 
 @dataclass
@@ -61,6 +63,16 @@ def net_edge(ask: float, fee_rate: float) -> float:
     return 1.0 - ask - taker_fee_per_share(fee_rate, ask)
 
 
+def _phase(cfg: Config, market: LiveMarket) -> Optional[str]:
+    t_left = market.t_remaining()
+    elapsed = market.t_elapsed()
+    if cfg.opening_gap_enabled and elapsed <= cfg.opening_gap_window_sec:
+        return "opening_gap"
+    if t_left <= cfg.entry_window_sec and t_left >= cfg.min_t_remaining_sec:
+        return "late"
+    return None
+
+
 def decide(
     cfg: Config,
     market: LiveMarket,
@@ -74,24 +86,51 @@ def decide(
 ) -> Decision:
     state.reset_for_market(market.condition_id)
     t_left = market.t_remaining()
+    elapsed = market.t_elapsed()
 
     if already_in_market or market.condition_id in (state.entered_markets or set()):
         return Decision(action="HOLD", reason="already entered this window")
 
-    if t_left > cfg.entry_window_sec:
+    phase = _phase(cfg, market)
+    if phase is None:
+        if t_left > cfg.entry_window_sec and not (
+            cfg.opening_gap_enabled and elapsed <= cfg.opening_gap_window_sec
+        ):
+            return Decision(
+                action="SKIP",
+                reason=(
+                    f"waiting for entry window t_left={t_left:.1f}s "
+                    f"elapsed={elapsed:.1f}s"
+                ),
+            )
         return Decision(
             action="SKIP",
-            reason=f"waiting for entry window t_left={t_left:.1f}s > {cfg.entry_window_sec:.0f}s",
-        )
-    if t_left < cfg.min_t_remaining_sec:
-        return Decision(
-            action="SKIP",
-            reason=f"too close to close t_left={t_left:.1f}s < {cfg.min_t_remaining_sec:.0f}s",
+            reason=f"outside trade phases t_left={t_left:.1f}s elapsed={elapsed:.1f}s",
         )
 
-    candidates: list[tuple[str, str, float, float, float]] = []
+    if signal is None and (cfg.delta_filter_enabled or cfg.lead_table_enabled):
+        return Decision(action="SKIP", reason="btc signal unavailable", phase=phase)
+
+    # Opening-gap: require minimum gap in bp
+    if phase == "opening_gap":
+        if signal is None or abs(signal.opening_gap_bp) < cfg.opening_gap_min_bp:
+            gap = signal.opening_gap_bp if signal else 0.0
+            return Decision(
+                action="SKIP",
+                phase=phase,
+                reason=(
+                    f"opening gap {gap:+.1f}bp < min {cfg.opening_gap_min_bp:.1f}bp"
+                ),
+            )
+
+    preferred = None
+    if signal:
+        preferred = signal.decision_side if signal.decision_side in {"UP", "DOWN"} else signal.signal_side
+
+    candidates: list[tuple[str, str, float, float, float, float]] = []
     banned_high = 0
     banned_cal = 0
+    rejected_hold = 0
     for side, token, book in (
         ("UP", market.up_token, up_book),
         ("DOWN", market.down_token, down_book),
@@ -101,11 +140,9 @@ def decide(
             continue
         if ask < cfg.min_entry_price or ask > cfg.max_entry_price:
             continue
-        # P0-A: empirically 0.90+ bucket had ~79% WR vs >=90% breakeven → ban
         if ask >= cfg.late_edge_hard_ban_price - 1e-12:
             banned_high += 1
             continue
-        # P1: rolling bucket WR circuit breaker (e.g. 0.95 needs ~96%+ WR)
         if cfg.bucket_calibration_enabled and db_path is not None:
             ban = bucket_ban_reason(
                 ask,
@@ -125,7 +162,29 @@ def decide(
             continue
         if residual > 0 and (ask + fee) > 1.0 - residual / max(cfg.late_edge_edge_safety, 1.0):
             continue
-        candidates.append((side, token, ask, fee, edge))
+
+        # P3: lead-hold table — ask must be cheap vs empirical WR
+        hold = signal.hold_wr if signal else 0.5
+        if cfg.lead_table_enabled and signal is not None:
+            # Recompute for this side's signed lead
+            signed = signal.projected_lead_bp if signal.in_final_minute else signal.lead_bp
+            if side == "DOWN":
+                signed = -signed
+            hold = hold_win_rate(elapsed_sec=elapsed, lead_bp=signed).hold_wr
+            if not is_cheap_vs_hold(
+                ask,
+                hold,
+                fee_rate=cfg.taker_fee_rate,
+                margin=cfg.lead_edge_margin,
+            ):
+                rejected_hold += 1
+                continue
+            # Score by probabilistic edge rather than residual-only
+            edge = edge_after_fee(
+                ask, hold, fee_rate=cfg.taker_fee_rate, margin=cfg.lead_edge_margin
+            )
+
+        candidates.append((side, token, ask, fee, edge, hold))
 
     if not candidates:
         extras = []
@@ -133,31 +192,33 @@ def decide(
             extras.append(f"banned_high>={cfg.late_edge_hard_ban_price:.2f}x{banned_high}")
         if banned_cal:
             extras.append(f"bucket_cal_ban x{banned_cal}")
+        if rejected_hold:
+            extras.append(f"hold_table_reject x{rejected_hold}")
         extra = (" " + " ".join(extras)) if extras else ""
         return Decision(
             action="SKIP",
+            phase=phase,
             reason=(
-                f"no edge candidate up_ask={up_book.best_ask} "
+                f"no edge candidate phase={phase} up_ask={up_book.best_ask} "
                 f"dn_ask={down_book.best_ask} t_left={t_left:.1f}s{extra}"
             ),
         )
 
-    # Prefer higher net edge; ties break toward BTC signal side.
     candidates.sort(key=lambda c: c[4], reverse=True)
-    if signal and signal.signal_side in {"UP", "DOWN"}:
-        aligned = [c for c in candidates if c[0] == signal.signal_side]
+    if preferred in {"UP", "DOWN"}:
+        aligned = [c for c in candidates if c[0] == preferred]
         if aligned:
-            candidates = aligned + [c for c in candidates if c[0] != signal.signal_side]
+            candidates = aligned + [c for c in candidates if c[0] != preferred]
 
-    side, token, ask, fee, edge = candidates[0]
+    side, token, ask, fee, edge, hold = candidates[0]
 
     if cfg.delta_filter_enabled:
-        if signal is None:
-            return Decision(action="SKIP", reason="btc signal unavailable")
+        assert signal is not None
         if signal.venue_count < cfg.signal_min_venues:
             return Decision(
                 action="SKIP",
                 side=side,
+                phase=phase,
                 reason=(
                     f"signal venues {signal.venue_count} < min {cfg.signal_min_venues}: "
                     f"{signal.describe()}"
@@ -167,18 +228,33 @@ def decide(
             return Decision(
                 action="SKIP",
                 side=side,
+                phase=phase,
                 reason=f"signal consensus failed: {signal.describe()}",
+            )
+        # Align with decision_side (projected in final minute)
+        want = signal.decision_side if signal.decision_side in {"UP", "DOWN"} else side
+        if want != side:
+            return Decision(
+                action="SKIP",
+                side=side,
+                phase=phase,
+                reason=f"side {side} != decision_side {want}: {signal.describe()}",
             )
         if not signal.allows(
             side,
             up_min=cfg.up_min_delta_usd,
             down_max=cfg.down_max_delta_usd,
         ):
-            return Decision(
-                action="SKIP",
-                side=side,
-                reason=f"delta filter blocked {side}: {signal.describe()}",
-            )
+            # Opening gap may use bp gate instead of USD delta
+            if phase == "opening_gap" and abs(signal.opening_gap_bp) >= cfg.opening_gap_min_bp:
+                pass
+            else:
+                return Decision(
+                    action="SKIP",
+                    side=side,
+                    phase=phase,
+                    reason=f"delta filter blocked {side}: {signal.describe()}",
+                )
 
     confirms = state.note(side, ask)
     if confirms < cfg.confirm_checks:
@@ -188,16 +264,24 @@ def decide(
             price=ask,
             fee=fee,
             net_edge=edge,
-            reason=f"confirm {confirms}/{cfg.confirm_checks} {side}@{ask:.2f} edge={edge:.4f}",
+            phase=phase,
+            reason=(
+                f"confirm {confirms}/{cfg.confirm_checks} {side}@{ask:.2f} "
+                f"edge={edge:.4f} hold={hold:.1%} phase={phase}"
+            ),
         )
 
     size = float(cfg.order_shares)
     notional = size * ask
     if notional > cfg.max_order_usd:
         size = max(cfg.max_order_usd / ask, market.min_size)
-        size = float(int(size))  # whole shares
+        size = float(int(size))
         if size < market.min_size:
-            return Decision(action="SKIP", reason="size below exchange minimum after USD cap")
+            return Decision(
+                action="SKIP",
+                phase=phase,
+                reason="size below exchange minimum after USD cap",
+            )
 
     return Decision(
         action="BUY",
@@ -207,9 +291,10 @@ def decide(
         size=size,
         fee=fee,
         net_edge=edge,
+        phase=phase,
         reason=(
             f"BUY {side}@{ask:.2f} size={size:.0f} edge={edge:.4f} "
-            f"fee={fee:.4f} t_left={t_left:.1f}s"
+            f"fee={fee:.4f} hold={hold:.1%} phase={phase} t_left={t_left:.1f}s"
             + (f" | {signal.describe()}" if signal else "")
         ),
     )

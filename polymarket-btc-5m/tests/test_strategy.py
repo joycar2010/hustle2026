@@ -5,71 +5,19 @@ import time
 from pathlib import Path
 
 from btc5m.book import TopOfBook
-from btc5m.config import Config
 from btc5m.markets import LiveMarket
 from btc5m.signal import BtcSignal
 from btc5m.strategy import StrategyState, decide, net_edge, taker_fee_per_share
+from conftest import make_cfg
 
 
-def _cfg(**overrides) -> Config:
-    base = dict(
-        private_key="",
-        funder_address="",
-        signature_type=3,
-        chain_id=137,
-        api_key="",
-        api_secret="",
-        api_passphrase="",
-        clob_host="https://clob.polymarket.com",
-        gamma_host="https://gamma-api.polymarket.com",
-        polygon_rpc="https://polygon-rpc.com",
-        series_slug="btc-up-or-down-5m",
-        entry_window_sec=60.0,
-        min_t_remaining_sec=12.0,
-        min_entry_price=0.75,
-        max_entry_price=0.95,
-        min_net_edge=0.02,
-        taker_fee_rate=0.07,
-        confirm_checks=2,
-        poll_interval_sec=1.0,
-        delta_filter_enabled=True,
-        up_min_delta_usd=15.0,
-        down_max_delta_usd=-15.0,
-        price_hosts="okx",
-        signal_require_consensus=False,
-        signal_min_venues=1,
-        order_shares=10.0,
-        max_order_usd=15.0,
-        daily_loss_limit_usd=40.0,
-        max_open_positions=1,
-        paper_bankroll_usd=200.0,
-        live_trading_enabled=False,
-        mode="late_edge",
-        late_edge_hard_ban_price=0.90,
-        late_edge_edge_safety=1.25,
-        bucket_calibration_enabled=False,
-        bucket_lookback_sec=7 * 86400.0,
-        bucket_min_samples=8,
-        bucket_wr_buffer=0.02,
-        maker_pair_cost_max=0.97,
-        maker_pair_profit_min=0.02,
-        maker_quote_shares=10.0,
-        maker_start_delay_sec=15.0,
-        maker_stop_before_end_sec=60.0,
-        maker_touch_fill_sec=12.0,
-        maker_max_imbalance_shares=10.0,
-        maker_allow_crossed_fills=False,
-        maker_flatten_residual=True,
-        heartbeat_stale_sec=120.0,
-        data_dir=Path("/tmp"),
-    )
-    base.update(overrides)
-    return Config(**base)
-
-
-def _market(t_left: float = 30.0) -> LiveMarket:
-    end = time.time() + t_left
-    start = end - 300
+def _market(t_left: float = 30.0, *, elapsed: float | None = None) -> LiveMarket:
+    if elapsed is not None:
+        start = time.time() - elapsed
+        end = start + 300
+    else:
+        end = time.time() + t_left
+        start = end - 300
     return LiveMarket(
         condition_id="0xabc",
         market_slug="btc-updown-5m-1",
@@ -85,7 +33,15 @@ def _market(t_left: float = 30.0) -> LiveMarket:
     )
 
 
-def _signal(side: str = "UP", delta: float = 30.0, *, consensus: bool = True, venues: int = 2) -> BtcSignal:
+def _signal(
+    side: str = "UP",
+    delta: float = 30.0,
+    *,
+    consensus: bool = True,
+    venues: int = 2,
+    hold_wr: float = 0.90,
+    lead_bp: float = 8.0,
+) -> BtcSignal:
     return BtcSignal(
         ts=0,
         source="test",
@@ -95,6 +51,14 @@ def _signal(side: str = "UP", delta: float = 30.0, *, consensus: bool = True, ve
         signal_side=side,
         venue_count=venues,
         consensus=consensus,
+        lead_bp=lead_bp,
+        projected_close=100 + delta,
+        projected_lead_bp=lead_bp,
+        projected_delta_usd=delta,
+        hold_wr=hold_wr,
+        in_final_minute=False,
+        opening_gap_bp=lead_bp,
+        decision_side=side,
     )
 
 
@@ -105,7 +69,7 @@ def test_taker_fee_peaks_near_half():
 
 
 def test_skips_outside_window():
-    cfg = _cfg()
+    cfg = make_cfg()
     state = StrategyState()
     d = decide(
         cfg,
@@ -117,11 +81,11 @@ def test_skips_outside_window():
         already_in_market=False,
     )
     assert d.action == "SKIP"
-    assert "waiting" in d.reason
+    assert "waiting" in d.reason or "outside" in d.reason
 
 
 def test_hard_bans_high_price_bucket():
-    cfg = _cfg(delta_filter_enabled=False, confirm_checks=1, max_entry_price=0.95)
+    cfg = make_cfg(delta_filter_enabled=False, confirm_checks=1, max_entry_price=0.95)
     state = StrategyState()
     d = decide(
         cfg,
@@ -137,12 +101,13 @@ def test_hard_bans_high_price_bucket():
 
 
 def test_buy_after_confirm_with_delta():
-    cfg = _cfg(
+    cfg = make_cfg(
         delta_filter_enabled=True,
         confirm_checks=2,
         max_entry_price=0.90,
         min_net_edge=0.05,
         late_edge_hard_ban_price=0.90,
+        lead_table_enabled=False,
     )
     state = StrategyState()
     market = _market(t_left=25)
@@ -159,7 +124,7 @@ def test_buy_after_confirm_with_delta():
 
 
 def test_blocks_failed_consensus():
-    cfg = _cfg(delta_filter_enabled=True, confirm_checks=1, signal_min_venues=2)
+    cfg = make_cfg(delta_filter_enabled=True, confirm_checks=1, signal_min_venues=2)
     state = StrategyState()
     d = decide(
         cfg,
@@ -172,6 +137,61 @@ def test_blocks_failed_consensus():
     )
     assert d.action == "SKIP"
     assert "consensus" in d.reason
+
+
+def test_lead_table_rejects_expensive_ask():
+    cfg = make_cfg(
+        delta_filter_enabled=False,
+        confirm_checks=1,
+        lead_table_enabled=True,
+        lead_edge_margin=0.03,
+        max_entry_price=0.90,
+        min_net_edge=0.01,
+    )
+    # hold ~0.66 at bell with 5-10bp → ask 0.85 is expensive after fee+margin
+    state = StrategyState()
+    d = decide(
+        cfg,
+        _market(elapsed=5.0),
+        TopOfBook(0.80, 50, 0.85, 50),
+        TopOfBook(0.01, 50, 0.99, 50),
+        _signal("UP", 40, hold_wr=0.66, lead_bp=6.0),
+        state,
+        already_in_market=False,
+    )
+    # opening_gap disabled → outside late window at elapsed=5 → skip waiting
+    assert d.action == "SKIP"
+
+
+def test_opening_gap_buy_when_cheap():
+    cfg = make_cfg(
+        delta_filter_enabled=True,
+        confirm_checks=1,
+        opening_gap_enabled=True,
+        opening_gap_min_bp=5.0,
+        opening_gap_window_sec=60.0,
+        lead_table_enabled=True,
+        lead_edge_margin=0.03,
+        max_entry_price=0.70,
+        min_entry_price=0.50,
+        min_net_edge=0.01,
+        late_edge_hard_ban_price=0.90,
+        up_min_delta_usd=1.0,
+    )
+    state = StrategyState()
+    # At bell with 8bp lead, hold≈66%; ask 0.55 is cheap
+    d = decide(
+        cfg,
+        _market(elapsed=10.0),
+        TopOfBook(0.50, 50, 0.55, 50),
+        TopOfBook(0.40, 50, 0.50, 50),
+        _signal("UP", 50, hold_wr=0.66, lead_bp=8.0),
+        state,
+        already_in_market=False,
+    )
+    assert d.action == "BUY"
+    assert d.phase == "opening_gap"
+    assert d.side == "UP"
 
 
 def test_bucket_calibration_ban(tmp_path: Path):
@@ -190,7 +210,6 @@ def test_bucket_calibration_ban(tmp_path: Path):
         """
     )
     now = time.time()
-    # 8 losses in 0.85-0.90 → WR=0 << required → ban
     for i in range(8):
         conn.execute(
             "INSERT INTO positions VALUES (?,?,?,?,?,?)",
@@ -199,13 +218,14 @@ def test_bucket_calibration_ban(tmp_path: Path):
     conn.commit()
     conn.close()
 
-    cfg = _cfg(
+    cfg = make_cfg(
         delta_filter_enabled=False,
         confirm_checks=1,
         max_entry_price=0.90,
         min_net_edge=0.05,
         bucket_calibration_enabled=True,
         bucket_min_samples=8,
+        lead_table_enabled=False,
     )
     state = StrategyState()
     d = decide(

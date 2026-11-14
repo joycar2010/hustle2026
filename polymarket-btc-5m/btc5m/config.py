@@ -59,6 +59,14 @@ class Config:
     signal_require_consensus: bool
     signal_min_venues: int
 
+    # P3 lead / TWAP
+    lead_table_enabled: bool
+    lead_edge_margin: float
+    lead_min_bp: float
+    opening_gap_enabled: bool
+    opening_gap_window_sec: float
+    opening_gap_min_bp: float
+
     order_shares: float
     max_order_usd: float
     daily_loss_limit_usd: float
@@ -66,10 +74,9 @@ class Config:
     paper_bankroll_usd: float
     live_trading_enabled: bool
 
-    # late_edge | maker
+    # late_edge | maker | split_sell
     mode: str
 
-    # Late-edge risk gates (P0-A / P1 calibration)
     late_edge_hard_ban_price: float
     late_edge_edge_safety: float
     bucket_calibration_enabled: bool
@@ -77,7 +84,6 @@ class Config:
     bucket_min_samples: int
     bucket_wr_buffer: float
 
-    # Maker bilateral MM (paper)
     maker_pair_cost_max: float
     maker_pair_profit_min: float
     maker_quote_shares: float
@@ -88,15 +94,23 @@ class Config:
     maker_allow_crossed_fills: bool
     maker_flatten_residual: bool
 
-    # P2 observability
-    heartbeat_stale_sec: float
+    # P4 split-sell
+    split_size: float
+    split_fair_edge: float
+    split_max_lean_shares: float
+    split_clip_shares: float
+    split_touch_fill_sec: float
+    split_stop_before_end_sec: float
+    split_merge_before_end_sec: float
+    split_rebate_bps: float
 
+    heartbeat_stale_sec: float
     data_dir: Path
 
 
 def load() -> Config:
     mode = os.getenv("MODE", "late_edge").strip().lower() or "late_edge"
-    if mode not in {"late_edge", "maker"}:
+    if mode not in {"late_edge", "maker", "split_sell"}:
         mode = "late_edge"
     return Config(
         private_key=os.getenv("PRIVATE_KEY", "").strip(),
@@ -110,7 +124,6 @@ def load() -> Config:
         gamma_host=os.getenv("GAMMA_HOST", "https://gamma-api.polymarket.com").rstrip("/"),
         polygon_rpc=os.getenv("POLYGON_RPC", "https://polygon-rpc.com").rstrip("/"),
         series_slug=os.getenv("SERIES_SLUG", "btc-up-or-down-5m"),
-        # P0-A defaults: lower price cap / higher edge / stronger confirm
         entry_window_sec=_float("ENTRY_WINDOW_SEC", 60.0),
         min_t_remaining_sec=_float("MIN_T_REMAINING_SEC", 15.0),
         min_entry_price=_float("MIN_ENTRY_PRICE", 0.75),
@@ -125,6 +138,12 @@ def load() -> Config:
         price_hosts=os.getenv("PRICE_HOSTS", "okx,coinbase,kraken"),
         signal_require_consensus=_bool("SIGNAL_REQUIRE_CONSENSUS", True),
         signal_min_venues=max(_int("SIGNAL_MIN_VENUES", 2), 1),
+        lead_table_enabled=_bool("LEAD_TABLE_ENABLED", True),
+        lead_edge_margin=_float("LEAD_EDGE_MARGIN", 0.03),
+        lead_min_bp=_float("LEAD_MIN_BP", 2.0),
+        opening_gap_enabled=_bool("OPENING_GAP_ENABLED", True),
+        opening_gap_window_sec=_float("OPENING_GAP_WINDOW_SEC", 60.0),
+        opening_gap_min_bp=_float("OPENING_GAP_MIN_BP", 5.0),
         order_shares=max(_float("ORDER_SHARES", 10.0), 5.0),
         max_order_usd=_float("MAX_ORDER_USD", 15.0),
         daily_loss_limit_usd=_float("DAILY_LOSS_LIMIT_USD", 40.0),
@@ -147,6 +166,14 @@ def load() -> Config:
         maker_max_imbalance_shares=_float("MAKER_MAX_IMBALANCE_SHARES", 10.0),
         maker_allow_crossed_fills=_bool("MAKER_ALLOW_CROSSED_FILLS", False),
         maker_flatten_residual=_bool("MAKER_FLATTEN_RESIDUAL", True),
+        split_size=max(_float("SPLIT_SIZE", 50.0), 5.0),
+        split_fair_edge=_float("SPLIT_FAIR_EDGE", 0.03),
+        split_max_lean_shares=_float("SPLIT_MAX_LEAN_SHARES", 3.0),
+        split_clip_shares=max(_float("SPLIT_CLIP_SHARES", 10.0), 5.0),
+        split_touch_fill_sec=_float("SPLIT_TOUCH_FILL_SEC", 8.0),
+        split_stop_before_end_sec=_float("SPLIT_STOP_BEFORE_END_SEC", 45.0),
+        split_merge_before_end_sec=_float("SPLIT_MERGE_BEFORE_END_SEC", 15.0),
+        split_rebate_bps=_float("SPLIT_REBATE_BPS", 42.0),
         heartbeat_stale_sec=_float("HEARTBEAT_STALE_SEC", 120.0),
         data_dir=ROOT / "data",
     )

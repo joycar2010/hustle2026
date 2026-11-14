@@ -1,4 +1,4 @@
-"""CLI entry: python -m btc5m [--mode late_edge|maker] [--live] [--once] [report|heartbeat|stress] [-v]."""
+"""CLI entry: python -m btc5m [--mode late_edge|maker|split_sell] ..."""
 from __future__ import annotations
 
 import argparse
@@ -22,9 +22,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--mode",
-        choices=["late_edge", "maker"],
+        choices=["late_edge", "maker", "split_sell"],
         default=None,
-        help="Strategy mode (overrides MODE env). maker is paper-only.",
+        help="Strategy mode (overrides MODE env). maker/split_sell are paper-only.",
     )
     parser.add_argument(
         "--live",
@@ -73,14 +73,18 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "report":
         from btc5m.audit import print_report
 
-        db = cfg.data_dir / (
-            "maker_paper.db" if mode == "maker" else ("live.db" if args.live else "paper.db")
-        )
+        if mode == "maker":
+            db = cfg.data_dir / "maker_paper.db"
+        elif mode == "split_sell":
+            db = cfg.data_dir / "split_sell_paper.db"
+        else:
+            db = cfg.data_dir / ("live.db" if args.live else "paper.db")
         print_report(db, day=args.day, fee_rate=cfg.taker_fee_rate)
-        other = cfg.data_dir / ("paper.db" if mode == "maker" else "maker_paper.db")
-        if other.exists() and other != db:
-            print()
-            print_report(other, day=args.day, fee_rate=cfg.taker_fee_rate)
+        for other_name in ("paper.db", "maker_paper.db", "split_sell_paper.db"):
+            other = cfg.data_dir / other_name
+            if other.exists() and other != db:
+                print()
+                print_report(other, day=args.day, fee_rate=cfg.taker_fee_rate)
         return 0
 
     if args.command == "heartbeat":
@@ -120,14 +124,18 @@ def main(argv: list[str] | None = None) -> int:
     if mode == "maker":
         from btc5m.maker import MakerEngine
 
-        engine = MakerEngine(cfg, live=args.live)
-        engine.run(once=args.once)
+        MakerEngine(cfg, live=args.live).run(once=args.once)
+        return 0
+
+    if mode == "split_sell":
+        from btc5m.split_sell import SplitSellEngine
+
+        SplitSellEngine(cfg, live=args.live).run(once=args.once)
         return 0
 
     from btc5m.engine import Engine
 
-    engine = Engine(cfg, live=args.live)
-    engine.run(once=args.once)
+    Engine(cfg, live=args.live).run(once=args.once)
     return 0
 
 

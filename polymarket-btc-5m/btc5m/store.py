@@ -348,6 +348,35 @@ class Store:
             )
         self.conn.commit()
 
+    def session_sell_stats(self, session_id: int) -> dict[str, float]:
+        """Aggregate maker sell fills for a split_sell / maker session."""
+        rows = self.conn.execute(
+            """
+            SELECT side,
+                   COALESCE(SUM(size), 0) AS shares,
+                   COALESCE(SUM(notional_usd), 0) AS notional
+            FROM fills
+            WHERE session_id=? AND strategy IN ('split_sell', 'maker_mm')
+            GROUP BY side
+            """,
+            (session_id,),
+        ).fetchall()
+        out = {
+            "up_sold": 0.0,
+            "down_sold": 0.0,
+            "up_proceeds": 0.0,
+            "down_proceeds": 0.0,
+        }
+        for row in rows:
+            side = str(row["side"] or "").upper()
+            if side == "UP":
+                out["up_sold"] = float(row["shares"] or 0)
+                out["up_proceeds"] = float(row["notional"] or 0)
+            elif side == "DOWN":
+                out["down_sold"] = float(row["shares"] or 0)
+                out["down_proceeds"] = float(row["notional"] or 0)
+        return out
+
     def close_maker_session(
         self,
         session_id: int,

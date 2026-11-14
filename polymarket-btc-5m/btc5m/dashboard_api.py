@@ -1,7 +1,8 @@
-"""Read-only Paper dashboard API with correct A/B ledger separation.
+"""Read-only Paper dashboard API with A/B/C ledger separation.
 
 A = late_edge paper.db
 B = maker maker_paper.db
+C = split_sell split_sell_paper.db
 """
 from __future__ import annotations
 
@@ -39,8 +40,11 @@ if WEB_DIR.exists():
 
 def _db_path(group: str) -> Path:
     cfg = load()
-    if group.upper() == "B":
+    g = group.upper()
+    if g == "B":
         return cfg.data_dir / "maker_paper.db"
+    if g == "C":
+        return cfg.data_dir / "split_sell_paper.db"
     return cfg.data_dir / "paper.db"
 
 
@@ -62,8 +66,9 @@ def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
 def _summarize_group(group: str) -> dict[str, Any]:
     path = _db_path(group)
     meta = {
-        "A": {"label": "A · late_edge", "version": "p1-p2", "mode": "late_edge"},
-        "B": {"label": "B · maker", "version": "p1-p2", "mode": "maker"},
+        "A": {"label": "A · late_edge", "version": "p3-p4", "mode": "late_edge"},
+        "B": {"label": "B · maker", "version": "p3-p4", "mode": "maker"},
+        "C": {"label": "C · split_sell", "version": "p3-p4", "mode": "split_sell"},
     }[group.upper()]
     out: dict[str, Any] = {
         **meta,
@@ -83,7 +88,7 @@ def _summarize_group(group: str) -> dict[str, Any]:
     if conn is None:
         return out
     try:
-        if group.upper() == "B" and _table_exists(conn, "maker_sessions"):
+        if group.upper() in {"B", "C"} and _table_exists(conn, "maker_sessions"):
             row = conn.execute(
                 """
                 SELECT COUNT(*) AS n,
@@ -221,7 +226,11 @@ def maker_quality() -> dict[str, Any]:
 def ab() -> dict[str, Any]:
     return {
         "paper_only": True,
-        "groups": {"A": _summarize_group("A"), "B": _summarize_group("B")},
+        "groups": {
+            "A": _summarize_group("A"),
+            "B": _summarize_group("B"),
+            "C": _summarize_group("C"),
+        },
         "updated_at": time.time(),
     }
 
@@ -237,7 +246,7 @@ def positions(
     items: list[dict[str, Any]] = []
     if conn is not None:
         try:
-            if g == "B" and _table_exists(conn, "maker_sessions"):
+            if g in {"B", "C"} and _table_exists(conn, "maker_sessions"):
                 rows = conn.execute(
                     """
                     SELECT * FROM maker_sessions
@@ -319,9 +328,15 @@ def state() -> dict[str, Any]:
                     "price_to_beat": sig.price_to_beat,
                     "delta_usd": sig.delta_usd,
                     "side": sig.signal_side,
+                    "decision_side": sig.decision_side,
                     "source": sig.source,
                     "venue_count": sig.venue_count,
                     "consensus": sig.consensus,
+                    "lead_bp": sig.lead_bp,
+                    "projected_lead_bp": sig.projected_lead_bp,
+                    "hold_wr": sig.hold_wr,
+                    "in_final_minute": sig.in_final_minute,
+                    "opening_gap_bp": sig.opening_gap_bp,
                 }
             except Exception as exc:  # noqa: BLE001
                 errors.append(f"signal: {exc}")
@@ -363,11 +378,18 @@ def state() -> dict[str, Any]:
             "bucket_calibration_enabled": cfg.bucket_calibration_enabled,
             "signal_require_consensus": cfg.signal_require_consensus,
             "signal_min_venues": cfg.signal_min_venues,
+            "lead_table_enabled": cfg.lead_table_enabled,
+            "lead_edge_margin": cfg.lead_edge_margin,
+            "opening_gap_enabled": cfg.opening_gap_enabled,
             "maker_pair_cost_max": cfg.maker_pair_cost_max,
             "maker_pair_profit_min": cfg.maker_pair_profit_min,
             "maker_flatten_residual": cfg.maker_flatten_residual,
             "maker_allow_crossed_fills": cfg.maker_allow_crossed_fills,
+            "split_size": cfg.split_size,
+            "split_fair_edge": cfg.split_fair_edge,
+            "split_max_lean_shares": cfg.split_max_lean_shares,
             "heartbeat_stale_sec": cfg.heartbeat_stale_sec,
+            "ws_book": __import__("btc5m.ws_book", fromlist=["status"]).status(),
         },
         "heartbeat": status_report(cfg.data_dir, stale_sec=cfg.heartbeat_stale_sec),
         "errors": errors,
