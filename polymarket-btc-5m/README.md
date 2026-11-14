@@ -4,6 +4,16 @@
 
 默认 **纸面交易（paper）**，不会下真单。实盘需同时满足：`--live` + `.env` 中 `LIVE_TRADING_ENABLED=true`（仅 `late_edge`）。
 
+## P0 修复（v1.2）
+
+针对 poly.hustle2026.xyz A/B Paper 亏损：
+
+- **A late_edge**：`MAX_ENTRY_PRICE=0.88`，硬禁 `≥0.90`，`MIN_NET_EDGE=0.08`，确认×3，Δ±25  
+- **B maker**：只补缺腿、失衡≤10、关闭 crossed 成交、收盘前残仓按买一强平  
+- **Dashboard**：`python -m btc5m dashboard`，`/api/positions?group=A|B` 读独立账本  
+
+部署：`PEM=... HOST=ec2-user@18.179.50.168 bash scripts/deploy_polydex.sh`
+
 ## 两种模式
 
 ### 1) `maker`（推荐纸面主路径）— 双边做市

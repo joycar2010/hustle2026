@@ -16,8 +16,8 @@ def main(argv: list[str] | None = None) -> int:
         "command",
         nargs="?",
         default="run",
-        choices=["run", "report"],
-        help="run trading loop (default) or print fee-aware audit report",
+        choices=["run", "report", "dashboard"],
+        help="run trading loop (default), fee-aware report, or dashboard API",
     )
     parser.add_argument(
         "--mode",
@@ -69,6 +69,17 @@ def main(argv: list[str] | None = None) -> int:
         if other.exists() and other != db:
             print()
             print_report(other, day=args.day)
+        return 0
+
+    if args.command == "dashboard":
+        import uvicorn
+
+        uvicorn.run(
+            "btc5m.dashboard_api:app",
+            host="0.0.0.0",
+            port=int(__import__("os").getenv("DASHBOARD_PORT", "8088")),
+            reload=False,
+        )
         return 0
 
     if mode == "maker":

@@ -52,3 +52,18 @@ def test_settle_skew_win():
     assert r["paired_shares"] == 10
     assert r["residual_side"] == "UP"
     assert r["residual_shares"] == 5
+
+
+def test_settle_includes_flatten_pnl():
+    r = settle_maker_pnl(
+        up_shares=10,
+        down_shares=10,
+        up_cost=4.7,
+        down_cost=5.0,
+        up_fee=0.0,
+        down_fee=0.0,
+        winner="UP",
+        flatten_pnl_usd=-1.5,
+    )
+    assert abs(r["gross_pnl_usd"] - (0.30 - 1.5)) < 1e-9
+    assert abs(r["flatten_pnl_usd"] + 1.5) < 1e-9

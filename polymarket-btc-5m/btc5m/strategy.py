@@ -87,6 +87,7 @@ def decide(
         )
 
     candidates: list[tuple[str, str, float, float, float]] = []
+    banned_high = 0
     for side, token, book in (
         ("UP", market.up_token, up_book),
         ("DOWN", market.down_token, down_book),
@@ -96,18 +97,32 @@ def decide(
             continue
         if ask < cfg.min_entry_price or ask > cfg.max_entry_price:
             continue
+        # P0-A: empirically 0.90+ bucket had ~79% WR vs >=90% breakeven → ban
+        if ask >= cfg.late_edge_hard_ban_price - 1e-12:
+            banned_high += 1
+            continue
         fee = taker_fee_per_share(cfg.taker_fee_rate, ask)
         edge = 1.0 - ask - fee
+        # Require edge to clear residual payout by safety multiple after fees
+        residual = max(1.0 - ask, 0.0)
+        need = max(cfg.min_net_edge, residual * max(cfg.late_edge_edge_safety - 1.0, 0.0))
+        # residual * (safety-1) is extra buffer beyond "just win"; also keep absolute floor
+        # Practical: need edge >= min_net_edge AND edge/(1-ask) implies WR cushion
         if edge < cfg.min_net_edge:
             continue
+        if residual > 0 and (ask + fee) > 1.0 - residual / max(cfg.late_edge_edge_safety, 1.0):
+            # equivalent: entry too expensive vs safety-adjusted fair
+            continue
+        _ = need  # retained for readability / future tuning hooks
         candidates.append((side, token, ask, fee, edge))
 
     if not candidates:
+        extra = f" banned_high>={cfg.late_edge_hard_ban_price:.2f}x{banned_high}" if banned_high else ""
         return Decision(
             action="SKIP",
             reason=(
                 f"no edge candidate up_ask={up_book.best_ask} "
-                f"dn_ask={down_book.best_ask} t_left={t_left:.1f}s"
+                f"dn_ask={down_book.best_ask} t_left={t_left:.1f}s{extra}"
             ),
         )
 

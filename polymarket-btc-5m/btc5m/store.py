@@ -89,6 +89,10 @@ _POSITION_COLS = {
     "strategy": "TEXT DEFAULT 'late_edge'",
 }
 
+_MAKER_COLS = {
+    "flatten_pnl_usd": "REAL DEFAULT 0",
+}
+
 
 class Store:
     def __init__(self, path: Path) -> None:
@@ -108,6 +112,13 @@ class Store:
         for col, decl in _POSITION_COLS.items():
             if col not in existing:
                 self.conn.execute(f"ALTER TABLE positions ADD COLUMN {col} {decl}")
+        maker_existing = {
+            row[1]
+            for row in self.conn.execute("PRAGMA table_info(maker_sessions)").fetchall()
+        }
+        for col, decl in _MAKER_COLS.items():
+            if col not in maker_existing:
+                self.conn.execute(f"ALTER TABLE maker_sessions ADD COLUMN {col} {decl}")
 
     def log(self, kind: str, payload: dict[str, Any], market_slug: str = "") -> None:
         self.conn.execute(
@@ -296,24 +307,45 @@ class Store:
         down_cost_usd: float,
         up_fee_usd: float = 0.0,
         down_fee_usd: float = 0.0,
+        flatten_pnl_usd: Optional[float] = None,
     ) -> None:
-        self.conn.execute(
-            """
-            UPDATE maker_sessions
-            SET up_shares=?, down_shares=?, up_cost_usd=?, down_cost_usd=?,
-                up_fee_usd=?, down_fee_usd=?
-            WHERE id=?
-            """,
-            (
-                up_shares,
-                down_shares,
-                up_cost_usd,
-                down_cost_usd,
-                up_fee_usd,
-                down_fee_usd,
-                session_id,
-            ),
-        )
+        if flatten_pnl_usd is None:
+            self.conn.execute(
+                """
+                UPDATE maker_sessions
+                SET up_shares=?, down_shares=?, up_cost_usd=?, down_cost_usd=?,
+                    up_fee_usd=?, down_fee_usd=?
+                WHERE id=?
+                """,
+                (
+                    up_shares,
+                    down_shares,
+                    up_cost_usd,
+                    down_cost_usd,
+                    up_fee_usd,
+                    down_fee_usd,
+                    session_id,
+                ),
+            )
+        else:
+            self.conn.execute(
+                """
+                UPDATE maker_sessions
+                SET up_shares=?, down_shares=?, up_cost_usd=?, down_cost_usd=?,
+                    up_fee_usd=?, down_fee_usd=?, flatten_pnl_usd=?
+                WHERE id=?
+                """,
+                (
+                    up_shares,
+                    down_shares,
+                    up_cost_usd,
+                    down_cost_usd,
+                    up_fee_usd,
+                    down_fee_usd,
+                    float(flatten_pnl_usd),
+                    session_id,
+                ),
+            )
         self.conn.commit()
 
     def close_maker_session(

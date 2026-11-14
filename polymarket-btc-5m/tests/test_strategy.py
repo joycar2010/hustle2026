@@ -39,12 +39,16 @@ def _cfg(**overrides) -> Config:
         paper_bankroll_usd=200.0,
         live_trading_enabled=False,
         mode="late_edge",
-        maker_pair_cost_max=0.98,
+        late_edge_hard_ban_price=0.90,
+        late_edge_edge_safety=1.25,
+        maker_pair_cost_max=0.97,
         maker_quote_shares=10.0,
         maker_start_delay_sec=15.0,
-        maker_stop_before_end_sec=45.0,
-        maker_touch_fill_sec=8.0,
-        maker_max_imbalance_shares=20.0,
+        maker_stop_before_end_sec=60.0,
+        maker_touch_fill_sec=12.0,
+        maker_max_imbalance_shares=10.0,
+        maker_allow_crossed_fills=False,
+        maker_flatten_residual=True,
         data_dir=__import__("pathlib").Path("/tmp"),
     )
     base.update(overrides)
@@ -93,11 +97,33 @@ def test_skips_outside_window():
     assert "waiting" in d.reason
 
 
+def test_hard_bans_high_price_bucket():
+    cfg = _cfg(delta_filter_enabled=False, confirm_checks=1, max_entry_price=0.95)
+    state = StrategyState()
+    d = decide(
+        cfg,
+        _market(t_left=25),
+        TopOfBook(0.90, 50, 0.95, 50),
+        TopOfBook(0.01, 50, 0.99, 50),
+        None,
+        state,
+        already_in_market=False,
+    )
+    assert d.action == "SKIP"
+    assert "banned_high" in d.reason
+
+
 def test_buy_after_confirm_with_delta():
-    cfg = _cfg(delta_filter_enabled=True, confirm_checks=2)
+    cfg = _cfg(
+        delta_filter_enabled=True,
+        confirm_checks=2,
+        max_entry_price=0.90,
+        min_net_edge=0.05,
+        late_edge_hard_ban_price=0.90,
+    )
     state = StrategyState()
     market = _market(t_left=25)
-    up = TopOfBook(0.80, 50, 0.88, 50)
+    up = TopOfBook(0.80, 50, 0.85, 50)
     down = TopOfBook(0.01, 50, 0.99, 50)
     signal = BtcSignal(
         ts=0,
@@ -113,4 +139,4 @@ def test_buy_after_confirm_with_delta():
     d2 = decide(cfg, market, up, down, signal, state, already_in_market=False)
     assert d2.action == "BUY"
     assert d2.side == "UP"
-    assert d2.price == 0.88
+    assert d2.price == 0.85

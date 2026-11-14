@@ -67,6 +67,10 @@ class Config:
     # late_edge | maker
     mode: str
 
+    # Late-edge risk gates (P0-A)
+    late_edge_hard_ban_price: float
+    late_edge_edge_safety: float
+
     # Maker bilateral MM (paper)
     maker_pair_cost_max: float
     maker_quote_shares: float
@@ -74,6 +78,8 @@ class Config:
     maker_stop_before_end_sec: float
     maker_touch_fill_sec: float
     maker_max_imbalance_shares: float
+    maker_allow_crossed_fills: bool
+    maker_flatten_residual: bool
 
     data_dir: Path
 
@@ -94,17 +100,18 @@ def load() -> Config:
         gamma_host=os.getenv("GAMMA_HOST", "https://gamma-api.polymarket.com").rstrip("/"),
         polygon_rpc=os.getenv("POLYGON_RPC", "https://polygon-rpc.com").rstrip("/"),
         series_slug=os.getenv("SERIES_SLUG", "btc-up-or-down-5m"),
+        # P0-A defaults: lower price cap / higher edge / stronger confirm
         entry_window_sec=_float("ENTRY_WINDOW_SEC", 60.0),
-        min_t_remaining_sec=_float("MIN_T_REMAINING_SEC", 12.0),
+        min_t_remaining_sec=_float("MIN_T_REMAINING_SEC", 15.0),
         min_entry_price=_float("MIN_ENTRY_PRICE", 0.75),
-        max_entry_price=_float("MAX_ENTRY_PRICE", 0.95),
-        min_net_edge=_float("MIN_NET_EDGE", 0.02),
+        max_entry_price=_float("MAX_ENTRY_PRICE", 0.88),
+        min_net_edge=_float("MIN_NET_EDGE", 0.08),
         taker_fee_rate=_float("TAKER_FEE_RATE", 0.07),
-        confirm_checks=max(_int("CONFIRM_CHECKS", 2), 1),
+        confirm_checks=max(_int("CONFIRM_CHECKS", 3), 1),
         poll_interval_sec=max(_float("POLL_INTERVAL_SEC", 1.0), 0.2),
         delta_filter_enabled=_bool("DELTA_FILTER_ENABLED", True),
-        up_min_delta_usd=_float("UP_MIN_DELTA_USD", 15.0),
-        down_max_delta_usd=_float("DOWN_MAX_DELTA_USD", -15.0),
+        up_min_delta_usd=_float("UP_MIN_DELTA_USD", 25.0),
+        down_max_delta_usd=_float("DOWN_MAX_DELTA_USD", -25.0),
         price_hosts=os.getenv("PRICE_HOSTS", "okx,coinbase,kraken"),
         order_shares=max(_float("ORDER_SHARES", 10.0), 5.0),
         max_order_usd=_float("MAX_ORDER_USD", 15.0),
@@ -113,11 +120,17 @@ def load() -> Config:
         paper_bankroll_usd=_float("PAPER_BANKROLL_USD", 200.0),
         live_trading_enabled=_bool("LIVE_TRADING_ENABLED", False),
         mode=mode,
-        maker_pair_cost_max=_float("MAKER_PAIR_COST_MAX", 0.98),
+        # hard ban bucket that empirically destroyed A expectancy
+        late_edge_hard_ban_price=_float("LATE_EDGE_HARD_BAN_PRICE", 0.90),
+        late_edge_edge_safety=_float("LATE_EDGE_EDGE_SAFETY", 1.25),
+        maker_pair_cost_max=_float("MAKER_PAIR_COST_MAX", 0.97),
         maker_quote_shares=max(_float("MAKER_QUOTE_SHARES", 10.0), 5.0),
         maker_start_delay_sec=_float("MAKER_START_DELAY_SEC", 15.0),
-        maker_stop_before_end_sec=_float("MAKER_STOP_BEFORE_END_SEC", 45.0),
-        maker_touch_fill_sec=_float("MAKER_TOUCH_FILL_SEC", 8.0),
-        maker_max_imbalance_shares=_float("MAKER_MAX_IMBALANCE_SHARES", 20.0),
+        maker_stop_before_end_sec=_float("MAKER_STOP_BEFORE_END_SEC", 60.0),
+        maker_touch_fill_sec=_float("MAKER_TOUCH_FILL_SEC", 12.0),
+        # one clip max imbalance; complete the other leg only
+        maker_max_imbalance_shares=_float("MAKER_MAX_IMBALANCE_SHARES", 10.0),
+        maker_allow_crossed_fills=_bool("MAKER_ALLOW_CROSSED_FILLS", False),
+        maker_flatten_residual=_bool("MAKER_FLATTEN_RESIDUAL", True),
         data_dir=ROOT / "data",
     )

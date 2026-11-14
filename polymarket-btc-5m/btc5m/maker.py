@@ -47,8 +47,10 @@ class MakerState:
     down_cost: float = 0.0
     up_fee: float = 0.0
     down_fee: float = 0.0
+    flatten_pnl_usd: float = 0.0
     quotes: dict[str, Quote] = field(default_factory=dict)
     quoting: bool = True
+    flattened: bool = False
 
 
 def _round_tick(price: float, tick: float) -> float:
@@ -72,18 +74,18 @@ def settle_maker_pnl(
     down_fee: float,
     winner: str,
     rebate_est: float = 0.0,
+    flatten_pnl_usd: float = 0.0,
 ) -> dict:
-    """Resolution PnL for bilateral inventory."""
+    """Resolution PnL for bilateral inventory (+ any early residual flatten)."""
     total_cost = up_cost + down_cost
     fees = up_fee + down_fee
     payout = (up_shares if winner == "UP" else 0.0) + (
         down_shares if winner == "DOWN" else 0.0
     )
     # payout is $1 per winning share
-    gross = payout - total_cost
+    gross = payout - total_cost + float(flatten_pnl_usd)
     paired = min(up_shares, down_shares)
     if paired > 0:
-        # volume-weighted pair cost approximation
         up_avg = _avg(up_cost, up_shares)
         down_avg = _avg(down_cost, down_shares)
         pair_cost = up_avg + down_avg
@@ -107,6 +109,7 @@ def settle_maker_pnl(
         "net_pnl_usd": net,
         "payout": payout,
         "total_cost": total_cost,
+        "flatten_pnl_usd": float(flatten_pnl_usd),
     }
 
 
@@ -160,48 +163,41 @@ class MakerEngine:
         if down.best_ask is not None:
             down_q = min(down_q, down.best_ask - tick)
 
-        # Inventory skew: bid less on the heavy side
         up_sh, dn_sh = state.up_shares, state.down_shares
-        if up_sh > dn_sh + self.cfg.maker_max_imbalance_shares:
-            up_q -= tick
-        elif dn_sh > up_sh + self.cfg.maker_max_imbalance_shares:
-            down_q -= tick
-
         up_q = _round_tick(max(tick, up_q), tick)
         down_q = _round_tick(max(tick, down_q), tick)
 
         # Enforce projected pair cost including existing averages
         up_avg = _avg(state.up_cost, state.up_shares) if state.up_shares else up_q
         dn_avg = _avg(state.down_cost, state.down_shares) if state.down_shares else down_q
-        # If already long one side, the other bid must keep completable pair under cap
-        if state.up_shares > 0 and state.down_shares == 0:
-            down_q = min(down_q, _round_tick(max_pair - up_avg, tick))
-        elif state.down_shares > 0 and state.up_shares == 0:
-            up_q = min(up_q, _round_tick(max_pair - dn_avg, tick))
-        elif state.up_shares > 0 and state.down_shares > 0:
-            # still keep new marginal pair under cap
-            if up_q + down_q > max_pair:
-                scale = max_pair / (up_q + down_q)
-                up_q = _round_tick(up_q * scale, tick)
-                down_q = _round_tick(max_pair - up_q, tick)
-        else:
-            if up_q + down_q > max_pair:
-                # center under cap
-                half = _round_tick(max_pair / 2.0, tick)
-                up_q = min(up_q, half)
-                down_q = min(down_q, _round_tick(max_pair - up_q, tick))
 
-        # Hard floors
+        # P0-B: once one side fills, ONLY quote the missing leg (complete the pair)
+        if up_sh > dn_sh:
+            # need DOWN only; cap so pair stays under max
+            down_q = min(down_q, _round_tick(max_pair - up_avg, tick))
+            if down_q < tick:
+                return None, None
+            if up_sh - dn_sh >= self.cfg.maker_max_imbalance_shares:
+                return None, down_q
+            return None, down_q
+        if dn_sh > up_sh:
+            up_q = min(up_q, _round_tick(max_pair - dn_avg, tick))
+            if up_q < tick:
+                return None, None
+            if dn_sh - up_sh >= self.cfg.maker_max_imbalance_shares:
+                return up_q, None
+            return up_q, None
+
+        # Flat inventory: quote both under pair cap
+        if up_q + down_q > max_pair:
+            half = _round_tick(max_pair / 2.0, tick)
+            up_q = min(up_q, half)
+            down_q = min(down_q, _round_tick(max_pair - up_q, tick))
+
         if up_q < tick or down_q < tick:
             return None, None
         if up_q + down_q > max_pair + 1e-9:
             return None, None
-
-        # Stop adding to overloaded side
-        if up_sh - dn_sh >= self.cfg.maker_max_imbalance_shares:
-            return None, down_q
-        if dn_sh - up_sh >= self.cfg.maker_max_imbalance_shares:
-            return up_q, None
         return up_q, down_q
 
     def _fill_side(
@@ -217,11 +213,17 @@ class MakerEngine:
 
         filled = False
         reason = ""
-        if book.best_ask is not None and book.best_ask <= q.price + 1e-12:
+        # Crossed fills are optional — they behaved like aggressive taker in paper
+        # and piled one-sided inventory during trends.
+        if (
+            self.cfg.maker_allow_crossed_fills
+            and book.best_ask is not None
+            and book.best_ask <= q.price + 1e-12
+        ):
             filled = True
             reason = f"crossed ask={book.best_ask:.2f}<=bid={q.price:.2f}"
         else:
-            at_touch = book.best_bid is not None and book.best_bid <= q.price + 1e-12
+            at_touch = book.best_bid is not None and abs(book.best_bid - q.price) <= 1e-12
             if at_touch:
                 if q.at_touch_since is None:
                     q.at_touch_since = now
@@ -237,10 +239,25 @@ class MakerEngine:
         if not filled:
             return False
 
+        # Refuse fills that would exceed imbalance before the other leg completes
+        tentative_up = state.up_shares + (q.size if side == "UP" else 0.0)
+        tentative_dn = state.down_shares + (q.size if side == "DOWN" else 0.0)
+        if abs(tentative_up - tentative_dn) > self.cfg.maker_max_imbalance_shares + 1e-9:
+            state.quotes.pop(side, None)
+            log.info(
+                "MAKER SKIP FILL %s %s — imbalance cap %.0f (would be %.0f/%.0f)",
+                state.market.market_slug,
+                side,
+                self.cfg.maker_max_imbalance_shares,
+                tentative_up,
+                tentative_dn,
+            )
+            return False
+
         size = q.size
         price = q.price
         notional = size * price
-        # Maker fee = 0 in paper; optional tiny adverse slip none
+        # Maker fee = 0 in paper
         if side == "UP":
             state.up_shares += size
             state.up_cost += notional
@@ -375,6 +392,85 @@ class MakerEngine:
         )
         return self._state
 
+    def _flatten_residual(
+        self, state: MakerState, up: TopOfBook, down: TopOfBook
+    ) -> None:
+        """Paper-sell unpaired inventory at best bid before resolution gamble."""
+        if state.flattened:
+            return
+        residual = abs(state.up_shares - state.down_shares)
+        if residual <= 1e-9:
+            state.flattened = True
+            return
+        if state.up_shares > state.down_shares:
+            side, book, avg = "UP", up, _avg(state.up_cost, state.up_shares)
+        else:
+            side, book, avg = "DOWN", down, _avg(state.down_cost, state.down_shares)
+        px = book.best_bid
+        if px is None or px <= 0:
+            log.warning(
+                "MAKER FLATTEN skip %s — no bid for residual %.0f",
+                state.market.market_slug,
+                residual,
+            )
+            return
+        pnl = residual * (px - avg)
+        if side == "UP":
+            state.up_shares -= residual
+            state.up_cost = max(state.up_cost - residual * avg, 0.0)
+        else:
+            state.down_shares -= residual
+            state.down_cost = max(state.down_cost - residual * avg, 0.0)
+        state.flatten_pnl_usd += pnl
+        state.flattened = True
+        self.store.update_maker_inventory(
+            state.session_id,
+            up_shares=state.up_shares,
+            down_shares=state.down_shares,
+            up_cost_usd=state.up_cost,
+            down_cost_usd=state.down_cost,
+            up_fee_usd=state.up_fee,
+            down_fee_usd=state.down_fee,
+            flatten_pnl_usd=state.flatten_pnl_usd,
+        )
+        self.store.record_fill(
+            market_slug=state.market.market_slug,
+            condition_id=state.market.condition_id,
+            side=side,
+            token_id=state.market.up_token if side == "UP" else state.market.down_token,
+            size=residual,
+            price=px,
+            fee_usd=0.0,
+            liquidity="maker",
+            strategy="maker_mm",
+            dry_run=True,
+            session_id=state.session_id,
+            note=f"flatten_residual bid={px:.2f} avg={avg:.2f} pnl={pnl:+.2f}",
+        )
+        self.store.log(
+            "maker_flatten",
+            {
+                "session_id": state.session_id,
+                "side": side,
+                "size": residual,
+                "price": px,
+                "avg": avg,
+                "pnl": pnl,
+            },
+            state.market.market_slug,
+        )
+        log.info(
+            "MAKER FLATTEN %s %s x%.0f @%.2f (avg=%.2f) pnl=%+.2f | inv %.0f/%.0f",
+            state.market.market_slug,
+            side,
+            residual,
+            px,
+            avg,
+            pnl,
+            state.up_shares,
+            state.down_shares,
+        )
+
     def _resolve_session(self, state: MakerState, winner: str) -> None:
         # No maker rebate attribution without window fee pool; keep 0 or tiny stub
         rebate = maker_rebate_estimate(0.0)
@@ -387,6 +483,7 @@ class MakerEngine:
             down_fee=state.down_fee,
             winner=winner,
             rebate_est=rebate,
+            flatten_pnl_usd=state.flatten_pnl_usd,
         )
         self.store.close_maker_session(
             state.session_id,
@@ -444,6 +541,11 @@ class MakerEngine:
                     continue
             if winner is None:
                 continue
+            flatten = 0.0
+            try:
+                flatten = float(row["flatten_pnl_usd"] or 0)
+            except (KeyError, IndexError, TypeError):
+                flatten = 0.0
             state = MakerState(
                 session_id=int(row["id"]),
                 market=market,
@@ -453,7 +555,9 @@ class MakerEngine:
                 down_cost=float(row["down_cost_usd"] or 0),
                 up_fee=float(row["up_fee_usd"] or 0),
                 down_fee=float(row["down_fee_usd"] or 0),
+                flatten_pnl_usd=flatten,
                 quoting=False,
+                flattened=True,
             )
             self._resolve_session(state, winner)
 
@@ -490,19 +594,22 @@ class MakerEngine:
                 elapsed,
             )
             return
+        up = fetch_book(self.cfg.clob_host, market.up_token)
+        down = fetch_book(self.cfg.clob_host, market.down_token)
+
         if t_left <= self.cfg.maker_stop_before_end_sec:
             if state.quoting:
                 log.info(
-                    "maker stop quoting t_left=%.1f <= %.0f; hold to resolution",
+                    "maker stop quoting t_left=%.1f <= %.0f",
                     t_left,
                     self.cfg.maker_stop_before_end_sec,
                 )
             state.quoting = False
             state.quotes.clear()
+            # P0-B: flatten unpaired residual instead of gambling to resolution
+            if self.cfg.maker_flatten_residual:
+                self._flatten_residual(state, up, down)
             return
-
-        up = fetch_book(self.cfg.clob_host, market.up_token)
-        down = fetch_book(self.cfg.clob_host, market.down_token)
 
         # Detect fills on resting quotes first
         self._fill_side(state, "UP", up, now)
