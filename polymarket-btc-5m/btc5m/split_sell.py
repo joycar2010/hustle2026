@@ -61,6 +61,9 @@ class SplitState:
     quotes: dict[str, AskQuote] = field(default_factory=dict)
     quoting: bool = True
     closed: bool = False
+    # P5a: lean clamp persistence → abort / merge
+    lean_breach_since: Optional[float] = None
+    lean_aborted: bool = False
 
 
 def _round_tick(price: float, tick: float) -> float:
@@ -113,11 +116,15 @@ class SplitSellEngine:
         self._last_slug: Optional[str] = None
         self._hydrate_risk()
         log.info(
-            "Split-sell paper | mint=%.0f edge=%.2f lean≤%.0f clip=%.0f",
+            "Split-sell paper | mint=%.0f edge=%.2f lean≤%.0f clip=%.0f "
+            "min_pair_ask=%.2f min_ask=%.2f lean_abort=%.0fs",
             cfg.split_size,
             cfg.split_fair_edge,
             cfg.split_max_lean_shares,
             cfg.split_clip_shares,
+            cfg.split_min_pair_ask,
+            cfg.split_min_ask_price,
+            cfg.split_lean_abort_sec,
         )
 
     def _hydrate_risk(self) -> None:
@@ -142,6 +149,7 @@ class SplitSellEngine:
             log.debug("fair value fallback: %s", exc)
 
         fair_dn = 1.0 - fair_up
+        min_ask = max(tick, float(self.cfg.split_min_ask_price))
         up_ask = _round_tick(fair_up + self.cfg.split_fair_edge, tick)
         dn_ask = _round_tick(fair_dn + self.cfg.split_fair_edge, tick)
         # Post-only: never cross the bid; join/raise to sit on ask side
@@ -153,6 +161,9 @@ class SplitSellEngine:
             up_ask = max(up_ask, up.best_ask)  # join touch ask (sell)
         if down.best_ask is not None:
             dn_ask = max(dn_ask, down.best_ask)
+        # P5a: refuse lottery-cheap asks
+        up_ask = max(up_ask, min_ask)
+        dn_ask = max(dn_ask, min_ask)
         up_ask = min(up_ask, 1.0 - tick)
         dn_ask = min(dn_ask, 1.0 - tick)
         return up_ask, dn_ask
@@ -163,7 +174,7 @@ class SplitSellEngine:
     def _target_asks(
         self, state: SplitState, up: TopOfBook, down: TopOfBook
     ) -> tuple[Optional[float], Optional[float]]:
-        if not state.quoting:
+        if not state.quoting or state.lean_aborted:
             return None, None
         if state.up_inv < self.cfg.split_clip_shares and state.down_inv < self.cfg.split_clip_shares:
             return None, None
@@ -178,7 +189,54 @@ class SplitSellEngine:
             up_px = None
         if state.down_inv < self.cfg.split_clip_shares:
             dn_px = None
+        # P5a: when quoting both legs, require pair ask ≥ floor (mint edge)
+        if up_px is not None and dn_px is not None:
+            if (up_px + dn_px) + 1e-12 < float(self.cfg.split_min_pair_ask):
+                return None, None
+        # One-sided catch-up asks still must clear min ask floor
+        min_ask = float(self.cfg.split_min_ask_price)
+        if up_px is not None and up_px + 1e-12 < min_ask:
+            up_px = None
+        if dn_px is not None and dn_px + 1e-12 < min_ask:
+            dn_px = None
         return up_px, dn_px
+
+    def _note_lean(self, state: SplitState, now: float) -> None:
+        lean = abs(self._lean(state))
+        if lean >= self.cfg.split_max_lean_shares - 1e-9:
+            if state.lean_breach_since is None:
+                state.lean_breach_since = now
+        else:
+            state.lean_breach_since = None
+
+    def _maybe_lean_abort(self, state: SplitState, now: float) -> bool:
+        """P5a: if lean clamp lasts too long, stop asks and merge remaining pairs."""
+        if state.lean_aborted or state.lean_breach_since is None:
+            return False
+        if (now - state.lean_breach_since) < self.cfg.split_lean_abort_sec:
+            return False
+        state.lean_aborted = True
+        state.quoting = False
+        state.quotes.clear()
+        self._merge_pairs(state)
+        self.store.log(
+            "split_lean_abort",
+            {
+                "session_id": state.session_id,
+                "lean": self._lean(state),
+                "breach_sec": now - state.lean_breach_since,
+                "merged": state.merged,
+            },
+            state.market.market_slug,
+        )
+        log.info(
+            "SPLIT LEAN ABORT #%s %s lean=%+.0f after %.0fs — merge remaining",
+            state.session_id,
+            state.market.market_slug,
+            self._lean(state),
+            now - state.lean_breach_since,
+        )
+        return True
 
     def _fill_ask(self, state: SplitState, side: str, book: TopOfBook, now: float) -> bool:
         q = state.quotes.get(side)
@@ -197,6 +255,18 @@ class SplitSellEngine:
         else:
             q.at_touch_since = None
         if not filled:
+            return False
+
+        # P5a: refuse fills below min ask floor
+        if q.price + 1e-12 < float(self.cfg.split_min_ask_price):
+            state.quotes.pop(side, None)
+            log.info(
+                "SPLIT SKIP FILL %s %s@%.2f — below min_ask %.2f",
+                state.market.market_slug,
+                side,
+                q.price,
+                self.cfg.split_min_ask_price,
+            )
             return False
 
         size = min(q.size, state.up_inv if side == "UP" else state.down_inv)
@@ -527,7 +597,11 @@ class SplitSellEngine:
                 self.cfg.data_dir,
                 mode="split_sell",
                 market_slug=market.market_slug,
-                detail=f"merged early t_left={t_left:.0f}s",
+                detail=(
+                    f"merged early t_left={t_left:.0f}s "
+                    f"sold={state.up_sold:.0f}/{state.down_sold:.0f} "
+                    f"merge={state.merged:.0f}"
+                ),
                 pnl_usd=self.risk.realized_pnl_usd,
                 open_positions=self.risk.open_positions,
             )
@@ -537,18 +611,42 @@ class SplitSellEngine:
             state.quoting = False
             state.quotes.clear()
 
-        self._fill_ask(state, "UP", up, now)
-        self._fill_ask(state, "DOWN", down, now)
-        if state.quoting:
+        if not state.lean_aborted:
+            self._fill_ask(state, "UP", up, now)
+            self._fill_ask(state, "DOWN", down, now)
+            self._note_lean(state, now)
+            if self._maybe_lean_abort(state, now):
+                write_heartbeat(
+                    self.cfg.data_dir,
+                    mode="split_sell",
+                    market_slug=market.market_slug,
+                    detail=(
+                        f"lean_abort lean={self._lean(state):+.0f} "
+                        f"merge={state.merged:.0f} inv={state.up_inv:.0f}/{state.down_inv:.0f}"
+                    ),
+                    pnl_usd=self.risk.realized_pnl_usd,
+                    open_positions=self.risk.open_positions,
+                )
+                return
+
+        if state.quoting and not state.lean_aborted:
             self._refresh_quotes(state, up, down, now)
 
+        lean = self._lean(state)
+        lean_age = (
+            (now - state.lean_breach_since)
+            if state.lean_breach_since is not None
+            else 0.0
+        )
         write_heartbeat(
             self.cfg.data_dir,
             mode="split_sell",
             market_slug=market.market_slug,
             detail=(
                 f"inv={state.up_inv:.0f}/{state.down_inv:.0f} "
-                f"sold={state.up_sold:.0f}/{state.down_sold:.0f} lean={self._lean(state):+.0f}"
+                f"sold={state.up_sold:.0f}/{state.down_sold:.0f} "
+                f"lean={lean:+.0f} lean_age={lean_age:.0f}s "
+                f"merge={state.merged:.0f}"
             ),
             pnl_usd=self.risk.realized_pnl_usd,
             open_positions=self.risk.open_positions,
@@ -556,14 +654,18 @@ class SplitSellEngine:
         uq = state.quotes.get("UP")
         dq = state.quotes.get("DOWN")
         log.info(
-            "SPLIT %s t_left=%.0fs asks up=%s dn=%s | inv %.0f/%.0f lean=%+.0f",
+            "SPLIT %s t_left=%.0fs asks up=%s dn=%s pair=%s | "
+            "inv %.0f/%.0f lean=%+.0f lean_age=%.0fs merge=%.0f",
             market.market_slug,
             t_left,
             f"{uq.price:.2f}" if uq else "-",
             f"{dq.price:.2f}" if dq else "-",
+            f"{(uq.price + dq.price):.2f}" if uq and dq else "-",
             state.up_inv,
             state.down_inv,
-            self._lean(state),
+            lean,
+            lean_age,
+            state.merged,
         )
 
     def run(self, *, once: bool = False) -> None:

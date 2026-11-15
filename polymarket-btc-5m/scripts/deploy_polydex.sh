@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Deploy P0 fix to PolyDex EC2 and restart A/B paper + dashboard.
+# Deploy to PolyDex EC2 and restart A/B/C paper + dashboard.
 # Usage:
 #   PEM=/path/to/HustleNew.pem HOST=ec2-user@18.179.50.168 bash scripts/deploy_polydex.sh
 set -euo pipefail
@@ -24,7 +24,7 @@ python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 .venv/bin/pip install -e .
 [[ -f .env ]] || cp .env.example .env
-# Upsert P0 keys
+# Upsert P0→P5 keys
 python3 - <<'PY'
 from pathlib import Path
 p = Path(".env")
@@ -36,12 +36,27 @@ updates = {
     "CONFIRM_CHECKS": "3",
     "UP_MIN_DELTA_USD": "25",
     "DOWN_MAX_DELTA_USD": "-25",
-    "MAKER_PAIR_COST_MAX": "0.97",
+    "MAKER_PAIR_COST_MAX": "0.96",
+    "MAKER_PAIR_PROFIT_MIN": "0.03",
     "MAKER_STOP_BEFORE_END_SEC": "60",
     "MAKER_TOUCH_FILL_SEC": "12",
     "MAKER_MAX_IMBALANCE_SHARES": "10",
     "MAKER_ALLOW_CROSSED_FILLS": "false",
     "MAKER_FLATTEN_RESIDUAL": "true",
+    "MAKER_MIN_BID_PRICE": "0.20",
+    "MAKER_PAIR_COMPLETE_SEC": "20",
+    "MAKER_ZERO_FILL_KILL_SEC": "90",
+    "MAKER_EARLY_FLATTEN": "true",
+    "SPLIT_SIZE": "50",
+    "SPLIT_FAIR_EDGE": "0.03",
+    "SPLIT_MAX_LEAN_SHARES": "3",
+    "SPLIT_CLIP_SHARES": "10",
+    "SPLIT_MIN_PAIR_ASK": "1.02",
+    "SPLIT_MIN_ASK_PRICE": "0.35",
+    "SPLIT_LEAN_ABORT_SEC": "25",
+    "SPLIT_STOP_BEFORE_END_SEC": "45",
+    "SPLIT_MERGE_BEFORE_END_SEC": "15",
+    "SPLIT_REBATE_BPS": "42",
 }
 lines = text.splitlines()
 keys = set()
@@ -90,6 +105,19 @@ RestartSec=3
 [Install]
 WantedBy=default.target
 UNIT
+cat > "$HOME/.config/systemd/user/btc5m-c.service" <<UNIT
+[Unit]
+Description=BTC5m Paper C split_sell
+After=network.target
+[Service]
+WorkingDirectory=$REMOTE_DIR
+Environment=MODE=split_sell
+ExecStart=$REMOTE_DIR/.venv/bin/python -m btc5m --mode split_sell
+Restart=always
+RestartSec=3
+[Install]
+WantedBy=default.target
+UNIT
 cat > "$HOME/.config/systemd/user/btc5m-dash.service" <<UNIT
 [Unit]
 Description=BTC5m Paper Dashboard API
@@ -105,9 +133,9 @@ WantedBy=default.target
 UNIT
 
 systemctl --user daemon-reload
-systemctl --user enable --now btc5m-a.service btc5m-b.service btc5m-dash.service
-systemctl --user restart btc5m-a.service btc5m-b.service btc5m-dash.service
-systemctl --user --no-pager --full status btc5m-a.service btc5m-b.service btc5m-dash.service | sed -n '1,120p'
+systemctl --user enable --now btc5m-a.service btc5m-b.service btc5m-c.service btc5m-dash.service
+systemctl --user restart btc5m-a.service btc5m-b.service btc5m-c.service btc5m-dash.service
+systemctl --user --no-pager --full status btc5m-a.service btc5m-b.service btc5m-c.service btc5m-dash.service | sed -n '1,160p'
 EOF
 
 echo "Deployed to $HOST:$REMOTE_DIR"

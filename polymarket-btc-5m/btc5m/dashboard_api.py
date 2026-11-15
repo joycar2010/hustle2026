@@ -66,9 +66,9 @@ def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
 def _summarize_group(group: str) -> dict[str, Any]:
     path = _db_path(group)
     meta = {
-        "A": {"label": "A · late_edge", "version": "p3-p4", "mode": "late_edge"},
-        "B": {"label": "B · maker", "version": "p3-p4", "mode": "maker"},
-        "C": {"label": "C · split_sell", "version": "p3-p4", "mode": "split_sell"},
+        "A": {"label": "A · late_edge", "version": "p5", "mode": "late_edge"},
+        "B": {"label": "B · maker", "version": "p5b", "mode": "maker"},
+        "C": {"label": "C · split_sell", "version": "p5a", "mode": "split_sell"},
     }[group.upper()]
     out: dict[str, Any] = {
         **meta,
@@ -171,6 +171,7 @@ def health() -> dict[str, Any]:
         "live_trading_enabled": cfg.live_trading_enabled,
         "db_exists": (cfg.data_dir / "paper.db").exists(),
         "maker_db_exists": (cfg.data_dir / "maker_paper.db").exists(),
+        "split_sell_db_exists": (cfg.data_dir / "split_sell_paper.db").exists(),
         "heartbeat": hb,
         "ts": time.time(),
     }
@@ -214,9 +215,21 @@ def calibration(group: str = Query("A")) -> dict[str, Any]:
 
 
 @app.get("/api/maker/quality")
-def maker_quality() -> dict[str, Any]:
-    path = _db_path("B")
+def maker_quality(group: str = Query("B")) -> dict[str, Any]:
+    g = group.upper() if group else "B"
+    path = _db_path(g if g in {"B", "C"} else "B")
     return {
+        "group": g if g in {"B", "C"} else "B",
+        "pair_residual": maker_pair_residual_report(path),
+        "fill_quality": fill_quality_report(path),
+    }
+
+
+@app.get("/api/split/quality")
+def split_quality() -> dict[str, Any]:
+    path = _db_path("C")
+    return {
+        "group": "C",
         "pair_residual": maker_pair_residual_report(path),
         "fill_quality": fill_quality_report(path),
     }
@@ -385,9 +398,16 @@ def state() -> dict[str, Any]:
             "maker_pair_profit_min": cfg.maker_pair_profit_min,
             "maker_flatten_residual": cfg.maker_flatten_residual,
             "maker_allow_crossed_fills": cfg.maker_allow_crossed_fills,
+            "maker_min_bid_price": cfg.maker_min_bid_price,
+            "maker_pair_complete_sec": cfg.maker_pair_complete_sec,
+            "maker_zero_fill_kill_sec": cfg.maker_zero_fill_kill_sec,
+            "maker_early_flatten": cfg.maker_early_flatten,
             "split_size": cfg.split_size,
             "split_fair_edge": cfg.split_fair_edge,
             "split_max_lean_shares": cfg.split_max_lean_shares,
+            "split_min_pair_ask": cfg.split_min_pair_ask,
+            "split_min_ask_price": cfg.split_min_ask_price,
+            "split_lean_abort_sec": cfg.split_lean_abort_sec,
             "heartbeat_stale_sec": cfg.heartbeat_stale_sec,
             "ws_book": __import__("btc5m.ws_book", fromlist=["status"]).status(),
         },

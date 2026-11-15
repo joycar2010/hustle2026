@@ -31,14 +31,19 @@ function renderConfig(c) {
 function renderAb(ab) {
   const a = ab?.groups?.A || {};
   const b = ab?.groups?.B || {};
+  const c = ab?.groups?.C || {};
   $('abAMode').textContent = `${a.mode || 'late_edge'} · ${a.version || ''}`;
   $('abBMode').textContent = `${b.mode || 'maker'} · ${b.version || ''}`;
+  $('abCMode').textContent = `${c.mode || 'split_sell'} · ${c.version || ''}`;
   $('abAPnl').textContent = money(a.pnl_usd);
   $('abBPnl').textContent = money(b.pnl_usd);
+  $('abCPnl').textContent = money(c.pnl_usd);
   $('abAPnl').style.color = Number(a.pnl_usd) >= 0 ? '#39d98a' : '#ff7183';
   $('abBPnl').style.color = Number(b.pnl_usd) >= 0 ? '#39d98a' : '#ff7183';
+  $('abCPnl').style.color = Number(c.pnl_usd) >= 0 ? '#39d98a' : '#ff7183';
   $('abAStats').textContent = `${a.positions || 0} 笔 · 胜负 ${a.wins || 0} / ${a.losses || 0} · 未平 ${a.open_positions || 0}`;
   $('abBStats').textContent = b.db_exists ? `${b.positions || 0} 笔 · 胜负 ${b.wins || 0} / ${b.losses || 0} · 未平 ${b.open_positions || 0}` : '等待 B 组独立账本';
+  $('abCStats').textContent = c.db_exists ? `${c.positions || 0} 笔 · 胜负 ${c.wins || 0} / ${c.losses || 0} · 未平 ${c.open_positions || 0} · rebate ${money(c.rebate_usd)}` : '等待 C 组独立账本';
 }
 
 async function renderEvents() {

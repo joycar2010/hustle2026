@@ -72,6 +72,10 @@ class MakerState:
     quoting: bool = True
     flattened: bool = False
     fill_quality: FillQuality = field(default_factory=FillQuality)
+    # P5b: pair-complete SLA tracking
+    imbalance_since: Optional[float] = None
+    first_fill_ts: Optional[float] = None
+    killed_zero_fill: bool = False
 
 
 def _round_tick(price: float, tick: float) -> float:
@@ -150,11 +154,13 @@ class MakerEngine:
         self._last_slug: Optional[str] = None
         self._hydrate_risk()
         log.info(
-            "Maker paper engine | pair_max=%.3f size=%.0f stop_before=%.0fs touch=%.0fs",
-            cfg.maker_pair_cost_max,
+            "Maker paper engine | pair_max=%.3f min_bid=%.2f complete_sla=%.0fs "
+            "zero_kill=%.0fs size=%.0f",
+            self._effective_pair_max(),
+            cfg.maker_min_bid_price,
+            cfg.maker_pair_complete_sec,
+            cfg.maker_zero_fill_kill_sec,
             cfg.maker_quote_shares,
-            cfg.maker_stop_before_end_sec,
-            cfg.maker_touch_fill_sec,
         )
 
     def _hydrate_risk(self) -> None:
@@ -190,22 +196,25 @@ class MakerEngine:
             down_q = min(down_q, down.best_ask - tick)
 
         up_sh, dn_sh = state.up_shares, state.down_shares
-        up_q = _round_tick(max(tick, up_q), tick)
-        down_q = _round_tick(max(tick, down_q), tick)
+        min_bid = max(tick, float(self.cfg.maker_min_bid_price))
+        up_q = _round_tick(max(min_bid, up_q), tick)
+        down_q = _round_tick(max(min_bid, down_q), tick)
 
         # Enforce projected pair cost including existing averages
         up_avg = _avg(state.up_cost, state.up_shares) if state.up_shares else up_q
         dn_avg = _avg(state.down_cost, state.down_shares) if state.down_shares else down_q
 
-        # P0/P1: once one side fills, ONLY quote the missing leg (complete the pair)
+        # P0/P1/P5b: once one side fills, ONLY quote the missing leg
         if up_sh > dn_sh:
             down_q = min(down_q, _round_tick(max_pair - up_avg, tick))
-            if down_q < tick or (up_avg + down_q) > max_pair + 1e-9:
+            down_q = _round_tick(max(min_bid, down_q), tick)
+            if down_q < min_bid - 1e-12 or (up_avg + down_q) > max_pair + 1e-9:
                 return None, None
             return None, down_q
         if dn_sh > up_sh:
             up_q = min(up_q, _round_tick(max_pair - dn_avg, tick))
-            if up_q < tick or (dn_avg + up_q) > max_pair + 1e-9:
+            up_q = _round_tick(max(min_bid, up_q), tick)
+            if up_q < min_bid - 1e-12 or (dn_avg + up_q) > max_pair + 1e-9:
                 return None, None
             return up_q, None
 
@@ -214,8 +223,10 @@ class MakerEngine:
             half = _round_tick(max_pair / 2.0, tick)
             up_q = min(up_q, half)
             down_q = min(down_q, _round_tick(max_pair - up_q, tick))
+        up_q = _round_tick(max(min_bid, up_q), tick)
+        down_q = _round_tick(max(min_bid, down_q), tick)
 
-        if up_q < tick or down_q < tick:
+        if up_q < min_bid - 1e-12 or down_q < min_bid - 1e-12:
             return None, None
         if up_q + down_q > max_pair + 1e-9:
             return None, None
@@ -279,6 +290,18 @@ class MakerEngine:
             )
             return False
 
+        # P5b: refuse lottery fills below min bid floor
+        if q.price + 1e-12 < float(self.cfg.maker_min_bid_price):
+            state.quotes.pop(side, None)
+            log.info(
+                "MAKER SKIP FILL %s %s@%.2f — below min_bid %.2f",
+                state.market.market_slug,
+                side,
+                q.price,
+                self.cfg.maker_min_bid_price,
+            )
+            return False
+
         size = q.size
         price = q.price
         notional = size * price
@@ -289,6 +312,14 @@ class MakerEngine:
         else:
             state.down_shares += size
             state.down_cost += notional
+
+        if state.first_fill_ts is None:
+            state.first_fill_ts = now
+        if abs(state.up_shares - state.down_shares) > 1e-9:
+            if state.imbalance_since is None:
+                state.imbalance_since = now
+        else:
+            state.imbalance_since = None
 
         if fill_kind == "crossed":
             state.fill_quality.crossed += 1
@@ -430,12 +461,13 @@ class MakerEngine:
     def _flatten_residual(
         self, state: MakerState, up: TopOfBook, down: TopOfBook
     ) -> None:
-        """Paper-sell unpaired inventory at best bid before resolution gamble."""
+        """Paper-sell unpaired inventory at best bid (P5b: may run mid-window)."""
         if state.flattened:
             return
         residual = abs(state.up_shares - state.down_shares)
         if residual <= 1e-9:
             state.flattened = True
+            state.imbalance_since = None
             return
         if state.up_shares > state.down_shares:
             side, book, avg = "UP", up, _avg(state.up_cost, state.up_shares)
@@ -458,6 +490,8 @@ class MakerEngine:
             state.down_cost = max(state.down_cost - residual * avg, 0.0)
         state.flatten_pnl_usd += pnl
         state.flattened = True
+        state.imbalance_since = None
+        state.quotes.clear()
         state.fill_quality.flatten += 1
         self.store.update_maker_inventory(
             state.session_id,
@@ -633,6 +667,13 @@ class MakerEngine:
         up = fetch_book(self.cfg.clob_host, market.up_token)
         down = fetch_book(self.cfg.clob_host, market.down_token)
 
+        # Keep imbalance timer accurate even after restart
+        if abs(state.up_shares - state.down_shares) > 1e-9:
+            if state.imbalance_since is None:
+                state.imbalance_since = now
+        else:
+            state.imbalance_since = None
+
         if t_left <= self.cfg.maker_stop_before_end_sec:
             if state.quoting:
                 log.info(
@@ -642,7 +683,7 @@ class MakerEngine:
                 )
             state.quoting = False
             state.quotes.clear()
-            # P0-B: flatten unpaired residual instead of gambling to resolution
+            # P0-B / P5b: flatten unpaired residual instead of gambling to resolution
             if self.cfg.maker_flatten_residual:
                 self._flatten_residual(state, up, down)
             write_heartbeat(
@@ -655,9 +696,80 @@ class MakerEngine:
             )
             return
 
+        # P5b: kill zero-fill sessions by T−N (default 90s)
+        if (
+            state.first_fill_ts is None
+            and not state.killed_zero_fill
+            and t_left <= self.cfg.maker_zero_fill_kill_sec
+        ):
+            state.killed_zero_fill = True
+            state.quoting = False
+            state.quotes.clear()
+            log.info(
+                "MAKER ZERO-FILL KILL %s t_left=%.1f <= %.0f — stop quoting",
+                market.market_slug,
+                t_left,
+                self.cfg.maker_zero_fill_kill_sec,
+            )
+            write_heartbeat(
+                self.cfg.data_dir,
+                mode="maker",
+                market_slug=market.market_slug,
+                detail=f"zero_fill_kill t_left={t_left:.0f}s",
+                pnl_usd=self.risk.realized_pnl_usd,
+                open_positions=self.risk.open_positions,
+            )
+            return
+
+        if state.flattened or state.killed_zero_fill:
+            state.quoting = False
+            state.quotes.clear()
+            write_heartbeat(
+                self.cfg.data_dir,
+                mode="maker",
+                market_slug=market.market_slug,
+                detail=(
+                    f"idle flattened={state.flattened} "
+                    f"zero_kill={state.killed_zero_fill} "
+                    f"inv={state.up_shares:.0f}/{state.down_shares:.0f}"
+                ),
+                pnl_usd=self.risk.realized_pnl_usd,
+                open_positions=self.risk.open_positions,
+            )
+            return
+
         # Detect fills on resting quotes first
         self._fill_side(state, "UP", up, now)
         self._fill_side(state, "DOWN", down, now)
+
+        # P5b: pair-complete SLA — if missing leg unfilled > N sec, early flatten
+        if (
+            self.cfg.maker_early_flatten
+            and self.cfg.maker_flatten_residual
+            and state.imbalance_since is not None
+            and (now - state.imbalance_since) >= self.cfg.maker_pair_complete_sec
+        ):
+            log.info(
+                "MAKER PAIR-COMPLETE SLA %s imbalance=%.1fs ≥ %.0fs — flatten",
+                market.market_slug,
+                now - state.imbalance_since,
+                self.cfg.maker_pair_complete_sec,
+            )
+            state.quoting = False
+            state.quotes.clear()
+            self._flatten_residual(state, up, down)
+            write_heartbeat(
+                self.cfg.data_dir,
+                mode="maker",
+                market_slug=market.market_slug,
+                detail=(
+                    f"pair_complete_sla flatten={state.flatten_pnl_usd:+.2f} "
+                    f"inv={state.up_shares:.0f}/{state.down_shares:.0f}"
+                ),
+                pnl_usd=self.risk.realized_pnl_usd,
+                open_positions=self.risk.open_positions,
+            )
+            return
 
         # Refresh quotes
         self._refresh_quotes(state, up, down, now)
@@ -665,20 +777,24 @@ class MakerEngine:
         uq = state.quotes.get("UP")
         dq = state.quotes.get("DOWN")
         fq = state.fill_quality.as_dict()
+        imb_age = (
+            (now - state.imbalance_since) if state.imbalance_since is not None else 0.0
+        )
         write_heartbeat(
             self.cfg.data_dir,
             mode="maker",
             market_slug=market.market_slug,
             detail=(
                 f"inv={state.up_shares:.0f}/{state.down_shares:.0f} "
-                f"fills touch={fq['touch']} crossed={fq['crossed']}"
+                f"fills touch={fq['touch']} crossed={fq['crossed']} "
+                f"imb_age={imb_age:.0f}s"
             ),
             pnl_usd=self.risk.realized_pnl_usd,
             open_positions=self.risk.open_positions,
         )
         log.info(
             "MAKER %s t_left=%.0fs quotes up=%s dn=%s pair=%s | "
-            "book up %s/%s dn %s/%s | inv %.0f/%.0f | fill_q touch=%d crossed=%d",
+            "book up %s/%s dn %s/%s | inv %.0f/%.0f | fill_q touch=%d crossed=%d | imb=%.0fs",
             market.market_slug,
             t_left,
             f"{uq.price:.2f}" if uq else "-",
@@ -692,6 +808,7 @@ class MakerEngine:
             state.down_shares,
             fq["touch"],
             fq["crossed"],
+            imb_age,
         )
 
     def run(self, *, once: bool = False) -> None:

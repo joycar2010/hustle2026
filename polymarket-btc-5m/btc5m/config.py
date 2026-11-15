@@ -93,8 +93,13 @@ class Config:
     maker_max_imbalance_shares: float
     maker_allow_crossed_fills: bool
     maker_flatten_residual: bool
+    # P5b B1 hardening
+    maker_min_bid_price: float
+    maker_pair_complete_sec: float
+    maker_zero_fill_kill_sec: float
+    maker_early_flatten: bool
 
-    # P4 split-sell
+    # P4/P5a split-sell
     split_size: float
     split_fair_edge: float
     split_max_lean_shares: float
@@ -103,6 +108,9 @@ class Config:
     split_stop_before_end_sec: float
     split_merge_before_end_sec: float
     split_rebate_bps: float
+    split_min_pair_ask: float
+    split_min_ask_price: float
+    split_lean_abort_sec: float
 
     heartbeat_stale_sec: float
     data_dir: Path
@@ -157,8 +165,8 @@ def load() -> Config:
         bucket_lookback_sec=_float("BUCKET_LOOKBACK_SEC", 7 * 86400.0),
         bucket_min_samples=max(_int("BUCKET_MIN_SAMPLES", 8), 1),
         bucket_wr_buffer=_float("BUCKET_WR_BUFFER", 0.02),
-        maker_pair_cost_max=_float("MAKER_PAIR_COST_MAX", 0.97),
-        maker_pair_profit_min=_float("MAKER_PAIR_PROFIT_MIN", 0.02),
+        maker_pair_cost_max=_float("MAKER_PAIR_COST_MAX", 0.96),
+        maker_pair_profit_min=_float("MAKER_PAIR_PROFIT_MIN", 0.03),
         maker_quote_shares=max(_float("MAKER_QUOTE_SHARES", 10.0), 5.0),
         maker_start_delay_sec=_float("MAKER_START_DELAY_SEC", 15.0),
         maker_stop_before_end_sec=_float("MAKER_STOP_BEFORE_END_SEC", 60.0),
@@ -166,6 +174,10 @@ def load() -> Config:
         maker_max_imbalance_shares=_float("MAKER_MAX_IMBALANCE_SHARES", 10.0),
         maker_allow_crossed_fills=_bool("MAKER_ALLOW_CROSSED_FILLS", False),
         maker_flatten_residual=_bool("MAKER_FLATTEN_RESIDUAL", True),
+        maker_min_bid_price=_float("MAKER_MIN_BID_PRICE", 0.20),
+        maker_pair_complete_sec=_float("MAKER_PAIR_COMPLETE_SEC", 20.0),
+        maker_zero_fill_kill_sec=_float("MAKER_ZERO_FILL_KILL_SEC", 90.0),
+        maker_early_flatten=_bool("MAKER_EARLY_FLATTEN", True),
         split_size=max(_float("SPLIT_SIZE", 50.0), 5.0),
         split_fair_edge=_float("SPLIT_FAIR_EDGE", 0.03),
         split_max_lean_shares=_float("SPLIT_MAX_LEAN_SHARES", 3.0),
@@ -174,6 +186,9 @@ def load() -> Config:
         split_stop_before_end_sec=_float("SPLIT_STOP_BEFORE_END_SEC", 45.0),
         split_merge_before_end_sec=_float("SPLIT_MERGE_BEFORE_END_SEC", 15.0),
         split_rebate_bps=_float("SPLIT_REBATE_BPS", 42.0),
+        split_min_pair_ask=_float("SPLIT_MIN_PAIR_ASK", 1.02),
+        split_min_ask_price=_float("SPLIT_MIN_ASK_PRICE", 0.35),
+        split_lean_abort_sec=_float("SPLIT_LEAN_ABORT_SEC", 25.0),
         heartbeat_stale_sec=_float("HEARTBEAT_STALE_SEC", 120.0),
         data_dir=ROOT / "data",
     )
