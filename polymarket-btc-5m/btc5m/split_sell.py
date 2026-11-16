@@ -1,14 +1,15 @@
-"""P4 split-sell paper engine: mint complete sets → post-only asks → merge/redeem.
+"""P4/P6 split-sell paper engine: mint → bilateral asks → residual flatten → merge/redeem.
 
 Paper-only. Live mint/merge/redeem on CTF is intentionally not wired until
 WS cancel/replace and wallet approvals are verified.
 
 Economics (per window):
 1. Mint N USDC → N Up + N Down (cost = N)
-2. Rest post-only asks both sides at max(touch, fair + edge)
-3. Lean clamp: pull ahead side when sold_up - sold_down exceeds lean
-4. Near close: merge remaining pairs @ $1, redeem unpaired winner
-5. Rebate estimate = sold_notional * rebate_bps / 10000
+2. Post-only asks both sides — **join touch** for fillability (P6)
+3. Lean clamp: pull ahead side; lagging side improves into touch faster
+4. Residual SLA: sell excess inventory at best bid to re-balance
+5. Near close: merge remaining pairs @ $1, redeem unpaired winner
+6. Rebate estimate = sold_notional * rebate_bps / 10000
 """
 from __future__ import annotations
 
@@ -40,6 +41,7 @@ class AskQuote:
     size: float
     placed_ts: float
     at_touch_since: Optional[float] = None
+    catchup: bool = False
 
 
 @dataclass
@@ -58,12 +60,15 @@ class SplitState:
     merge_proceeds: float = 0.0
     redeem_proceeds: float = 0.0
     rebate_est: float = 0.0
+    flatten_pnl_usd: float = 0.0
     quotes: dict[str, AskQuote] = field(default_factory=dict)
     quoting: bool = True
     closed: bool = False
-    # P5a: lean clamp persistence → abort / merge
+    # P5a/P6: lean + residual closed loop
     lean_breach_since: Optional[float] = None
     lean_aborted: bool = False
+    residual_since: Optional[float] = None
+    residual_flattened: bool = False
 
 
 def _round_tick(price: float, tick: float) -> float:
@@ -83,7 +88,10 @@ def settle_split_sell(
     rebate_est: float,
     up_inv: float,
     down_inv: float,
+    flatten_pnl_usd: float = 0.0,
 ) -> dict:
+    # Flatten residual sells are already booked into up/down_proceeds;
+    # flatten_pnl_usd is diagnostic (proceeds vs $0.50 mint basis).
     cash = up_proceeds + down_proceeds + merge_proceeds + redeem_proceeds + rebate_est
     net = cash - mint_cost
     residual = abs(up_inv - down_inv)
@@ -93,6 +101,7 @@ def settle_split_sell(
         "merge_proceeds": merge_proceeds,
         "redeem_proceeds": redeem_proceeds,
         "rebate_est_usd": rebate_est,
+        "flatten_pnl_usd": float(flatten_pnl_usd),
         "gross_pnl_usd": cash - mint_cost - rebate_est,
         "net_pnl_usd": net,
         "residual_shares": residual,
@@ -102,7 +111,7 @@ def settle_split_sell(
 
 
 class SplitSellEngine:
-    """Paper mint → ask both → merge/redeem loop."""
+    """Paper mint → ask both → residual flatten → merge/redeem loop."""
 
     def __init__(self, cfg: Config, *, live: bool = False) -> None:
         if live:
@@ -117,14 +126,15 @@ class SplitSellEngine:
         self._hydrate_risk()
         log.info(
             "Split-sell paper | mint=%.0f edge=%.2f lean≤%.0f clip=%.0f "
-            "min_pair_ask=%.2f min_ask=%.2f lean_abort=%.0fs",
+            "min_pair_ask=%.2f min_ask=%.2f join_touch=%s residual_sla=%.0fs",
             cfg.split_size,
             cfg.split_fair_edge,
             cfg.split_max_lean_shares,
             cfg.split_clip_shares,
             cfg.split_min_pair_ask,
             cfg.split_min_ask_price,
-            cfg.split_lean_abort_sec,
+            cfg.split_join_touch,
+            cfg.split_residual_sla_sec,
         )
 
     def _hydrate_risk(self) -> None:
@@ -137,8 +147,7 @@ class SplitSellEngine:
         self.risk.realized_pnl_usd = self.store.day_realized_pnl(day_start)
         self.risk.open_positions = len(self.store.open_maker_sessions())
 
-    def _fair_asks(self, market: LiveMarket, up: TopOfBook, down: TopOfBook) -> tuple[float, float]:
-        tick = market.tick_size
+    def _fair_probs(self, market: LiveMarket) -> tuple[float, float]:
         fair_up = 0.50
         try:
             sig = fetch_btc_signal(self.cfg, market)
@@ -147,58 +156,108 @@ class SplitSellEngine:
             fair_up = fair_up_prob_from_lead(lookup.hold_wr, lead_bp_signed=lead)
         except Exception as exc:  # noqa: BLE001
             log.debug("fair value fallback: %s", exc)
+        return fair_up, 1.0 - fair_up
 
-        fair_dn = 1.0 - fair_up
-        min_ask = max(tick, float(self.cfg.split_min_ask_price))
-        up_ask = _round_tick(fair_up + self.cfg.split_fair_edge, tick)
-        dn_ask = _round_tick(fair_dn + self.cfg.split_fair_edge, tick)
-        # Post-only: never cross the bid; join/raise to sit on ask side
-        if up.best_bid is not None:
-            up_ask = max(up_ask, _round_tick(up.best_bid + tick, tick))
-        if down.best_bid is not None:
-            dn_ask = max(dn_ask, _round_tick(down.best_bid + tick, tick))
-        if up.best_ask is not None:
-            up_ask = max(up_ask, up.best_ask)  # join touch ask (sell)
-        if down.best_ask is not None:
-            dn_ask = max(dn_ask, down.best_ask)
-        # P5a: refuse lottery-cheap asks
-        up_ask = max(up_ask, min_ask)
-        dn_ask = max(dn_ask, min_ask)
-        up_ask = min(up_ask, 1.0 - tick)
-        dn_ask = min(dn_ask, 1.0 - tick)
-        return up_ask, dn_ask
+    def _side_ask(
+        self,
+        fair: float,
+        book: TopOfBook,
+        tick: float,
+        *,
+        catchup: bool,
+    ) -> Optional[float]:
+        """Build a post-only ask; P6 joins touch so both legs can actually fill."""
+        min_ask = max(
+            tick,
+            float(
+                self.cfg.split_catchup_min_ask if catchup else self.cfg.split_min_ask_price
+            ),
+        )
+        floor = tick
+        if book.best_bid is not None:
+            floor = max(floor, _round_tick(book.best_bid + tick, tick))
+
+        fair_px = _round_tick(fair + self.cfg.split_fair_edge, tick)
+
+        if self.cfg.split_join_touch and book.best_ask is not None:
+            touch = _round_tick(book.best_ask, tick)
+            if catchup and self.cfg.split_catchup_improve_ticks > 0:
+                touch = _round_tick(
+                    touch - self.cfg.split_catchup_improve_ticks * tick, tick
+                )
+            # Join (or improve) touch — never lift far above the book
+            ask = max(floor, touch)
+            # Keep a soft fair floor only when it does not destroy fillability
+            # (fair within 2 ticks of touch)
+            if fair_px <= touch + 2 * tick + 1e-12:
+                ask = max(ask, min(fair_px, touch))
+        else:
+            ask = max(floor, fair_px)
+            if book.best_ask is not None:
+                ask = max(ask, book.best_ask)
+
+        ask = max(ask, min_ask)
+        ask = min(ask, 1.0 - tick)
+        if ask + 1e-12 < min_ask:
+            return None
+        # If still far above touch, skip — unfillable lottery quote
+        if (
+            self.cfg.split_join_touch
+            and book.best_ask is not None
+            and ask > book.best_ask + 3 * tick + 1e-12
+            and not catchup
+        ):
+            return None
+        return ask
 
     def _lean(self, state: SplitState) -> float:
         return state.up_sold - state.down_sold
 
+    def _inv_residual(self, state: SplitState) -> float:
+        return abs(state.up_inv - state.down_inv)
+
+    def _note_residual(self, state: SplitState, now: float) -> None:
+        if self._inv_residual(state) > 1e-9:
+            if state.residual_since is None:
+                state.residual_since = now
+        else:
+            state.residual_since = None
+
     def _target_asks(
         self, state: SplitState, up: TopOfBook, down: TopOfBook
     ) -> tuple[Optional[float], Optional[float]]:
-        if not state.quoting or state.lean_aborted:
+        if not state.quoting or state.lean_aborted or state.residual_flattened:
             return None, None
         if state.up_inv < self.cfg.split_clip_shares and state.down_inv < self.cfg.split_clip_shares:
             return None, None
-        up_px, dn_px = self._fair_asks(state.market, up, down)
+
+        tick = state.market.tick_size
+        fair_up, fair_dn = self._fair_probs(state.market)
         lean = self._lean(state)
-        # Pull ahead side when lean exceeds clamp
-        if lean >= self.cfg.split_max_lean_shares:
-            up_px = None  # sold too much UP — wait for DOWN
-        elif lean <= -self.cfg.split_max_lean_shares:
+        max_lean = float(self.cfg.split_max_lean_shares)
+
+        up_catchup = lean <= -max_lean + 1e-9  # sold too much DOWN → catch UP
+        dn_catchup = lean >= max_lean - 1e-9  # sold too much UP → catch DOWN
+
+        up_px = self._side_ask(fair_up, up, tick, catchup=up_catchup)
+        dn_px = self._side_ask(fair_dn, down, tick, catchup=dn_catchup)
+
+        # Pull ahead side when lean exceeds clamp — only quote lagging leg
+        if lean >= max_lean - 1e-9:
+            up_px = None
+        elif lean <= -max_lean + 1e-9:
             dn_px = None
+
         if state.up_inv < self.cfg.split_clip_shares:
             up_px = None
         if state.down_inv < self.cfg.split_clip_shares:
             dn_px = None
-        # P5a: when quoting both legs, require pair ask ≥ floor (mint edge)
+
+        # Dual-quote gate: both legs must clear min pair ask (mint edge / rebate path)
         if up_px is not None and dn_px is not None:
             if (up_px + dn_px) + 1e-12 < float(self.cfg.split_min_pair_ask):
                 return None, None
-        # One-sided catch-up asks still must clear min ask floor
-        min_ask = float(self.cfg.split_min_ask_price)
-        if up_px is not None and up_px + 1e-12 < min_ask:
-            up_px = None
-        if dn_px is not None and dn_px + 1e-12 < min_ask:
-            dn_px = None
+
         return up_px, dn_px
 
     def _note_lean(self, state: SplitState, now: float) -> None:
@@ -209,8 +268,114 @@ class SplitSellEngine:
         else:
             state.lean_breach_since = None
 
-    def _maybe_lean_abort(self, state: SplitState, now: float) -> bool:
-        """P5a: if lean clamp lasts too long, stop asks and merge remaining pairs."""
+    def _flatten_residual(
+        self, state: SplitState, up: TopOfBook, down: TopOfBook, *, reason: str
+    ) -> bool:
+        """P6: sell excess inventory at best bid until up_inv == down_inv."""
+        if not self.cfg.split_residual_flatten:
+            return False
+        residual = self._inv_residual(state)
+        if residual <= 1e-9:
+            state.residual_since = None
+            return False
+        if state.up_inv > state.down_inv:
+            side, book = "UP", up
+        else:
+            side, book = "DOWN", down
+        px = book.best_bid
+        if px is None or px <= 0:
+            log.warning(
+                "SPLIT FLATTEN skip %s — no bid for residual %.0f (%s)",
+                state.market.market_slug,
+                residual,
+                reason,
+            )
+            return False
+
+        # Cost basis ≈ $0.50 per minted share; flatten PnL vs that basis
+        basis = 0.5
+        notional = residual * px
+        pnl = residual * (px - basis)
+        if side == "UP":
+            state.up_inv -= residual
+            state.up_sold += residual
+            state.up_proceeds += notional
+        else:
+            state.down_inv -= residual
+            state.down_sold += residual
+            state.down_proceeds += notional
+        state.flatten_pnl_usd += pnl
+        state.residual_since = None
+        state.quotes.clear()
+
+        self.store.update_maker_inventory(
+            state.session_id,
+            up_shares=state.up_inv,
+            down_shares=state.down_inv,
+            up_cost_usd=state.mint_cost / 2.0,
+            down_cost_usd=state.mint_cost / 2.0,
+            flatten_pnl_usd=state.flatten_pnl_usd,
+        )
+        token = state.market.up_token if side == "UP" else state.market.down_token
+        self.store.record_fill(
+            market_slug=state.market.market_slug,
+            condition_id=state.market.condition_id,
+            side=side,
+            token_id=token,
+            size=residual,
+            price=px,
+            fee_usd=0.0,
+            liquidity="taker",
+            strategy="split_sell",
+            dry_run=True,
+            session_id=state.session_id,
+            note=f"flatten_residual bid={px:.2f} basis={basis:.2f} pnl={pnl:+.2f} ({reason})",
+        )
+        self.store.log(
+            "split_flatten",
+            {
+                "session_id": state.session_id,
+                "side": side,
+                "size": residual,
+                "price": px,
+                "pnl": pnl,
+                "reason": reason,
+            },
+            state.market.market_slug,
+        )
+        log.info(
+            "SPLIT FLATTEN %s %s x%.0f @%.2f pnl=%+.2f | inv %.0f/%.0f | %s",
+            state.market.market_slug,
+            side,
+            residual,
+            px,
+            pnl,
+            state.up_inv,
+            state.down_inv,
+            reason,
+        )
+        return True
+
+    def _maybe_residual_sla(
+        self, state: SplitState, up: TopOfBook, down: TopOfBook, now: float
+    ) -> bool:
+        if state.residual_flattened or state.residual_since is None:
+            return False
+        if (now - state.residual_since) < self.cfg.split_residual_sla_sec:
+            return False
+        did = self._flatten_residual(state, up, down, reason="residual_sla")
+        if did:
+            # After rebalance, merge pairs to lock capital; stop quoting this window
+            self._merge_pairs(state)
+            state.quoting = False
+            state.residual_flattened = True
+            state.quotes.clear()
+        return did
+
+    def _maybe_lean_abort(
+        self, state: SplitState, up: TopOfBook, down: TopOfBook, now: float
+    ) -> bool:
+        """If lean clamp lasts too long: flatten residual, merge, stop asks."""
         if state.lean_aborted or state.lean_breach_since is None:
             return False
         if (now - state.lean_breach_since) < self.cfg.split_lean_abort_sec:
@@ -218,6 +383,7 @@ class SplitSellEngine:
         state.lean_aborted = True
         state.quoting = False
         state.quotes.clear()
+        self._flatten_residual(state, up, down, reason="lean_abort")
         self._merge_pairs(state)
         self.store.log(
             "split_lean_abort",
@@ -226,11 +392,12 @@ class SplitSellEngine:
                 "lean": self._lean(state),
                 "breach_sec": now - state.lean_breach_since,
                 "merged": state.merged,
+                "flatten_pnl": state.flatten_pnl_usd,
             },
             state.market.market_slug,
         )
         log.info(
-            "SPLIT LEAN ABORT #%s %s lean=%+.0f after %.0fs — merge remaining",
+            "SPLIT LEAN ABORT #%s %s lean=%+.0f after %.0fs — flatten+merge",
             state.session_id,
             state.market.market_slug,
             self._lean(state),
@@ -244,28 +411,57 @@ class SplitSellEngine:
             return False
         filled = False
         reason = ""
+        touch_need = (
+            self.cfg.split_catchup_touch_fill_sec
+            if q.catchup
+            else self.cfg.split_touch_fill_sec
+        )
         # Post-only sell fills when bid lifts into our ask (touch) for N seconds
         at_touch = book.best_bid is not None and book.best_bid + 1e-12 >= q.price
         if at_touch:
             if q.at_touch_since is None:
                 q.at_touch_since = now
-            elif now - q.at_touch_since >= self.cfg.split_touch_fill_sec:
+            elif now - q.at_touch_since >= touch_need:
                 filled = True
-                reason = f"ask_touch {now - q.at_touch_since:.1f}s bid={book.best_bid:.2f} ask={q.price:.2f}"
+                reason = (
+                    f"ask_touch {now - q.at_touch_since:.1f}s "
+                    f"bid={book.best_bid:.2f} ask={q.price:.2f}"
+                    f"{' catchup' if q.catchup else ''}"
+                )
         else:
             q.at_touch_since = None
         if not filled:
             return False
 
-        # P5a: refuse fills below min ask floor
-        if q.price + 1e-12 < float(self.cfg.split_min_ask_price):
+        min_ask = float(
+            self.cfg.split_catchup_min_ask if q.catchup else self.cfg.split_min_ask_price
+        )
+        if q.price + 1e-12 < min_ask:
             state.quotes.pop(side, None)
             log.info(
                 "SPLIT SKIP FILL %s %s@%.2f — below min_ask %.2f",
                 state.market.market_slug,
                 side,
                 q.price,
-                self.cfg.split_min_ask_price,
+                min_ask,
+            )
+            return False
+
+        # Refuse fills that would push lean beyond clamp on the ahead side
+        tentative_lean = self._lean(state) + (
+            q.size if side == "UP" else -q.size
+        )
+        max_lean = float(self.cfg.split_max_lean_shares)
+        if abs(tentative_lean) > max_lean + 1e-9 and abs(tentative_lean) > abs(
+            self._lean(state)
+        ):
+            state.quotes.pop(side, None)
+            log.info(
+                "SPLIT SKIP FILL %s %s — lean would be %+.0f > ±%.0f",
+                state.market.market_slug,
+                side,
+                tentative_lean,
+                max_lean,
             )
             return False
 
@@ -298,15 +494,16 @@ class SplitSellEngine:
             session_id=state.session_id,
             note=reason,
         )
-        # Persist inventory as maker session fields (up/down shares = remaining)
         self.store.update_maker_inventory(
             state.session_id,
             up_shares=state.up_inv,
             down_shares=state.down_inv,
             up_cost_usd=state.mint_cost / 2.0,
             down_cost_usd=state.mint_cost / 2.0,
+            flatten_pnl_usd=state.flatten_pnl_usd,
         )
         state.quotes.pop(side, None)
+        self._note_residual(state, now)
         log.info(
             "SPLIT FILL SELL %s %s@%.2f x%.0f | inv %.0f/%.0f sold %.0f/%.0f | %s",
             state.market.market_slug,
@@ -321,17 +518,33 @@ class SplitSellEngine:
         )
         return True
 
-    def _refresh_quotes(self, state: SplitState, up: TopOfBook, down: TopOfBook, now: float) -> None:
+    def _refresh_quotes(
+        self, state: SplitState, up: TopOfBook, down: TopOfBook, now: float
+    ) -> None:
         up_px, dn_px = self._target_asks(state, up, down)
         clip = float(self.cfg.split_clip_shares)
+        lean = self._lean(state)
+        max_lean = float(self.cfg.split_max_lean_shares)
 
-        def place(side: str, token: str, px: Optional[float], book: TopOfBook, inv: float) -> None:
+        def place(
+            side: str,
+            token: str,
+            px: Optional[float],
+            book: TopOfBook,
+            inv: float,
+            catchup: bool,
+        ) -> None:
             if px is None or inv < clip:
                 state.quotes.pop(side, None)
                 return
             size = min(clip, inv)
             old = state.quotes.get(side)
-            if old and abs(old.price - px) < 1e-12 and old.size == size:
+            if (
+                old
+                and abs(old.price - px) < 1e-12
+                and old.size == size
+                and old.catchup == catchup
+            ):
                 return
             at_touch = None
             if book.best_bid is not None and book.best_bid + 1e-12 >= px:
@@ -343,10 +556,25 @@ class SplitSellEngine:
                 size=size,
                 placed_ts=now,
                 at_touch_since=at_touch,
+                catchup=catchup,
             )
 
-        place("UP", state.market.up_token, up_px, up, state.up_inv)
-        place("DOWN", state.market.down_token, dn_px, down, state.down_inv)
+        place(
+            "UP",
+            state.market.up_token,
+            up_px,
+            up,
+            state.up_inv,
+            lean <= -max_lean + 1e-9,
+        )
+        place(
+            "DOWN",
+            state.market.down_token,
+            dn_px,
+            down,
+            state.down_inv,
+            lean >= max_lean - 1e-9,
+        )
         self.store.log(
             "split_quotes",
             {
@@ -355,7 +583,7 @@ class SplitSellEngine:
                 "pair_ask": (up_px or 0) + (dn_px or 0) if up_px and dn_px else None,
                 "inv_up": state.up_inv,
                 "inv_dn": state.down_inv,
-                "lean": self._lean(state),
+                "lean": lean,
             },
             state.market.market_slug,
         )
@@ -368,6 +596,11 @@ class SplitSellEngine:
         if row:
             mint = float(self.cfg.split_size)
             stats = self.store.session_sell_stats(int(row["id"]))
+            flatten = 0.0
+            try:
+                flatten = float(row["flatten_pnl_usd"] or 0)
+            except (KeyError, IndexError, TypeError):
+                flatten = 0.0
             self._state = SplitState(
                 session_id=int(row["id"]),
                 market=market,
@@ -379,6 +612,7 @@ class SplitSellEngine:
                 down_sold=stats["down_sold"],
                 up_proceeds=stats["up_proceeds"],
                 down_proceeds=stats["down_proceeds"],
+                flatten_pnl_usd=flatten,
             )
             return self._state
 
@@ -399,7 +633,6 @@ class SplitSellEngine:
             down_token=market.down_token,
             dry_run=True,
         )
-        # Paper mint
         self.store.update_maker_inventory(
             sid,
             up_shares=mint,
@@ -445,6 +678,7 @@ class SplitSellEngine:
             down_shares=state.down_inv,
             up_cost_usd=state.mint_cost / 2.0,
             down_cost_usd=state.mint_cost / 2.0,
+            flatten_pnl_usd=state.flatten_pnl_usd,
         )
         self.store.log(
             "split_merge",
@@ -468,14 +702,12 @@ class SplitSellEngine:
         elif winner == "DOWN" and state.down_inv > 0:
             state.redeem_proceeds += state.down_inv
             state.down_inv = 0.0
-        # Losing residual → 0
         state.up_inv = 0.0
         state.down_inv = 0.0
 
     def _close_session(self, state: SplitState, winner: str) -> None:
         if state.closed:
             return
-        # Merge any remaining pairs first, then redeem
         self._merge_pairs(state)
         self._redeem(state, winner)
         sold_notional = state.up_proceeds + state.down_proceeds
@@ -489,11 +721,11 @@ class SplitSellEngine:
             rebate_est=state.rebate_est,
             up_inv=state.up_inv,
             down_inv=state.down_inv,
+            flatten_pnl_usd=state.flatten_pnl_usd,
         )
-        paired = state.merged
         self.store.close_maker_session(
             state.session_id,
-            paired_shares=paired,
+            paired_shares=state.merged,
             pair_cost=None,
             residual_side=None,
             residual_shares=result["residual_shares"],
@@ -511,13 +743,14 @@ class SplitSellEngine:
         )
         log.info(
             "SPLIT RESOLVED #%s %s winner=%s sold=$%.2f merge=$%.2f redeem=$%.2f "
-            "rebate≈$%.2f net=%+.2f day=%+.2f",
+            "flatten=%+.2f rebate≈$%.2f net=%+.2f day=%+.2f",
             state.session_id,
             state.market.market_slug,
             winner,
             sold_notional,
             state.merge_proceeds,
             state.redeem_proceeds,
+            state.flatten_pnl_usd,
             state.rebate_est,
             result["net_pnl_usd"],
             self.risk.realized_pnl_usd,
@@ -544,9 +777,19 @@ class SplitSellEngine:
                 except Exception:  # noqa: BLE001
                     continue
             if winner is None:
+                self.store.log(
+                    "split_unresolved",
+                    {"session_id": int(row["id"]), "reason": "gamma_result_pending"},
+                    slug,
+                )
                 continue
             mint = float(self.cfg.split_size)
             stats = self.store.session_sell_stats(int(row["id"]))
+            flatten = 0.0
+            try:
+                flatten = float(row["flatten_pnl_usd"] or 0)
+            except (KeyError, IndexError, TypeError):
+                flatten = 0.0
             state = SplitState(
                 session_id=int(row["id"]),
                 market=market,
@@ -558,6 +801,7 @@ class SplitSellEngine:
                 down_sold=stats["down_sold"],
                 up_proceeds=stats["up_proceeds"],
                 down_proceeds=stats["down_proceeds"],
+                flatten_pnl_usd=flatten,
                 quoting=False,
             )
             self._close_session(state, winner)
@@ -587,11 +831,13 @@ class SplitSellEngine:
         t_left = market.t_remaining(now)
         up = get_book(self.cfg.clob_host, market.up_token)
         down = get_book(self.cfg.clob_host, market.down_token)
+        self._note_residual(state, now)
 
-        # Stop quoting / merge early
+        # Near close: flatten residual → merge pairs
         if t_left <= self.cfg.split_merge_before_end_sec:
             state.quoting = False
             state.quotes.clear()
+            self._flatten_residual(state, up, down, reason="merge_window")
             self._merge_pairs(state)
             write_heartbeat(
                 self.cfg.data_dir,
@@ -600,7 +846,7 @@ class SplitSellEngine:
                 detail=(
                     f"merged early t_left={t_left:.0f}s "
                     f"sold={state.up_sold:.0f}/{state.down_sold:.0f} "
-                    f"merge={state.merged:.0f}"
+                    f"merge={state.merged:.0f} flat={state.flatten_pnl_usd:+.2f}"
                 ),
                 pnl_usd=self.risk.realized_pnl_usd,
                 open_positions=self.risk.open_positions,
@@ -611,17 +857,19 @@ class SplitSellEngine:
             state.quoting = False
             state.quotes.clear()
 
-        if not state.lean_aborted:
+        if not state.lean_aborted and not state.residual_flattened:
             self._fill_ask(state, "UP", up, now)
             self._fill_ask(state, "DOWN", down, now)
             self._note_lean(state, now)
-            if self._maybe_lean_abort(state, now):
+            self._note_residual(state, now)
+
+            if self._maybe_residual_sla(state, up, down, now):
                 write_heartbeat(
                     self.cfg.data_dir,
                     mode="split_sell",
                     market_slug=market.market_slug,
                     detail=(
-                        f"lean_abort lean={self._lean(state):+.0f} "
+                        f"residual_sla flat={state.flatten_pnl_usd:+.2f} "
                         f"merge={state.merged:.0f} inv={state.up_inv:.0f}/{state.down_inv:.0f}"
                     ),
                     pnl_usd=self.risk.realized_pnl_usd,
@@ -629,7 +877,22 @@ class SplitSellEngine:
                 )
                 return
 
-        if state.quoting and not state.lean_aborted:
+            if self._maybe_lean_abort(state, up, down, now):
+                write_heartbeat(
+                    self.cfg.data_dir,
+                    mode="split_sell",
+                    market_slug=market.market_slug,
+                    detail=(
+                        f"lean_abort lean={self._lean(state):+.0f} "
+                        f"flat={state.flatten_pnl_usd:+.2f} merge={state.merged:.0f} "
+                        f"inv={state.up_inv:.0f}/{state.down_inv:.0f}"
+                    ),
+                    pnl_usd=self.risk.realized_pnl_usd,
+                    open_positions=self.risk.open_positions,
+                )
+                return
+
+        if state.quoting and not state.lean_aborted and not state.residual_flattened:
             self._refresh_quotes(state, up, down, now)
 
         lean = self._lean(state)
@@ -637,6 +900,9 @@ class SplitSellEngine:
             (now - state.lean_breach_since)
             if state.lean_breach_since is not None
             else 0.0
+        )
+        resid_age = (
+            (now - state.residual_since) if state.residual_since is not None else 0.0
         )
         write_heartbeat(
             self.cfg.data_dir,
@@ -646,7 +912,7 @@ class SplitSellEngine:
                 f"inv={state.up_inv:.0f}/{state.down_inv:.0f} "
                 f"sold={state.up_sold:.0f}/{state.down_sold:.0f} "
                 f"lean={lean:+.0f} lean_age={lean_age:.0f}s "
-                f"merge={state.merged:.0f}"
+                f"resid_age={resid_age:.0f}s merge={state.merged:.0f}"
             ),
             pnl_usd=self.risk.realized_pnl_usd,
             open_positions=self.risk.open_positions,
@@ -655,7 +921,7 @@ class SplitSellEngine:
         dq = state.quotes.get("DOWN")
         log.info(
             "SPLIT %s t_left=%.0fs asks up=%s dn=%s pair=%s | "
-            "inv %.0f/%.0f lean=%+.0f lean_age=%.0fs merge=%.0f",
+            "inv %.0f/%.0f lean=%+.0f resid_age=%.0fs merge=%.0f",
             market.market_slug,
             t_left,
             f"{uq.price:.2f}" if uq else "-",
@@ -664,12 +930,12 @@ class SplitSellEngine:
             state.up_inv,
             state.down_inv,
             lean,
-            lean_age,
+            resid_age,
             state.merged,
         )
 
     def run(self, *, once: bool = False) -> None:
-        log.info("starting split_sell paper mode (mint→ask→merge/redeem)")
+        log.info("starting split_sell paper mode (mint→ask→flatten→merge/redeem)")
         while True:
             try:
                 self.tick()

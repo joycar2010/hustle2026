@@ -4,11 +4,11 @@
 
 默认 **纸面交易（paper）**，不会下真单。实盘需同时满足：`--live` + `.env` 中 `LIVE_TRADING_ENABLED=true`（仅 `late_edge`）。
 
-## P0 → P5（v1.5）
+## P0 → P6（v1.6）
 
 - **A late_edge**：价格帽/硬禁 + 分桶熔断 + **P3 lead-hold 表 / 开盘缺口 / 末分钟 projected TWAP**  
 - **B maker（P5b）**：缺腿补齐、pair profit、**min bid ≥0.20**、**pair-complete SLA 20s**、**zero-fill kill T−90**、提前强平  
-- **C split_sell（P5a 推荐主路径）**：纸面 **mint→双边 ask→lean→merge/redeem** + **min pair ask / lean abort**  
+- **C split_sell（P6 推荐主路径）**：mint→**join-touch 双边 ask**→lean catch-up→**残仓 SLA 强平**→merge/redeem  
 - **P2**：`report` / `heartbeat` / `stress`；dashboard A/B/C  
 
 ```bash
@@ -19,7 +19,7 @@ python -m btc5m heartbeat
 ```
 
 部署（含 systemd **C**）：`PEM=... HOST=ec2-user@18.179.50.168 bash scripts/deploy_polydex.sh`  
-详见 `ops/P5_NOTES.md`。
+详见 `ops/P5_NOTES.md` · `ops/P6_NOTES.md`。
 
 ## 两种模式
 

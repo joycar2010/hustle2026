@@ -68,7 +68,7 @@ def _summarize_group(group: str) -> dict[str, Any]:
     meta = {
         "A": {"label": "A · late_edge", "version": "p5", "mode": "late_edge"},
         "B": {"label": "B · maker", "version": "p5b", "mode": "maker"},
-        "C": {"label": "C · split_sell", "version": "p5a", "mode": "split_sell"},
+        "C": {"label": "C · split_sell", "version": "p6", "mode": "split_sell"},
     }[group.upper()]
     out: dict[str, Any] = {
         **meta,
@@ -408,6 +408,9 @@ def state() -> dict[str, Any]:
             "split_min_pair_ask": cfg.split_min_pair_ask,
             "split_min_ask_price": cfg.split_min_ask_price,
             "split_lean_abort_sec": cfg.split_lean_abort_sec,
+            "split_join_touch": cfg.split_join_touch,
+            "split_residual_flatten": cfg.split_residual_flatten,
+            "split_residual_sla_sec": cfg.split_residual_sla_sec,
             "heartbeat_stale_sec": cfg.heartbeat_stale_sec,
             "ws_book": __import__("btc5m.ws_book", fromlist=["status"]).status(),
         },

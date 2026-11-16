@@ -136,9 +136,10 @@ def test_maker_zero_fill_kill(tmp_path: Path, monkeypatch):
 def test_split_min_pair_ask_blocks_cheap_dual(tmp_path: Path):
     cfg = make_cfg(
         data_dir=tmp_path,
-        split_min_pair_ask=1.02,
-        split_min_ask_price=0.35,
+        split_min_pair_ask=1.05,
+        split_min_ask_price=0.20,
         split_fair_edge=0.01,
+        split_join_touch=True,
     )
     eng = SplitSellEngine(cfg)
     m = _market()
@@ -150,19 +151,19 @@ def test_split_min_pair_ask_blocks_cheap_dual(tmp_path: Path):
         down_inv=50,
         mint_cost=50,
     )
-    # Force fair asks via monkeypatched _fair_asks returning cheap pair
-    eng._fair_asks = lambda market, up, down: (0.48, 0.48)  # type: ignore[method-assign]
+    # Touch pair 0.48+0.48=0.96 < 1.05 → block dual quotes
     up = TopOfBook(0.45, 10, 0.48, 10)
     dn = TopOfBook(0.45, 10, 0.48, 10)
     up_px, dn_px = eng._target_asks(st, up, dn)
     assert up_px is None and dn_px is None
 
 
-def test_split_lean_abort_merges(tmp_path: Path):
+def test_split_lean_abort_flattens_then_merges(tmp_path: Path):
     cfg = make_cfg(
         data_dir=tmp_path,
         split_max_lean_shares=3.0,
-        split_lean_abort_sec=25.0,
+        split_lean_abort_sec=20.0,
+        split_residual_flatten=True,
     )
     eng = SplitSellEngine(cfg)
     m = _market()
@@ -177,7 +178,6 @@ def test_split_lean_abort_merges(tmp_path: Path):
         down_sold=0,
         lean_breach_since=time.time() - 30,
     )
-    # open a real session row so inventory update works
     sid = eng.store.open_maker_session(
         market_slug=m.market_slug,
         condition_id=m.condition_id,
@@ -189,9 +189,14 @@ def test_split_lean_abort_merges(tmp_path: Path):
     eng.store.update_maker_inventory(
         sid, up_shares=30, down_shares=50, up_cost_usd=25, down_cost_usd=25
     )
-    assert eng._maybe_lean_abort(st, time.time())
+    up = TopOfBook(0.40, 10, 0.50, 10)
+    dn = TopOfBook(0.40, 10, 0.50, 10)
+    assert eng._maybe_lean_abort(st, up, dn, time.time())
     assert st.lean_aborted
     assert not st.quoting
-    assert st.merged == 30
+    # Flatten sold 20 excess DOWN @0.40, then merge remaining 30/30
     assert abs(st.up_inv) < 1e-9
-    assert abs(st.down_inv - 20) < 1e-9
+    assert abs(st.down_inv) < 1e-9
+    assert st.merged == 30
+    assert st.down_sold >= 20
+

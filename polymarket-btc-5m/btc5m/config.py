@@ -99,7 +99,7 @@ class Config:
     maker_zero_fill_kill_sec: float
     maker_early_flatten: bool
 
-    # P4/P5a split-sell
+    # P4/P5a/P6 split-sell
     split_size: float
     split_fair_edge: float
     split_max_lean_shares: float
@@ -111,6 +111,13 @@ class Config:
     split_min_pair_ask: float
     split_min_ask_price: float
     split_lean_abort_sec: float
+    # P6: bilateral fillability + residual closed loop
+    split_join_touch: bool
+    split_catchup_improve_ticks: int
+    split_catchup_min_ask: float
+    split_catchup_touch_fill_sec: float
+    split_residual_flatten: bool
+    split_residual_sla_sec: float
 
     heartbeat_stale_sec: float
     data_dir: Path
@@ -179,16 +186,23 @@ def load() -> Config:
         maker_zero_fill_kill_sec=_float("MAKER_ZERO_FILL_KILL_SEC", 90.0),
         maker_early_flatten=_bool("MAKER_EARLY_FLATTEN", True),
         split_size=max(_float("SPLIT_SIZE", 50.0), 5.0),
-        split_fair_edge=_float("SPLIT_FAIR_EDGE", 0.03),
+        split_fair_edge=_float("SPLIT_FAIR_EDGE", 0.01),
         split_max_lean_shares=_float("SPLIT_MAX_LEAN_SHARES", 3.0),
         split_clip_shares=max(_float("SPLIT_CLIP_SHARES", 10.0), 5.0),
-        split_touch_fill_sec=_float("SPLIT_TOUCH_FILL_SEC", 8.0),
+        split_touch_fill_sec=_float("SPLIT_TOUCH_FILL_SEC", 5.0),
         split_stop_before_end_sec=_float("SPLIT_STOP_BEFORE_END_SEC", 45.0),
         split_merge_before_end_sec=_float("SPLIT_MERGE_BEFORE_END_SEC", 15.0),
         split_rebate_bps=_float("SPLIT_REBATE_BPS", 42.0),
-        split_min_pair_ask=_float("SPLIT_MIN_PAIR_ASK", 1.02),
-        split_min_ask_price=_float("SPLIT_MIN_ASK_PRICE", 0.35),
-        split_lean_abort_sec=_float("SPLIT_LEAN_ABORT_SEC", 25.0),
+        # Touch pair on skewed books is ~1.00–1.02; 1.01 keeps edge without blocking fills
+        split_min_pair_ask=_float("SPLIT_MIN_PAIR_ASK", 1.01),
+        split_min_ask_price=_float("SPLIT_MIN_ASK_PRICE", 0.20),
+        split_lean_abort_sec=_float("SPLIT_LEAN_ABORT_SEC", 20.0),
+        split_join_touch=_bool("SPLIT_JOIN_TOUCH", True),
+        split_catchup_improve_ticks=max(_int("SPLIT_CATCHUP_IMPROVE_TICKS", 1), 0),
+        split_catchup_min_ask=_float("SPLIT_CATCHUP_MIN_ASK", 0.15),
+        split_catchup_touch_fill_sec=_float("SPLIT_CATCHUP_TOUCH_FILL_SEC", 3.0),
+        split_residual_flatten=_bool("SPLIT_RESIDUAL_FLATTEN", True),
+        split_residual_sla_sec=_float("SPLIT_RESIDUAL_SLA_SEC", 20.0),
         heartbeat_stale_sec=_float("HEARTBEAT_STALE_SEC", 120.0),
         data_dir=ROOT / "data",
     )
