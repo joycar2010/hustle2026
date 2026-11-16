@@ -9,7 +9,7 @@ from typing import Optional
 
 import requests
 
-WINDOW_SEC = 300
+WINDOW_SEC = 300  # BTC 5m baseline; other products pass window_sec explicitly
 
 
 @dataclass(frozen=True)
@@ -33,9 +33,10 @@ class LiveMarket:
         return (now if now is not None else time.time()) - self.start_ts
 
 
-def window_start_ts(now: Optional[float] = None) -> int:
+def window_start_ts(now: Optional[float] = None, window_sec: int = WINDOW_SEC) -> int:
     ts = int(now if now is not None else time.time())
-    return ts - (ts % WINDOW_SEC)
+    w = int(window_sec) if window_sec and window_sec > 0 else WINDOW_SEC
+    return ts - (ts % w)
 
 
 def _iso_to_unix(value: str) -> float:
@@ -85,16 +86,29 @@ def fetch_market_by_slug(gamma_host: str, slug: str) -> Optional[LiveMarket]:
     return _parse_market(event, markets[0])
 
 
-def fetch_live_market(gamma_host: str, series_slug: str = "btc-up-or-down-5m") -> Optional[LiveMarket]:
-    """Return the currently open BTC 5m market, preferring exact slug lookup."""
+def fetch_live_market(
+    gamma_host: str,
+    series_slug: str = "btc-up-or-down-5m",
+    *,
+    window_sec: int = WINDOW_SEC,
+    slug_prefix: str = "btc-updown-5m",
+) -> Optional[LiveMarket]:
+    """Return the currently open crypto up/down market for a series.
+
+    BTC 5m default args preserve historical behavior. BTC 15m passes
+    window_sec=900 and slug_prefix=btc-updown-15m.
+    """
     now = time.time()
-    # Prefer direct slug: btc-updown-5m-<unix_start>
-    for offset in (0, -WINDOW_SEC, WINDOW_SEC):
-        start = window_start_ts(now + offset)
-        slug = f"btc-updown-5m-{start}"
-        market = fetch_market_by_slug(gamma_host, slug)
-        if market and market.start_ts <= now < market.end_ts and market.enable_order_book:
-            return market
+    w = int(window_sec) if window_sec and window_sec > 0 else WINDOW_SEC
+    prefix = slug_prefix or "btc-updown-5m"
+    # Prefer direct slug: <prefix>-<unix_start>
+    if prefix:
+        for offset in (0, -w, w):
+            start = window_start_ts(now + offset, window_sec=w)
+            slug = f"{prefix}-{start}"
+            market = fetch_market_by_slug(gamma_host, slug)
+            if market and market.start_ts <= now < market.end_ts and market.enable_order_book:
+                return market
 
     # Fallback: scan series feed
     r = requests.get(
@@ -125,9 +139,10 @@ def fetch_live_market(gamma_host: str, series_slug: str = "btc-up-or-down-5m") -
     return candidates[0]
 
 
-def next_window_eta(now: Optional[float] = None) -> float:
+def next_window_eta(now: Optional[float] = None, window_sec: int = WINDOW_SEC) -> float:
     ts = now if now is not None else time.time()
-    return WINDOW_SEC - (ts % WINDOW_SEC)
+    w = int(window_sec) if window_sec and window_sec > 0 else WINDOW_SEC
+    return w - (ts % w)
 
 
 def fmt_utc(ts: float) -> str:

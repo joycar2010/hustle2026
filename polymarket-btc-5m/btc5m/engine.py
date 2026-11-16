@@ -241,7 +241,14 @@ class Engine:
 
     def tick(self) -> None:
         self._resolve_open()
-        market = fetch_live_market(self.cfg.gamma_host, self.cfg.series_slug)
+        market = fetch_live_market(
+            self.cfg.gamma_host,
+            self.cfg.series_slug,
+            window_sec=int(getattr(self.cfg, "window_sec", 300) or 300),
+            slug_prefix=str(
+                getattr(self.cfg, "market_slug_prefix", None) or "btc-updown-5m"
+            ),
+        )
         if market is None:
             eta = next_window_eta()
             log.info("no live market; next window in %.0fs", eta)

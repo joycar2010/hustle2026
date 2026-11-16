@@ -119,20 +119,21 @@ class SplitSellEngine:
                 "split_sell is paper-only until CTF mint/merge + WS cancel are live-ready"
             )
         self.cfg = cfg
-        self.store = Store(cfg.data_dir / "split_sell_paper.db")
+        db_name = getattr(cfg, "split_db_name", None) or "split_sell_paper.db"
+        self.store = Store(cfg.data_dir / db_name)
         self.risk = RiskState()
         self._state: Optional[SplitState] = None
         self._last_slug: Optional[str] = None
         self._hydrate_risk()
         log.info(
-            "Split-sell paper | mint=%.0f edge=%.2f lean≤%.0f clip=%.0f "
-            "min_pair_ask=%.2f min_ask=%.2f join_touch=%s residual_sla=%.0fs",
+            "Split-sell paper | series=%s db=%s mint=%.0f edge=%.2f lean≤%.0f "
+            "min_pair_ask=%.2f join_touch=%s residual_sla=%.0fs",
+            cfg.series_slug,
+            db_name,
             cfg.split_size,
             cfg.split_fair_edge,
             cfg.split_max_lean_shares,
-            cfg.split_clip_shares,
             cfg.split_min_pair_ask,
-            cfg.split_min_ask_price,
             cfg.split_join_touch,
             cfg.split_residual_sla_sec,
         )
@@ -808,9 +809,21 @@ class SplitSellEngine:
 
     def tick(self) -> None:
         self._resolve_open()
-        market = fetch_live_market(self.cfg.gamma_host, self.cfg.series_slug)
+        market = fetch_live_market(
+            self.cfg.gamma_host,
+            self.cfg.series_slug,
+            window_sec=int(getattr(self.cfg, "window_sec", 300) or 300),
+            slug_prefix=str(
+                getattr(self.cfg, "market_slug_prefix", None) or "btc-updown-5m"
+            ),
+        )
         if market is None:
-            log.info("no live market; next window in %.0fs", next_window_eta())
+            log.info(
+                "no live market; next window in %.0fs",
+                next_window_eta(
+                    window_sec=int(getattr(self.cfg, "window_sec", 300) or 300)
+                ),
+            )
             return
 
         if market.market_slug != self._last_slug:

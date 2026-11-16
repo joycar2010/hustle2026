@@ -4,22 +4,26 @@
 
 默认 **纸面交易（paper）**，不会下真单。实盘需同时满足：`--live` + `.env` 中 `LIVE_TRADING_ENABLED=true`（仅 `late_edge`）。
 
-## P0 → P6（v1.6）
+## P0 → P7（v1.7）
 
-- **A late_edge**：价格帽/硬禁 + 分桶熔断 + **P3 lead-hold 表 / 开盘缺口 / 末分钟 projected TWAP**  
-- **B maker（P5b）**：缺腿补齐、pair profit、**min bid ≥0.20**、**pair-complete SLA 20s**、**zero-fill kill T−90**、提前强平  
-- **C split_sell（P6 推荐主路径）**：mint→**join-touch 双边 ask**→lean catch-up→**残仓 SLA 强平**→merge/redeem  
-- **P2**：`report` / `heartbeat` / `stress`；dashboard A/B/C  
+- **A/B/C BTC 5m**：行为冻结；默认 `SERIES_SLUG=btc-up-or-down-5m`  
+- **P6 C**：join-touch 双边 + 残仓 SLA  
+- **P7 多品类（不破坏 5m）**  
+  1. BTC 15m — 复用 C，独立账本 `split_sell_15m_paper.db`  
+  2. ATP / CS — `sports_mm` + odds_bus + 事件状态机（仅主盘 PRE_GAME）  
+  3. NBA/NFL、Dota/足球 live — scaffold，默认禁用  
 
 ```bash
-python -m btc5m --mode split_sell
-bash scripts/run_split_sell_paper.sh
+python -m btc5m --mode split_sell                    # BTC 5m C
+python -m btc5m --series btc15m --mode split_sell    # BTC 15m C
+python -m btc5m --series atp --mode sports_mm        # ATP 主盘 paper
+python -m btc5m products
 python -m btc5m report
 python -m btc5m heartbeat
 ```
 
 部署（含 systemd **C**）：`PEM=... HOST=ec2-user@18.179.50.168 bash scripts/deploy_polydex.sh`  
-详见 `ops/P5_NOTES.md` · `ops/P6_NOTES.md`。
+详见 `ops/P5_NOTES.md` · `ops/P6_NOTES.md` · `ops/P7_NOTES.md`。
 
 ## 两种模式
 

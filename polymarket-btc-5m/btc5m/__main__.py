@@ -1,4 +1,4 @@
-"""CLI entry: python -m btc5m [--mode late_edge|maker|split_sell] ..."""
+"""CLI entry: python -m btc5m [--series ...] [--mode ...] ..."""
 from __future__ import annotations
 
 import argparse
@@ -7,24 +7,31 @@ import logging
 import sys
 
 from btc5m.config import load
+from btc5m.products import list_products
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Polymarket BTC 5-minute Up/Down quant bot"
+        description="Polymarket multi-series paper quant bot (BTC 5m baseline preserved)"
     )
     parser.add_argument(
         "command",
         nargs="?",
         default="run",
-        choices=["run", "report", "dashboard", "heartbeat", "stress"],
-        help="run trading loop (default), fee-aware report, dashboard, heartbeat, or stress",
+        choices=["run", "report", "dashboard", "heartbeat", "stress", "products"],
+        help="run trading loop (default), report, dashboard, heartbeat, stress, or list products",
+    )
+    parser.add_argument(
+        "--series",
+        default=None,
+        help="Product / series slug or key (btc5m, btc-up-or-down-15m, atp, cs, ...). "
+        "Default SERIES_SLUG / btc-up-or-down-5m.",
     )
     parser.add_argument(
         "--mode",
-        choices=["late_edge", "maker", "split_sell"],
+        choices=["late_edge", "maker", "split_sell", "sports_mm"],
         default=None,
-        help="Strategy mode (overrides MODE env). maker/split_sell are paper-only.",
+        help="Strategy mode (overrides MODE env / product preferred mode).",
     )
     parser.add_argument(
         "--live",
@@ -67,20 +74,51 @@ def main(argv: list[str] | None = None) -> int:
         datefmt="%H:%M:%S",
     )
 
-    cfg = load()
+    if args.command == "products":
+        rows = []
+        for p in list_products():
+            rows.append(
+                {
+                    "key": p.key,
+                    "series_slug": p.series_slug,
+                    "phase": p.phase,
+                    "enabled": p.enabled,
+                    "family": p.family,
+                    "preferred_mode": p.preferred_mode,
+                    "description": p.description,
+                }
+            )
+        print(json.dumps(rows, indent=2))
+        return 0
+
+    try:
+        cfg = load(series=args.series)
+    except Exception as exc:  # noqa: BLE001
+        logging.error("%s", exc)
+        return 2
+
     mode = args.mode or cfg.mode
 
     if args.command == "report":
         from btc5m.audit import print_report
 
         if mode == "maker":
-            db = cfg.data_dir / "maker_paper.db"
+            db = cfg.data_dir / cfg.maker_db_name
         elif mode == "split_sell":
-            db = cfg.data_dir / "split_sell_paper.db"
+            db = cfg.data_dir / cfg.split_db_name
+        elif mode == "sports_mm":
+            db = cfg.data_dir / f"sports_mm_{cfg.product_key}_paper.db"
         else:
             db = cfg.data_dir / ("live.db" if args.live else "paper.db")
         print_report(db, day=args.day, fee_rate=cfg.taker_fee_rate)
-        for other_name in ("paper.db", "maker_paper.db", "split_sell_paper.db"):
+        for other_name in (
+            "paper.db",
+            "maker_paper.db",
+            "split_sell_paper.db",
+            "split_sell_15m_paper.db",
+            "maker_15m_paper.db",
+            f"sports_mm_{cfg.product_key}_paper.db",
+        ):
             other = cfg.data_dir / other_name
             if other.exists() and other != db:
                 print()
@@ -121,6 +159,16 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 0
 
+    # Guard: phase-3/4 products
+    if cfg.product_key in {"nba", "nfl"}:
+        from btc5m.phase_stubs import assert_nba_nfl_ready
+
+        assert_nba_nfl_ready()
+    if cfg.product_key in {"dota", "soccer_unl"}:
+        from btc5m.phase_stubs import assert_dota_soccer_live_ready
+
+        assert_dota_soccer_live_ready()
+
     if mode == "maker":
         from btc5m.maker import MakerEngine
 
@@ -131,6 +179,12 @@ def main(argv: list[str] | None = None) -> int:
         from btc5m.split_sell import SplitSellEngine
 
         SplitSellEngine(cfg, live=args.live).run(once=args.once)
+        return 0
+
+    if mode == "sports_mm":
+        from btc5m.sports_mm import SportsMmEngine
+
+        SportsMmEngine(cfg, live=args.live).run(once=args.once)
         return 0
 
     from btc5m.engine import Engine

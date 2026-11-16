@@ -370,6 +370,8 @@ def state() -> dict[str, Any]:
         "ab": ab(),
         "config": {
             "series_slug": cfg.series_slug,
+            "product_key": cfg.product_key,
+            "window_sec": cfg.window_sec,
             "entry_window_sec": cfg.entry_window_sec,
             "min_t_remaining_sec": cfg.min_t_remaining_sec,
             "min_entry_price": cfg.min_entry_price,

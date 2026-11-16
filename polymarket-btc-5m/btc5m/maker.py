@@ -148,14 +148,17 @@ class MakerEngine:
                 "Run without --live (strategy MODE=maker)."
             )
         self.cfg = cfg
-        self.store = Store(cfg.data_dir / "maker_paper.db")
+        db_name = getattr(cfg, "maker_db_name", None) or "maker_paper.db"
+        self.store = Store(cfg.data_dir / db_name)
         self.risk = RiskState()
         self._state: Optional[MakerState] = None
         self._last_slug: Optional[str] = None
         self._hydrate_risk()
         log.info(
-            "Maker paper engine | pair_max=%.3f min_bid=%.2f complete_sla=%.0fs "
-            "zero_kill=%.0fs size=%.0f",
+            "Maker paper engine | series=%s db=%s pair_max=%.3f min_bid=%.2f "
+            "complete_sla=%.0fs zero_kill=%.0fs size=%.0f",
+            cfg.series_slug,
+            db_name,
             self._effective_pair_max(),
             cfg.maker_min_bid_price,
             cfg.maker_pair_complete_sec,
@@ -633,9 +636,21 @@ class MakerEngine:
 
     def tick(self) -> None:
         self._resolve_open()
-        market = fetch_live_market(self.cfg.gamma_host, self.cfg.series_slug)
+        market = fetch_live_market(
+            self.cfg.gamma_host,
+            self.cfg.series_slug,
+            window_sec=int(getattr(self.cfg, "window_sec", 300) or 300),
+            slug_prefix=str(
+                getattr(self.cfg, "market_slug_prefix", None) or "btc-updown-5m"
+            ),
+        )
         if market is None:
-            log.info("no live market; next window in %.0fs", next_window_eta())
+            log.info(
+                "no live market; next window in %.0fs",
+                next_window_eta(
+                    window_sec=int(getattr(self.cfg, "window_sec", 300) or 300)
+                ),
+            )
             return
 
         if market.market_slug != self._last_slug:

@@ -42,6 +42,12 @@ class Config:
     gamma_host: str
     polygon_rpc: str
     series_slug: str
+    # P7 multi-product (defaults preserve BTC 5m)
+    product_key: str
+    window_sec: int
+    market_slug_prefix: str
+    split_db_name: str
+    maker_db_name: str
 
     entry_window_sec: float
     min_t_remaining_sec: float
@@ -123,11 +129,12 @@ class Config:
     data_dir: Path
 
 
-def load() -> Config:
+def load(*, series: str | None = None) -> Config:
     mode = os.getenv("MODE", "late_edge").strip().lower() or "late_edge"
-    if mode not in {"late_edge", "maker", "split_sell"}:
+    if mode not in {"late_edge", "maker", "split_sell", "sports_mm"}:
         mode = "late_edge"
-    return Config(
+    series_slug = (series or os.getenv("SERIES_SLUG", "btc-up-or-down-5m")).strip()
+    cfg = Config(
         private_key=os.getenv("PRIVATE_KEY", "").strip(),
         funder_address=os.getenv("FUNDER_ADDRESS", "").strip(),
         signature_type=_int("SIGNATURE_TYPE", 3),
@@ -138,7 +145,15 @@ def load() -> Config:
         clob_host=os.getenv("CLOB_HOST", "https://clob.polymarket.com").rstrip("/"),
         gamma_host=os.getenv("GAMMA_HOST", "https://gamma-api.polymarket.com").rstrip("/"),
         polygon_rpc=os.getenv("POLYGON_RPC", "https://polygon-rpc.com").rstrip("/"),
-        series_slug=os.getenv("SERIES_SLUG", "btc-up-or-down-5m"),
+        series_slug=series_slug,
+        product_key=os.getenv("PRODUCT_KEY", "btc5m").strip() or "btc5m",
+        window_sec=max(_int("WINDOW_SEC", 300), 60),
+        market_slug_prefix=os.getenv("MARKET_SLUG_PREFIX", "btc-updown-5m").strip()
+        or "btc-updown-5m",
+        split_db_name=os.getenv("SPLIT_DB_NAME", "split_sell_paper.db").strip()
+        or "split_sell_paper.db",
+        maker_db_name=os.getenv("MAKER_DB_NAME", "maker_paper.db").strip()
+        or "maker_paper.db",
         entry_window_sec=_float("ENTRY_WINDOW_SEC", 60.0),
         min_t_remaining_sec=_float("MIN_T_REMAINING_SEC", 15.0),
         min_entry_price=_float("MIN_ENTRY_PRICE", 0.75),
@@ -206,3 +221,8 @@ def load() -> Config:
         heartbeat_stale_sec=_float("HEARTBEAT_STALE_SEC", 120.0),
         data_dir=ROOT / "data",
     )
+    # Apply product overlays (BTC 5m is identity — no behavioral change)
+    from btc5m.products import apply_product
+
+    cfg, _product = apply_product(cfg, series_slug)
+    return cfg
