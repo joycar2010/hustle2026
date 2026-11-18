@@ -88,6 +88,12 @@ def make_cfg(**overrides) -> Config:
         split_residual_flatten=True,
         split_residual_sla_sec=20.0,
         heartbeat_stale_sec=120.0,
+        sports_min_edge=0.04,
+        sports_daily_loss_limit_usd=25.0,
+        sports_pre_game_open_sec=6 * 3600.0,
+        sports_quote_on_mock=True,  # unit tests inject fair quotes / mock ok
+        sports_discover_limit=60,
+        odds_api_key="",
         data_dir=Path("/tmp"),
     )
     base.update(overrides)

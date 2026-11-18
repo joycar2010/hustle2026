@@ -138,6 +138,14 @@ class SplitSellEngine:
             cfg.split_residual_sla_sec,
         )
 
+    def _hb_mode(self) -> str:
+        """P7.1: keep 5m and 15m heartbeats from overwriting each other."""
+        key = getattr(self.cfg, "product_key", "") or ""
+        db = getattr(self.cfg, "split_db_name", "") or ""
+        if key == "btc15m" or "15m" in db:
+            return "split_sell_15m"
+        return "split_sell"
+
     def _hydrate_risk(self) -> None:
         from datetime import datetime, timezone
 
@@ -854,7 +862,7 @@ class SplitSellEngine:
             self._merge_pairs(state)
             write_heartbeat(
                 self.cfg.data_dir,
-                mode="split_sell",
+                mode=self._hb_mode(),
                 market_slug=market.market_slug,
                 detail=(
                     f"merged early t_left={t_left:.0f}s "
@@ -879,7 +887,7 @@ class SplitSellEngine:
             if self._maybe_residual_sla(state, up, down, now):
                 write_heartbeat(
                     self.cfg.data_dir,
-                    mode="split_sell",
+                    mode=self._hb_mode(),
                     market_slug=market.market_slug,
                     detail=(
                         f"residual_sla flat={state.flatten_pnl_usd:+.2f} "
@@ -893,7 +901,7 @@ class SplitSellEngine:
             if self._maybe_lean_abort(state, up, down, now):
                 write_heartbeat(
                     self.cfg.data_dir,
-                    mode="split_sell",
+                    mode=self._hb_mode(),
                     market_slug=market.market_slug,
                     detail=(
                         f"lean_abort lean={self._lean(state):+.0f} "
@@ -919,7 +927,7 @@ class SplitSellEngine:
         )
         write_heartbeat(
             self.cfg.data_dir,
-            mode="split_sell",
+            mode=self._hb_mode(),
             market_slug=market.market_slug,
             detail=(
                 f"inv={state.up_inv:.0f}/{state.down_inv:.0f} "

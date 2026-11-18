@@ -50,3 +50,16 @@ pytest -q   # full suite — BTC 5m tests must still pass
 
 - Point production A/B/C 5m processes at `--series btc15m` (separate systemd unit if deployed)
 - Enable NBA/NFL/Dota/soccer until phase gates are lifted in `products.py`
+
+## P7.1 remediation (dashboard audit)
+
+| Issue | Fix |
+|-------|-----|
+| ATP shown as “no eligible market” while day −$57 | Heartbeat `status=risk_blocked`; sports daily loss limit separate (`SPORTS_DAILY_LOSS_LIMIT_USD`) |
+| CS discover empty | Gamma `ascending=false`, higher limit, drop far-past LIVE backlog |
+| Map lines treated as mainline | Prop regex catches `game1` / `Map 1` / spreads |
+| MockSharp noise trading | Default `SPORTS_QUOTE_ON_MOCK=0`; status `mock odds (no quote)` until `ODDS_API_KEY` |
+| B empty sessions inflate KPIs | `/api/ab` + products expose `filled_sessions` / `empty_closed_sessions` |
+| C +$34 misread as pair edge | `/api/split/quality` → `edge_attribution` (residual winner/loser) |
+| LIVE sports zombies | `_sweep_stale_sessions` closes `LIVE_ABORT` / `EXPIRED_EMPTY` |
+| 5m/15m/ATP/CS heartbeat clobber | Modes `split_sell_15m`, `sports_mm_atp`, `sports_mm_cs` |

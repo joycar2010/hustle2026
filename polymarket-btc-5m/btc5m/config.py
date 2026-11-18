@@ -126,6 +126,15 @@ class Config:
     split_residual_sla_sec: float
 
     heartbeat_stale_sec: float
+
+    # P7.1 sports MM (does not affect BTC 5m defaults)
+    sports_min_edge: float
+    sports_daily_loss_limit_usd: float
+    sports_pre_game_open_sec: float
+    sports_quote_on_mock: bool
+    sports_discover_limit: int
+    odds_api_key: str
+
     data_dir: Path
 
 
@@ -219,6 +228,13 @@ def load(*, series: str | None = None) -> Config:
         split_residual_flatten=_bool("SPLIT_RESIDUAL_FLATTEN", True),
         split_residual_sla_sec=_float("SPLIT_RESIDUAL_SLA_SEC", 20.0),
         heartbeat_stale_sec=_float("HEARTBEAT_STALE_SEC", 120.0),
+        sports_min_edge=_float("SPORTS_MIN_EDGE", 0.04),
+        sports_daily_loss_limit_usd=_float("SPORTS_DAILY_LOSS_LIMIT_USD", 25.0),
+        sports_pre_game_open_sec=_float("SPORTS_PRE_GAME_OPEN_SEC", 6 * 3600.0),
+        # Default off: mock fair probs are not tradable edge
+        sports_quote_on_mock=_bool("SPORTS_QUOTE_ON_MOCK", False),
+        sports_discover_limit=max(_int("SPORTS_DISCOVER_LIMIT", 60), 20),
+        odds_api_key=os.getenv("ODDS_API_KEY", "").strip(),
         data_dir=ROOT / "data",
     )
     # Apply product overlays (BTC 5m is identity — no behavioral change)

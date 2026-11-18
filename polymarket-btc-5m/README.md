@@ -4,14 +4,15 @@
 
 默认 **纸面交易（paper）**，不会下真单。实盘需同时满足：`--live` + `.env` 中 `LIVE_TRADING_ENABLED=true`（仅 `late_edge`）。
 
-## P0 → P7（v1.7）
+## P0 → P7.1（v1.7.1）
 
 - **A/B/C BTC 5m**：行为冻结；默认 `SERIES_SLUG=btc-up-or-down-5m`  
 - **P6 C**：join-touch 双边 + 残仓 SLA  
-- **P7 多品类（不破坏 5m）**  
-  1. BTC 15m — 复用 C，独立账本 `split_sell_15m_paper.db`  
-  2. ATP / CS — `sports_mm` + odds_bus + 事件状态机（仅主盘 PRE_GAME）  
+- **P7 多品类（不破坏 5m）** + **P7.1 审计修复**  
+  1. BTC 15m — 复用 C，独立账本 / heartbeat  
+  2. ATP / CS — discover 未来优先；状态拆分 risk/mock/window；默认不在 mock 赔率上开仓  
   3. NBA/NFL、Dota/足球 live — scaffold，默认禁用  
+  4. Dashboard：`filled/empty` KPI、`/api/split/quality` 残仓归因、产品状态文案  
 
 ```bash
 python -m btc5m --mode split_sell                    # BTC 5m C

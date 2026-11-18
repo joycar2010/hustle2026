@@ -211,6 +211,190 @@ def maker_pair_residual_report(path: Path, *, since_ts: float = 0.0) -> dict[str
     }
 
 
+def maker_session_activity_report(path: Path, *, since_ts: float = 0.0) -> dict[str, Any]:
+    """Filled vs empty session counts — stops empty B sessions from looking like trades."""
+    empty = {
+        "sessions": 0,
+        "open_sessions": 0,
+        "filled_sessions": 0,
+        "empty_closed_sessions": 0,
+        "nonzero_pnl_sessions": 0,
+        "wins": 0,
+        "losses": 0,
+        "flats": 0,
+        "net_pnl_usd": 0.0,
+    }
+    if not path.exists():
+        return empty
+    conn = sqlite3.connect(path)
+    conn.row_factory = sqlite3.Row
+    try:
+        tables = {
+            r[0]
+            for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+        if "maker_sessions" not in tables:
+            return empty
+        cols = _table_cols(conn, "maker_sessions")
+        merge_col = "merged_shares" if "merged_shares" in cols else "0"
+        up_pr = "up_proceeds_usd" if "up_proceeds_usd" in cols else "0"
+        dn_pr = "down_proceeds_usd" if "down_proceeds_usd" in cols else "0"
+        flat_col = "flatten_pnl_usd" if "flatten_pnl_usd" in cols else "0"
+        rows = conn.execute(
+            f"""
+            SELECT status,
+                   COALESCE(up_shares,0) AS up_shares,
+                   COALESCE(down_shares,0) AS down_shares,
+                   COALESCE(paired_shares,0) AS paired_shares,
+                   COALESCE({merge_col},0) AS merged_shares,
+                   COALESCE({up_pr},0) AS up_proceeds_usd,
+                   COALESCE({dn_pr},0) AS down_proceeds_usd,
+                   COALESCE({flat_col},0) AS flatten_pnl_usd,
+                   net_pnl_usd
+            FROM maker_sessions
+            WHERE COALESCE(closed_ts, opened_ts) >= ? OR status='open'
+            """,
+            (since_ts,),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    out = dict(empty)
+    out["sessions"] = len(rows)
+    for row in rows:
+        if row["status"] == "open":
+            out["open_sessions"] += 1
+            continue
+        filled = (
+            float(row["up_shares"] or 0) > 0
+            or float(row["down_shares"] or 0) > 0
+            or float(row["paired_shares"] or 0) > 0
+            or float(row["merged_shares"] or 0) > 0
+            or float(row["up_proceeds_usd"] or 0) > 0
+            or float(row["down_proceeds_usd"] or 0) > 0
+            or abs(float(row["flatten_pnl_usd"] or 0)) > 1e-9
+            or (row["net_pnl_usd"] is not None and abs(float(row["net_pnl_usd"])) > 1e-9)
+        )
+        if filled:
+            out["filled_sessions"] += 1
+        else:
+            out["empty_closed_sessions"] += 1
+        net = float(row["net_pnl_usd"] or 0.0)
+        out["net_pnl_usd"] += net
+        if abs(net) > 1e-9:
+            out["nonzero_pnl_sessions"] += 1
+            if net > 0:
+                out["wins"] += 1
+            else:
+                out["losses"] += 1
+        else:
+            out["flats"] += 1
+    return out
+
+
+def split_edge_attribution_report(path: Path, *, since_ts: float = 0.0) -> dict[str, Any]:
+    """Decompose C PnL into merge-flat vs residual-direction vs flatten."""
+    empty = {
+        "sessions": 0,
+        "full_merge_flat": 0,
+        "residual_winner_kept": 0,
+        "residual_loser_kept": 0,
+        "residual_winner_pnl": 0.0,
+        "residual_loser_pnl": 0.0,
+        "flatten_pnl_usd": 0.0,
+        "pair_ask_edge_est": 0.0,
+        "net_pnl_usd": 0.0,
+    }
+    if not path.exists():
+        return empty
+    conn = sqlite3.connect(path)
+    conn.row_factory = sqlite3.Row
+    try:
+        tables = {
+            r[0]
+            for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+        if "maker_sessions" not in tables:
+            return empty
+        cols = _table_cols(conn, "maker_sessions")
+        needed = {
+            "up_shares",
+            "down_shares",
+            "merged_shares",
+            "up_proceeds_usd",
+            "down_proceeds_usd",
+            "net_pnl_usd",
+        }
+        if not needed.issubset(cols):
+            return empty
+        flatten_expr = (
+            "COALESCE(flatten_pnl_usd, 0)" if "flatten_pnl_usd" in cols else "0"
+        )
+        rows = conn.execute(
+            f"""
+            SELECT COALESCE(up_shares,0) AS up_shares,
+                   COALESCE(down_shares,0) AS down_shares,
+                   COALESCE(merged_shares,0) AS merged_shares,
+                   COALESCE(up_proceeds_usd,0) AS up_proceeds,
+                   COALESCE(down_proceeds_usd,0) AS down_proceeds,
+                   COALESCE(redeem_proceeds_usd,0) AS redeem_proceeds,
+                   COALESCE(merge_proceeds_usd,0) AS merge_proceeds,
+                   COALESCE(up_cost_usd,0)+COALESCE(down_cost_usd,0) AS cost,
+                   {flatten_expr} AS flatten_pnl_usd,
+                   COALESCE(net_pnl_usd,0) AS net_pnl_usd,
+                   winner
+            FROM maker_sessions
+            WHERE status='closed' AND closed_ts >= ?
+            """,
+            (since_ts,),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    out = dict(empty)
+    out["sessions"] = len(rows)
+    for row in rows:
+        net = float(row["net_pnl_usd"] or 0)
+        out["net_pnl_usd"] += net
+        flat = float(row["flatten_pnl_usd"] or 0)
+        out["flatten_pnl_usd"] += flat
+        sell = float(row["up_proceeds"] or 0) + float(row["down_proceeds"] or 0)
+        merged = float(row["merged_shares"] or 0)
+        up_sh = float(row["up_shares"] or 0)
+        dn_sh = float(row["down_shares"] or 0)
+        if sell <= 1e-9 and abs(flat) < 1e-9 and abs(net) < 1e-6:
+            out["full_merge_flat"] += 1
+            continue
+        # Residual kept after partial sell
+        if up_sh > dn_sh or (sell > 0 and float(row["down_proceeds"] or 0) > float(row["up_proceeds"] or 0)):
+            # sold more DOWN → residual leans UP
+            residual_side = "UP"
+        elif dn_sh > up_sh or float(row["up_proceeds"] or 0) > float(row["down_proceeds"] or 0):
+            residual_side = "DOWN"
+        else:
+            residual_side = None
+        winner = str(row["winner"] or "").upper()
+        if residual_side and winner in {"UP", "DOWN"}:
+            if residual_side == winner:
+                out["residual_winner_kept"] += 1
+                out["residual_winner_pnl"] += net
+            else:
+                out["residual_loser_kept"] += 1
+                out["residual_loser_pnl"] += net
+        # Crude pair-ask edge: merge proceeds should ≈ merged shares; anything
+        # above mint cost on the merged sleeve is ask edge (usually ~0 in paper).
+        cost = float(row["cost"] or 0)
+        merge_p = float(row["merge_proceeds"] or 0)
+        if merged > 0 and cost > 0:
+            # mint cost for merged sleeve ≈ merged ( $1 per pair )
+            out["pair_ask_edge_est"] += merge_p - merged
+    return out
+
+
 def fill_quality_report(path: Path, *, since_ts: float = 0.0) -> dict[str, Any]:
     """Classify maker fills from note text: touch / crossed / flatten."""
     out = {
@@ -238,15 +422,24 @@ def fill_quality_report(path: Path, *, since_ts: float = 0.0) -> dict[str, Any]:
         if "note" not in cols:
             return out
         ts_col = "ts" if "ts" in cols else None
+        # Include maker / split_sell / sports fills
         if ts_col:
             rows = conn.execute(
-                "SELECT note FROM fills WHERE strategy='maker_mm' AND ts >= ?",
+                """
+                SELECT note FROM fills
+                WHERE ts >= ?
+                  AND (
+                    strategy IN ('maker_mm','split_sell','sports_mm')
+                    OR strategy IS NULL
+                    OR note LIKE '%touch%'
+                    OR note LIKE '%flatten%'
+                    OR note LIKE '%sports%'
+                  )
+                """,
                 (since_ts,),
             ).fetchall()
         else:
-            rows = conn.execute(
-                "SELECT note FROM fills WHERE strategy='maker_mm'"
-            ).fetchall()
+            rows = conn.execute("SELECT note FROM fills").fetchall()
     finally:
         conn.close()
 

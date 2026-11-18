@@ -91,6 +91,15 @@ _POSITION_COLS = {
 
 _MAKER_COLS = {
     "flatten_pnl_usd": "REAL DEFAULT 0",
+    # P6/P7 split-sell / sports accounting (additive; BTC 5m A untouched)
+    "up_proceeds_usd": "REAL DEFAULT 0",
+    "down_proceeds_usd": "REAL DEFAULT 0",
+    "merged_shares": "REAL DEFAULT 0",
+    "merge_proceeds_usd": "REAL DEFAULT 0",
+    "redeem_proceeds_usd": "REAL DEFAULT 0",
+    "accounting_original_gross_pnl_usd": "REAL",
+    "accounting_original_net_pnl_usd": "REAL",
+    "accounting_corrected_ts": "REAL",
 }
 
 

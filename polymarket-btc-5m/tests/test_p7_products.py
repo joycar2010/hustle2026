@@ -102,6 +102,7 @@ def test_prop_filter_keeps_mainline():
         "Set 1 Winner",
     )
     assert _is_prop("dota2-x-game-1", "Game 1: Both Teams Beat Roshan?")
+    assert _is_prop("cs2-x-game1", "Map 1 Winner")
 
 
 def test_sports_mm_quotes_when_fair_edge(tmp_path: Path, monkeypatch):
