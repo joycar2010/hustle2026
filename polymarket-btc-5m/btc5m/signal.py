@@ -1,14 +1,16 @@
-"""BTC price signal vs the 5-minute window open.
+"""Crypto spot signal vs the window open (BTC / ETH / SOL).
 
-Resolution uses Chainlink BTC/USD TWAP. We approximate with a multi-venue
+Resolution uses Chainlink TWAP proxies. We approximate with a multi-venue
 median (OKX / Coinbase / Kraken), project closing TWAP in the final minute,
-and attach empirical lead-hold win rates (P3).
+and attach empirical lead-hold win rates (P3). Asset is selected via
+Config.crypto_asset (default btc — BTC 5m unchanged).
 """
 from __future__ import annotations
 
 import statistics
 import time
 from dataclasses import dataclass
+from typing import Callable
 
 import requests
 
@@ -18,8 +20,8 @@ from btc5m.markets import LiveMarket
 from btc5m.twap import lead_bp as _lead_bp
 from btc5m.twap import note_spot, projected_close_twap
 
-_open_cache: dict[int, tuple[float, str]] = {}
-_spot_cache: dict[str, tuple[float, float]] = {}
+_open_cache: dict[tuple[str, int], tuple[float, str]] = {}
+_spot_cache: dict[tuple[str, str], tuple[float, float]] = {}
 
 
 @dataclass(frozen=True)
@@ -40,6 +42,7 @@ class BtcSignal:
     in_final_minute: bool = False
     opening_gap_bp: float = 0.0
     decision_side: str = "FLAT"  # side after projected-TWAP preference
+    asset: str = "btc"
 
     def allows(self, side: str, *, up_min: float, down_max: float) -> bool:
         if not self.consensus:
@@ -54,7 +57,7 @@ class BtcSignal:
 
     def describe(self) -> str:
         return (
-            f"btc Δ={self.delta_usd:+.2f} lead={self.lead_bp:+.1f}bp "
+            f"{self.asset} Δ={self.delta_usd:+.2f} lead={self.lead_bp:+.1f}bp "
             f"hold={self.hold_wr:.1%} projΔ={self.projected_delta_usd:+.2f} "
             f"side={self.decision_side} gap0={self.opening_gap_bp:+.1f}bp "
             f"src={self.source} venues={self.venue_count} "
@@ -63,21 +66,25 @@ class BtcSignal:
         )
 
 
-def _okx_spot() -> float:
+def _asset(cfg: Config) -> str:
+    return (getattr(cfg, "crypto_asset", None) or "btc").strip().lower() or "btc"
+
+
+def _okx_spot(inst: str) -> float:
     r = requests.get(
         "https://www.okx.com/api/v5/market/ticker",
-        params={"instId": "BTC-USDT"},
+        params={"instId": inst},
         timeout=3,
     )
     r.raise_for_status()
     return float(r.json()["data"][0]["last"])
 
 
-def _okx_open(start_ts: float) -> float:
+def _okx_open(inst: str, start_ts: float) -> float:
     after_ms = int((start_ts + 60) * 1000)
     r = requests.get(
         "https://www.okx.com/api/v5/market/history-candles",
-        params={"instId": "BTC-USDT", "bar": "1m", "after": str(after_ms), "limit": "3"},
+        params={"instId": inst, "bar": "1m", "after": str(after_ms), "limit": "3"},
         timeout=3,
     )
     r.raise_for_status()
@@ -89,33 +96,33 @@ def _okx_open(start_ts: float) -> float:
     if rows:
         rows = sorted(rows, key=lambda x: abs(int(x[0]) - target))
         return float(rows[0][1])
-    raise RuntimeError("okx: no candle for window open")
+    raise RuntimeError(f"okx: no candle for window open ({inst})")
 
 
-def _coinbase_spot() -> float:
-    r = requests.get("https://api.coinbase.com/v2/prices/BTC-USD/spot", timeout=3)
+def _coinbase_spot(product: str) -> float:
+    r = requests.get(f"https://api.coinbase.com/v2/prices/{product}/spot", timeout=3)
     r.raise_for_status()
     return float(r.json()["data"]["amount"])
 
 
-def _kraken_spot() -> float:
+def _kraken_spot(pair: str, result_key: str) -> float:
     r = requests.get(
         "https://api.kraken.com/0/public/Ticker",
-        params={"pair": "XBTUSD"},
+        params={"pair": pair},
         timeout=3,
     )
     r.raise_for_status()
-    return float(r.json()["result"]["XXBTZUSD"]["c"][0])
+    return float(r.json()["result"][result_key]["c"][0])
 
 
-def _kraken_open(start_ts: float) -> float:
+def _kraken_open(pair: str, result_key: str, start_ts: float) -> float:
     r = requests.get(
         "https://api.kraken.com/0/public/OHLC",
-        params={"pair": "XBTUSD", "interval": 1, "since": int(start_ts) - 60},
+        params={"pair": pair, "interval": 1, "since": int(start_ts) - 60},
         timeout=3,
     )
     r.raise_for_status()
-    rows = r.json()["result"]["XXBTZUSD"]
+    rows = r.json()["result"][result_key]
     target = int(start_ts)
     for row in rows:
         if int(row[0]) == target:
@@ -123,17 +130,41 @@ def _kraken_open(start_ts: float) -> float:
     if rows:
         rows = sorted(rows, key=lambda x: abs(int(x[0]) - target))
         return float(rows[0][1])
-    raise RuntimeError("kraken: no candle for window open")
+    raise RuntimeError(f"kraken: no candle for window open ({pair})")
 
 
-_SPOTTERS = {
-    "okx": _okx_spot,
-    "coinbase": _coinbase_spot,
-    "kraken": _kraken_spot,
+# Per-asset venue callables
+_ASSET_SPOT: dict[str, dict[str, Callable[[], float]]] = {
+    "btc": {
+        "okx": lambda: _okx_spot("BTC-USDT"),
+        "coinbase": lambda: _coinbase_spot("BTC-USD"),
+        "kraken": lambda: _kraken_spot("XBTUSD", "XXBTZUSD"),
+    },
+    "eth": {
+        "okx": lambda: _okx_spot("ETH-USDT"),
+        "coinbase": lambda: _coinbase_spot("ETH-USD"),
+        "kraken": lambda: _kraken_spot("XETHZUSD", "XETHZUSD"),
+    },
+    "sol": {
+        "okx": lambda: _okx_spot("SOL-USDT"),
+        "coinbase": lambda: _coinbase_spot("SOL-USD"),
+        "kraken": lambda: _kraken_spot("SOLUSD", "SOLUSD"),
+    },
 }
-_OPENERS = {
-    "okx": _okx_open,
-    "kraken": _kraken_open,
+
+_ASSET_OPEN: dict[str, dict[str, Callable[[float], float]]] = {
+    "btc": {
+        "okx": lambda ts: _okx_open("BTC-USDT", ts),
+        "kraken": lambda ts: _kraken_open("XBTUSD", "XXBTZUSD", ts),
+    },
+    "eth": {
+        "okx": lambda ts: _okx_open("ETH-USDT", ts),
+        "kraken": lambda ts: _kraken_open("XETHZUSD", "XETHZUSD", ts),
+    },
+    "sol": {
+        "okx": lambda ts: _okx_open("SOL-USDT", ts),
+        "kraken": lambda ts: _kraken_open("SOLUSD", "SOLUSD", ts),
+    },
 }
 
 
@@ -142,19 +173,22 @@ def _hosts(cfg: Config) -> list[str]:
 
 
 def _spot_all(cfg: Config) -> list[tuple[str, float]]:
+    asset = _asset(cfg)
+    spotters = _ASSET_SPOT.get(asset) or _ASSET_SPOT["btc"]
     now = time.time()
     out: list[tuple[str, float]] = []
     for host in _hosts(cfg):
-        fn = _SPOTTERS.get(host)
+        fn = spotters.get(host)
         if not fn:
             continue
-        cached = _spot_cache.get(host)
+        cache_key = (asset, host)
+        cached = _spot_cache.get(cache_key)
         if cached and now - cached[0] <= 0.8:
             out.append((host, cached[1]))
             continue
         try:
             px = fn()
-            _spot_cache[host] = (now, px)
+            _spot_cache[cache_key] = (now, px)
             out.append((host, px))
         except Exception:  # noqa: BLE001
             continue
@@ -162,14 +196,16 @@ def _spot_all(cfg: Config) -> list[tuple[str, float]]:
 
 
 def _open_price(cfg: Config, market: LiveMarket) -> tuple[float, str]:
-    key = int(market.start_ts)
+    asset = _asset(cfg)
+    openers = _ASSET_OPEN.get(asset) or _ASSET_OPEN["btc"]
+    key = (asset, int(market.start_ts))
     cached = _open_cache.get(key)
     if cached:
         return cached
 
     errors: list[str] = []
     for host in _hosts(cfg):
-        fn = _OPENERS.get(host)
+        fn = openers.get(host)
         if not fn:
             continue
         try:
@@ -205,7 +241,8 @@ def _side_from_lead_bp(lead: float, *, min_bp: float) -> str:
     return "FLAT"
 
 
-def fetch_btc_signal(cfg: Config, market: LiveMarket) -> BtcSignal:
+def fetch_asset_signal(cfg: Config, market: LiveMarket) -> BtcSignal:
+    asset = _asset(cfg)
     beat, open_src = _open_price(cfg, market)
     spots = _spot_all(cfg)
     if not spots:
@@ -263,4 +300,10 @@ def fetch_btc_signal(cfg: Config, market: LiveMarket) -> BtcSignal:
         in_final_minute=proj.in_final_minute,
         opening_gap_bp=opening_gap,
         decision_side=decision_side,
+        asset=asset,
     )
+
+
+def fetch_btc_signal(cfg: Config, market: LiveMarket) -> BtcSignal:
+    """Backward-compatible alias; asset comes from cfg.crypto_asset."""
+    return fetch_asset_signal(cfg, market)

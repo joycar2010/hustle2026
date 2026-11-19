@@ -42,12 +42,15 @@ class Config:
     gamma_host: str
     polygon_rpc: str
     series_slug: str
-    # P7 multi-product (defaults preserve BTC 5m)
+    # P7/P8 multi-product (defaults preserve BTC 5m)
     product_key: str
     window_sec: int
     market_slug_prefix: str
     split_db_name: str
     maker_db_name: str
+    late_edge_db_name: str
+    crypto_asset: str  # btc | eth | sol
+    odds_sport_keys: str  # comma-separated The Odds API sport keys
 
     entry_window_sec: float
     min_t_remaining_sec: float
@@ -163,6 +166,10 @@ def load(*, series: str | None = None) -> Config:
         or "split_sell_paper.db",
         maker_db_name=os.getenv("MAKER_DB_NAME", "maker_paper.db").strip()
         or "maker_paper.db",
+        late_edge_db_name=os.getenv("LATE_EDGE_DB_NAME", "paper.db").strip()
+        or "paper.db",
+        crypto_asset=os.getenv("CRYPTO_ASSET", "btc").strip().lower() or "btc",
+        odds_sport_keys=os.getenv("ODDS_SPORT_KEYS", "").strip(),
         entry_window_sec=_float("ENTRY_WINDOW_SEC", 60.0),
         min_t_remaining_sec=_float("MIN_T_REMAINING_SEC", 15.0),
         min_entry_price=_float("MIN_ENTRY_PRICE", 0.75),

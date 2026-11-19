@@ -1,7 +1,7 @@
-"""Multi-series product profiles (P7).
+"""Multi-series product profiles (P7 / P8).
 
 BTC 5m defaults are preserved: selecting another series only overlays
-parameters / ledger names. Disabled phase-3/4 products refuse to run.
+parameters / ledger names. Disabled products refuse to run.
 """
 from __future__ import annotations
 
@@ -68,6 +68,54 @@ BTC_15M = ProductProfile(
     },
 )
 
+ETH_5M = ProductProfile(
+    key="eth5m",
+    series_slug="eth-up-or-down-5m",
+    family="crypto_updown",
+    phase=1,
+    enabled=True,
+    window_sec=300,
+    market_slug_prefix="eth-updown-5m",
+    split_db_name="unused_eth_split.db",
+    maker_db_name="unused_eth_maker.db",
+    preferred_mode="late_edge",
+    description="ETH Up/Down 5m — paper late_edge A (scaled Δ, separate ledger)",
+    overlays={
+        "mode": "late_edge",
+        "crypto_asset": "eth",
+        "late_edge_db_name": "paper_eth5m.db",
+        # ~4.5 bp at ~$1770
+        "up_min_delta_usd": 0.80,
+        "down_max_delta_usd": -0.80,
+        "lead_min_bp": 2.0,
+        "opening_gap_min_bp": 5.0,
+    },
+)
+
+SOL_5M = ProductProfile(
+    key="sol5m",
+    series_slug="sol-up-or-down-5m",
+    family="crypto_updown",
+    phase=1,
+    enabled=True,
+    window_sec=300,
+    market_slug_prefix="sol-updown-5m",
+    split_db_name="unused_sol_split.db",
+    maker_db_name="unused_sol_maker.db",
+    preferred_mode="late_edge",
+    description="SOL Up/Down 5m — paper late_edge A (stricter bp, separate ledger)",
+    overlays={
+        "mode": "late_edge",
+        "crypto_asset": "sol",
+        "late_edge_db_name": "paper_sol5m.db",
+        # ~20 bp at ~$73 — keep absolute Δ small but lead gates stricter
+        "up_min_delta_usd": 0.15,
+        "down_max_delta_usd": -0.15,
+        "lead_min_bp": 3.0,
+        "opening_gap_min_bp": 8.0,
+    },
+)
+
 # --- Phase 2: odds bus + event state (mainline only) -------------------------
 ATP = ProductProfile(
     key="atp",
@@ -99,20 +147,25 @@ CS = ProductProfile(
     overlays={"mode": "sports_mm"},
 )
 
-# --- Phase 3: sports tree (scaffold only) ------------------------------------
+# --- Phase 3: sports tree (moneyline paper via OddsAPI) ----------------------
 NBA = ProductProfile(
     key="nba",
     series_slug="nba-2026",
     family="sports_tree",
     phase=3,
-    enabled=False,
+    enabled=True,
     window_sec=0,
     market_slug_prefix="",
     split_db_name="unused.db",
     maker_db_name="unused.db",
     preferred_mode="sports_mm",
-    description="NBA 2026 moneyline+spread tree — scaffold (not enabled)",
-    overlays={},
+    description="NBA 2026 moneyline mainline — OddsAPI fair MM (paper; spread tree deferred)",
+    overlays={
+        "mode": "sports_mm",
+        "sports_min_edge": 0.045,
+        "sports_quote_on_mock": False,
+        "odds_sport_keys": "basketball_nba",
+    },
 )
 
 NFL = ProductProfile(
@@ -120,30 +173,41 @@ NFL = ProductProfile(
     series_slug="nfl-2026",
     family="sports_tree",
     phase=3,
-    enabled=False,
+    enabled=True,
     window_sec=0,
     market_slug_prefix="",
     split_db_name="unused.db",
     maker_db_name="unused.db",
     preferred_mode="sports_mm",
-    description="NFL 2026 moneyline+spread tree — scaffold (not enabled)",
-    overlays={},
+    description="NFL 2026 moneyline mainline — OddsAPI fair MM (paper; spread tree deferred)",
+    overlays={
+        "mode": "sports_mm",
+        "sports_min_edge": 0.045,
+        "sports_quote_on_mock": False,
+        "odds_sport_keys": "americanfootball_nfl",
+    },
 )
 
-# --- Phase 4: toxic / live (scaffold only) -----------------------------------
+# --- Phase 4: toxic / live (mainline-only, live gated) -----------------------
 DOTA = ProductProfile(
     key="dota",
     series_slug="dota-2",
     family="esports_props",
     phase=4,
-    enabled=False,
+    enabled=True,
     window_sec=0,
     market_slug_prefix="",
     split_db_name="unused.db",
     maker_db_name="unused.db",
     preferred_mode="sports_mm",
-    description="Dota props / live — deferred (toxic books)",
-    overlays={},
+    description="Dota-2 mainline-only paper (no OddsAPI sport; props/live still filtered)",
+    overlays={
+        "mode": "sports_mm",
+        "sports_min_edge": 0.06,
+        "sports_quote_on_mock": False,
+        "sports_daily_loss_limit_usd": 15.0,
+        "odds_sport_keys": "",
+    },
 )
 
 SOCCER_UNL = ProductProfile(
@@ -151,14 +215,28 @@ SOCCER_UNL = ProductProfile(
     series_slug="soccer-unl",
     family="soccer_live",
     phase=4,
-    enabled=False,
+    enabled=True,
     window_sec=0,
     market_slug_prefix="",
     split_db_name="unused.db",
     maker_db_name="unused.db",
     preferred_mode="sports_mm",
-    description="UEFA Nations League live — deferred (goal jumps)",
-    overlays={},
+    description=(
+        "Soccer-UNL mainline-only paper (OddsAPI best-effort soccer keys; "
+        "starting-XI / live props filtered; Nations League sparse on OddsAPI)"
+    ),
+    overlays={
+        "mode": "sports_mm",
+        "sports_min_edge": 0.06,
+        "sports_quote_on_mock": False,
+        "sports_daily_loss_limit_usd": 15.0,
+        "odds_sport_keys": (
+            "soccer_uefa_champs_league,soccer_uefa_europa_league,"
+            "soccer_uefa_europa_conference_league,soccer_epl,"
+            "soccer_spain_la_liga,soccer_italy_serie_a,"
+            "soccer_germany_bundesliga,soccer_france_ligue_one,soccer_usa_mls"
+        ),
+    },
 )
 
 PRODUCTS: dict[str, ProductProfile] = {
@@ -166,6 +244,10 @@ PRODUCTS: dict[str, ProductProfile] = {
     BTC_5M.key: BTC_5M,
     BTC_15M.series_slug: BTC_15M,
     BTC_15M.key: BTC_15M,
+    ETH_5M.series_slug: ETH_5M,
+    ETH_5M.key: ETH_5M,
+    SOL_5M.series_slug: SOL_5M,
+    SOL_5M.key: SOL_5M,
     ATP.series_slug: ATP,
     ATP.key: ATP,
     CS.series_slug: CS,
@@ -213,7 +295,18 @@ def apply_product(cfg: Config, name: Optional[str] = None) -> tuple[Config, Prod
 def list_products() -> list[ProductProfile]:
     seen: set[str] = set()
     out: list[ProductProfile] = []
-    for p in (BTC_5M, BTC_15M, ATP, CS, NBA, NFL, DOTA, SOCCER_UNL):
+    for p in (
+        BTC_5M,
+        BTC_15M,
+        ETH_5M,
+        SOL_5M,
+        ATP,
+        CS,
+        NBA,
+        NFL,
+        DOTA,
+        SOCCER_UNL,
+    ):
         if p.key in seen:
             continue
         seen.add(p.key)

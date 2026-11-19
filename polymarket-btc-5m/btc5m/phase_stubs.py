@@ -1,9 +1,14 @@
-"""Phase-3 / Phase-4 scaffolds — explicitly disabled.
+"""Phase-3 / Phase-4 readiness gates.
 
-NBA/NFL spread trees and Dota props / soccer live are intentionally not
-runnable so they cannot interfere with BTC 5m or phase-1/2 paper paths.
+NBA/NFL moneyline and Dota/Soccer mainline paper are enabled (P8).
+Spread trees, props, and live quoting remain deferred — discover keeps
+include_live=False and prop filters on.
 """
 from __future__ import annotations
+
+import logging
+
+log = logging.getLogger("btc5m.phase_stubs")
 
 
 class PhaseNotEnabled(RuntimeError):
@@ -11,14 +16,16 @@ class PhaseNotEnabled(RuntimeError):
 
 
 def assert_nba_nfl_ready() -> None:
-    raise PhaseNotEnabled(
-        "Phase-3 NBA/NFL pre-game MM scaffold only. "
-        "Enable after odds_bus + injury feed + spread-tree risk land."
+    """Paper moneyline sports_mm is enabled; spread-tree risk still deferred."""
+    log.info(
+        "NBA/NFL paper sports_mm enabled (moneyline mainline + OddsAPI). "
+        "Spread tree / injury feed still deferred."
     )
 
 
 def assert_dota_soccer_live_ready() -> None:
-    raise PhaseNotEnabled(
-        "Phase-4 Dota props / soccer live deferred — toxic books and jump risk. "
-        "Mainline-only esports is phase-2 (CS); Dota props stay off."
+    """Mainline-only paper; live and props stay filtered out."""
+    log.info(
+        "Dota/Soccer paper sports_mm enabled (mainline-only). "
+        "Live/props quoting remains gated (include_live=False, prop filter)."
     )

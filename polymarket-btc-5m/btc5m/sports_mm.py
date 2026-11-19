@@ -18,7 +18,7 @@ from btc5m.book import TopOfBook
 from btc5m.config import Config
 from btc5m.event_state import MatchPhase, MatchState
 from btc5m.heartbeat import write_heartbeat
-from btc5m.odds_bus import OddsBus, build_odds_bus_from_env
+from btc5m.odds_bus import OddsBus, build_odds_bus
 from btc5m.risk import RiskState, allowed_to_trade
 from btc5m.sports_discover import MainlineMarket, fetch_mainline_events
 from btc5m.store import Store
@@ -57,7 +57,11 @@ class SportsMmEngine:
         if live:
             raise RuntimeError("sports_mm is paper-only in this release")
         self.cfg = cfg
-        self.odds = odds or build_odds_bus_from_env()
+        self.odds = odds or build_odds_bus(
+            api_key=getattr(cfg, "odds_api_key", "") or "",
+            product_key=getattr(cfg, "product_key", "") or "",
+            sport_keys_override=getattr(cfg, "odds_sport_keys", "") or "",
+        )
         self.store = Store(cfg.data_dir / f"sports_mm_{cfg.product_key}_paper.db")
         self.risk = RiskState()
         self._sessions: dict[str, SportsSession] = {}
@@ -473,6 +477,10 @@ class SportsMmEngine:
         active = 0
         if allow_new:
             for m in quoteable_list:
+                fair = self.odds.fair_match(m.event_slug, m.home, m.away)
+                if fair is None or (fair.is_mock and not self.quote_on_mock):
+                    # Do not open empty sessions without a tradable fair quote.
+                    continue
                 st = self._ensure(m)
                 if st is None:
                     # risk blocked mid-loop

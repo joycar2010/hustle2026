@@ -11,8 +11,9 @@
 | 1 baseline | `btc-up-or-down-5m` | **enabled** | late_edge / maker / split_sell | `split_sell_paper.db` etc. |
 | 1 | `btc-up-or-down-15m` | **enabled** | split_sell (preferred) | `split_sell_15m_paper.db` |
 | 2 | `atp`, `counter-strike` | **enabled** paper | `sports_mm` | `sports_mm_{atp\|cs}_paper.db` |
-| 3 | `nba-2026`, `nfl-2026` | scaffold **disabled** | — | — |
-| 4 | `dota-2`, `soccer-unl` | scaffold **disabled** | — | — |
+| 3 | `nba-2026`, `nfl-2026` | **enabled** (P8 paper MM) | sports_mm | `sports_mm_{nba\|nfl}_paper.db` |
+| 4 | `dota-2`, `soccer-unl` | **enabled** (P8 mainline-only) | sports_mm | `sports_mm_{dota\|soccer_unl}_paper.db` |
+| 1+ | `eth5m`, `sol5m` | **enabled** (P8) | late_edge | `paper_eth5m.db` / `paper_sol5m.db` |
 
 ## BTC 15m overlays (vs 5m)
 
@@ -49,7 +50,8 @@ pytest -q   # full suite — BTC 5m tests must still pass
 ## Do not
 
 - Point production A/B/C 5m processes at `--series btc15m` (separate systemd unit if deployed)
-- Enable NBA/NFL/Dota/soccer until phase gates are lifted in `products.py`
+- Run NBA/NFL/Dota/soccer without `ODDS_API_KEY` expecting fills (mock quoting stays off)
+- See `ops/P8_NOTES.md` for ETH/SOL + OddsAPI details
 
 ## P7.1 remediation (dashboard audit)
 

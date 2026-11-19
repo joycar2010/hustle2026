@@ -65,12 +65,18 @@ def status_report(
     *,
     modes: tuple[str, ...] = (
         "late_edge",
+        "late_edge_eth5m",
+        "late_edge_sol5m",
         "maker",
         "split_sell",
         "split_sell_15m",
         "sports_mm",
         "sports_mm_atp",
         "sports_mm_cs",
+        "sports_mm_nba",
+        "sports_mm_nfl",
+        "sports_mm_dota",
+        "sports_mm_soccer_unl",
     ),
     stale_sec: float = 120.0,
 ) -> dict[str, Any]:

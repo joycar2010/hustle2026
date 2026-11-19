@@ -26,9 +26,16 @@ class Engine:
         self.live = bool(live)
         self.state = StrategyState()
         self.risk = RiskState()
-        self.store = Store(cfg.data_dir / ("live.db" if live else "paper.db"))
+        if live:
+            db_name = "live.db"
+        else:
+            db_name = getattr(cfg, "late_edge_db_name", None) or "paper.db"
+        self.store = Store(cfg.data_dir / db_name)
         self.client = None
         self._last_market_slug: Optional[str] = None
+        key = getattr(cfg, "product_key", "") or "btc5m"
+        # Keep BTC 5m on legacy heartbeat mode="late_edge"; others get a suffix.
+        self._hb_mode = "late_edge" if key in {"btc5m", ""} else f"late_edge_{key}"
         self._hydrate_risk()
 
         if self.live:
@@ -41,7 +48,12 @@ class Engine:
             self.client = build_client(cfg)
             log.warning("LIVE TRADING ENABLED — real orders will be placed")
         else:
-            log.info("Paper mode — decisions logged, no real orders")
+            log.info(
+                "Paper mode — decisions logged, no real orders | product=%s db=%s asset=%s",
+                key,
+                db_name,
+                getattr(cfg, "crypto_asset", "btc"),
+            )
 
     def _hydrate_risk(self) -> None:
         day_start = datetime.now(timezone.utc).replace(
@@ -305,7 +317,7 @@ class Engine:
 
         write_heartbeat(
             self.cfg.data_dir,
-            mode="late_edge",
+            mode=self._hb_mode,
             market_slug=market.market_slug,
             detail=decision.reason[:200],
             pnl_usd=self.risk.realized_pnl_usd,

@@ -77,7 +77,11 @@ def _product_db_path(product_key: str) -> Path:
         return cfg.data_dir / "split_sell_paper.db"
     if key == "btc15m":
         return cfg.data_dir / "split_sell_15m_paper.db"
-    if key in {"atp", "cs"}:
+    if key == "eth5m":
+        return cfg.data_dir / "paper_eth5m.db"
+    if key == "sol5m":
+        return cfg.data_dir / "paper_sol5m.db"
+    if key in {"atp", "cs", "nba", "nfl", "dota", "soccer_unl"}:
         return cfg.data_dir / f"sports_mm_{key}_paper.db"
     return cfg.data_dir / f"{key}_paper.db"
 
@@ -346,8 +350,14 @@ def _product_payload(product) -> dict[str, Any]:
     hb_modes = {
         "btc5m": "split_sell",
         "btc15m": "split_sell_15m",
+        "eth5m": "late_edge_eth5m",
+        "sol5m": "late_edge_sol5m",
         "atp": "sports_mm_atp",
         "cs": "sports_mm_cs",
+        "nba": "sports_mm_nba",
+        "nfl": "sports_mm_nfl",
+        "dota": "sports_mm_dota",
+        "soccer_unl": "sports_mm_soccer_unl",
     }
     hb_all = status_report(cfg.data_dir, stale_sec=cfg.heartbeat_stale_sec)
     mode = hb_modes.get(product.key)
@@ -545,15 +555,39 @@ def positions(
     path = _db_path(g)
     # Allow product keys via group=atp|cs|btc15m
     gl = group.lower()
-    if gl in {"atp", "cs", "btc15m", "btc5m"}:
+    _product_groups = {
+        "atp",
+        "cs",
+        "nba",
+        "nfl",
+        "dota",
+        "soccer_unl",
+        "btc15m",
+        "btc5m",
+        "eth5m",
+        "sol5m",
+    }
+    if gl in _product_groups:
         path = _product_db_path(gl)
         g = gl
     conn = _connect(path)
     items: list[dict[str, Any]] = []
     if conn is not None:
         try:
+            maker_keys = {
+                "B",
+                "C",
+                "atp",
+                "cs",
+                "nba",
+                "nfl",
+                "dota",
+                "soccer_unl",
+                "btc15m",
+                "btc5m",
+            }
             if _table_exists(conn, "maker_sessions") and (
-                g in {"B", "C", "atp", "cs", "btc15m", "btc5m"} or g.upper() in {"B", "C"}
+                g in maker_keys or g.upper() in {"B", "C"}
             ):
                 rows = conn.execute(
                     """
@@ -584,7 +618,17 @@ def events(
 ) -> dict[str, Any]:
     path = _db_path(group)
     gl = group.lower()
-    if gl in {"atp", "cs", "btc15m"}:
+    if gl in {
+        "atp",
+        "cs",
+        "nba",
+        "nfl",
+        "dota",
+        "soccer_unl",
+        "btc15m",
+        "eth5m",
+        "sol5m",
+    }:
         path = _product_db_path(gl)
     conn = _connect(path)
     items: list[dict[str, Any]] = []

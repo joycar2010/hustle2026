@@ -109,10 +109,13 @@ def main(argv: list[str] | None = None) -> int:
         elif mode == "sports_mm":
             db = cfg.data_dir / f"sports_mm_{cfg.product_key}_paper.db"
         else:
-            db = cfg.data_dir / ("live.db" if args.live else "paper.db")
+            late_db = getattr(cfg, "late_edge_db_name", None) or "paper.db"
+            db = cfg.data_dir / ("live.db" if args.live else late_db)
         print_report(db, day=args.day, fee_rate=cfg.taker_fee_rate)
         for other_name in (
             "paper.db",
+            "paper_eth5m.db",
+            "paper_sol5m.db",
             "maker_paper.db",
             "split_sell_paper.db",
             "split_sell_15m_paper.db",
@@ -138,7 +141,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "stress":
         from btc5m.stress import format_stress, stress_late_edge_db
 
-        db = cfg.data_dir / ("live.db" if args.live else "paper.db")
+        late_db = getattr(cfg, "late_edge_db_name", None) or "paper.db"
+        db = cfg.data_dir / ("live.db" if args.live else late_db)
         result = stress_late_edge_db(
             db,
             slip_ticks=args.slip_ticks,

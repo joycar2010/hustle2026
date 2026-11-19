@@ -4,14 +4,11 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
-import pytest
-
 from btc5m.config import Config
 from btc5m.event_state import MatchPhase, MatchState, infer_phase, transition
 from btc5m.markets import window_start_ts
 from btc5m.odds_bus import MockSharpProvider, OddsBus, deveig_two_way
 from btc5m.phase_stubs import (
-    PhaseNotEnabled,
     assert_dota_soccer_live_ready,
     assert_nba_nfl_ready,
 )
@@ -59,13 +56,13 @@ def test_window_start_ts_15m_alignment():
     assert window_start_ts(1_794_595_574) == 1_794_595_500
 
 
-def test_phase3_4_refuse_to_run():
-    with pytest.raises(PhaseNotEnabled):
-        assert_nba_nfl_ready()
-    with pytest.raises(PhaseNotEnabled):
-        assert_dota_soccer_live_ready()
-    with pytest.raises(RuntimeError, match="scaffold"):
-        apply_product(make_cfg(), "nba-2026")
+def test_phase3_4_enabled_for_paper_sports_mm():
+    # P8: gates are soft (log only); products are enabled
+    assert_nba_nfl_ready()
+    assert_dota_soccer_live_ready()
+    cfg, product = apply_product(make_cfg(), "nba-2026")
+    assert product.key == "nba"
+    assert cfg.mode == "sports_mm"
 
 
 def test_odds_bus_mock_and_deveig():
@@ -161,5 +158,6 @@ def test_sports_mm_quotes_when_fair_edge(tmp_path: Path, monkeypatch):
 
 def test_list_products_ordered_phases():
     keys = [p.key for p in list_products()]
-    assert keys[:4] == ["btc5m", "btc15m", "atp", "cs"]
+    assert keys[:4] == ["btc5m", "btc15m", "eth5m", "sol5m"]
+    assert "atp" in keys and "cs" in keys
     assert get_product("counter-strike").key == "cs"

@@ -4,27 +4,31 @@
 
 默认 **纸面交易（paper）**，不会下真单。实盘需同时满足：`--live` + `.env` 中 `LIVE_TRADING_ENABLED=true`（仅 `late_edge`）。
 
-## P0 → P7.1（v1.7.1）
+## P0 → P8（v1.8.0）
 
 - **A/B/C BTC 5m**：行为冻结；默认 `SERIES_SLUG=btc-up-or-down-5m`  
 - **P6 C**：join-touch 双边 + 残仓 SLA  
-- **P7 多品类（不破坏 5m）** + **P7.1 审计修复**  
-  1. BTC 15m — 复用 C，独立账本 / heartbeat  
-  2. ATP / CS — discover 未来优先；状态拆分 risk/mock/window；默认不在 mock 赔率上开仓  
-  3. NBA/NFL、Dota/足球 live — scaffold，默认禁用  
-  4. Dashboard：`filled/empty` KPI、`/api/split/quality` 残仓归因、产品状态文案  
+- **P7 / P7.1**：BTC 15m + ATP/CS sports_mm + 审计修复  
+- **P8**  
+  1. ETH 5m / SOL 5m — paper `late_edge` A（独立账本 + 资产信号）  
+  2. NBA / NFL — OddsAPI fair MM（moneyline 主盘；spread 树仍延后）  
+  3. Dota / Soccer-UNL — 主盘-only paper（live/道具过滤；无 OddsAPI 时不开 mock 仓）  
+  4. `ODDS_API_KEY` 仅走环境变量 / secrets，禁止入库  
 
 ```bash
 python -m btc5m --mode split_sell                    # BTC 5m C
 python -m btc5m --series btc15m --mode split_sell    # BTC 15m C
+python -m btc5m --series eth5m --mode late_edge      # ETH 5m A
+python -m btc5m --series sol5m --mode late_edge      # SOL 5m A
 python -m btc5m --series atp --mode sports_mm        # ATP 主盘 paper
+python -m btc5m --series nba --mode sports_mm        # NBA（需 ODDS_API_KEY）
 python -m btc5m products
 python -m btc5m report
 python -m btc5m heartbeat
 ```
 
 部署（含 systemd **C**）：`PEM=... HOST=ec2-user@18.179.50.168 bash scripts/deploy_polydex.sh`  
-详见 `ops/P5_NOTES.md` · `ops/P6_NOTES.md` · `ops/P7_NOTES.md`。
+详见 `ops/P5_NOTES.md` · `ops/P6_NOTES.md` · `ops/P7_NOTES.md` · `ops/P8_NOTES.md`。
 
 ## 两种模式
 
