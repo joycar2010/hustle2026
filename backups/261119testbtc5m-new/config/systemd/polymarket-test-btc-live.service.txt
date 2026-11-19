@@ -1,0 +1,177 @@
+# /etc/systemd/system/polymarket-test-btc-live.service
+[Unit]
+Description=Polytest supervised BTC live worker
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=ec2-user
+Group=ec2-user
+WorkingDirectory=/home/ec2-user/polymarketbot-test/releases/polytest-p0p1-20261110T182300Z
+EnvironmentFile=/home/ec2-user/polymarketbot-test/releases/polytest-p0p1-20261110T182300Z/.env
+Environment=PYTHONPATH=/home/ec2-user/polymarketbot-test/releases/polytest-p0p1-20261110T182300Z
+Environment=PYTHONUNBUFFERED=1
+Environment=LIVE_WORKER_SYSTEMD_UNIT=polymarket-test-btc-live.service
+ExecStartPre=/home/ec2-user/polymarketbot-test/releases/polytest-p0p1-20261110T182300Z/.venv/bin/python /home/ec2-user/polymarketbot-test/releases/polytest-p0p1-20261110T182300Z/scripts/live_preflight.py
+ExecStartPre=/home/ec2-user/polymarketbot-test/releases/polytest-p0p1-20261110T182300Z/.venv/bin/python /home/ec2-user/polymarketbot-test/releases/polytest-p0p1-20261110T182300Z/scripts/verify_setup.py
+ExecStart=/home/ec2-user/polymarketbot-test/releases/polytest-p0p1-20261110T182300Z/.venv/bin/python -m bot.live_worker --live --asset BTC
+Restart=on-failure
+RestartSec=5
+KillMode=control-group
+KillSignal=SIGTERM
+TimeoutStopSec=30
+UMask=0077
+NoNewPrivileges=true
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=polytest-btc-live
+
+[Install]
+WantedBy=multi-user.target
+
+# /etc/systemd/system/polymarket-test-btc-live.service.d/zzzzzzzzzzzz-p2p3.conf
+[Service]
+WorkingDirectory=/home/ec2-user/polymarketbot-test/releases/polytest-p2p3-20261110T202600Z
+EnvironmentFile=
+EnvironmentFile=/home/ec2-user/polymarketbot-test/releases/polytest-p2p3-20261110T202600Z/.env
+Environment=PYTHONPATH=/home/ec2-user/polymarketbot-test/releases/polytest-p2p3-20261110T202600Z
+ExecStartPre=
+ExecStartPre=/home/ec2-user/polymarketbot-test/releases/polytest-p2p3-20261110T202600Z/.venv/bin/python /home/ec2-user/polymarketbot-test/releases/polytest-p2p3-20261110T202600Z/scripts/live_preflight.py
+ExecStartPre=/home/ec2-user/polymarketbot-test/releases/polytest-p2p3-20261110T202600Z/.venv/bin/python /home/ec2-user/polymarketbot-test/releases/polytest-p2p3-20261110T202600Z/scripts/verify_setup.py
+ExecStart=
+ExecStart=/home/ec2-user/polymarketbot-test/releases/polytest-p2p3-20261110T202600Z/.venv/bin/python -m bot.live_worker --live --asset BTC
+
+# /etc/systemd/system/polymarket-test-btc-live.service.d/zzzzzzzzzzzz-polyauto-a.conf
+[Service]
+WorkingDirectory=/home/ec2-user/polymarketbot-test/releases/polytest-polyauto-a-20261118T000000Z
+EnvironmentFile=
+EnvironmentFile=/home/ec2-user/polymarketbot-test/releases/polytest-polyauto-a-20261118T000000Z/.env
+Environment=PYTHONPATH=/home/ec2-user/polymarketbot-test/releases/polytest-polyauto-a-20261118T000000Z
+Environment=PYTHONUNBUFFERED=1
+Environment=BTC_LIVE_ENABLED=false
+ExecStartPre=
+ExecStartPre=/home/ec2-user/polymarketbot-test/releases/polytest-polyauto-a-20261118T000000Z/.venv/bin/python /home/ec2-user/polymarketbot-test/releases/polytest-polyauto-a-20261118T000000Z/scripts/live_preflight.py
+ExecStartPre=/home/ec2-user/polymarketbot-test/releases/polytest-polyauto-a-20261118T000000Z/.venv/bin/python /home/ec2-user/polymarketbot-test/releases/polytest-polyauto-a-20261118T000000Z/scripts/verify_setup.py
+ExecStart=
+ExecStart=/home/ec2-user/polymarketbot-test/releases/polytest-polyauto-a-20261118T000000Z/.venv/bin/python -m bot.live_worker --live --asset BTC
+Restart=on-failure
+RestartSec=5
+KillMode=control-group
+TimeoutStopSec=30
+
+# /etc/systemd/system/polymarket-test-btc-live.service.d/zzzzzzzzzzzzz-p2p3.conf
+[Service]
+WorkingDirectory=/home/ec2-user/polymarketbot-test/releases/polytest-p2p3-20261110T204200Z
+EnvironmentFile=
+EnvironmentFile=/home/ec2-user/polymarketbot-test/releases/polytest-p2p3-20261110T204200Z/.env
+Environment=PYTHONPATH=/home/ec2-user/polymarketbot-test/releases/polytest-p2p3-20261110T204200Z
+ExecStartPre=
+ExecStartPre=/home/ec2-user/polymarketbot-test/releases/polytest-p2p3-20261110T204200Z/.venv/bin/python /home/ec2-user/polymarketbot-test/releases/polytest-p2p3-20261110T204200Z/scripts/live_preflight.py
+ExecStartPre=/home/ec2-user/polymarketbot-test/releases/polytest-p2p3-20261110T204200Z/.venv/bin/python /home/ec2-user/polymarketbot-test/releases/polytest-p2p3-20261110T204200Z/scripts/verify_setup.py
+ExecStart=
+ExecStart=/home/ec2-user/polymarketbot-test/releases/polytest-p2p3-20261110T204200Z/.venv/bin/python -m bot.live_worker --live --asset BTC
+
+# /etc/systemd/system/polymarket-test-btc-live.service.d/zzzzzzzzzzzzzz-p2p3.conf
+[Service]
+WorkingDirectory=/home/ec2-user/polymarketbot-test/releases/polytest-p2p3-20261111T040500Z
+EnvironmentFile=
+EnvironmentFile=/home/ec2-user/polymarketbot-test/releases/polytest-p2p3-20261111T040500Z/.env
+Environment=PYTHONPATH=/home/ec2-user/polymarketbot-test/releases/polytest-p2p3-20261111T040500Z
+ExecStartPre=
+ExecStartPre=/home/ec2-user/polymarketbot-test/releases/polytest-p2p3-20261111T040500Z/.venv/bin/python /home/ec2-user/polymarketbot-test/releases/polytest-p2p3-20261111T040500Z/scripts/live_preflight.py
+ExecStartPre=/home/ec2-user/polymarketbot-test/releases/polytest-p2p3-20261111T040500Z/.venv/bin/python /home/ec2-user/polymarketbot-test/releases/polytest-p2p3-20261111T040500Z/scripts/verify_setup.py
+ExecStart=
+ExecStart=/home/ec2-user/polymarketbot-test/releases/polytest-p2p3-20261111T040500Z/.venv/bin/python -m bot.live_worker --live --asset BTC
+
+# /etc/systemd/system/polymarket-test-btc-live.service.d/zzzzzzzzzzzzzzz-p2p3.conf
+[Service]
+WorkingDirectory=/home/ec2-user/polymarketbot-test/releases/polytest-p2p3-20261113T035500Z
+EnvironmentFile=
+EnvironmentFile=/home/ec2-user/polymarketbot-test/releases/polytest-p2p3-20261113T035500Z/.env
+Environment=PYTHONPATH=/home/ec2-user/polymarketbot-test/releases/polytest-p2p3-20261113T035500Z
+ExecStartPre=
+ExecStartPre=/home/ec2-user/polymarketbot-test/releases/polytest-p2p3-20261113T035500Z/.venv/bin/python /home/ec2-user/polymarketbot-test/releases/polytest-p2p3-20261113T035500Z/scripts/live_preflight.py
+ExecStartPre=/home/ec2-user/polymarketbot-test/releases/polytest-p2p3-20261113T035500Z/.venv/bin/python /home/ec2-user/polymarketbot-test/releases/polytest-p2p3-20261113T035500Z/scripts/verify_setup.py
+ExecStart=
+ExecStart=/home/ec2-user/polymarketbot-test/releases/polytest-p2p3-20261113T035500Z/.venv/bin/python -m bot.live_worker --live --asset BTC
+
+# /etc/systemd/system/polymarket-test-btc-live.service.d/zzzzzzzzzzzzzzzz-p2p3.conf
+[Service]
+WorkingDirectory=/home/ec2-user/polymarketbot-test/releases/polytest-p2p3-20261113T143000Z
+EnvironmentFile=
+EnvironmentFile=/home/ec2-user/polymarketbot-test/releases/polytest-p2p3-20261113T143000Z/.env
+Environment=PYTHONPATH=/home/ec2-user/polymarketbot-test/releases/polytest-p2p3-20261113T143000Z
+ExecStartPre=
+ExecStartPre=/home/ec2-user/polymarketbot-test/releases/polytest-p2p3-20261113T143000Z/.venv/bin/python /home/ec2-user/polymarketbot-test/releases/polytest-p2p3-20261113T143000Z/scripts/live_preflight.py
+ExecStartPre=/home/ec2-user/polymarketbot-test/releases/polytest-p2p3-20261113T143000Z/.venv/bin/python /home/ec2-user/polymarketbot-test/releases/polytest-p2p3-20261113T143000Z/scripts/verify_setup.py
+ExecStart=
+ExecStart=/home/ec2-user/polymarketbot-test/releases/polytest-p2p3-20261113T143000Z/.venv/bin/python -m bot.live_worker --live --asset BTC
+
+# /etc/systemd/system/polymarket-test-btc-live.service.d/zzzzzzzzzzzzzzzzz-p2p3.conf
+[Service]
+WorkingDirectory=/home/ec2-user/polymarketbot-test/releases/polytest-p2p3-20261113T150000Z
+EnvironmentFile=
+EnvironmentFile=/home/ec2-user/polymarketbot-test/releases/polytest-p2p3-20261113T150000Z/.env
+Environment=PYTHONPATH=/home/ec2-user/polymarketbot-test/releases/polytest-p2p3-20261113T150000Z
+ExecStartPre=
+ExecStartPre=/home/ec2-user/polymarketbot-test/releases/polytest-p2p3-20261113T150000Z/.venv/bin/python /home/ec2-user/polymarketbot-test/releases/polytest-p2p3-20261113T150000Z/scripts/live_preflight.py
+ExecStartPre=/home/ec2-user/polymarketbot-test/releases/polytest-p2p3-20261113T150000Z/.venv/bin/python /home/ec2-user/polymarketbot-test/releases/polytest-p2p3-20261113T150000Z/scripts/verify_setup.py
+ExecStart=
+ExecStart=/home/ec2-user/polymarketbot-test/releases/polytest-p2p3-20261113T150000Z/.venv/bin/python -m bot.live_worker --live --asset BTC
+
+# /etc/systemd/system/polymarket-test-btc-live.service.d/zzzzzzzzzzzzzzzzzz-p2p3.conf
+[Service]
+WorkingDirectory=/home/ec2-user/polymarketbot-test/releases/polytest-p2p3-20261113T163000Z
+EnvironmentFile=
+EnvironmentFile=/home/ec2-user/polymarketbot-test/releases/polytest-p2p3-20261113T163000Z/.env
+Environment=PYTHONPATH=/home/ec2-user/polymarketbot-test/releases/polytest-p2p3-20261113T163000Z
+ExecStartPre=
+ExecStartPre=/home/ec2-user/polymarketbot-test/releases/polytest-p2p3-20261113T163000Z/.venv/bin/python /home/ec2-user/polymarketbot-test/releases/polytest-p2p3-20261113T163000Z/scripts/live_preflight.py
+ExecStartPre=/home/ec2-user/polymarketbot-test/releases/polytest-p2p3-20261113T163000Z/.venv/bin/python /home/ec2-user/polymarketbot-test/releases/polytest-p2p3-20261113T163000Z/scripts/verify_setup.py
+ExecStart=
+ExecStart=/home/ec2-user/polymarketbot-test/releases/polytest-p2p3-20261113T163000Z/.venv/bin/python -m bot.live_worker --live --asset BTC
+
+# /etc/systemd/system/polymarket-test-btc-live.service.d/zzzzzzzzzzzzzzzzzzz-p2p3.conf
+[Service]
+WorkingDirectory=/home/ec2-user/polymarketbot-test/releases/polytest-p2p3-20261113T171500Z
+EnvironmentFile=
+EnvironmentFile=/home/ec2-user/polymarketbot-test/releases/polytest-p2p3-20261113T171500Z/.env
+Environment=PYTHONPATH=/home/ec2-user/polymarketbot-test/releases/polytest-p2p3-20261113T171500Z
+ExecStartPre=
+ExecStartPre=/home/ec2-user/polymarketbot-test/releases/polytest-p2p3-20261113T171500Z/.venv/bin/python /home/ec2-user/polymarketbot-test/releases/polytest-p2p3-20261113T171500Z/scripts/live_preflight.py
+ExecStartPre=/home/ec2-user/polymarketbot-test/releases/polytest-p2p3-20261113T171500Z/.venv/bin/python /home/ec2-user/polymarketbot-test/releases/polytest-p2p3-20261113T171500Z/scripts/verify_setup.py
+ExecStart=
+ExecStart=/home/ec2-user/polymarketbot-test/releases/polytest-p2p3-20261113T171500Z/.venv/bin/python -m bot.live_worker --live --asset BTC
+
+# /etc/systemd/system/polymarket-test-btc-live.service.d/zzzzzzzzzzzzzzzzzzzz-p2p3.conf
+[Service]
+WorkingDirectory=/home/ec2-user/polymarketbot-test/releases/polytest-p2p3-20261113T152356Z
+EnvironmentFile=
+EnvironmentFile=/home/ec2-user/polymarketbot-test/releases/polytest-p2p3-20261113T152356Z/.env
+Environment=PYTHONPATH=/home/ec2-user/polymarketbot-test/releases/polytest-p2p3-20261113T152356Z
+ExecStartPre=
+ExecStartPre=/home/ec2-user/polymarketbot-test/releases/polytest-p2p3-20261113T152356Z/.venv/bin/python /home/ec2-user/polymarketbot-test/releases/polytest-p2p3-20261113T152356Z/scripts/live_preflight.py
+ExecStartPre=/home/ec2-user/polymarketbot-test/releases/polytest-p2p3-20261113T152356Z/.venv/bin/python /home/ec2-user/polymarketbot-test/releases/polytest-p2p3-20261113T152356Z/scripts/verify_setup.py
+ExecStart=
+ExecStart=/home/ec2-user/polymarketbot-test/releases/polytest-p2p3-20261113T152356Z/.venv/bin/python -m bot.live_worker --live --asset BTC
+
+# /etc/systemd/system/polymarket-test-btc-live.service.d/zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz-polyauto-a-final.conf
+[Service]
+WorkingDirectory=/home/ec2-user/polymarketbot-test/releases/polytest-polyauto-a-20261118T000000Z
+EnvironmentFile=
+EnvironmentFile=/home/ec2-user/polymarketbot-test/releases/polytest-polyauto-a-20261118T000000Z/.env
+Environment=PYTHONPATH=/home/ec2-user/polymarketbot-test/releases/polytest-polyauto-a-20261118T000000Z
+Environment=PYTHONUNBUFFERED=1
+Environment=BTC_LIVE_ENABLED=false
+ExecStartPre=
+ExecStartPre=/home/ec2-user/polymarketbot-test/releases/polytest-polyauto-a-20261118T000000Z/.venv/bin/python /home/ec2-user/polymarketbot-test/releases/polytest-polyauto-a-20261118T000000Z/scripts/live_preflight.py
+ExecStartPre=/home/ec2-user/polymarketbot-test/releases/polytest-polyauto-a-20261118T000000Z/.venv/bin/python /home/ec2-user/polymarketbot-test/releases/polytest-polyauto-a-20261118T000000Z/scripts/verify_setup.py
+ExecStart=
+ExecStart=/home/ec2-user/polymarketbot-test/releases/polytest-polyauto-a-20261118T000000Z/.venv/bin/python -m bot.live_worker --live --asset BTC
+Restart=on-failure
+RestartSec=5
+KillMode=control-group
+TimeoutStopSec=30

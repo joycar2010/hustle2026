@@ -1,0 +1,92 @@
+{
+  "backup_note": "261119testbtc5m新版",
+  "source_server": "18.177.149.23",
+  "domain": "polytest.hustle2026.xyz",
+  "captured_at_utc": "2026-11-19T16:26:30.360361+00:00",
+  "source_releases": {
+    "dashboard": "polytest-polyauto-a-20261118T000000Z",
+    "native_btc5m": "polytest-native-btc5m-20261118T181500Z",
+    "frontend_dist": "polytest-paper-label-20261119T130200Z"
+  },
+  "excluded": [
+    ".env*",
+    "*.env",
+    "env",
+    "*.db*",
+    "*.sqlite*",
+    "*.wal",
+    "*.shm",
+    "logs",
+    ".venv",
+    "node_modules",
+    "__pycache__",
+    "*.pyc"
+  ],
+  "files": [
+    {
+      "path": ".gitattributes",
+      "bytes": 8,
+      "sha256": "705fd4d6451a31d36b3df7de96f83f30ac976c9b4a6d1e51671d8e2f33e2d0da"
+    },
+    {
+      "path": "backend/dashboard-source.tar.gz",
+      "bytes": 3893856,
+      "sha256": "4e993c3128cb62f339a5b85736c157cedb4c2bb01d61a6b5205ab38f70cdbfe6"
+    },
+    {
+      "path": "backend/native-btc5m-source.tar.gz",
+      "bytes": 118813,
+      "sha256": "c9a58aad9a841cf151eaac4889ff11e27c451c766857a990e3064d33a34af33e"
+    },
+    {
+      "path": "config/nginx-polytest.conf",
+      "bytes": 1815,
+      "sha256": "9957faee1bde8736d883e900aad2e1628c3ed2da5713af3a74b77787f08a3127"
+    },
+    {
+      "path": "config/systemd/file-list.txt",
+      "bytes": 4769,
+      "sha256": "eb1148092e5504061ef393995a4e216043f327b62653e582563e026eb0b63cec"
+    },
+    {
+      "path": "config/systemd/polymarket-auto-dashboard.service.txt",
+      "bytes": 378,
+      "sha256": "effc169c57deb17716feebc7f81b61971fb815a1b8b575048e52f449eca4f2f3"
+    },
+    {
+      "path": "config/systemd/polymarket-test-btc-live.service.txt",
+      "bytes": 12480,
+      "sha256": "7d88cb82edc675759d2b3d2d3b256a3dccea86d86f3f7b698a205f676068cac2"
+    },
+    {
+      "path": "config/systemd/polymarket-test-btc-native-bridge.service.txt",
+      "bytes": 923,
+      "sha256": "f5f9740d9167f75d391bd09592d91879e13427be81c3e456b1655c285db5bad7"
+    },
+    {
+      "path": "config/systemd/polymarket-test-btc-paper.service.txt",
+      "bytes": 3731,
+      "sha256": "c633815d3b6818cd071b84b69a4bc2bd04c6abbcb9d62cc92ca8c2f34d56ed14"
+    },
+    {
+      "path": "config/systemd/polymarket-test-dashboard.service.txt",
+      "bytes": 30019,
+      "sha256": "2174fb31cb0927ea94f4567b49203648b81f06129bacebd6ca7d69a79ca302f7"
+    },
+    {
+      "path": "frontend/polytest-paper-label-20261119T130200Z-dist.tar.gz",
+      "bytes": 6988639,
+      "sha256": "e3144897571749451cb094e4386949468fed6cfba337479bf53e673c9976f6e2"
+    },
+    {
+      "path": "frontend/ui-source-polytest-polyauto-a-20261118T000000Z.tar.gz",
+      "bytes": 333090,
+      "sha256": "192680434cc8dde493f0586b20e7e6409502c7639a9508e66759775ad4c0013f"
+    },
+    {
+      "path": "README.md",
+      "bytes": 1715,
+      "sha256": "32764053cad51a6b234771b6961a211b186571a5bd6af4133f8e0c3643f9e141"
+    }
+  ]
+}

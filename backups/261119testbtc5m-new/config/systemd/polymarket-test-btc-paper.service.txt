@@ -1,0 +1,78 @@
+# /etc/systemd/system/polymarket-test-btc-paper.service
+[Unit]
+Description=polytest 85056d2 btc-paper (isolated Paper)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ec2-user
+WorkingDirectory=/home/ec2-user/polymarketbot-test/releases/85056d2-20261025
+EnvironmentFile=/home/ec2-user/polymarketbot-test/releases/85056d2-20261025/.env
+Environment=PYTHONPATH=/home/ec2-user/polymarketbot-test/releases/85056d2-20261025
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/bash /home/ec2-user/polymarketbot-test/releases/85056d2-20261025/scripts/run_paper_asset.sh BTC
+Restart=on-failure
+RestartSec=10
+UMask=0077
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target
+
+# /etc/systemd/system/polymarket-test-btc-paper.service.d/zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz-polyauto-a-final.conf
+[Service]
+WorkingDirectory=/home/ec2-user/polymarketbot-test/releases/polytest-polyauto-a-20261118T000000Z
+EnvironmentFile=
+EnvironmentFile=/home/ec2-user/polymarketbot-test/releases/polytest-polyauto-a-20261118T000000Z/.env
+Environment=PYTHONPATH=/home/ec2-user/polymarketbot-test/releases/polytest-polyauto-a-20261118T000000Z
+Environment=PYTHONUNBUFFERED=1
+Environment=BTC_LIVE_ENABLED=false
+ExecStartPre=
+ExecStart=
+ExecStart=/home/ec2-user/polymarketbot-test/releases/polytest-polyauto-a-20261118T000000Z/scripts/run_paper_a.sh
+Restart=on-failure
+RestartSec=5
+KillMode=control-group
+TimeoutStopSec=30
+
+# /etc/systemd/system/polymarket-test-btc-paper.service.d/zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz-native-btc5m.conf
+[Service]
+WorkingDirectory=/home/ec2-user/polymarketbot-test/releases/polytest-native-btc5m-20261118T181500Z
+EnvironmentFile=
+EnvironmentFile=/home/ec2-user/polymarketbot-test/releases/polytest-native-btc5m-20261118T181500Z/.env
+Environment=PYTHONPATH=/home/ec2-user/polymarketbot-test/releases/polytest-native-btc5m-20261118T181500Z
+Environment=DATA_DIR=/home/ec2-user/polymarketbot-test/state/paper-native-a/data
+Environment=LIVE_TRADING_ENABLED=false
+Environment=PYTHONUNBUFFERED=1
+ExecStartPre=
+ExecStart=
+ExecStart=/usr/bin/bash /home/ec2-user/polymarketbot-test/releases/polytest-native-btc5m-20261118T181500Z/scripts/run_native_polytest_paper.sh
+ExecStopPost=/usr/bin/rm -f /home/ec2-user/polymarketbot-test/releases/polytest-polyauto-a-20261118T000000Z/bot_btc.pid
+Restart=on-failure
+RestartSec=5
+KillMode=control-group
+TimeoutStopSec=30
+
+# /etc/systemd/system/polymarket-test-btc-paper.service.d/zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz-poly-a-effective.conf
+[Service]
+EnvironmentFile=/home/ec2-user/polymarketbot-test/releases/polytest-polyauto-a-20261118T000000Z/.env.poly-a
+Environment=BTC_LIVE_ENABLED=false
+
+# /etc/systemd/system/polymarket-test-btc-paper.service.d/zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz-native-btc5m-final.conf
+[Service]
+WorkingDirectory=/home/ec2-user/polymarketbot-test/releases/polytest-native-btc5m-20261118T181500Z
+EnvironmentFile=
+EnvironmentFile=/home/ec2-user/polymarketbot-test/releases/polytest-native-btc5m-20261118T181500Z/.env
+Environment=PYTHONPATH=/home/ec2-user/polymarketbot-test/releases/polytest-native-btc5m-20261118T181500Z
+Environment=DATA_DIR=/home/ec2-user/polymarketbot-test/state/paper-native-a/data
+Environment=LIVE_TRADING_ENABLED=false
+Environment=PYTHONUNBUFFERED=1
+ExecStartPre=
+ExecStart=
+ExecStart=/usr/bin/bash /home/ec2-user/polymarketbot-test/releases/polytest-native-btc5m-20261118T181500Z/scripts/run_native_polytest_paper.sh
+ExecStopPost=/usr/bin/rm -f /home/ec2-user/polymarketbot-test/releases/polytest-polyauto-a-20261118T000000Z/bot_btc.pid
+Restart=on-failure
+RestartSec=5
+KillMode=control-group
+TimeoutStopSec=30
