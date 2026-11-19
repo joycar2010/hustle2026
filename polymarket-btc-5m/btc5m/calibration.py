@@ -16,6 +16,10 @@ BUCKETS = (
     (0.95, 1.01),
 )
 
+# P0 manual ban: live A [0.80,0.85) WR≈57% vs ~85% BE (n=7, −$18).
+# Remains banned even before min_samples / if MAX_ENTRY is later raised.
+FORCE_BAN_BUCKETS = frozenset({(0.80, 0.85)})
+
 
 @dataclass(frozen=True)
 class BucketStats:
@@ -92,7 +96,13 @@ def load_bucket_stats(
         req = required_wr_for_price(mid, fee_rate=fee_rate, buffer=wr_buffer)
         banned = False
         reason = ""
-        if n >= min_samples and wr + 1e-12 < req:
+        if (lo, hi) in FORCE_BAN_BUCKETS:
+            banned = True
+            reason = (
+                f"bucket[{lo:.2f},{hi:.2f}) force-banned (P0 toxic band; "
+                f"WR={wr:.1%} n={n} required {req:.1%})"
+            )
+        elif n >= min_samples and wr + 1e-12 < req:
             banned = True
             reason = f"bucket[{lo:.2f},{hi:.2f}) WR={wr:.1%} < required {req:.1%} (n={n})"
         out.append(

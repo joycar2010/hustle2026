@@ -50,6 +50,74 @@ def test_bucket_ban_when_wr_below_required(tmp_path: Path):
     assert bucket_ban_reason(0.95, db, min_samples=8)
 
 
+def test_p0_force_ban_080_085_even_with_few_samples(tmp_path: Path):
+    """[0.80,0.85) is hard-banned (P0) even before min_samples fuse."""
+    db = tmp_path / "paper.db"
+    conn = sqlite3.connect(db)
+    conn.execute(
+        """
+        CREATE TABLE positions (
+          id INTEGER PRIMARY KEY,
+          status TEXT,
+          entry_price REAL,
+          closed_ts REAL,
+          pnl_usd REAL,
+          pnl_net_usd REAL
+        )
+        """
+    )
+    now = time.time()
+    # Only 2 samples — below min_samples=5 — still force-banned
+    for i, net in enumerate((1.5, -8.2)):
+        conn.execute(
+            "INSERT INTO positions VALUES (?,?,?,?,?,?)",
+            (i + 1, "closed", 0.82, now, net, net),
+        )
+    conn.commit()
+    conn.close()
+    stats = load_bucket_stats(db, min_samples=5)
+    band = next(s for s in stats if s.lo == 0.80 and s.hi == 0.85)
+    assert band.banned
+    assert "force-banned" in band.reason
+    assert bucket_ban_reason(0.82, db, min_samples=5)
+
+
+def test_p0_faster_fuse_bans_at_five_samples(tmp_path: Path):
+    db = tmp_path / "paper.db"
+    conn = sqlite3.connect(db)
+    conn.execute(
+        """
+        CREATE TABLE positions (
+          id INTEGER PRIMARY KEY,
+          status TEXT,
+          entry_price REAL,
+          closed_ts REAL,
+          pnl_usd REAL,
+          pnl_net_usd REAL
+        )
+        """
+    )
+    now = time.time()
+    # [0.85,0.90): 2 wins / 3 losses → WR 40% << required (~90%)
+    for i in range(5):
+        net = 1.0 if i < 2 else -8.5
+        conn.execute(
+            "INSERT INTO positions VALUES (?,?,?,?,?,?)",
+            (i + 1, "closed", 0.87, now, net, net),
+        )
+    conn.commit()
+    conn.close()
+    stats = load_bucket_stats(db, min_samples=5, wr_buffer=0.03)
+    band = next(s for s in stats if s.lo == 0.85 and s.hi == 0.90)
+    assert band.n == 5
+    assert band.banned
+    # With old min_samples=8 this would NOT ban
+    stats_slow = load_bucket_stats(db, min_samples=8, wr_buffer=0.03)
+    band_slow = next(s for s in stats_slow if s.lo == 0.85 and s.hi == 0.90)
+    assert not band_slow.banned
+
+
+
 def test_heartbeat_stale_alert(tmp_path: Path):
     write_heartbeat(tmp_path, mode="maker", market_slug="x", detail="ok")
     hb = read_heartbeat(tmp_path, "maker")

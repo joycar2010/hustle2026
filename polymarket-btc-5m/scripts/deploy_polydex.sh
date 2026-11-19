@@ -30,8 +30,12 @@ from pathlib import Path
 p = Path(".env")
 text = p.read_text() if p.exists() else ""
 updates = {
-    "MAX_ENTRY_PRICE": "0.88",
+    "MAX_ENTRY_PRICE": "0.79",
     "LATE_EDGE_HARD_BAN_PRICE": "0.90",
+    "LATE_EDGE_EDGE_SAFETY": "1.5",
+    "LEAD_EDGE_MARGIN": "0.05",
+    "BUCKET_MIN_SAMPLES": "5",
+    "BUCKET_WR_BUFFER": "0.03",
     "MIN_NET_EDGE": "0.08",
     "CONFIRM_CHECKS": "3",
     "UP_MIN_DELTA_USD": "25",
