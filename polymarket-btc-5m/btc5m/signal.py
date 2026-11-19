@@ -233,10 +233,19 @@ def _side_from_delta(delta: float, cfg: Config) -> str:
     return "FLAT"
 
 
-def _side_from_lead_bp(lead: float, *, min_bp: float) -> str:
-    if lead >= min_bp:
+def _side_from_lead_bp(
+    lead: float,
+    *,
+    min_bp: float,
+    up_min_bp: float | None = None,
+    down_min_bp: float | None = None,
+) -> str:
+    """P1 asymmetric lead: UP can fire earlier; DOWN needs a larger move."""
+    up_need = float(up_min_bp if up_min_bp is not None else min_bp)
+    down_need = float(down_min_bp if down_min_bp is not None else min_bp)
+    if lead >= up_need:
         return "UP"
-    if lead <= -min_bp:
+    if lead <= -down_need:
         return "DOWN"
     return "FLAT"
 
@@ -279,7 +288,14 @@ def fetch_asset_signal(cfg: Config, market: LiveMarket) -> BtcSignal:
         proj.projected_close - beat if proj.in_final_minute else delta
     )
     lookup = hold_win_rate(elapsed_sec=elapsed, lead_bp=decision_lead)
-    decision_side = _side_from_lead_bp(decision_lead, min_bp=cfg.lead_min_bp)
+    up_bp = float(getattr(cfg, "up_lead_min_bp", cfg.lead_min_bp) or cfg.lead_min_bp)
+    down_bp = float(getattr(cfg, "down_lead_min_bp", cfg.lead_min_bp) or cfg.lead_min_bp)
+    decision_side = _side_from_lead_bp(
+        decision_lead,
+        min_bp=cfg.lead_min_bp,
+        up_min_bp=up_bp,
+        down_min_bp=down_bp,
+    )
     if decision_side == "FLAT":
         decision_side = _side_from_delta(decision_delta, cfg)
 

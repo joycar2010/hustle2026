@@ -56,9 +56,14 @@ class Config:
     min_t_remaining_sec: float
     min_entry_price: float
     max_entry_price: float
+    # P1: gap phase tighter than late; high-ask edge / confirm
+    opening_gap_max_entry_price: float
+    high_ask_threshold: float
     min_net_edge: float
+    min_net_edge_high: float
     taker_fee_rate: float
     confirm_checks: int
+    confirm_checks_high: int
     poll_interval_sec: float
 
     delta_filter_enabled: bool
@@ -68,16 +73,22 @@ class Config:
     signal_require_consensus: bool
     signal_min_venues: int
 
-    # P3 lead / TWAP
+    # P3 lead / TWAP (+ P1/P2 asymmetric)
     lead_table_enabled: bool
     lead_edge_margin: float
+    lead_edge_margin_down: float  # DOWN uses max(margin, this)
     lead_min_bp: float
+    up_lead_min_bp: float
+    down_lead_min_bp: float
     opening_gap_enabled: bool
     opening_gap_window_sec: float
     opening_gap_min_bp: float
 
     order_shares: float
     max_order_usd: float
+    # P2: size ∝ (1-ask)/(1-ref) so a high ask cannot erase many cheap wins
+    size_scale_enabled: bool
+    size_scale_ref_ask: float
     daily_loss_limit_usd: float
     max_open_positions: int
     paper_bankroll_usd: float
@@ -175,24 +186,34 @@ def load(*, series: str | None = None) -> Config:
         min_entry_price=_float("MIN_ENTRY_PRICE", 0.75),
         # P0 A: cut toxic [0.80,0.85) band (live WR≪breakeven)
         max_entry_price=_float("MAX_ENTRY_PRICE", 0.79),
+        opening_gap_max_entry_price=_float("OPENING_GAP_MAX_ENTRY_PRICE", 0.78),
+        high_ask_threshold=_float("HIGH_ASK_THRESHOLD", 0.80),
         min_net_edge=_float("MIN_NET_EDGE", 0.08),
+        min_net_edge_high=_float("MIN_NET_EDGE_HIGH", 0.12),
         taker_fee_rate=_float("TAKER_FEE_RATE", 0.07),
         confirm_checks=max(_int("CONFIRM_CHECKS", 3), 1),
+        confirm_checks_high=max(_int("CONFIRM_CHECKS_HIGH", 5), 1),
         poll_interval_sec=max(_float("POLL_INTERVAL_SEC", 1.0), 0.2),
         delta_filter_enabled=_bool("DELTA_FILTER_ENABLED", True),
-        up_min_delta_usd=_float("UP_MIN_DELTA_USD", 25.0),
-        down_max_delta_usd=_float("DOWN_MAX_DELTA_USD", -25.0),
+        # P1 asymmetric Δ: slightly easier UP, stricter DOWN
+        up_min_delta_usd=_float("UP_MIN_DELTA_USD", 20.0),
+        down_max_delta_usd=_float("DOWN_MAX_DELTA_USD", -30.0),
         price_hosts=os.getenv("PRICE_HOSTS", "okx,coinbase,kraken"),
         signal_require_consensus=_bool("SIGNAL_REQUIRE_CONSENSUS", True),
         signal_min_venues=max(_int("SIGNAL_MIN_VENUES", 2), 1),
         lead_table_enabled=_bool("LEAD_TABLE_ENABLED", True),
         lead_edge_margin=_float("LEAD_EDGE_MARGIN", 0.05),
+        lead_edge_margin_down=_float("LEAD_EDGE_MARGIN_DOWN", 0.07),
         lead_min_bp=_float("LEAD_MIN_BP", 2.0),
+        up_lead_min_bp=_float("UP_LEAD_MIN_BP", 1.5),
+        down_lead_min_bp=_float("DOWN_LEAD_MIN_BP", 3.0),
         opening_gap_enabled=_bool("OPENING_GAP_ENABLED", True),
         opening_gap_window_sec=_float("OPENING_GAP_WINDOW_SEC", 60.0),
         opening_gap_min_bp=_float("OPENING_GAP_MIN_BP", 5.0),
         order_shares=max(_float("ORDER_SHARES", 10.0), 5.0),
         max_order_usd=_float("MAX_ORDER_USD", 15.0),
+        size_scale_enabled=_bool("SIZE_SCALE_ENABLED", True),
+        size_scale_ref_ask=_float("SIZE_SCALE_REF_ASK", 0.75),
         daily_loss_limit_usd=_float("DAILY_LOSS_LIMIT_USD", 40.0),
         max_open_positions=max(_int("MAX_OPEN_POSITIONS", 1), 1),
         paper_bankroll_usd=_float("PAPER_BANKROLL_USD", 200.0),

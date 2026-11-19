@@ -1,4 +1,4 @@
-"""Late-window + opening-gap fee-aware edge strategy for BTC 5m Up/Down."""
+"""Late-window + opening-gap fee-aware edge strategy for crypto Up/Down."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -73,6 +73,61 @@ def _phase(cfg: Config, market: LiveMarket) -> Optional[str]:
     return None
 
 
+def _phase_max_entry(cfg: Config, phase: str) -> float:
+    """P1: opening-gap uses a tighter cap than late."""
+    late_cap = float(cfg.max_entry_price)
+    if phase != "opening_gap":
+        return late_cap
+    gap_cap = float(getattr(cfg, "opening_gap_max_entry_price", late_cap) or late_cap)
+    return min(late_cap, gap_cap)
+
+
+def _min_edge_for_ask(cfg: Config, ask: float) -> float:
+    """P1: require more residual edge once ask crosses high_ask_threshold."""
+    base = float(cfg.min_net_edge)
+    high_thr = float(getattr(cfg, "high_ask_threshold", 0.80) or 0.80)
+    high_edge = float(getattr(cfg, "min_net_edge_high", base) or base)
+    if ask + 1e-12 >= high_thr:
+        return max(base, high_edge)
+    return base
+
+
+def _confirm_needed(cfg: Config, ask: float) -> int:
+    """P1: more confirms on high asks (flash spikes)."""
+    base = int(cfg.confirm_checks)
+    high_thr = float(getattr(cfg, "high_ask_threshold", 0.80) or 0.80)
+    high = int(getattr(cfg, "confirm_checks_high", base) or base)
+    if ask + 1e-12 >= high_thr:
+        return max(base, high)
+    return base
+
+
+def _hold_margin(cfg: Config, side: str) -> float:
+    """P2: DOWN uses a stricter hold-table margin (live A was DOWN-heavy)."""
+    base = float(cfg.lead_edge_margin)
+    if side == "DOWN":
+        down = float(getattr(cfg, "lead_edge_margin_down", base) or base)
+        return max(base, down)
+    return base
+
+
+def _scaled_size(cfg: Config, ask: float, min_size: float) -> float:
+    """P2: size ∝ (1-ask)/(1-ref); never below exchange min when base fits."""
+    base = float(cfg.order_shares)
+    if not bool(getattr(cfg, "size_scale_enabled", False)):
+        return base
+    ref = float(getattr(cfg, "size_scale_ref_ask", 0.75) or 0.75)
+    ref = min(max(ref, 0.50), 0.90)
+    numer = max(1.0 - ask, 0.01)
+    denom = max(1.0 - ref, 0.01)
+    raw = base * (numer / denom)
+    # Round down to whole shares; floor at min_size only if base itself qualifies
+    size = float(int(raw))
+    if size < min_size:
+        size = float(min_size) if base >= min_size else 0.0
+    return size
+
+
 def decide(
     cfg: Config,
     market: LiveMarket,
@@ -127,10 +182,12 @@ def decide(
     if signal:
         preferred = signal.decision_side if signal.decision_side in {"UP", "DOWN"} else signal.signal_side
 
+    max_entry = _phase_max_entry(cfg, phase)
     candidates: list[tuple[str, str, float, float, float, float]] = []
     banned_high = 0
     banned_cal = 0
     rejected_hold = 0
+    rejected_phase_cap = 0
     for side, token, book in (
         ("UP", market.up_token, up_book),
         ("DOWN", market.down_token, down_book),
@@ -139,6 +196,9 @@ def decide(
         if ask is None or book.ask_size < cfg.order_shares:
             continue
         if ask < cfg.min_entry_price or ask > cfg.max_entry_price:
+            continue
+        if ask > max_entry + 1e-12:
+            rejected_phase_cap += 1
             continue
         if ask >= cfg.late_edge_hard_ban_price - 1e-12:
             banned_high += 1
@@ -158,7 +218,8 @@ def decide(
         fee = taker_fee_per_share(cfg.taker_fee_rate, ask)
         edge = 1.0 - ask - fee
         residual = max(1.0 - ask, 0.0)
-        if edge < cfg.min_net_edge:
+        need_edge = _min_edge_for_ask(cfg, ask)
+        if edge < need_edge:
             continue
         if residual > 0 and (ask + fee) > 1.0 - residual / max(cfg.late_edge_edge_safety, 1.0):
             continue
@@ -171,17 +232,18 @@ def decide(
             if side == "DOWN":
                 signed = -signed
             hold = hold_win_rate(elapsed_sec=elapsed, lead_bp=signed).hold_wr
+            margin = _hold_margin(cfg, side)
             if not is_cheap_vs_hold(
                 ask,
                 hold,
                 fee_rate=cfg.taker_fee_rate,
-                margin=cfg.lead_edge_margin,
+                margin=margin,
             ):
                 rejected_hold += 1
                 continue
             # Score by probabilistic edge rather than residual-only
             edge = edge_after_fee(
-                ask, hold, fee_rate=cfg.taker_fee_rate, margin=cfg.lead_edge_margin
+                ask, hold, fee_rate=cfg.taker_fee_rate, margin=margin
             )
 
         candidates.append((side, token, ask, fee, edge, hold))
@@ -194,6 +256,8 @@ def decide(
             extras.append(f"bucket_cal_ban x{banned_cal}")
         if rejected_hold:
             extras.append(f"hold_table_reject x{rejected_hold}")
+        if rejected_phase_cap:
+            extras.append(f"phase_cap>{max_entry:.2f}x{rejected_phase_cap}")
         extra = (" " + " ".join(extras)) if extras else ""
         return Decision(
             action="SKIP",
@@ -256,8 +320,9 @@ def decide(
                     reason=f"delta filter blocked {side}: {signal.describe()}",
                 )
 
+    need_confirms = _confirm_needed(cfg, ask)
     confirms = state.note(side, ask)
-    if confirms < cfg.confirm_checks:
+    if confirms < need_confirms:
         return Decision(
             action="SKIP",
             side=side,
@@ -266,12 +331,18 @@ def decide(
             net_edge=edge,
             phase=phase,
             reason=(
-                f"confirm {confirms}/{cfg.confirm_checks} {side}@{ask:.2f} "
+                f"confirm {confirms}/{need_confirms} {side}@{ask:.2f} "
                 f"edge={edge:.4f} hold={hold:.1%} phase={phase}"
             ),
         )
 
-    size = float(cfg.order_shares)
+    size = _scaled_size(cfg, ask, market.min_size)
+    if size < market.min_size:
+        return Decision(
+            action="SKIP",
+            phase=phase,
+            reason="size below exchange minimum after ask scaling",
+        )
     notional = size * ask
     if notional > cfg.max_order_usd:
         size = max(cfg.max_order_usd / ask, market.min_size)

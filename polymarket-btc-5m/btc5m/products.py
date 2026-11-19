@@ -79,16 +79,22 @@ ETH_5M = ProductProfile(
     split_db_name="unused_eth_split.db",
     maker_db_name="unused_eth_maker.db",
     preferred_mode="late_edge",
-    description="ETH Up/Down 5m — paper late_edge A (scaled Δ, separate ledger)",
+    description="ETH Up/Down 5m — paper late_edge A (no BTC hold table; tighter band)",
     overlays={
         "mode": "late_edge",
         "crypto_asset": "eth",
         "late_edge_db_name": "paper_eth5m.db",
         # ~4.5 bp at ~$1770
         "up_min_delta_usd": 0.80,
-        "down_max_delta_usd": -0.80,
+        "down_max_delta_usd": -1.00,  # asymmetric: stricter DOWN
         "lead_min_bp": 2.0,
+        "up_lead_min_bp": 1.5,
+        "down_lead_min_bp": 3.0,
         "opening_gap_min_bp": 5.0,
+        # P2: do not reuse BTC hold table; Δ/bp + tight price only until ETH table exists
+        "lead_table_enabled": False,
+        "max_entry_price": 0.78,
+        "opening_gap_max_entry_price": 0.76,
     },
 )
 
@@ -103,16 +109,21 @@ SOL_5M = ProductProfile(
     split_db_name="unused_sol_split.db",
     maker_db_name="unused_sol_maker.db",
     preferred_mode="late_edge",
-    description="SOL Up/Down 5m — paper late_edge A (stricter bp, separate ledger)",
+    description="SOL Up/Down 5m — paper late_edge A (no BTC hold table; tighter band)",
     overlays={
         "mode": "late_edge",
         "crypto_asset": "sol",
         "late_edge_db_name": "paper_sol5m.db",
         # ~20 bp at ~$73 — keep absolute Δ small but lead gates stricter
-        "up_min_delta_usd": 0.15,
-        "down_max_delta_usd": -0.15,
+        "up_min_delta_usd": 0.12,
+        "down_max_delta_usd": -0.20,
         "lead_min_bp": 3.0,
+        "up_lead_min_bp": 2.5,
+        "down_lead_min_bp": 4.0,
         "opening_gap_min_bp": 8.0,
+        "lead_table_enabled": False,
+        "max_entry_price": 0.78,
+        "opening_gap_max_entry_price": 0.76,
     },
 )
 

@@ -45,6 +45,8 @@ def test_eth5m_sol5m_overlays_and_ledgers():
     assert eth.late_edge_db_name == "paper_eth5m.db"
     assert eth.mode == "late_edge"
     assert eth.up_min_delta_usd == pytest.approx(0.80)
+    assert eth.lead_table_enabled is False
+    assert eth.max_entry_price == pytest.approx(0.78)
     assert eth.market_slug_prefix == "eth-updown-5m"
 
     sol, p_sol = apply_product(cfg, "sol5m")
@@ -53,7 +55,8 @@ def test_eth5m_sol5m_overlays_and_ledgers():
     assert sol.late_edge_db_name == "paper_sol5m.db"
     assert sol.lead_min_bp == pytest.approx(3.0)
     assert sol.opening_gap_min_bp == pytest.approx(8.0)
-    assert sol.up_min_delta_usd == pytest.approx(0.15)
+    assert sol.up_min_delta_usd == pytest.approx(0.12)
+    assert sol.lead_table_enabled is False
 
 
 def test_nba_nfl_dota_soccer_enabled():
