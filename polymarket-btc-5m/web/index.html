@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Poly BTC 5m · Paper Dashboard</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">POLYMARKET · BTC 5M</p>
+        <h1>Paper 量化台</h1>
+        <p class="muted">P7.1 · A/B/C + 多品类 · 不提交实盘</p>
+      </div>
+      <div class="status"><span id="dot" class="dot"></span><span id="mode">PAPER</span><small id="updated">连接中…</small></div>
+    </header>
+
+    <section class="hero card">
+      <div>
+        <span class="label">当前市场</span>
+        <h2 id="market">加载中…</h2>
+        <p id="title" class="muted">—</p>
+      </div>
+      <div class="countdown"><span class="label">剩余时间</span><strong id="remaining">—</strong></div>
+    </section>
+
+    <section class="grid two">
+      <article class="card quote up">
+        <div class="quote-head"><h3>UP · 上涨</h3><span>最佳盘口</span></div>
+        <div class="prices">
+          <div><span>买一</span><b id="upBid">—</b></div>
+          <div><span>卖一</span><b id="upAsk">—</b></div>
+          <div><span>可卖数量</span><b id="upSize">—</b></div>
+        </div>
+      </article>
+      <article class="card quote down">
+        <div class="quote-head"><h3>DOWN · 下跌</h3><span>最佳盘口</span></div>
+        <div class="prices">
+          <div><span>买一</span><b id="downBid">—</b></div>
+          <div><span>卖一</span><b id="downAsk">—</b></div>
+          <div><span>可卖数量</span><b id="downSize">—</b></div>
+        </div>
+      </article>
+    </section>
+
+    <section class="grid four">
+      <article class="metric"><span>BTC 现价</span><strong id="spot">—</strong></article>
+      <article class="metric"><span>窗口开盘</span><strong id="beat">—</strong></article>
+      <article class="metric"><span>Delta</span><strong id="delta">—</strong></article>
+      <article class="metric"><span>信号</span><strong id="signal">—</strong></article>
+    </section>
+
+    <section class="grid two">
+      <article class="card">
+        <div class="section-head">
+          <h3>今日 Paper 统计（北京）</h3>
+          <span class="badge">A+B+C</span>
+        </div>
+        <div class="stats">
+          <div><span>今日 PnL</span><b id="pnl">$0.00</b></div>
+          <div><span>今日收益</span><b id="dailyReturn">0.00%</b></div>
+          <div><span>胜 / 负</span><b id="wl">0 / 0</b></div>
+          <div><span>已结算 / 未平</span><b id="count">0</b><small id="open">0 open</small></div>
+        </div>
+      </article>
+      <article class="card">
+        <div class="section-head"><h3>策略配置</h3><span class="badge safe">安全只读</span></div>
+        <div id="config" class="config"></div>
+      </article>
+    </section>
+
+    <section class="card">
+      <div class="section-head">
+        <h3>A / B / C Paper 对照</h3>
+        <span class="badge">北京日切 · 点击卡片看历史</span>
+      </div>
+      <div class="ab-grid three">
+        <button class="ab-cell ab-card" data-group="A" type="button">
+          <strong>A · late_edge</strong>
+          <span id="abAMode">late_edge</span>
+          <b id="abAPnl">$0.00</b>
+          <small id="abAReturn">0.00%</small>
+          <small id="abAStats">等待 A 账本</small>
+        </button>
+        <button class="ab-cell ab-card" data-group="B" type="button">
+          <strong>B · maker</strong>
+          <span id="abBMode">maker</span>
+          <b id="abBPnl">$0.00</b>
+          <small id="abBReturn">0.00%</small>
+          <small id="abBStats">等待 B 账本</small>
+        </button>
+        <button class="ab-cell candidate ab-card" data-group="C" type="button">
+          <strong>C · split_sell</strong>
+          <span id="abCMode">split_sell</span>
+          <b id="abCPnl">$0.00</b>
+          <small id="abCReturn">0.00%</small>
+          <small id="abCStats">等待 C 账本</small>
+        </button>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="section-head">
+        <h3>新品类 Paper 滚动</h3>
+        <span class="badge">BTC 15m · ATP · CS · Paper only</span>
+      </div>
+      <div id="productCards" class="product-grid">
+        <div class="muted">Waiting for product status...</div>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="section-head">
+        <h3>最近决策</h3>
+        <button id="refresh" type="button">立即刷新</button>
+      </div>
+      <div id="errors" class="notice hidden"></div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>时间</th><th>类型</th><th>市场</th><th>详情</th></tr></thead>
+          <tbody id="events"><tr><td colspan="4" class="muted">加载中…</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+
+    <footer>数据来自 PR #2 Paper SQLite journal 与公开行情 · <span id="source">—</span></footer>
+  </main>
+
+  <div id="historyModal" class="modal hidden" role="dialog" aria-modal="true">
+    <div class="modal-panel">
+      <div class="section-head">
+        <h3 id="historyTitle">Daily Paper history</h3>
+        <button id="closeHistory" type="button">Close</button>
+      </div>
+      <p id="historyMeta" class="muted"></p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>北京日期</th><th>Net PnL</th><th>Return</th><th>Wins / losses</th><th>Settled</th></tr></thead>
+          <tbody id="historyRows"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

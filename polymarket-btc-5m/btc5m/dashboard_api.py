@@ -1,0 +1,851 @@
+"""Read-only Paper dashboard API with A/B/C ledger separation + P7 products.
+
+A = late_edge paper.db
+B = maker maker_paper.db
+C = split_sell split_sell_paper.db
+Products = BTC15 / ATP / CS / scaffolds (P7.1 status labels)
+"""
+from __future__ import annotations
+
+import json
+import sqlite3
+import time
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from typing import Any, Optional
+
+from fastapi import FastAPI, Query
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
+
+from btc5m.audit import (
+    fill_quality_report,
+    late_edge_activity_report,
+    maker_pair_residual_report,
+    maker_session_activity_report,
+    split_edge_attribution_report,
+)
+from btc5m.book import fetch_book
+from btc5m.calibration import load_bucket_stats
+from btc5m.config import ROOT, load
+from btc5m.heartbeat import status_report
+from btc5m.markets import fetch_live_market
+from btc5m.products import list_products
+from btc5m.signal import fetch_btc_signal
+
+# Product keys with dedicated ledgers (resolve BEFORE A/B/C fallback)
+_PRODUCT_GROUPS = frozenset(
+    {
+        "atp",
+        "cs",
+        "nba",
+        "nfl",
+        "dota",
+        "soccer_unl",
+        "btc15m",
+        "btc5m",
+        "eth5m",
+        "sol5m",
+    }
+)
+_LATE_EDGE_PRODUCTS = frozenset({"eth5m", "sol5m"})
+_MAKER_PRODUCT_KEYS = frozenset(
+    {
+        "B",
+        "C",
+        "atp",
+        "cs",
+        "nba",
+        "nfl",
+        "dota",
+        "soccer_unl",
+        "btc15m",
+        "btc5m",
+    }
+)
+_SLUG_PREFIX = {
+    "eth5m": "eth-updown",
+    "sol5m": "sol-updown",
+    "btc5m": "btc-updown-5m",
+    "btc15m": "btc-updown-15m",
+}
+
+app = FastAPI(title="Poly BTC 5m Paper Dashboard", docs_url=None, redoc_url=None)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+WEB_DIR = ROOT / "web"
+if WEB_DIR.exists():
+    app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
+
+_BJ = timezone(timedelta(hours=8))
+
+
+def _beijing_day_key(ts: Optional[float] = None) -> str:
+    dt = datetime.fromtimestamp(ts if ts is not None else time.time(), tz=_BJ)
+    return dt.strftime("%Y-%m-%d")
+
+
+def _beijing_day_bounds(day_key: Optional[str] = None) -> tuple[str, float, float]:
+    key = day_key or _beijing_day_key()
+    start = datetime.strptime(key, "%Y-%m-%d").replace(tzinfo=_BJ)
+    end = start + timedelta(days=1)
+    return key, start.timestamp(), end.timestamp()
+
+
+def _db_path(group: str) -> Path:
+    cfg = load()
+    g = group.upper()
+    if g == "B":
+        return cfg.data_dir / "maker_paper.db"
+    if g == "C":
+        return cfg.data_dir / "split_sell_paper.db"
+    return cfg.data_dir / "paper.db"
+
+
+def _resolve_group_db(group: str) -> tuple[str, Path]:
+    """Map API group → (canonical key, db path). Product keys win over A/B/C."""
+    raw = (group or "A").strip()
+    gl = raw.lower()
+    if gl in _PRODUCT_GROUPS:
+        return gl, _product_db_path(gl)
+    gu = raw.upper()
+    if gu in {"A", "B", "C"}:
+        return gu, _db_path(gu)
+    return "A", _db_path("A")
+
+
+def _filter_slug_prefix(items: list[dict[str, Any]], group: str) -> list[dict[str, Any]]:
+    prefix = _SLUG_PREFIX.get(group.lower())
+    if not prefix or not items:
+        return items
+    out = []
+    for row in items:
+        slug = str(row.get("market_slug") or "")
+        if slug.startswith(prefix):
+            out.append(row)
+    return out
+
+
+def _product_db_path(product_key: str) -> Path:
+    cfg = load()
+    key = product_key.lower()
+    if key == "btc5m":
+        return cfg.data_dir / "split_sell_paper.db"
+    if key == "btc15m":
+        return cfg.data_dir / "split_sell_15m_paper.db"
+    if key == "eth5m":
+        return cfg.data_dir / "paper_eth5m.db"
+    if key == "sol5m":
+        return cfg.data_dir / "paper_sol5m.db"
+    if key in {"atp", "cs", "nba", "nfl", "dota", "soccer_unl"}:
+        return cfg.data_dir / f"sports_mm_{key}_paper.db"
+    return cfg.data_dir / f"{key}_paper.db"
+
+
+def _connect(path: Path) -> Optional[sqlite3.Connection]:
+    if not path.exists():
+        return None
+    conn = sqlite3.connect(path)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
+    row = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)
+    ).fetchone()
+    return row is not None
+
+
+def _daily_from_maker(conn: sqlite3.Connection, start: float, end: float) -> dict[str, Any]:
+    row = conn.execute(
+        """
+        SELECT COUNT(*) AS settled,
+               COALESCE(SUM(net_pnl_usd), 0) AS net,
+               COALESCE(SUM(gross_pnl_usd), 0) AS gross,
+               COALESCE(SUM(fee_usd), 0) AS fees,
+               COALESCE(SUM(rebate_est_usd), 0) AS rebates,
+               SUM(CASE WHEN net_pnl_usd > 0 THEN 1 ELSE 0 END) AS wins,
+               SUM(CASE WHEN net_pnl_usd < 0 THEN 1 ELSE 0 END) AS losses
+        FROM maker_sessions
+        WHERE status='closed' AND closed_ts >= ? AND closed_ts < ?
+        """,
+        (start, end),
+    ).fetchone()
+    return {
+        "settled": int(row["settled"] or 0),
+        "pnl_usd": float(row["net"] or 0),
+        "gross_pnl_usd": float(row["gross"] or 0),
+        "fees_usd": float(row["fees"] or 0),
+        "rebate_usd": float(row["rebates"] or 0),
+        "wins": int(row["wins"] or 0),
+        "losses": int(row["losses"] or 0),
+    }
+
+
+def _daily_from_positions(conn: sqlite3.Connection, start: float, end: float) -> dict[str, Any]:
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(positions)")}
+    net_expr = "COALESCE(pnl_net_usd, pnl_usd)" if "pnl_net_usd" in cols else "pnl_usd"
+    fee_expr = "COALESCE(fee_usd, 0)" if "fee_usd" in cols else "0"
+    row = conn.execute(
+        f"""
+        SELECT COUNT(*) AS settled,
+               COALESCE(SUM({net_expr}), 0) AS net,
+               COALESCE(SUM(pnl_usd), 0) AS gross,
+               COALESCE(SUM({fee_expr}), 0) AS fees,
+               SUM(CASE WHEN {net_expr} > 0 THEN 1 ELSE 0 END) AS wins,
+               SUM(CASE WHEN {net_expr} < 0 THEN 1 ELSE 0 END) AS losses
+        FROM positions
+        WHERE status='closed' AND closed_ts >= ? AND closed_ts < ?
+        """,
+        (start, end),
+    ).fetchone()
+    return {
+        "settled": int(row["settled"] or 0),
+        "pnl_usd": float(row["net"] or 0),
+        "gross_pnl_usd": float(row["gross"] or 0),
+        "fees_usd": float(row["fees"] or 0),
+        "rebate_usd": 0.0,
+        "wins": int(row["wins"] or 0),
+        "losses": int(row["losses"] or 0),
+    }
+
+
+def _daily_bundle(path: Path, *, is_maker: bool, bankroll: float, history_days: int = 7) -> dict[str, Any]:
+    today_key, _, _ = _beijing_day_bounds()
+    history: list[dict[str, Any]] = []
+    conn = _connect(path)
+    if conn is None:
+        empty = {
+            "day_key": today_key,
+            "pnl_usd": 0.0,
+            "gross_pnl_usd": 0.0,
+            "fees_usd": 0.0,
+            "rebate_usd": 0.0,
+            "settled": 0,
+            "wins": 0,
+            "losses": 0,
+            "return_pct": 0.0,
+            "history": [],
+        }
+        return empty
+    try:
+        for i in range(history_days):
+            day = datetime.now(_BJ).date() - timedelta(days=i)
+            key = day.strftime("%Y-%m-%d")
+            _, start, end = _beijing_day_bounds(key)
+            if is_maker and _table_exists(conn, "maker_sessions"):
+                d = _daily_from_maker(conn, start, end)
+            elif _table_exists(conn, "positions"):
+                d = _daily_from_positions(conn, start, end)
+            else:
+                d = {
+                    "settled": 0,
+                    "pnl_usd": 0.0,
+                    "gross_pnl_usd": 0.0,
+                    "fees_usd": 0.0,
+                    "rebate_usd": 0.0,
+                    "wins": 0,
+                    "losses": 0,
+                }
+            d["day_key"] = key
+            d["return_pct"] = (d["pnl_usd"] / bankroll * 100.0) if bankroll else 0.0
+            history.append(d)
+    finally:
+        conn.close()
+    today = history[0] if history else {
+        "day_key": today_key,
+        "pnl_usd": 0.0,
+        "return_pct": 0.0,
+        "settled": 0,
+        "wins": 0,
+        "losses": 0,
+        "gross_pnl_usd": 0.0,
+        "fees_usd": 0.0,
+        "rebate_usd": 0.0,
+    }
+    return {**today, "history": history}
+
+
+def _summarize_group(group: str) -> dict[str, Any]:
+    path = _db_path(group)
+    cfg = load()
+    meta = {
+        "A": {"label": "A · late_edge", "version": "p5", "mode": "late_edge"},
+        "B": {"label": "B · maker", "version": "p5b", "mode": "maker"},
+        "C": {"label": "C · split_sell", "version": "p7.1", "mode": "split_sell"},
+    }[group.upper()]
+    out: dict[str, Any] = {
+        **meta,
+        "db_exists": path.exists(),
+        "db_path": str(path),
+        "positions": 0,
+        "open_positions": 0,
+        "pnl_usd": 0.0,
+        "gross_pnl_usd": 0.0,
+        "fees_usd": 0.0,
+        "rebate_usd": 0.0,
+        "wins": 0,
+        "losses": 0,
+        "last_update_ts": None,
+        "filled_sessions": 0,
+        "empty_closed_sessions": 0,
+        "flats": 0,
+    }
+    is_maker = group.upper() in {"B", "C"}
+    conn = _connect(path)
+    if conn is None:
+        daily = _daily_bundle(path, is_maker=is_maker, bankroll=cfg.paper_bankroll_usd)
+        out["daily"] = daily
+        out["daily_pnl_usd"] = daily["pnl_usd"]
+        out["daily_return_pct"] = daily["return_pct"]
+        out["daily_day_key"] = daily["day_key"]
+        return out
+    try:
+        if is_maker and _table_exists(conn, "maker_sessions"):
+            row = conn.execute(
+                """
+                SELECT COUNT(*) AS n,
+                       SUM(CASE WHEN status='open' THEN 1 ELSE 0 END) AS open_n,
+                       COALESCE(SUM(CASE WHEN status='closed' THEN net_pnl_usd END), 0) AS net,
+                       COALESCE(SUM(CASE WHEN status='closed' THEN gross_pnl_usd END), 0) AS gross,
+                       COALESCE(SUM(CASE WHEN status='closed' THEN fee_usd END), 0) AS fees,
+                       COALESCE(SUM(CASE WHEN status='closed' THEN rebate_est_usd END), 0) AS rebates,
+                       SUM(CASE WHEN status='closed' AND net_pnl_usd > 0 THEN 1 ELSE 0 END) AS wins,
+                       SUM(CASE WHEN status='closed' AND net_pnl_usd < 0 THEN 1 ELSE 0 END) AS losses,
+                       MAX(COALESCE(closed_ts, opened_ts)) AS last_ts
+                FROM maker_sessions
+                """
+            ).fetchone()
+            activity = maker_session_activity_report(path)
+            out.update(
+                {
+                    "positions": int(row["n"] or 0),
+                    "open_positions": int(row["open_n"] or 0),
+                    "pnl_usd": float(row["net"] or 0),
+                    "gross_pnl_usd": float(row["gross"] or 0),
+                    "fees_usd": float(row["fees"] or 0),
+                    "rebate_usd": float(row["rebates"] or 0),
+                    "wins": int(activity.get("wins") or row["wins"] or 0),
+                    "losses": int(activity.get("losses") or row["losses"] or 0),
+                    "flats": int(activity.get("flats") or 0),
+                    "filled_sessions": int(activity.get("filled_sessions") or 0),
+                    "empty_closed_sessions": int(activity.get("empty_closed_sessions") or 0),
+                    "last_update_ts": row["last_ts"],
+                }
+            )
+        elif _table_exists(conn, "positions"):
+            cols = {r[1] for r in conn.execute("PRAGMA table_info(positions)")}
+            net_expr = (
+                "COALESCE(pnl_net_usd, pnl_usd)" if "pnl_net_usd" in cols else "pnl_usd"
+            )
+            fee_expr = "COALESCE(fee_usd, 0)" if "fee_usd" in cols else "0"
+            row = conn.execute(
+                f"""
+                SELECT COUNT(*) AS n,
+                       SUM(CASE WHEN status='open' THEN 1 ELSE 0 END) AS open_n,
+                       COALESCE(SUM(CASE WHEN status='closed' THEN {net_expr} END), 0) AS net,
+                       COALESCE(SUM(CASE WHEN status='closed' THEN pnl_usd END), 0) AS gross,
+                       COALESCE(SUM(CASE WHEN status='closed' THEN {fee_expr} END), 0) AS fees,
+                       SUM(CASE WHEN status='closed' AND {net_expr} > 0 THEN 1 ELSE 0 END) AS wins,
+                       SUM(CASE WHEN status='closed' AND {net_expr} < 0 THEN 1 ELSE 0 END) AS losses,
+                       MAX(COALESCE(closed_ts, opened_ts)) AS last_ts
+                FROM positions
+                """
+            ).fetchone()
+            out.update(
+                {
+                    "positions": int(row["n"] or 0),
+                    "open_positions": int(row["open_n"] or 0),
+                    "pnl_usd": float(row["net"] or 0),
+                    "gross_pnl_usd": float(row["gross"] or 0),
+                    "fees_usd": float(row["fees"] or 0),
+                    "wins": int(row["wins"] or 0),
+                    "losses": int(row["losses"] or 0),
+                    "last_update_ts": row["last_ts"],
+                }
+            )
+    finally:
+        conn.close()
+    daily = _daily_bundle(path, is_maker=is_maker, bankroll=cfg.paper_bankroll_usd)
+    out["daily"] = daily
+    out["daily_pnl_usd"] = daily["pnl_usd"]
+    out["daily_return_pct"] = daily["return_pct"]
+    out["daily_day_key"] = daily["day_key"]
+    return out
+
+
+def _heartbeat_status_label(detail: str, *, enabled: bool, ok: bool, reason: str = "") -> str:
+    if not enabled:
+        return "未启用 / 暂无策略"
+    if not ok and reason:
+        if "scaffold" in reason:
+            return "未启用 / 暂无策略"
+        return reason
+    d = detail or ""
+    if "status=risk_blocked" in d or d.startswith("risk_block="):
+        return "risk blocked"
+    if "status=mock_odds_quote_disabled" in d:
+        return "mock odds (no quote)"
+    if "status=outside_window" in d:
+        return "outside pregame window"
+    if "status=discover_empty" in d or "status=discover_error" in d:
+        return "no eligible market"
+    if "active_mainlines=0" in d and "status=running" not in d:
+        return "no eligible market"
+    if "status=running" in d or "active_mainlines=" in d:
+        return "running"
+    if ok:
+        return "running"
+    return "unknown"
+
+
+def _product_payload(product) -> dict[str, Any]:
+    cfg = load()
+    path = _product_db_path(product.key)
+    hb_modes = {
+        "btc5m": "split_sell",
+        "btc15m": "split_sell_15m",
+        "eth5m": "late_edge_eth5m",
+        "sol5m": "late_edge_sol5m",
+        "atp": "sports_mm_atp",
+        "cs": "sports_mm_cs",
+        "nba": "sports_mm_nba",
+        "nfl": "sports_mm_nfl",
+        "dota": "sports_mm_dota",
+        "soccer_unl": "sports_mm_soccer_unl",
+    }
+    hb_all = status_report(cfg.data_dir, stale_sec=cfg.heartbeat_stale_sec)
+    mode = hb_modes.get(product.key)
+    hb = hb_all.get("groups", {}).get(mode or "", {}) if mode else {}
+
+    if not product.enabled:
+        return {
+            "key": product.key,
+            "series_slug": product.series_slug,
+            "family": product.family,
+            "phase": product.phase,
+            "enabled": False,
+            "preferred_mode": product.preferred_mode,
+            "description": product.description,
+            "db_exists": False,
+            "sessions": 0,
+            "open_sessions": 0,
+            "filled_sessions": 0,
+            "empty_closed_sessions": 0,
+            "pnl_usd": 0.0,
+            "gross_pnl_usd": 0.0,
+            "return_pct": 0.0,
+            "fees_usd": 0.0,
+            "rebate_usd": 0.0,
+            "wins": 0,
+            "losses": 0,
+            "daily": {
+                "pnl_usd": 0.0,
+                "return_pct": 0.0,
+                "settled": 0,
+                "wins": 0,
+                "losses": 0,
+                "history": [],
+            },
+            "heartbeat": {
+                "ok": False,
+                "reason": (
+                    f"product {product.series_slug} is phase-{product.phase} "
+                    f"scaffold only ({product.description})"
+                ),
+            },
+            "status_label": "未启用 / 暂无策略",
+        }
+
+    is_late = product.key in _LATE_EDGE_PRODUCTS
+    if is_late:
+        activity = late_edge_activity_report(path)
+        daily = _daily_bundle(path, is_maker=False, bankroll=cfg.paper_bankroll_usd)
+    else:
+        activity = maker_session_activity_report(path)
+        daily = _daily_bundle(path, is_maker=True, bankroll=cfg.paper_bankroll_usd)
+    detail = str(hb.get("detail") or "")
+    label = _heartbeat_status_label(
+        detail,
+        enabled=True,
+        ok=bool(hb.get("ok", False)),
+        reason=str(hb.get("reason") or ""),
+    )
+    return {
+        "key": product.key,
+        "series_slug": product.series_slug,
+        "family": product.family,
+        "phase": product.phase,
+        "enabled": True,
+        "preferred_mode": product.preferred_mode,
+        "description": product.description,
+        "db_exists": path.exists(),
+        "sessions": activity["sessions"],
+        "open_sessions": activity["open_sessions"],
+        "filled_sessions": activity["filled_sessions"],
+        "empty_closed_sessions": activity["empty_closed_sessions"],
+        "last_update_ts": None,
+        "pnl_usd": activity["net_pnl_usd"],
+        "gross_pnl_usd": activity["net_pnl_usd"],
+        "return_pct": (activity["net_pnl_usd"] / cfg.paper_bankroll_usd * 100.0)
+        if cfg.paper_bankroll_usd
+        else 0.0,
+        "fees_usd": 0.0,
+        "rebate_usd": 0.0,
+        "wins": activity["wins"],
+        "losses": activity["losses"],
+        "flats": activity["flats"],
+        "daily": daily,
+        "heartbeat": hb if hb else {"ok": False, "reason": "missing heartbeat"},
+        "status_label": label,
+    }
+
+
+@app.get("/")
+def index() -> FileResponse:
+    index_path = WEB_DIR / "index.html"
+    if not index_path.exists():
+        raise RuntimeError(f"missing dashboard web root: {index_path}")
+    return FileResponse(index_path)
+
+
+@app.get("/api/health")
+def health() -> dict[str, Any]:
+    cfg = load()
+    hb = status_report(cfg.data_dir, stale_sec=cfg.heartbeat_stale_sec)
+    return {
+        "ok": True,
+        "mode": "PAPER",
+        "paper_only": True,
+        "live_trading_enabled": cfg.live_trading_enabled,
+        "db_exists": (cfg.data_dir / "paper.db").exists(),
+        "maker_db_exists": (cfg.data_dir / "maker_paper.db").exists(),
+        "split_sell_db_exists": (cfg.data_dir / "split_sell_paper.db").exists(),
+        "heartbeat": hb,
+        "ts": time.time(),
+    }
+
+
+@app.get("/api/heartbeat")
+def heartbeat() -> dict[str, Any]:
+    cfg = load()
+    return status_report(cfg.data_dir, stale_sec=cfg.heartbeat_stale_sec)
+
+
+@app.get("/api/calibration")
+def calibration(group: str = Query("A")) -> dict[str, Any]:
+    cfg = load()
+    path = _db_path(group)
+    buckets = load_bucket_stats(
+        path,
+        lookback_sec=cfg.bucket_lookback_sec,
+        min_samples=cfg.bucket_min_samples,
+        fee_rate=cfg.taker_fee_rate,
+        wr_buffer=cfg.bucket_wr_buffer,
+    )
+    return {
+        "group": group.upper(),
+        "db_path": str(path),
+        "buckets": [
+            {
+                "lo": b.lo,
+                "hi": b.hi,
+                "n": b.n,
+                "wins": b.wins,
+                "wr": b.wr,
+                "required_wr": b.required_wr,
+                "net_pnl_usd": b.net_pnl_usd,
+                "banned": b.banned,
+                "reason": b.reason,
+            }
+            for b in buckets
+        ],
+    }
+
+
+@app.get("/api/maker/quality")
+def maker_quality(group: str = Query("B")) -> dict[str, Any]:
+    g = group.upper() if group else "B"
+    path = _db_path(g if g in {"B", "C"} else "B")
+    return {
+        "group": g if g in {"B", "C"} else "B",
+        "pair_residual": maker_pair_residual_report(path),
+        "fill_quality": fill_quality_report(path),
+        "activity": maker_session_activity_report(path),
+    }
+
+
+@app.get("/api/split/quality")
+def split_quality() -> dict[str, Any]:
+    path = _db_path("C")
+    return {
+        "group": "C",
+        "pair_residual": maker_pair_residual_report(path),
+        "fill_quality": fill_quality_report(path),
+        "activity": maker_session_activity_report(path),
+        "edge_attribution": split_edge_attribution_report(path),
+    }
+
+
+@app.get("/api/ab")
+def ab() -> dict[str, Any]:
+    return {
+        "paper_only": True,
+        "groups": {
+            "A": _summarize_group("A"),
+            "B": _summarize_group("B"),
+            "C": _summarize_group("C"),
+        },
+        "updated_at": time.time(),
+    }
+
+
+@app.get("/api/products")
+def products() -> dict[str, Any]:
+    rows = [_product_payload(p) for p in list_products()]
+    return {"paper_only": True, "products": rows, "updated_at": time.time()}
+
+
+@app.get("/api/positions")
+def positions(
+    group: str = Query("A"),
+    limit: int = Query(100, ge=1, le=500),
+) -> dict[str, Any]:
+    g, path = _resolve_group_db(group)
+    conn = _connect(path)
+    items: list[dict[str, Any]] = []
+    if conn is not None:
+        try:
+            use_maker = _table_exists(conn, "maker_sessions") and (
+                g in _MAKER_PRODUCT_KEYS or g.upper() in {"B", "C"}
+            )
+            # eth5m/sol5m are late_edge → always positions journal
+            if g in _LATE_EDGE_PRODUCTS:
+                use_maker = False
+            if use_maker:
+                rows = conn.execute(
+                    """
+                    SELECT * FROM maker_sessions
+                    ORDER BY id DESC LIMIT ?
+                    """,
+                    (limit,),
+                ).fetchall()
+                items = [dict(r) for r in rows]
+            elif _table_exists(conn, "positions"):
+                rows = conn.execute(
+                    """
+                    SELECT * FROM positions
+                    ORDER BY id DESC LIMIT ?
+                    """,
+                    (limit,),
+                ).fetchall()
+                items = [dict(r) for r in rows]
+        finally:
+            conn.close()
+    items = _filter_slug_prefix(items, g)
+    return {
+        "items": items,
+        "mode": "PAPER",
+        "paper_only": True,
+        "group": g,
+        "db": path.name,
+    }
+
+
+@app.get("/api/events")
+def events(
+    limit: int = Query(50, ge=1, le=500),
+    group: str = Query("A"),
+) -> dict[str, Any]:
+    g, path = _resolve_group_db(group)
+    conn = _connect(path)
+    items: list[dict[str, Any]] = []
+    if conn is not None and _table_exists(conn, "events"):
+        try:
+            rows = conn.execute(
+                "SELECT id, ts, kind, market_slug, payload FROM events ORDER BY id DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+            for r in rows:
+                payload = r["payload"]
+                try:
+                    payload = json.loads(payload)
+                except Exception:  # noqa: BLE001
+                    pass
+                items.append(
+                    {
+                        "id": r["id"],
+                        "ts": r["ts"],
+                        "kind": r["kind"],
+                        "market_slug": r["market_slug"],
+                        "payload": payload,
+                        "group": g,
+                    }
+                )
+        finally:
+            conn.close()
+    items = _filter_slug_prefix(items, g)
+    return {
+        "items": items,
+        "mode": "PAPER",
+        "paper_only": True,
+        "group": g,
+        "db": path.name,
+    }
+
+
+@app.get("/api/state")
+def state() -> dict[str, Any]:
+    cfg = load()
+    errors: list[str] = []
+    market_obj = None
+    up = down = signal = None
+    try:
+        m = fetch_live_market(cfg.gamma_host, cfg.series_slug)
+        if m:
+            market_obj = {
+                "slug": m.market_slug,
+                "title": m.title,
+                "remaining_sec": m.t_remaining(),
+                "start_ts": m.start_ts,
+                "end_ts": m.end_ts,
+            }
+            up = fetch_book(cfg.clob_host, m.up_token).__dict__
+            down = fetch_book(cfg.clob_host, m.down_token).__dict__
+            try:
+                sig = fetch_btc_signal(cfg, m)
+                signal = {
+                    "current_price": sig.current_price,
+                    "price_to_beat": sig.price_to_beat,
+                    "delta_usd": sig.delta_usd,
+                    "side": sig.signal_side,
+                    "decision_side": sig.decision_side,
+                    "source": sig.source,
+                    "venue_count": sig.venue_count,
+                    "consensus": sig.consensus,
+                    "lead_bp": sig.lead_bp,
+                    "projected_lead_bp": sig.projected_lead_bp,
+                    "hold_wr": sig.hold_wr,
+                    "in_final_minute": sig.in_final_minute,
+                    "opening_gap_bp": sig.opening_gap_bp,
+                }
+            except Exception as exc:  # noqa: BLE001
+                errors.append(f"signal: {exc}")
+    except Exception as exc:  # noqa: BLE001
+        errors.append(f"market: {exc}")
+
+    ab_payload = ab()
+    # Hero journal: sum of A+B+C daily (selectable via ? — default combined daily)
+    groups = ab_payload["groups"]
+    combined_daily_pnl = sum(float(groups[g]["daily_pnl_usd"]) for g in ("A", "B", "C"))
+    combined_wins = sum(int(groups[g]["daily"].get("wins") or 0) for g in ("A", "B", "C"))
+    combined_losses = sum(int(groups[g]["daily"].get("losses") or 0) for g in ("A", "B", "C"))
+    combined_settled = sum(int(groups[g]["daily"].get("settled") or 0) for g in ("A", "B", "C"))
+    combined_open = sum(int(groups[g]["open_positions"] or 0) for g in ("A", "B", "C"))
+    journal = {
+        **groups["A"],
+        "label": "A+B+C",
+        "daily_pnl_usd": combined_daily_pnl,
+        "daily_return_pct": (combined_daily_pnl / cfg.paper_bankroll_usd * 100.0)
+        if cfg.paper_bankroll_usd
+        else 0.0,
+        "daily": {
+            "day_key": groups["A"]["daily"]["day_key"],
+            "pnl_usd": combined_daily_pnl,
+            "return_pct": (combined_daily_pnl / cfg.paper_bankroll_usd * 100.0)
+            if cfg.paper_bankroll_usd
+            else 0.0,
+            "wins": combined_wins,
+            "losses": combined_losses,
+            "settled": combined_settled,
+            "history": groups["A"]["daily"].get("history") or [],
+        },
+        "open_positions": combined_open,
+        "pnl_usd": sum(float(groups[g]["pnl_usd"]) for g in ("A", "B", "C")),
+        "wins": sum(int(groups[g]["wins"] or 0) for g in ("A", "B", "C")),
+        "losses": sum(int(groups[g]["losses"] or 0) for g in ("A", "B", "C")),
+    }
+
+    return {
+        "mode": "PAPER",
+        "live_trading_enabled": False,
+        "paper_only": True,
+        "fetched_at": time.time(),
+        "market": market_obj,
+        "up": up,
+        "down": down,
+        "signal": signal,
+        "journal": journal,
+        "ab": ab_payload,
+        "products": [_product_payload(p) for p in list_products()],
+        "events": events(limit=20, group="A").get("items") or [],
+        "config": {
+            "series_slug": cfg.series_slug,
+            "product_key": cfg.product_key,
+            "window_sec": cfg.window_sec,
+            "entry_window_sec": cfg.entry_window_sec,
+            "min_t_remaining_sec": cfg.min_t_remaining_sec,
+            "min_entry_price": cfg.min_entry_price,
+            "max_entry_price": cfg.max_entry_price,
+            "opening_gap_max_entry_price": cfg.opening_gap_max_entry_price,
+            "high_ask_threshold": cfg.high_ask_threshold,
+            "min_net_edge": cfg.min_net_edge,
+            "min_net_edge_high": cfg.min_net_edge_high,
+            "taker_fee_rate": cfg.taker_fee_rate,
+            "confirm_checks": cfg.confirm_checks,
+            "confirm_checks_high": cfg.confirm_checks_high,
+            "poll_interval_sec": cfg.poll_interval_sec,
+            "delta_filter_enabled": cfg.delta_filter_enabled,
+            "up_min_delta_usd": cfg.up_min_delta_usd,
+            "down_max_delta_usd": cfg.down_max_delta_usd,
+            "order_shares": cfg.order_shares,
+            "max_order_usd": cfg.max_order_usd,
+            "size_scale_enabled": cfg.size_scale_enabled,
+            "size_scale_ref_ask": cfg.size_scale_ref_ask,
+            "daily_loss_limit_usd": cfg.daily_loss_limit_usd,
+            "max_open_positions": cfg.max_open_positions,
+            "paper_bankroll_usd": cfg.paper_bankroll_usd,
+            "live_trading_enabled": cfg.live_trading_enabled,
+            "late_edge_hard_ban_price": cfg.late_edge_hard_ban_price,
+            "bucket_calibration_enabled": cfg.bucket_calibration_enabled,
+            "signal_require_consensus": cfg.signal_require_consensus,
+            "signal_min_venues": cfg.signal_min_venues,
+            "lead_table_enabled": cfg.lead_table_enabled,
+            "lead_edge_margin": cfg.lead_edge_margin,
+            "lead_edge_margin_down": cfg.lead_edge_margin_down,
+            "up_lead_min_bp": cfg.up_lead_min_bp,
+            "down_lead_min_bp": cfg.down_lead_min_bp,
+            "opening_gap_enabled": cfg.opening_gap_enabled,
+            "maker_pair_cost_max": cfg.maker_pair_cost_max,
+            "maker_pair_profit_min": cfg.maker_pair_profit_min,
+            "maker_flatten_residual": cfg.maker_flatten_residual,
+            "maker_allow_crossed_fills": cfg.maker_allow_crossed_fills,
+            "maker_min_bid_price": cfg.maker_min_bid_price,
+            "maker_pair_complete_sec": cfg.maker_pair_complete_sec,
+            "maker_zero_fill_kill_sec": cfg.maker_zero_fill_kill_sec,
+            "maker_early_flatten": cfg.maker_early_flatten,
+            "split_size": cfg.split_size,
+            "split_fair_edge": cfg.split_fair_edge,
+            "split_max_lean_shares": cfg.split_max_lean_shares,
+            "split_min_pair_ask": cfg.split_min_pair_ask,
+            "split_min_ask_price": cfg.split_min_ask_price,
+            "split_lean_abort_sec": cfg.split_lean_abort_sec,
+            "split_join_touch": cfg.split_join_touch,
+            "split_residual_flatten": cfg.split_residual_flatten,
+            "split_residual_sla_sec": cfg.split_residual_sla_sec,
+            "sports_min_edge": cfg.sports_min_edge,
+            "sports_daily_loss_limit_usd": cfg.sports_daily_loss_limit_usd,
+            "sports_quote_on_mock": cfg.sports_quote_on_mock,
+            "heartbeat_stale_sec": cfg.heartbeat_stale_sec,
+            "ws_book": __import__("btc5m.ws_book", fromlist=["status"]).status(),
+        },
+        "heartbeat": status_report(cfg.data_dir, stale_sec=cfg.heartbeat_stale_sec),
+        "errors": errors,
+    }

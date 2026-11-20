@@ -1,0 +1,162 @@
+#!/usr/bin/env bash
+# Deploy to PolyDex EC2 and restart A/B/C paper + dashboard.
+# Usage:
+#   PEM=/path/to/HustleNew.pem HOST=ec2-user@18.179.50.168 bash scripts/deploy_polydex.sh
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+PEM="${PEM:?set PEM=...}"
+HOST="${HOST:-ec2-user@18.179.50.168}"
+REMOTE_DIR="${REMOTE_DIR:-/opt/polymarket-btc-5m}"
+
+chmod 400 "$PEM"
+ssh -i "$PEM" -o StrictHostKeyChecking=accept-new "$HOST" "sudo mkdir -p '$REMOTE_DIR' && sudo chown -R \"\$USER:\$USER\" '$REMOTE_DIR'"
+rsync -az --delete \
+  --exclude '.venv' --exclude 'data/*.db' --exclude '__pycache__' --exclude '.pytest_cache' --exclude '*.egg-info' \
+  -e "ssh -i $PEM -o StrictHostKeyChecking=accept-new" \
+  "$ROOT/" "$HOST:$REMOTE_DIR/"
+
+ssh -i "$PEM" -o StrictHostKeyChecking=accept-new "$HOST" \
+  env REMOTE_DIR="$REMOTE_DIR" bash -s <<'EOF'
+set -euo pipefail
+cd "$REMOTE_DIR"
+python3 -m venv .venv
+.venv/bin/pip install -U pip
+.venv/bin/pip install -r requirements.txt
+.venv/bin/pip install -e .
+[[ -f .env ]] || cp .env.example .env
+# Upsert P0→P5 keys
+python3 - <<'PY'
+from pathlib import Path
+p = Path(".env")
+text = p.read_text() if p.exists() else ""
+updates = {
+    "MAX_ENTRY_PRICE": "0.79",
+    "OPENING_GAP_MAX_ENTRY_PRICE": "0.78",
+    "HIGH_ASK_THRESHOLD": "0.80",
+    "LATE_EDGE_HARD_BAN_PRICE": "0.90",
+    "LATE_EDGE_EDGE_SAFETY": "1.5",
+    "LEAD_EDGE_MARGIN": "0.05",
+    "LEAD_EDGE_MARGIN_DOWN": "0.07",
+    "UP_LEAD_MIN_BP": "1.5",
+    "DOWN_LEAD_MIN_BP": "3.0",
+    "BUCKET_MIN_SAMPLES": "5",
+    "BUCKET_WR_BUFFER": "0.03",
+    "MIN_NET_EDGE": "0.08",
+    "MIN_NET_EDGE_HIGH": "0.12",
+    "CONFIRM_CHECKS": "3",
+    "CONFIRM_CHECKS_HIGH": "5",
+    "UP_MIN_DELTA_USD": "20",
+    "DOWN_MAX_DELTA_USD": "-30",
+    "SIZE_SCALE_ENABLED": "true",
+    "SIZE_SCALE_REF_ASK": "0.75",
+    "MAKER_PAIR_COST_MAX": "0.96",
+    "MAKER_PAIR_PROFIT_MIN": "0.03",
+    "MAKER_STOP_BEFORE_END_SEC": "60",
+    "MAKER_TOUCH_FILL_SEC": "12",
+    "MAKER_MAX_IMBALANCE_SHARES": "10",
+    "MAKER_ALLOW_CROSSED_FILLS": "false",
+    "MAKER_FLATTEN_RESIDUAL": "true",
+    "MAKER_MIN_BID_PRICE": "0.20",
+    "MAKER_PAIR_COMPLETE_SEC": "20",
+    "MAKER_ZERO_FILL_KILL_SEC": "90",
+    "MAKER_EARLY_FLATTEN": "true",
+    "SPLIT_SIZE": "50",
+    "SPLIT_FAIR_EDGE": "0.01",
+    "SPLIT_MAX_LEAN_SHARES": "3",
+    "SPLIT_CLIP_SHARES": "10",
+    "SPLIT_TOUCH_FILL_SEC": "5",
+    "SPLIT_MIN_PAIR_ASK": "1.01",
+    "SPLIT_MIN_ASK_PRICE": "0.20",
+    "SPLIT_LEAN_ABORT_SEC": "20",
+    "SPLIT_STOP_BEFORE_END_SEC": "45",
+    "SPLIT_MERGE_BEFORE_END_SEC": "15",
+    "SPLIT_REBATE_BPS": "42",
+    "SPLIT_JOIN_TOUCH": "true",
+    "SPLIT_CATCHUP_IMPROVE_TICKS": "1",
+    "SPLIT_CATCHUP_MIN_ASK": "0.15",
+    "SPLIT_CATCHUP_TOUCH_FILL_SEC": "3",
+    "SPLIT_RESIDUAL_FLATTEN": "true",
+    "SPLIT_RESIDUAL_SLA_SEC": "20",
+}
+lines = text.splitlines()
+keys = set()
+out = []
+for line in lines:
+    if not line or line.strip().startswith("#") or "=" not in line:
+        out.append(line)
+        continue
+    k = line.split("=", 1)[0].strip()
+    if k in updates:
+        out.append(f"{k}={updates[k]}")
+        keys.add(k)
+    else:
+        out.append(line)
+for k, v in updates.items():
+    if k not in keys:
+        out.append(f"{k}={v}")
+p.write_text("\n".join(out) + "\n")
+print("env upserted", sorted(updates))
+PY
+
+mkdir -p "$HOME/.config/systemd/user"
+cat > "$HOME/.config/systemd/user/btc5m-a.service" <<UNIT
+[Unit]
+Description=BTC5m Paper A late_edge
+After=network.target
+[Service]
+WorkingDirectory=$REMOTE_DIR
+Environment=MODE=late_edge
+ExecStart=$REMOTE_DIR/.venv/bin/python -m btc5m --mode late_edge
+Restart=always
+RestartSec=3
+[Install]
+WantedBy=default.target
+UNIT
+cat > "$HOME/.config/systemd/user/btc5m-b.service" <<UNIT
+[Unit]
+Description=BTC5m Paper B maker
+After=network.target
+[Service]
+WorkingDirectory=$REMOTE_DIR
+Environment=MODE=maker
+ExecStart=$REMOTE_DIR/.venv/bin/python -m btc5m --mode maker
+Restart=always
+RestartSec=3
+[Install]
+WantedBy=default.target
+UNIT
+cat > "$HOME/.config/systemd/user/btc5m-c.service" <<UNIT
+[Unit]
+Description=BTC5m Paper C split_sell
+After=network.target
+[Service]
+WorkingDirectory=$REMOTE_DIR
+Environment=MODE=split_sell
+ExecStart=$REMOTE_DIR/.venv/bin/python -m btc5m --mode split_sell
+Restart=always
+RestartSec=3
+[Install]
+WantedBy=default.target
+UNIT
+cat > "$HOME/.config/systemd/user/btc5m-dash.service" <<UNIT
+[Unit]
+Description=BTC5m Paper Dashboard API
+After=network.target
+[Service]
+WorkingDirectory=$REMOTE_DIR
+Environment=DASHBOARD_PORT=8088
+ExecStart=$REMOTE_DIR/.venv/bin/python -m btc5m dashboard
+Restart=always
+RestartSec=3
+[Install]
+WantedBy=default.target
+UNIT
+
+systemctl --user daemon-reload
+systemctl --user enable --now btc5m-a.service btc5m-b.service btc5m-c.service btc5m-dash.service
+systemctl --user restart btc5m-a.service btc5m-b.service btc5m-c.service btc5m-dash.service
+systemctl --user --no-pager --full status btc5m-a.service btc5m-b.service btc5m-c.service btc5m-dash.service | sed -n '1,160p'
+EOF
+
+echo "Deployed to $HOST:$REMOTE_DIR"
+echo "Ensure nginx proxies /api to 127.0.0.1:8088"
