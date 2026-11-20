@@ -211,6 +211,67 @@ def maker_pair_residual_report(path: Path, *, since_ts: float = 0.0) -> dict[str
     }
 
 
+def late_edge_activity_report(path: Path, *, since_ts: float = 0.0) -> dict[str, Any]:
+    """Activity KPIs from positions journal (eth5m/sol5m late_edge ledgers)."""
+    empty = {
+        "sessions": 0,
+        "open_sessions": 0,
+        "filled_sessions": 0,
+        "empty_closed_sessions": 0,
+        "nonzero_pnl_sessions": 0,
+        "wins": 0,
+        "losses": 0,
+        "flats": 0,
+        "net_pnl_usd": 0.0,
+    }
+    if not path.exists():
+        return empty
+    conn = sqlite3.connect(path)
+    conn.row_factory = sqlite3.Row
+    try:
+        tables = {
+            r[0]
+            for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+        if "positions" not in tables:
+            return empty
+        cols = _table_cols(conn, "positions")
+        net_expr = (
+            "COALESCE(pnl_net_usd, pnl_usd)" if "pnl_net_usd" in cols else "pnl_usd"
+        )
+        rows = conn.execute(
+            f"""
+            SELECT status, {net_expr} AS net
+            FROM positions
+            WHERE COALESCE(closed_ts, opened_ts) >= ? OR status='open'
+            """,
+            (since_ts,),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    out = dict(empty)
+    out["sessions"] = len(rows)
+    for row in rows:
+        if row["status"] == "open":
+            out["open_sessions"] += 1
+            continue
+        out["filled_sessions"] += 1
+        net = float(row["net"] or 0.0)
+        out["net_pnl_usd"] += net
+        if abs(net) > 1e-9:
+            out["nonzero_pnl_sessions"] += 1
+            if net > 0:
+                out["wins"] += 1
+            else:
+                out["losses"] += 1
+        else:
+            out["flats"] += 1
+    return out
+
+
 def maker_session_activity_report(path: Path, *, since_ts: float = 0.0) -> dict[str, Any]:
     """Filled vs empty session counts — stops empty B sessions from looking like trades."""
     empty = {

@@ -21,6 +21,7 @@ from fastapi.staticfiles import StaticFiles
 
 from btc5m.audit import (
     fill_quality_report,
+    late_edge_activity_report,
     maker_pair_residual_report,
     maker_session_activity_report,
     split_edge_attribution_report,
@@ -32,6 +33,43 @@ from btc5m.heartbeat import status_report
 from btc5m.markets import fetch_live_market
 from btc5m.products import list_products
 from btc5m.signal import fetch_btc_signal
+
+# Product keys with dedicated ledgers (resolve BEFORE A/B/C fallback)
+_PRODUCT_GROUPS = frozenset(
+    {
+        "atp",
+        "cs",
+        "nba",
+        "nfl",
+        "dota",
+        "soccer_unl",
+        "btc15m",
+        "btc5m",
+        "eth5m",
+        "sol5m",
+    }
+)
+_LATE_EDGE_PRODUCTS = frozenset({"eth5m", "sol5m"})
+_MAKER_PRODUCT_KEYS = frozenset(
+    {
+        "B",
+        "C",
+        "atp",
+        "cs",
+        "nba",
+        "nfl",
+        "dota",
+        "soccer_unl",
+        "btc15m",
+        "btc5m",
+    }
+)
+_SLUG_PREFIX = {
+    "eth5m": "eth-updown",
+    "sol5m": "sol-updown",
+    "btc5m": "btc-updown-5m",
+    "btc15m": "btc-updown-15m",
+}
 
 app = FastAPI(title="Poly BTC 5m Paper Dashboard", docs_url=None, redoc_url=None)
 app.add_middleware(
@@ -68,6 +106,30 @@ def _db_path(group: str) -> Path:
     if g == "C":
         return cfg.data_dir / "split_sell_paper.db"
     return cfg.data_dir / "paper.db"
+
+
+def _resolve_group_db(group: str) -> tuple[str, Path]:
+    """Map API group → (canonical key, db path). Product keys win over A/B/C."""
+    raw = (group or "A").strip()
+    gl = raw.lower()
+    if gl in _PRODUCT_GROUPS:
+        return gl, _product_db_path(gl)
+    gu = raw.upper()
+    if gu in {"A", "B", "C"}:
+        return gu, _db_path(gu)
+    return "A", _db_path("A")
+
+
+def _filter_slug_prefix(items: list[dict[str, Any]], group: str) -> list[dict[str, Any]]:
+    prefix = _SLUG_PREFIX.get(group.lower())
+    if not prefix or not items:
+        return items
+    out = []
+    for row in items:
+        slug = str(row.get("market_slug") or "")
+        if slug.startswith(prefix):
+            out.append(row)
+    return out
 
 
 def _product_db_path(product_key: str) -> Path:
@@ -402,8 +464,13 @@ def _product_payload(product) -> dict[str, Any]:
             "status_label": "未启用 / 暂无策略",
         }
 
-    activity = maker_session_activity_report(path)
-    daily = _daily_bundle(path, is_maker=True, bankroll=cfg.paper_bankroll_usd)
+    is_late = product.key in _LATE_EDGE_PRODUCTS
+    if is_late:
+        activity = late_edge_activity_report(path)
+        daily = _daily_bundle(path, is_maker=False, bankroll=cfg.paper_bankroll_usd)
+    else:
+        activity = maker_session_activity_report(path)
+        daily = _daily_bundle(path, is_maker=True, bankroll=cfg.paper_bankroll_usd)
     detail = str(hb.get("detail") or "")
     label = _heartbeat_status_label(
         detail,
@@ -551,44 +618,18 @@ def positions(
     group: str = Query("A"),
     limit: int = Query(100, ge=1, le=500),
 ) -> dict[str, Any]:
-    g = group.upper() if group else "A"
-    path = _db_path(g)
-    # Allow product keys via group=atp|cs|btc15m
-    gl = group.lower()
-    _product_groups = {
-        "atp",
-        "cs",
-        "nba",
-        "nfl",
-        "dota",
-        "soccer_unl",
-        "btc15m",
-        "btc5m",
-        "eth5m",
-        "sol5m",
-    }
-    if gl in _product_groups:
-        path = _product_db_path(gl)
-        g = gl
+    g, path = _resolve_group_db(group)
     conn = _connect(path)
     items: list[dict[str, Any]] = []
     if conn is not None:
         try:
-            maker_keys = {
-                "B",
-                "C",
-                "atp",
-                "cs",
-                "nba",
-                "nfl",
-                "dota",
-                "soccer_unl",
-                "btc15m",
-                "btc5m",
-            }
-            if _table_exists(conn, "maker_sessions") and (
-                g in maker_keys or g.upper() in {"B", "C"}
-            ):
+            use_maker = _table_exists(conn, "maker_sessions") and (
+                g in _MAKER_PRODUCT_KEYS or g.upper() in {"B", "C"}
+            )
+            # eth5m/sol5m are late_edge → always positions journal
+            if g in _LATE_EDGE_PRODUCTS:
+                use_maker = False
+            if use_maker:
                 rows = conn.execute(
                     """
                     SELECT * FROM maker_sessions
@@ -608,7 +649,14 @@ def positions(
                 items = [dict(r) for r in rows]
         finally:
             conn.close()
-    return {"items": items, "mode": "PAPER", "paper_only": True, "group": g}
+    items = _filter_slug_prefix(items, g)
+    return {
+        "items": items,
+        "mode": "PAPER",
+        "paper_only": True,
+        "group": g,
+        "db": path.name,
+    }
 
 
 @app.get("/api/events")
@@ -616,20 +664,7 @@ def events(
     limit: int = Query(50, ge=1, le=500),
     group: str = Query("A"),
 ) -> dict[str, Any]:
-    path = _db_path(group)
-    gl = group.lower()
-    if gl in {
-        "atp",
-        "cs",
-        "nba",
-        "nfl",
-        "dota",
-        "soccer_unl",
-        "btc15m",
-        "eth5m",
-        "sol5m",
-    }:
-        path = _product_db_path(gl)
+    g, path = _resolve_group_db(group)
     conn = _connect(path)
     items: list[dict[str, Any]] = []
     if conn is not None and _table_exists(conn, "events"):
@@ -651,12 +686,19 @@ def events(
                         "kind": r["kind"],
                         "market_slug": r["market_slug"],
                         "payload": payload,
-                        "group": group.upper(),
+                        "group": g,
                     }
                 )
         finally:
             conn.close()
-    return {"items": items, "mode": "PAPER", "paper_only": True, "group": group.upper()}
+    items = _filter_slug_prefix(items, g)
+    return {
+        "items": items,
+        "mode": "PAPER",
+        "paper_only": True,
+        "group": g,
+        "db": path.name,
+    }
 
 
 @app.get("/api/state")

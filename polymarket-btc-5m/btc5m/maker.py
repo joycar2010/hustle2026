@@ -76,6 +76,12 @@ class MakerState:
     imbalance_since: Optional[float] = None
     first_fill_ts: Optional[float] = None
     killed_zero_fill: bool = False
+    # Peak paired inventory seen this session (min(up,down) high-water)
+    paired_peak: float = 0.0
+    closed: bool = False
+
+    def note_inventory(self) -> None:
+        self.paired_peak = max(self.paired_peak, min(self.up_shares, self.down_shares))
 
 
 def _round_tick(price: float, tick: float) -> float:
@@ -318,6 +324,7 @@ class MakerEngine:
 
         if state.first_fill_ts is None:
             state.first_fill_ts = now
+        state.note_inventory()
         if abs(state.up_shares - state.down_shares) > 1e-9:
             if state.imbalance_since is None:
                 state.imbalance_since = now
@@ -544,7 +551,80 @@ class MakerEngine:
             state.down_shares,
         )
 
+    def _abort_unpaired(self, state: MakerState, *, reason: str) -> bool:
+        """Close immediately when never paired — PnL = flatten only, no settle gamble."""
+        if state.closed:
+            return True
+        if not getattr(self.cfg, "maker_close_on_unpaired_flatten", True):
+            return False
+        if state.paired_peak > 1e-9:
+            return False
+        # Force flat inventory; leftover cost after one-sided flatten is already in flatten PnL
+        state.up_shares = 0.0
+        state.down_shares = 0.0
+        state.up_cost = 0.0
+        state.down_cost = 0.0
+        state.quoting = False
+        state.quotes.clear()
+        state.flattened = True
+        net = float(state.flatten_pnl_usd)
+        self.store.update_maker_inventory(
+            state.session_id,
+            up_shares=0.0,
+            down_shares=0.0,
+            up_cost_usd=0.0,
+            down_cost_usd=0.0,
+            up_fee_usd=state.up_fee,
+            down_fee_usd=state.down_fee,
+            flatten_pnl_usd=state.flatten_pnl_usd,
+        )
+        self.store.close_maker_session(
+            state.session_id,
+            paired_shares=0.0,
+            pair_cost=None,
+            residual_side=None,
+            residual_shares=0.0,
+            winner="UNPAIRED_ABORT",
+            gross_pnl_usd=net,
+            fee_usd=0.0,
+            rebate_est_usd=0.0,
+            net_pnl_usd=net,
+            flatten_pnl_usd=state.flatten_pnl_usd,
+        )
+        note_resolution(self.risk, net)
+        self.store.log(
+            "maker_unpaired_abort",
+            {
+                "session_id": state.session_id,
+                "reason": reason,
+                "flatten_pnl_usd": net,
+                "paired_peak": state.paired_peak,
+            },
+            state.market.market_slug,
+        )
+        log.info(
+            "MAKER UNPAIRED ABORT #%s %s reason=%s flatten=%+.2f — no settle hold",
+            state.session_id,
+            state.market.market_slug,
+            reason,
+            net,
+        )
+        state.closed = True
+        if self._state and self._state.session_id == state.session_id:
+            self._state = None
+        return True
+
     def _resolve_session(self, state: MakerState, winner: str) -> None:
+        if state.closed:
+            return
+        # Never-paired leftovers: do not settle directionally
+        if (
+            getattr(self.cfg, "maker_close_on_unpaired_flatten", True)
+            and state.paired_peak <= 1e-9
+            and state.flattened
+        ):
+            if self._abort_unpaired(state, reason="resolve_unpaired"):
+                return
         # No maker rebate attribution without window fee pool; keep 0 or tiny stub
         rebate = maker_rebate_estimate(0.0)
         result = settle_maker_pnl(
@@ -571,6 +651,7 @@ class MakerEngine:
             net_pnl_usd=result["net_pnl_usd"],
         )
         note_resolution(self.risk, result["net_pnl_usd"])
+        state.closed = True
         self.store.log(
             "maker_resolve",
             {"session_id": state.session_id, "winner": winner, **result},
@@ -701,6 +782,19 @@ class MakerEngine:
             # P0-B / P5b: flatten unpaired residual instead of gambling to resolution
             if self.cfg.maker_flatten_residual:
                 self._flatten_residual(state, up, down)
+                if self._abort_unpaired(state, reason="stop_before_end_unpaired"):
+                    write_heartbeat(
+                        self.cfg.data_dir,
+                        mode="maker",
+                        market_slug=market.market_slug,
+                        detail=(
+                            f"unpaired_abort t_left={t_left:.0f}s "
+                            f"flatten={state.flatten_pnl_usd:+.2f}"
+                        ),
+                        pnl_usd=self.risk.realized_pnl_usd,
+                        open_positions=self.risk.open_positions,
+                    )
+                    return
             write_heartbeat(
                 self.cfg.data_dir,
                 mode="maker",
@@ -773,6 +867,18 @@ class MakerEngine:
             state.quoting = False
             state.quotes.clear()
             self._flatten_residual(state, up, down)
+            if self._abort_unpaired(state, reason="pair_complete_unpaired"):
+                write_heartbeat(
+                    self.cfg.data_dir,
+                    mode="maker",
+                    market_slug=market.market_slug,
+                    detail=(
+                        f"unpaired_abort pair_sla flatten={state.flatten_pnl_usd:+.2f}"
+                    ),
+                    pnl_usd=self.risk.realized_pnl_usd,
+                    open_positions=self.risk.open_positions,
+                )
+                return
             write_heartbeat(
                 self.cfg.data_dir,
                 mode="maker",

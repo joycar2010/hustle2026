@@ -386,6 +386,56 @@ class Store:
                 out["down_proceeds"] = float(row["notional"] or 0)
         return out
 
+    def update_split_cash(
+        self,
+        session_id: int,
+        *,
+        up_proceeds_usd: float = 0.0,
+        down_proceeds_usd: float = 0.0,
+        merged_shares: float = 0.0,
+        merge_proceeds_usd: float = 0.0,
+        redeem_proceeds_usd: float = 0.0,
+        flatten_pnl_usd: Optional[float] = None,
+    ) -> None:
+        """Persist split-sell cash legs (survives process restart / _resolve_open)."""
+        if flatten_pnl_usd is None:
+            self.conn.execute(
+                """
+                UPDATE maker_sessions
+                SET up_proceeds_usd=?, down_proceeds_usd=?,
+                    merged_shares=?, merge_proceeds_usd=?, redeem_proceeds_usd=?
+                WHERE id=?
+                """,
+                (
+                    float(up_proceeds_usd),
+                    float(down_proceeds_usd),
+                    float(merged_shares),
+                    float(merge_proceeds_usd),
+                    float(redeem_proceeds_usd),
+                    session_id,
+                ),
+            )
+        else:
+            self.conn.execute(
+                """
+                UPDATE maker_sessions
+                SET up_proceeds_usd=?, down_proceeds_usd=?,
+                    merged_shares=?, merge_proceeds_usd=?, redeem_proceeds_usd=?,
+                    flatten_pnl_usd=?
+                WHERE id=?
+                """,
+                (
+                    float(up_proceeds_usd),
+                    float(down_proceeds_usd),
+                    float(merged_shares),
+                    float(merge_proceeds_usd),
+                    float(redeem_proceeds_usd),
+                    float(flatten_pnl_usd),
+                    session_id,
+                ),
+            )
+        self.conn.commit()
+
     def close_maker_session(
         self,
         session_id: int,
@@ -399,27 +449,53 @@ class Store:
         fee_usd: float,
         rebate_est_usd: float,
         net_pnl_usd: float,
+        up_proceeds_usd: Optional[float] = None,
+        down_proceeds_usd: Optional[float] = None,
+        merged_shares: Optional[float] = None,
+        merge_proceeds_usd: Optional[float] = None,
+        redeem_proceeds_usd: Optional[float] = None,
+        flatten_pnl_usd: Optional[float] = None,
     ) -> None:
+        sets = [
+            "closed_ts=?",
+            "paired_shares=?",
+            "pair_cost=?",
+            "residual_side=?",
+            "residual_shares=?",
+            "winner=?",
+            "gross_pnl_usd=?",
+            "fee_usd=?",
+            "rebate_est_usd=?",
+            "net_pnl_usd=?",
+            "status='closed'",
+        ]
+        vals: list[object] = [
+            time.time(),
+            paired_shares,
+            pair_cost,
+            residual_side,
+            residual_shares,
+            winner,
+            gross_pnl_usd,
+            fee_usd,
+            rebate_est_usd,
+            net_pnl_usd,
+        ]
+        optional = (
+            ("up_proceeds_usd", up_proceeds_usd),
+            ("down_proceeds_usd", down_proceeds_usd),
+            ("merged_shares", merged_shares),
+            ("merge_proceeds_usd", merge_proceeds_usd),
+            ("redeem_proceeds_usd", redeem_proceeds_usd),
+            ("flatten_pnl_usd", flatten_pnl_usd),
+        )
+        for col, value in optional:
+            if value is not None:
+                sets.append(f"{col}=?")
+                vals.append(float(value))
+        vals.append(session_id)
         self.conn.execute(
-            """
-            UPDATE maker_sessions
-            SET closed_ts=?, paired_shares=?, pair_cost=?, residual_side=?,
-                residual_shares=?, winner=?, gross_pnl_usd=?, fee_usd=?,
-                rebate_est_usd=?, net_pnl_usd=?, status='closed'
-            WHERE id=?
-            """,
-            (
-                time.time(),
-                paired_shares,
-                pair_cost,
-                residual_side,
-                residual_shares,
-                winner,
-                gross_pnl_usd,
-                fee_usd,
-                rebate_est_usd,
-                net_pnl_usd,
-                session_id,
-            ),
+            f"UPDATE maker_sessions SET {', '.join(sets)} WHERE id=?",
+            tuple(vals),
         )
         self.conn.commit()

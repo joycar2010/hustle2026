@@ -118,6 +118,8 @@ class Config:
     maker_pair_complete_sec: float
     maker_zero_fill_kill_sec: float
     maker_early_flatten: bool
+    # Abort never-paired sessions after flatten (no directional settle hold)
+    maker_close_on_unpaired_flatten: bool
 
     # P4/P5a/P6 split-sell
     split_size: float
@@ -236,9 +238,13 @@ def load(*, series: str | None = None) -> Config:
         maker_allow_crossed_fills=_bool("MAKER_ALLOW_CROSSED_FILLS", False),
         maker_flatten_residual=_bool("MAKER_FLATTEN_RESIDUAL", True),
         maker_min_bid_price=_float("MAKER_MIN_BID_PRICE", 0.20),
-        maker_pair_complete_sec=_float("MAKER_PAIR_COMPLETE_SEC", 20.0),
+        # Tighten pair-complete SLA (was 20s; live B rarely paired before bleed)
+        maker_pair_complete_sec=_float("MAKER_PAIR_COMPLETE_SEC", 12.0),
         maker_zero_fill_kill_sec=_float("MAKER_ZERO_FILL_KILL_SEC", 90.0),
         maker_early_flatten=_bool("MAKER_EARLY_FLATTEN", True),
+        maker_close_on_unpaired_flatten=_bool(
+            "MAKER_CLOSE_ON_UNPAIRED_FLATTEN", True
+        ),
         split_size=max(_float("SPLIT_SIZE", 50.0), 5.0),
         split_fair_edge=_float("SPLIT_FAIR_EDGE", 0.01),
         split_max_lean_shares=_float("SPLIT_MAX_LEAN_SHARES", 3.0),

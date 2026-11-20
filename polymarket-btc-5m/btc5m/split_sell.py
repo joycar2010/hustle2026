@@ -16,6 +16,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Optional
 
 from btc5m.book import TopOfBook
@@ -108,6 +109,121 @@ def settle_split_sell(
         "up_inv": up_inv,
         "down_inv": down_inv,
     }
+
+
+def repair_split_merge_accounting(db_path: Path, *, dry_run: bool = False) -> dict:
+    """Fix closed sessions where full merge cash was dropped (net ≈ −mint).
+
+    Symptom seen live: mint=$50, merged_shares=50, merge_proceeds=$50, sells=$0,
+    but net_pnl=−$50 (merge cash not credited in settle after restart).
+    """
+    import sqlite3
+    import time as _time
+
+    out = {"path": str(db_path), "scanned": 0, "repaired": 0, "ids": [], "dry_run": dry_run}
+    if not db_path.exists():
+        return out
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    try:
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(maker_sessions)")}
+        need = {
+            "merge_proceeds_usd",
+            "merged_shares",
+            "up_proceeds_usd",
+            "down_proceeds_usd",
+            "redeem_proceeds_usd",
+            "up_cost_usd",
+            "down_cost_usd",
+        }
+        if not need.issubset(cols):
+            out["error"] = "missing split cash columns"
+            return out
+        rows = conn.execute(
+            """
+            SELECT id, status, up_cost_usd, down_cost_usd,
+                   COALESCE(up_proceeds_usd,0) AS up_p,
+                   COALESCE(down_proceeds_usd,0) AS dn_p,
+                   COALESCE(merge_proceeds_usd,0) AS merge_p,
+                   COALESCE(redeem_proceeds_usd,0) AS redeem_p,
+                   COALESCE(merged_shares,0) AS merged,
+                   COALESCE(rebate_est_usd,0) AS rebate,
+                   COALESCE(gross_pnl_usd,0) AS gross,
+                   COALESCE(net_pnl_usd,0) AS net
+            FROM maker_sessions
+            WHERE status='closed'
+            """
+        ).fetchall()
+        out["scanned"] = len(rows)
+        for row in rows:
+            mint = float(row["up_cost_usd"] or 0) + float(row["down_cost_usd"] or 0)
+            if mint <= 1e-9:
+                continue
+            merge_p = float(row["merge_p"] or 0)
+            merged = float(row["merged"] or 0)
+            sells = float(row["up_p"] or 0) + float(row["dn_p"] or 0)
+            redeem = float(row["redeem_p"] or 0)
+            rebate = float(row["rebate"] or 0)
+            net = float(row["net"] or 0)
+            # Case A: merge cash present in columns but net ignored it (≈ −mint)
+            cash = sells + merge_p + redeem + rebate
+            correct = cash - mint
+            looks_dropped = (
+                merge_p + 1e-6 >= mint * 0.95
+                and sells <= 1e-6
+                and abs(net + mint) <= 1e-3
+            )
+            # Case B: inventory fully cleared via merge (merged≈mint) but merge_p=0
+            looks_unbooked_merge = (
+                merged + 1e-6 >= mint * 0.95
+                and merge_p <= 1e-6
+                and sells <= 1e-6
+                and abs(net + mint) <= 1e-3
+            )
+            if not (looks_dropped or looks_unbooked_merge):
+                # Also catch: merge_p booked, net wrong by ~mint
+                if abs(correct - net) <= 0.01 or abs(net - correct) < 1e-6:
+                    continue
+                if abs(net - correct) < mint * 0.5:
+                    continue
+                if not (merge_p > 0 and abs(net + mint) <= 1e-3 and abs(correct) <= 1e-3):
+                    continue
+            if looks_unbooked_merge:
+                merge_p = mint
+                cash = sells + merge_p + redeem + rebate
+                correct = cash - mint
+            out["ids"].append(int(row["id"]))
+            out["repaired"] += 1
+            if dry_run:
+                continue
+            conn.execute(
+                """
+                UPDATE maker_sessions
+                SET accounting_original_gross_pnl_usd=?,
+                    accounting_original_net_pnl_usd=?,
+                    accounting_corrected_ts=?,
+                    merge_proceeds_usd=?,
+                    merged_shares=?,
+                    gross_pnl_usd=?,
+                    net_pnl_usd=?
+                WHERE id=?
+                """,
+                (
+                    float(row["gross"]),
+                    float(row["net"]),
+                    _time.time(),
+                    merge_p,
+                    max(merged, mint if looks_unbooked_merge else merged),
+                    correct - rebate,  # gross excludes rebate in settle_split_sell
+                    correct,
+                    int(row["id"]),
+                ),
+            )
+        if not dry_run and out["repaired"]:
+            conn.commit()
+    finally:
+        conn.close()
+    return out
 
 
 class SplitSellEngine:
@@ -325,6 +441,7 @@ class SplitSellEngine:
             down_cost_usd=state.mint_cost / 2.0,
             flatten_pnl_usd=state.flatten_pnl_usd,
         )
+        self._persist_split_cash(state)
         token = state.market.up_token if side == "UP" else state.market.down_token
         self.store.record_fill(
             market_slug=state.market.market_slug,
@@ -511,6 +628,7 @@ class SplitSellEngine:
             down_cost_usd=state.mint_cost / 2.0,
             flatten_pnl_usd=state.flatten_pnl_usd,
         )
+        self._persist_split_cash(state)
         state.quotes.pop(side, None)
         self._note_residual(state, now)
         log.info(
@@ -610,6 +728,18 @@ class SplitSellEngine:
                 flatten = float(row["flatten_pnl_usd"] or 0)
             except (KeyError, IndexError, TypeError):
                 flatten = 0.0
+
+            def _col(name: str, default: float = 0.0) -> float:
+                try:
+                    return float(row[name] or 0)
+                except (KeyError, IndexError, TypeError):
+                    return default
+
+            up_p = max(stats["up_proceeds"], _col("up_proceeds_usd"))
+            dn_p = max(stats["down_proceeds"], _col("down_proceeds_usd"))
+            merge_p = _col("merge_proceeds_usd")
+            merged = _col("merged_shares")
+            redeem_p = _col("redeem_proceeds_usd")
             self._state = SplitState(
                 session_id=int(row["id"]),
                 market=market,
@@ -619,8 +749,11 @@ class SplitSellEngine:
                 mint_cost=mint,
                 up_sold=stats["up_sold"],
                 down_sold=stats["down_sold"],
-                up_proceeds=stats["up_proceeds"],
-                down_proceeds=stats["down_proceeds"],
+                up_proceeds=up_p,
+                down_proceeds=dn_p,
+                merge_proceeds=merge_p,
+                merged=merged,
+                redeem_proceeds=redeem_p,
                 flatten_pnl_usd=flatten,
             )
             return self._state
@@ -673,6 +806,17 @@ class SplitSellEngine:
         )
         return self._state
 
+    def _persist_split_cash(self, state: SplitState) -> None:
+        self.store.update_split_cash(
+            state.session_id,
+            up_proceeds_usd=state.up_proceeds,
+            down_proceeds_usd=state.down_proceeds,
+            merged_shares=state.merged,
+            merge_proceeds_usd=state.merge_proceeds,
+            redeem_proceeds_usd=state.redeem_proceeds,
+            flatten_pnl_usd=state.flatten_pnl_usd,
+        )
+
     def _merge_pairs(self, state: SplitState) -> None:
         paired = min(state.up_inv, state.down_inv)
         if paired <= 0:
@@ -689,6 +833,8 @@ class SplitSellEngine:
             down_cost_usd=state.mint_cost / 2.0,
             flatten_pnl_usd=state.flatten_pnl_usd,
         )
+        # Critical: survive restart — merge cash must be on disk before resolve
+        self._persist_split_cash(state)
         self.store.log(
             "split_merge",
             {"session_id": state.session_id, "pairs": paired, "proceeds": paired},
@@ -743,6 +889,12 @@ class SplitSellEngine:
             fee_usd=0.0,
             rebate_est_usd=result["rebate_est_usd"],
             net_pnl_usd=result["net_pnl_usd"],
+            up_proceeds_usd=state.up_proceeds,
+            down_proceeds_usd=state.down_proceeds,
+            merged_shares=state.merged,
+            merge_proceeds_usd=state.merge_proceeds,
+            redeem_proceeds_usd=state.redeem_proceeds,
+            flatten_pnl_usd=state.flatten_pnl_usd,
         )
         note_resolution(self.risk, result["net_pnl_usd"])
         self.store.log(
@@ -799,17 +951,49 @@ class SplitSellEngine:
                 flatten = float(row["flatten_pnl_usd"] or 0)
             except (KeyError, IndexError, TypeError):
                 flatten = 0.0
+            # Hydrate cash legs from DB (merge may have happened before restart)
+            def _col(name: str, default: float = 0.0) -> float:
+                try:
+                    return float(row[name] or 0)
+                except (KeyError, IndexError, TypeError):
+                    return default
+
+            up_inv = float(row["up_shares"] or 0)
+            down_inv = float(row["down_shares"] or 0)
+            merge_p = _col("merge_proceeds_usd")
+            merged = _col("merged_shares")
+            up_p = max(stats["up_proceeds"], _col("up_proceeds_usd"))
+            dn_p = max(stats["down_proceeds"], _col("down_proceeds_usd"))
+            redeem_p = _col("redeem_proceeds_usd")
+            # If inventory already zeroed by an earlier merge but cash not on disk,
+            # infer full remaining pairs were merged (mint − sold).
+            if up_inv <= 1e-9 and down_inv <= 1e-9 and merge_p <= 1e-9:
+                rem_up = max(mint - stats["up_sold"], 0.0)
+                rem_dn = max(mint - stats["down_sold"], 0.0)
+                inferred = min(rem_up, rem_dn)
+                if inferred > 1e-9:
+                    merge_p = inferred
+                    merged = max(merged, inferred)
+                    log.warning(
+                        "SPLIT RESOLVE hydrate merge #%s inferred pairs=%.0f "
+                        "(inv already cleared; cash was missing)",
+                        int(row["id"]),
+                        inferred,
+                    )
             state = SplitState(
                 session_id=int(row["id"]),
                 market=market,
                 mint_shares=mint,
-                up_inv=float(row["up_shares"] or 0),
-                down_inv=float(row["down_shares"] or 0),
+                up_inv=up_inv,
+                down_inv=down_inv,
                 mint_cost=mint,
                 up_sold=stats["up_sold"],
                 down_sold=stats["down_sold"],
-                up_proceeds=stats["up_proceeds"],
-                down_proceeds=stats["down_proceeds"],
+                up_proceeds=up_p,
+                down_proceeds=dn_p,
+                merge_proceeds=merge_p,
+                merged=merged,
+                redeem_proceeds=redeem_p,
                 flatten_pnl_usd=flatten,
                 quoting=False,
             )

@@ -18,8 +18,24 @@ def main(argv: list[str] | None = None) -> int:
         "command",
         nargs="?",
         default="run",
-        choices=["run", "report", "dashboard", "heartbeat", "stress", "products"],
-        help="run trading loop (default), report, dashboard, heartbeat, stress, or list products",
+        choices=[
+            "run",
+            "report",
+            "dashboard",
+            "heartbeat",
+            "stress",
+            "products",
+            "repair-split",
+        ],
+        help=(
+            "run trading loop (default), report, dashboard, heartbeat, stress, "
+            "list products, or repair-split (C merge accounting backfill)"
+        ),
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="For repair-split: scan without writing corrections",
     )
     parser.add_argument(
         "--series",
@@ -98,6 +114,14 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     mode = args.mode or cfg.mode
+
+    if args.command == "repair-split":
+        from btc5m.split_sell import repair_split_merge_accounting
+
+        db = cfg.data_dir / cfg.split_db_name
+        result = repair_split_merge_accounting(db, dry_run=bool(args.dry_run))
+        print(json.dumps(result, indent=2))
+        return 0
 
     if args.command == "report":
         from btc5m.audit import print_report
