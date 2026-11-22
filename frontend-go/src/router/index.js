@@ -29,6 +29,18 @@ const routes = [
     meta: { requiresAuth: true }
   },
   {
+    path: '/kline',
+    name: 'Kline',
+    component: () => import('@/views/Kline.vue'),
+    meta: { requiresAuth: true }
+  },
+  {
+    path: '/spread-chart',
+    name: 'SpreadChart',
+    component: () => import('@/views/SpreadChart.vue'),
+    meta: { requiresAuth: true }
+  },
+  {
     path: '/pending-orders',
     name: 'PendingOrders',
     component: () => import('@/views/PendingOrders.vue'),

@@ -19,6 +19,7 @@
     "element-plus": "^2.13.3",
     "jspdf": "^2.5.2",
     "jspdf-autotable": "^3.8.4",
+    "lightweight-charts": "^5.2.0",
     "pinia": "^2.1.7",
     "socket.io-client": "^4.6.1",
     "vue": "^3.4.0",

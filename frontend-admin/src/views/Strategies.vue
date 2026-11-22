@@ -1,7 +1,7 @@
 <template>
   <div class="strategies-page">
 
-    <!-- ===== 策略运行状态栏 ===== -->
+    <!-- ===== 策略运行状态栏（只读监控） ===== -->
     <div class="bg-dark-100 rounded-xl border border-border-primary px-4 py-3 mb-4">
       <div class="flex items-center justify-between mb-2">
         <div class="flex items-center gap-2">
@@ -24,18 +24,26 @@
       <div v-else class="text-xs text-text-tertiary">暂无运行中的策略</div>
     </div>
 
-    <!-- ===== 视图切换 ===== -->
-    <div class="flex gap-2 mb-4">
-      <button @click="viewMode = 'workflow'" :class="['px-4 py-1.5 rounded-lg text-sm font-medium border transition-colors', viewMode === 'workflow' ? 'bg-primary text-dark-300 border-primary' : 'bg-dark-100 text-text-secondary border-border-primary']">流程配置</button>
-      <button @click="viewMode = 'compare'; loadAllEffective()" :class="['px-4 py-1.5 rounded-lg text-sm font-medium border transition-colors', viewMode === 'compare' ? 'bg-primary text-dark-300 border-primary' : 'bg-dark-100 text-text-secondary border-border-primary']">四策略对比</button>
-      <button @click="viewMode = 'guard'; loadGuardRules()" :class="['px-4 py-1.5 rounded-lg text-sm font-medium border transition-colors', viewMode === 'guard' ? 'bg-primary text-dark-300 border-primary' : 'bg-dark-100 text-text-secondary border-border-primary']">Guard 时段规则</button>
+    <!-- 只读说明 -->
+    <div class="mb-4 px-4 py-2.5 bg-blue-900/15 border border-blue-800/40 rounded-lg flex items-start gap-2">
+      <span class="text-blue-400 text-sm leading-none mt-0.5">ℹ</span>
+      <div class="text-xs text-text-secondary leading-relaxed">
+        本页为<b class="text-text-primary">只读引擎时序预览</b>：展示「自动阶梯式套利」连续执行链路与全局执行引擎参数（超时/重试/单腿检查延迟等，对所有用户策略生效）。
+        参数由系统统一调优，<b class="text-text-primary">此处不提供修改入口</b>；时段风控请到「Guard 规则」页。
+      </div>
     </div>
 
-    <!-- ===== 四策略并排对比视图 ===== -->
+    <!-- ===== 视图切换（引擎配置内 2 Tab） ===== -->
+    <div class="flex gap-2 mb-4">
+      <button @click="viewMode = 'workflow'" :class="['px-4 py-1.5 rounded-lg text-sm font-medium border transition-colors', viewMode === 'workflow' ? 'bg-primary text-dark-300 border-primary' : 'bg-dark-100 text-text-secondary border-border-primary']">流程预览</button>
+      <button @click="viewMode = 'compare'; loadAllEffective()" :class="['px-4 py-1.5 rounded-lg text-sm font-medium border transition-colors', viewMode === 'compare' ? 'bg-primary text-dark-300 border-primary' : 'bg-dark-100 text-text-secondary border-border-primary']">四策略参数对比</button>
+    </div>
+
+    <!-- ===== 四策略并排对比视图（只读诊断） ===== -->
     <div v-if="viewMode === 'compare'" class="bg-dark-100 rounded-2xl border border-border-primary overflow-hidden mb-4">
       <div class="px-4 py-3 border-b border-border-secondary">
         <span class="font-semibold text-sm">四策略参数对比</span>
-        <span class="text-xs text-text-tertiary ml-2">差异项高亮显示</span>
+        <span class="text-xs text-text-tertiary ml-2">差异项高亮显示（只读）</span>
       </div>
       <div class="overflow-x-auto">
         <table class="w-full text-xs">
@@ -62,245 +70,7 @@
       </div>
     </div>
 
-    <!-- ===== Guard 时段规则视图 ===== -->
-    <div v-if="viewMode === 'guard'" class="space-y-4">
-
-      <!-- 实时状态条 -->
-      <div class="bg-dark-100 rounded-xl border border-border-primary px-4 py-3">
-        <div class="flex items-center justify-between">
-          <div class="flex items-center gap-3">
-            <div class="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
-            <span class="text-sm font-medium">当前时段</span>
-            <span class="text-xs font-mono text-primary">{{ guardCurrentBJT }}</span>
-          </div>
-          <div class="flex items-center gap-2">
-            <span class="px-2 py-0.5 rounded text-xs font-medium" :class="guardActivePhase.class">{{ guardActivePhase.label }}</span>
-            <button @click="loadGuardRules" class="text-xs text-primary hover:text-primary-hover ml-3">刷新</button>
-          </div>
-        </div>
-      </div>
-
-      <!-- 卡片1: 周一开盘规则 -->
-      <div class="bg-dark-100 rounded-xl border border-border-primary overflow-hidden">
-        <div class="px-4 py-3 border-b border-border-secondary flex items-center justify-between">
-          <div class="flex items-center gap-2">
-            <span class="text-sm font-bold">周一开盘</span>
-            <span class="text-xs text-text-tertiary">06:00-08:00 BJT</span>
-          </div>
-          <div class="flex items-center gap-2">
-            <label class="flex items-center gap-1.5 cursor-pointer">
-              <input type="checkbox" v-model="guardRules.monday_open.enabled" @change="guardDirty=true" class="accent-primary">
-              <span class="text-xs">启用</span>
-            </label>
-            <button v-if="!guardEditMode.monday" @click="guardEditMode.monday=true" class="text-xs px-2 py-1 bg-dark-200 hover:bg-dark-50 rounded">编辑</button>
-            <button v-else @click="saveGuardRules(); guardEditMode.monday=false" class="text-xs px-2 py-1 bg-primary hover:bg-primary-hover text-dark-300 rounded font-medium">保存</button>
-          </div>
-        </div>
-        <div class="p-4 space-y-3">
-          <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <div>
-              <label class="text-[10px] text-text-tertiary block mb-1">高波动开始</label>
-              <input :disabled="!guardEditMode.monday" v-model="guardRules.monday_open.volatility_start" @input="guardDirty=true"
-                class="w-full px-2 py-1 bg-dark-200 border border-border-primary rounded text-xs font-mono disabled:opacity-50">
-            </div>
-            <div>
-              <label class="text-[10px] text-text-tertiary block mb-1">高波动结束</label>
-              <input :disabled="!guardEditMode.monday" v-model="guardRules.monday_open.volatility_end" @input="guardDirty=true"
-                class="w-full px-2 py-1 bg-dark-200 border border-border-primary rounded text-xs font-mono disabled:opacity-50">
-            </div>
-            <div>
-              <label class="text-[10px] text-text-tertiary block mb-1">最小开仓点差</label>
-              <input :disabled="!guardEditMode.monday" type="number" step="0.5" v-model.number="guardRules.monday_open.min_spread_to_open" @input="guardDirty=true"
-                class="w-full px-2 py-1 bg-dark-200 border border-border-primary rounded text-xs font-mono disabled:opacity-50">
-            </div>
-            <div>
-              <label class="text-[10px] text-text-tertiary block mb-1">资金费最低阈值</label>
-              <input :disabled="!guardEditMode.monday" type="number" step="0.001" v-model.number="guardRules.monday_open.min_funding_for_capture" @input="guardDirty=true"
-                class="w-full px-2 py-1 bg-dark-200 border border-border-primary rounded text-xs font-mono disabled:opacity-50">
-            </div>
-          </div>
-          <div class="mt-3">
-            <div class="text-xs text-text-tertiary mb-2 font-medium">资金费捕获阶段</div>
-            <div class="space-y-2">
-              <div v-for="(ph, i) in guardRules.monday_open.funding_capture_phases || []" :key="i"
-                class="grid grid-cols-5 gap-2 bg-dark-200 rounded-lg p-2">
-                <div><label class="text-[9px] text-text-tertiary">开始</label><input :disabled="!guardEditMode.monday" v-model="ph.start" @input="guardDirty=true" class="w-full px-1.5 py-0.5 bg-dark-300 border border-border-primary rounded text-[11px] font-mono disabled:opacity-50"></div>
-                <div><label class="text-[9px] text-text-tertiary">结束</label><input :disabled="!guardEditMode.monday" v-model="ph.end" @input="guardDirty=true" class="w-full px-1.5 py-0.5 bg-dark-300 border border-border-primary rounded text-[11px] font-mono disabled:opacity-50"></div>
-                <div><label class="text-[9px] text-text-tertiary">点差下限</label><input :disabled="!guardEditMode.monday" type="number" step="0.5" v-model.number="ph.min_spread_entry" @input="guardDirty=true" class="w-full px-1.5 py-0.5 bg-dark-300 border border-border-primary rounded text-[11px] font-mono disabled:opacity-50"></div>
-                <div><label class="text-[9px] text-text-tertiary">点差上限</label><input :disabled="!guardEditMode.monday" type="number" step="0.5" v-model.number="ph.upper_spread_entry" @input="guardDirty=true" class="w-full px-1.5 py-0.5 bg-dark-300 border border-border-primary rounded text-[11px] font-mono disabled:opacity-50"></div>
-                <div><label class="text-[9px] text-text-tertiary">最低资金费</label><input :disabled="!guardEditMode.monday" type="number" step="0.001" v-model.number="ph.min_funding" @input="guardDirty=true" class="w-full px-1.5 py-0.5 bg-dark-300 border border-border-primary rounded text-[11px] font-mono disabled:opacity-50"></div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- 卡片2: 周三三倍过夜规则 -->
-      <div class="bg-dark-100 rounded-xl border border-border-primary overflow-hidden">
-        <div class="px-4 py-3 border-b border-border-secondary flex items-center justify-between">
-          <div class="flex items-center gap-2">
-            <span class="text-sm font-bold">周三三倍过夜</span>
-            <span class="text-xs text-text-tertiary">18:00 BJT 起生效</span>
-          </div>
-          <div class="flex items-center gap-2">
-            <label class="flex items-center gap-1.5 cursor-pointer">
-              <input type="checkbox" v-model="guardRules.wednesday_overnight.enabled" @change="guardDirty=true" class="accent-primary">
-              <span class="text-xs">启用</span>
-            </label>
-            <button v-if="!guardEditMode.wednesday" @click="guardEditMode.wednesday=true" class="text-xs px-2 py-1 bg-dark-200 hover:bg-dark-50 rounded">编辑</button>
-            <button v-else @click="saveGuardRules(); guardEditMode.wednesday=false" class="text-xs px-2 py-1 bg-primary hover:bg-primary-hover text-dark-300 rounded font-medium">保存</button>
-          </div>
-        </div>
-        <div class="p-4">
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div class="bg-dark-200 rounded-lg p-3 border border-border-primary">
-              <div class="text-xs font-semibold text-green-400 mb-2">正向（鼓励）</div>
-              <div class="space-y-2">
-                <div class="flex justify-between items-center">
-                  <span class="text-[10px] text-text-tertiary">基础仓位上限</span>
-                  <input :disabled="!guardEditMode.wednesday" type="number" step="0.05" v-model.number="guardRules.wednesday_overnight.forward.base_cap_pct" @input="guardDirty=true"
-                    class="w-20 px-1.5 py-0.5 bg-dark-300 border border-border-primary rounded text-xs font-mono text-right disabled:opacity-50">
-                </div>
-                <div class="flex justify-between items-center">
-                  <span class="text-[10px] text-text-tertiary">有利条件上限</span>
-                  <input :disabled="!guardEditMode.wednesday" type="number" step="0.05" v-model.number="guardRules.wednesday_overnight.forward.favorable_cap_pct" @input="guardDirty=true"
-                    class="w-20 px-1.5 py-0.5 bg-dark-300 border border-border-primary rounded text-xs font-mono text-right disabled:opacity-50">
-                </div>
-                <div class="flex justify-between items-center">
-                  <span class="text-[10px] text-text-tertiary">有利最低点差</span>
-                  <input :disabled="!guardEditMode.wednesday" type="number" step="0.5" v-model.number="guardRules.wednesday_overnight.forward.favorable_conditions.min_spread" @input="guardDirty=true"
-                    class="w-20 px-1.5 py-0.5 bg-dark-300 border border-border-primary rounded text-xs font-mono text-right disabled:opacity-50">
-                </div>
-                <div class="flex justify-between items-center">
-                  <span class="text-[10px] text-text-tertiary">有利最低资金费</span>
-                  <input :disabled="!guardEditMode.wednesday" type="number" step="0.001" v-model.number="guardRules.wednesday_overnight.forward.favorable_conditions.min_funding" @input="guardDirty=true"
-                    class="w-20 px-1.5 py-0.5 bg-dark-300 border border-border-primary rounded text-xs font-mono text-right disabled:opacity-50">
-                </div>
-              </div>
-            </div>
-            <div class="bg-dark-200 rounded-lg p-3 border border-border-primary">
-              <div class="text-xs font-semibold text-red-400 mb-2">反向（限制）</div>
-              <div class="space-y-2">
-                <div class="flex justify-between items-center">
-                  <span class="text-[10px] text-text-tertiary">基础仓位上限</span>
-                  <input :disabled="!guardEditMode.wednesday" type="number" step="0.05" v-model.number="guardRules.wednesday_overnight.reverse.base_cap_pct" @input="guardDirty=true"
-                    class="w-20 px-1.5 py-0.5 bg-dark-300 border border-border-primary rounded text-xs font-mono text-right disabled:opacity-50">
-                </div>
-                <div class="flex justify-between items-center">
-                  <span class="text-[10px] text-text-tertiary">有利条件上限</span>
-                  <input :disabled="!guardEditMode.wednesday" type="number" step="0.05" v-model.number="guardRules.wednesday_overnight.reverse.favorable_cap_pct" @input="guardDirty=true"
-                    class="w-20 px-1.5 py-0.5 bg-dark-300 border border-border-primary rounded text-xs font-mono text-right disabled:opacity-50">
-                </div>
-                <div class="flex justify-between items-center">
-                  <span class="text-[10px] text-text-tertiary">有利最低点差</span>
-                  <input :disabled="!guardEditMode.wednesday" type="number" step="0.5" v-model.number="guardRules.wednesday_overnight.reverse.favorable_conditions.min_spread" @input="guardDirty=true"
-                    class="w-20 px-1.5 py-0.5 bg-dark-300 border border-border-primary rounded text-xs font-mono text-right disabled:opacity-50">
-                </div>
-              </div>
-              <div class="mt-2 px-2 py-1.5 bg-dark-300 rounded text-[10px] text-text-tertiary">
-                核心规则：当资金费率 ≥ 三倍掉期费成本时，取消所有限制
-              </div>
-            </div>
-          </div>
-          <div class="mt-3 flex items-center gap-3">
-            <span class="text-[10px] text-text-tertiary">生效起始小时 (BJT)</span>
-            <input :disabled="!guardEditMode.wednesday" type="number" min="0" max="23" v-model.number="guardRules.wednesday_overnight.start_hour" @input="guardDirty=true"
-              class="w-16 px-1.5 py-0.5 bg-dark-200 border border-border-primary rounded text-xs font-mono disabled:opacity-50">
-          </div>
-        </div>
-      </div>
-
-      <!-- 卡片3: 周五周末规则 -->
-      <div class="bg-dark-100 rounded-xl border border-border-primary overflow-hidden">
-        <div class="px-4 py-3 border-b border-border-secondary flex items-center justify-between">
-          <div class="flex items-center gap-2">
-            <span class="text-sm font-bold">周五周末</span>
-            <span class="text-xs text-text-tertiary">条件双向仓位管理</span>
-          </div>
-          <div class="flex items-center gap-2">
-            <label class="flex items-center gap-1.5 cursor-pointer">
-              <input type="checkbox" v-model="guardRules.friday_weekend.enabled" @change="guardDirty=true" class="accent-primary">
-              <span class="text-xs">启用</span>
-            </label>
-            <button v-if="!guardEditMode.friday" @click="guardEditMode.friday=true" class="text-xs px-2 py-1 bg-dark-200 hover:bg-dark-50 rounded">编辑</button>
-            <button v-else @click="saveGuardRules(); guardEditMode.friday=false" class="text-xs px-2 py-1 bg-primary hover:bg-primary-hover text-dark-300 rounded font-medium">保存</button>
-          </div>
-        </div>
-        <div class="p-4">
-          <div class="flex items-center gap-3 mb-3">
-            <span class="text-[10px] text-text-tertiary">周末持仓最低点差</span>
-            <input :disabled="!guardEditMode.friday" type="number" step="0.5" v-model.number="guardRules.friday_weekend.weekend_hold_min_spread" @input="guardDirty=true"
-              class="w-16 px-1.5 py-0.5 bg-dark-200 border border-border-primary rounded text-xs font-mono disabled:opacity-50">
-          </div>
-          <div class="overflow-x-auto">
-            <table class="w-full text-xs">
-              <thead><tr class="border-b border-border-secondary text-text-tertiary">
-                <th class="text-left py-2 px-2">时段</th>
-                <th class="text-center py-2 px-2">默认上限</th>
-                <th class="text-center py-2 px-2">正向+资金费上升</th>
-                <th class="text-center py-2 px-2">条件加仓</th>
-              </tr></thead>
-              <tbody>
-                <tr class="border-b border-border-secondary">
-                  <td class="py-2 px-2 font-mono">周五 22:00-00:00</td>
-                  <td class="py-2 px-2 text-center">20%</td>
-                  <td class="py-2 px-2 text-center text-green-400">30% (spread&gt;=3.5: 40%)</td>
-                  <td class="py-2 px-2 text-center text-text-secondary">funding&gt;0: 30%</td>
-                </tr>
-                <tr class="border-b border-border-secondary">
-                  <td class="py-2 px-2 font-mono">周六 00:00-02:00</td>
-                  <td class="py-2 px-2 text-center">20%</td>
-                  <td class="py-2 px-2 text-center text-green-400">funding&gt;=swap: 40%</td>
-                  <td class="py-2 px-2 text-center text-red-400">反向限20%并减仓</td>
-                </tr>
-                <tr class="border-b border-border-secondary">
-                  <td class="py-2 px-2 font-mono">周六 02:00-04:00</td>
-                  <td class="py-2 px-2 text-center">10%</td>
-                  <td class="py-2 px-2 text-center text-green-400">rising+spread&gt;=4: 40%</td>
-                  <td class="py-2 px-2 text-center text-text-secondary">spread&gt;=3.5: 30%</td>
-                </tr>
-                <tr>
-                  <td class="py-2 px-2 font-mono">周六 04:00+</td>
-                  <td class="py-2 px-2 text-center text-red-400">禁止开仓</td>
-                  <td class="py-2 px-2 text-center text-green-400">rising+spread&gt;=5: 50%</td>
-                  <td class="py-2 px-2 text-center text-text-tertiary">极端条件</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-
-      <!-- 最近 Guard 拦截记录 -->
-      <div class="bg-dark-100 rounded-xl border border-border-primary overflow-hidden">
-        <div class="px-4 py-3 border-b border-border-secondary flex items-center justify-between">
-          <span class="text-sm font-bold">最近 Guard 拦截</span>
-          <button @click="loadGuardBlocks" class="text-xs text-primary hover:text-primary-hover">刷新</button>
-        </div>
-        <div class="overflow-x-auto">
-          <table class="w-full text-xs" v-if="guardBlocks.length">
-            <thead><tr class="border-b border-border-secondary text-text-tertiary">
-              <th class="text-left py-2 px-3">时间</th>
-              <th class="text-left py-2 px-3">规则类型</th>
-              <th class="text-left py-2 px-3">拒绝原因</th>
-              <th class="text-left py-2 px-3">提案</th>
-            </tr></thead>
-            <tbody>
-              <tr v-for="b in guardBlocks" :key="b.id" class="border-b border-border-secondary hover:bg-dark-50">
-                <td class="py-2 px-3 font-mono text-text-tertiary">{{ b.time }}</td>
-                <td class="py-2 px-3"><span class="px-1.5 py-0.5 rounded text-[10px] font-medium" :class="guardTypeClass(b.type)">{{ b.type }}</span></td>
-                <td class="py-2 px-3 text-text-secondary max-w-[300px] truncate" :title="b.reason">{{ b.reason }}</td>
-                <td class="py-2 px-3 font-mono text-text-tertiary">{{ b.action }} {{ b.qty }}</td>
-              </tr>
-            </tbody>
-          </table>
-          <div v-else class="px-4 py-6 text-center text-text-tertiary text-xs">暂无时段规则拦截记录</div>
-        </div>
-      </div>
-
-    </div>
-
-        <!-- 策略类型选择卡 (only in workflow mode) -->
+    <!-- 策略类型选择卡 (only in workflow mode) -->
     <div v-show="viewMode === 'workflow'" class="type-selector">
       <div
         v-for="t in strategyTypes" :key="t.type"
@@ -312,44 +82,30 @@
       </div>
     </div>
 
-    <!-- ── VueFlow 工作流画布 ── -->
+    <!-- ── VueFlow 工作流画布（只读全链路预览） ── -->
     <div v-show="viewMode === 'workflow'" class="workflow-canvas">
       <div class="canvas-header">
         <div class="header-left">
-          <h2>{{ strategyName }} - 执行流程配置</h2>
-          <span v-if="isLocked" class="lock-badge">🔒 已锁定</span>
+          <h2>{{ strategyName }} · 自动阶梯套利执行全链路</h2>
+          <span class="readonly-badge">🔒 只读预览</span>
         </div>
         <div class="header-actions">
-          <div class="template-group">
-            <button
-              v-for="(tpl, key) in builtinTemplates" :key="key"
-              @click="applyTemplateByKey(key)"
-              :class="['btn-template', { active: currentTemplate === key }]"
-              :disabled="isLocked"
-            >{{ tpl.name }}</button>
-          </div>
-          <div class="action-buttons">
-            <button @click="showDocModal = true" class="btn-secondary">📖 文档</button>
-            <button @click="openTemplateModal" class="btn-secondary">📋 模板</button>
-            <button @click="openHistoryModal" class="btn-secondary">📜 历史</button>
-            <button @click="exportConfig" class="btn-secondary">📤 导出</button>
-            <button @click="importConfig" class="btn-secondary" :disabled="isLocked">📥 导入</button>
-            <button @click="showCompareModal = true" class="btn-secondary">🔍 对比</button>
-            <button @click="showSaveTemplateModal = true" class="btn-secondary">💾 另存为</button>
-            <button @click="toggleLock" class="btn-secondary">{{ isLocked ? '🔓 解锁' : '🔒 锁定' }}</button>
-            <button @click="saveWorkflowConfig" class="btn-primary" :disabled="saving || isLocked">
-              {{ saving ? '保存中...' : '💾 保存配置' }}
-            </button>
-            <button @click="resetConfig" class="btn-secondary" :disabled="isLocked">🔄 重置</button>
+          <div class="legend">
+            <span class="lg-item"><span class="lg-dot main"></span>主干</span>
+            <span class="lg-item"><span class="lg-dot guard"></span>护栏旁路</span>
+            <span class="lg-item"><span class="lg-dot recover"></span>循环/恢复</span>
           </div>
         </div>
       </div>
 
       <VueFlow
         v-model="elements"
-        :default-zoom="0.75"
-        :min-zoom="0.5"
+        :default-zoom="0.6"
+        :min-zoom="0.3"
         :max-zoom="1.5"
+        :nodes-draggable="false"
+        :nodes-connectable="false"
+        :elements-selectable="false"
         class="workflow-flow"
       >
         <Background />
@@ -361,26 +117,10 @@
               <span class="node-icon">{{ data.icon }}</span>
               <span class="node-title">{{ data.label }}</span>
             </div>
-            <div class="node-content">
-              <div v-for="param in data.params" :key="param.key" class="param-row">
-                <label :for="`${data.id}-${param.key}`">{{ param.label }}</label>
-                <div class="param-input">
-                  <input
-                    :id="`${data.id}-${param.key}`"
-                    v-model.number="param.value"
-                    type="number"
-                    :step="param.step"
-                    :min="param.min"
-                    :max="param.max"
-                    @input="validateParam(param)"
-                    @change="onParamChange(data.id, param.key, param.value)"
-                    :class="{ warning: param.warning, error: param.error }"
-                  />
-                  <span class="param-unit">{{ param.unit }}</span>
-                </div>
-                <span class="param-hint" :class="{ 'text-warning': param.warning, 'text-error': param.error }">
-                  {{ param.warning || param.error || `推荐: ${param.recommended}${param.unit}` }}
-                </span>
+            <div v-if="data.params && data.params.length" class="node-content">
+              <div v-for="param in data.params" :key="param.key" class="param-row-ro">
+                <span class="param-label-ro">{{ param.label }}</span>
+                <span class="param-val-ro">{{ param.value }}<span class="param-unit-ro">{{ param.unit }}</span></span>
               </div>
             </div>
             <div v-if="data.description" class="node-description">{{ data.description }}</div>
@@ -388,24 +128,21 @@
           </div>
         </template>
       </VueFlow>
-
-      <div v-if="canvasError" class="error-message">{{ canvasError }}</div>
-      <div v-if="successMessage" class="success-message">{{ successMessage }}</div>
     </div>
 
-    <!-- ── 配置记录 CRUD（可折叠） ── -->
+    <!-- ── 当前有效引擎参数（只读展示，替代原 CRUD） ── -->
     <div v-show="viewMode === 'workflow'" class="crud-section">
       <div class="crud-header" @click="crudOpen = !crudOpen">
-        <span class="font-semibold text-sm">timing-configs 配置记录</span>
+        <span class="font-semibold text-sm">当前有效引擎参数（{{ strategyName }}）</span>
         <span class="text-xs text-text-tertiary">{{ crudOpen ? '▲ 收起' : '▼ 展开' }}</span>
       </div>
       <template v-if="crudOpen">
-        <!-- 有效配置 -->
         <div v-if="effectiveConfig" class="effective-bar">
           <div class="flex items-center gap-2 mb-2">
             <div class="w-2 h-2 rounded-full bg-primary animate-pulse"></div>
             <span class="text-sm font-bold text-primary">当前有效配置</span>
-            <span class="text-xs text-text-tertiary">{{ effectiveConfig.config_level }} · {{ effectiveConfig.strategy_type || '全局' }}</span>
+            <span class="text-xs text-text-tertiary">{{ effectiveConfig.config_level || 'global' }} · {{ effectiveConfig.strategy_type || '全局' }}</span>
+            <span class="text-[10px] text-text-tertiary ml-auto">优先级：实例 &gt; 策略类型 &gt; 全局</span>
           </div>
           <div class="grid grid-cols-2 md:grid-cols-5 gap-3 text-xs">
             <div v-for="f in configFields" :key="f.key">
@@ -414,288 +151,11 @@
             </div>
           </div>
         </div>
-        <div v-else class="py-3 text-center text-xs text-text-tertiary">
-          {{ loadingEffective ? '加载中...' : '当前策略类型暂无有效配置' }}
-        </div>
-
-        <!-- 操作栏 -->
-        <div class="crud-toolbar">
-          <button @click="reloadConfigs" :disabled="reloading" class="btn-sm-outline">
-            {{ reloading ? '重载中...' : '↻ 重载配置' }}
-          </button>
-          <button @click="openCreateModal" class="btn-sm-primary">+ 新增配置</button>
-        </div>
-
-        <!-- 配置列表 -->
-        <div v-if="loading" class="py-8 text-center text-text-tertiary text-sm">加载中...</div>
-        <div v-else-if="!typeConfigs.length" class="py-8 text-center text-text-tertiary text-sm">暂无配置</div>
-        <div v-else class="config-list">
-          <div v-for="cfg in typeConfigs" :key="cfg.id" class="config-row">
-            <div class="flex-1 min-w-0">
-              <div class="flex items-center gap-2 mb-1 flex-wrap">
-                <span class="font-semibold text-sm">{{ cfg.strategy_type || '全局' }}</span>
-                <span class="badge-level">{{ cfg.config_level || cfg.level }}</span>
-                <span v-if="cfg.is_locked" class="badge-disabled">🔒 已锁定</span>
-              </div>
-              <div class="grid grid-cols-2 md:grid-cols-5 gap-x-6 gap-y-0.5 text-xs text-text-tertiary">
-                <div v-for="f in configFields" :key="f.key">
-                  {{ f.label }}：<span class="font-mono text-text-secondary">{{ cfg[f.key] ?? '--' }}{{ f.unit ?? '' }}</span>
-                </div>
-              </div>
-            </div>
-            <div class="flex items-center gap-1.5 shrink-0">
-              <button @click="openEditModal(cfg)" class="btn-xs">编辑</button>
-              <button @click="openCrudHistoryModal(cfg)" class="btn-xs">历史</button>
-              <button @click="deleteConfig(cfg)" class="btn-xs danger">删除</button>
-            </div>
-          </div>
+        <div v-else class="py-3 px-5 text-center text-xs text-text-tertiary">
+          {{ loadingEffective ? '加载中...' : '当前策略类型暂无有效配置（将回退全局默认）' }}
         </div>
       </template>
     </div>
-
-    <!-- ── 配置历史模态框（画布） ── -->
-    <div v-if="showHistoryModal" class="modal-overlay" @click.self="showHistoryModal = false">
-      <div class="modal-content">
-        <div class="modal-header">
-          <h3>配置历史记录</h3>
-          <button @click="showHistoryModal = false" class="btn-close">✕</button>
-        </div>
-        <div class="modal-body">
-          <div v-if="!configHistory.length" class="empty-state">暂无历史记录</div>
-          <div v-else class="history-list">
-            <div v-for="h in configHistory" :key="h.id" class="history-item">
-              <div class="history-info">
-                <span class="history-time">{{ formatTime(h.created_at) }}</span>
-                <span class="history-user">{{ h.created_by || '系统' }}</span>
-                <span class="history-template" v-if="h.template">{{ h.template }}</span>
-              </div>
-              <div class="history-actions">
-                <button @click="compareWithHistory(h)" class="btn-sm">对比</button>
-                <button @click="restoreHistory(h)" class="btn-sm btn-primary">恢复</button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- ── 对比模态框 ── -->
-    <div v-if="showCompareModal" class="modal-overlay" @click.self="showCompareModal = false">
-      <div class="modal-content modal-large">
-        <div class="modal-header">
-          <h3>配置对比</h3>
-          <button @click="showCompareModal = false" class="btn-close">✕</button>
-        </div>
-        <div class="modal-body">
-          <div class="compare-controls">
-            <select v-model="compareSource" class="form-select" @change="generateCompareData(null)">
-              <option value="">选择对比源...</option>
-              <optgroup label="系统模板">
-                <option value="conservative">保守型模板</option>
-                <option value="balanced">平衡型模板</option>
-                <option value="aggressive">激进型模板</option>
-              </optgroup>
-              <optgroup label="自定义模板" v-if="customTemplates.length">
-                <option v-for="tpl in customTemplates" :key="tpl.id" :value="'custom_' + tpl.id">{{ tpl.name }}</option>
-              </optgroup>
-            </select>
-          </div>
-          <div v-if="compareData" class="compare-table">
-            <table>
-              <thead>
-                <tr><th>参数名称</th><th>当前值</th><th>对比值</th><th>差异</th></tr>
-              </thead>
-              <tbody>
-                <tr v-for="item in compareData" :key="item.key" :class="{ diff: item.isDifferent }">
-                  <td>{{ item.label }}</td>
-                  <td>{{ item.current }}{{ item.unit }}</td>
-                  <td>{{ item.compare }}{{ item.unit }}</td>
-                  <td>
-                    <span v-if="item.isDifferent" class="diff-badge">{{ item.diff > 0 ? '+' : '' }}{{ item.diff }}{{ item.unit }}</span>
-                    <span v-else class="same-badge">相同</span>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- ── 文档模态框 ── -->
-    <div v-if="showDocModal" class="modal-overlay" @click.self="showDocModal = false">
-      <div class="modal-content modal-large">
-        <div class="modal-header">
-          <h3>配置参数文档</h3>
-          <button @click="showDocModal = false" class="btn-close">✕</button>
-        </div>
-        <div class="modal-body doc-content">
-          <div class="doc-section">
-            <h4>🎯 触发控制组</h4>
-            <div class="doc-item">
-              <strong>检查间隔 (trigger_check_interval)</strong>
-              <p>每次检查点差是否满足触发条件的时间间隔。</p>
-              <p class="doc-impact">💡 间隔越短响应越快，但系统负载越高。推荐0.5秒。</p>
-            </div>
-            <div class="doc-item">
-              <strong>开仓/平仓触发次数</strong>
-              <p>连续满足触发条件的次数，达到后才执行开仓/平仓。</p>
-              <p class="doc-impact">💡 次数越多越稳定，但可能错过快速变化的机会。推荐3次。</p>
-            </div>
-          </div>
-          <div class="doc-section">
-            <h4>📝 订单执行组</h4>
-            <div class="doc-item">
-              <strong>Binance超时 (binance_timeout)</strong>
-              <p>等待Binance订单完成的最长时间。超时时间 = 检查间隔 × 最大重试次数。</p>
-              <p class="doc-impact">💡 限价单设置5-10秒，市价单设置2-5秒。</p>
-            </div>
-            <div class="doc-item">
-              <strong>MT5成交同步等待 (mt5_deal_sync_wait)</strong>
-              <p>等待MT5同步成交数据的时间，设置3-5秒确保数据同步完成。</p>
-            </div>
-          </div>
-          <div class="doc-section">
-            <h4>🔄 流程控制组</h4>
-            <div class="doc-item">
-              <strong>API防止频繁调用延迟 (api_spam_prevention_delay)</strong>
-              <p>多手执行时，每手之间的延迟时间。设置3秒可以有效防止限流。</p>
-            </div>
-            <div class="doc-item">
-              <strong>单腿检查延迟</strong>
-              <p>检测到单腿后，等待一段时间再次检查。第一次10秒，第二次1秒。</p>
-            </div>
-          </div>
-          <div class="doc-section">
-            <h4>⚠️ 常见问题</h4>
-            <div class="doc-item"><strong>Q: 为什么订单经常超时？</strong><p>A: 检查Binance超时设置是否过短，建议5秒以上。</p></div>
-            <div class="doc-item"><strong>Q: 为什么经常出现单腿？</strong><p>A: MT5成交同步等待时间过短，建议设置3-5秒。</p></div>
-            <div class="doc-item"><strong>Q: 如何提高执行速度？</strong><p>A: 减少触发次数、缩短检查间隔、减少重试次数。</p></div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- ── 另存为模板 ── -->
-    <div v-if="showSaveTemplateModal" class="modal-overlay" @click.self="showSaveTemplateModal = false">
-      <div class="modal-content">
-        <div class="modal-header">
-          <h3>另存为模板</h3>
-          <button @click="showSaveTemplateModal = false" class="btn-close">✕</button>
-        </div>
-        <div class="modal-body">
-          <div class="form-group">
-            <label>模板名称</label>
-            <input v-model="newTemplateName" type="text" class="form-input" placeholder="请输入模板名称" maxlength="50" />
-          </div>
-          <div class="form-group">
-            <label>模板描述（可选）</label>
-            <textarea v-model="newTemplateDesc" class="form-textarea" placeholder="描述此模板的用途" rows="3" maxlength="200"></textarea>
-          </div>
-          <div class="modal-actions">
-            <button @click="showSaveTemplateModal = false" class="btn-secondary">取消</button>
-            <button @click="saveAsTemplate" class="btn-primary" :disabled="!newTemplateName.trim()">保存模板</button>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- ── 模板管理 ── -->
-    <div v-if="showTemplateModal" class="modal-overlay" @click.self="showTemplateModal = false">
-      <div class="modal-content modal-large">
-        <div class="modal-header">
-          <h3>模板管理</h3>
-          <button @click="showTemplateModal = false" class="btn-close">✕</button>
-        </div>
-        <div class="modal-body">
-          <div v-if="!customTemplates.length" class="empty-state">暂无自定义模板，点击"💾 另存为"创建</div>
-          <div v-else class="template-list">
-            <div v-for="tpl in customTemplates" :key="tpl.id" class="template-item">
-              <div class="template-info">
-                <h4>{{ tpl.name }}</h4>
-                <p v-if="tpl.description" class="template-desc">{{ tpl.description }}</p>
-                <span class="template-time">创建于 {{ formatTime(tpl.created_at) }}</span>
-              </div>
-              <div class="template-actions">
-                <button @click="applyCustomTemplate(tpl)" class="btn-sm btn-primary">应用</button>
-                <button @click="compareWithTemplate(tpl)" class="btn-sm">对比</button>
-                <button @click="deleteCustomTemplate(tpl.id)" class="btn-sm btn-danger">删除</button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- ── 新增/编辑 CRUD Modal ── -->
-    <Teleport to="body">
-      <div v-if="showModal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60">
-        <div class="bg-dark-100 rounded-2xl border border-border-primary w-full max-w-2xl max-h-[90vh] overflow-y-auto shadow-2xl">
-          <div class="px-6 py-4 border-b border-border-secondary flex items-center justify-between">
-            <h3 class="font-bold text-lg">{{ editingConfig ? '编辑配置' : '新增配置' }}</h3>
-            <button @click="showModal = false" class="text-text-tertiary hover:text-text-primary text-xl">✕</button>
-          </div>
-          <div class="p-6 space-y-4">
-            <div class="grid grid-cols-2 gap-4">
-              <div>
-                <label class="block text-xs text-text-tertiary mb-1.5">配置层级</label>
-                <select v-model="form.config_level" class="input-field w-full">
-                  <option value="global">全局 (global)</option>
-                  <option value="strategy_type">策略类型 (strategy_type)</option>
-                  <option value="instance">实例 (instance)</option>
-                </select>
-              </div>
-              <div>
-                <label class="block text-xs text-text-tertiary mb-1.5">策略类型</label>
-                <select v-model="form.strategy_type" class="input-field w-full">
-                  <option v-for="t in strategyTypes" :key="t.type" :value="t.type">{{ t.label }}</option>
-                </select>
-              </div>
-            </div>
-            <div v-for="grp in configGroups" :key="grp.key" class="bg-dark-200 rounded-xl p-4 space-y-3">
-              <div class="text-xs font-bold text-text-secondary mb-2">{{ grp.label }}</div>
-              <div class="grid grid-cols-2 gap-4">
-                <div v-for="f in configFields.filter(x => x.group === grp.key)" :key="f.key">
-                  <label class="block text-xs text-text-tertiary mb-1.5">{{ f.label }} ({{ f.unit }})</label>
-                  <input v-model.number="form[f.key]" type="number" :step="f.step ?? 'any'" :placeholder="f.placeholder" class="input-field w-full" />
-                </div>
-              </div>
-            </div>
-          </div>
-          <div class="px-6 py-4 border-t border-border-secondary flex items-center justify-end gap-3">
-            <button @click="showModal = false" class="px-4 py-2 text-sm text-text-secondary hover:text-text-primary">取消</button>
-            <button @click="saveCrudConfig" :disabled="saving"
-              class="px-5 py-2 bg-primary hover:bg-primary-hover disabled:opacity-50 text-dark-300 font-semibold rounded-lg text-sm">
-              {{ saving ? '保存中...' : '保存' }}
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <!-- CRUD 历史 Modal -->
-      <div v-if="showCrudHistory" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60">
-        <div class="bg-dark-100 rounded-2xl border border-border-primary w-full max-w-xl max-h-[80vh] overflow-y-auto shadow-2xl">
-          <div class="px-6 py-4 border-b border-border-secondary flex items-center justify-between">
-            <h3 class="font-bold">配置历史记录</h3>
-            <button @click="showCrudHistory = false" class="text-text-tertiary hover:text-text-primary text-xl">✕</button>
-          </div>
-          <div class="p-4 space-y-2">
-            <div v-if="!crudHistoryList.length" class="text-center py-8 text-text-tertiary text-sm">暂无历史记录</div>
-            <div v-for="h in crudHistoryList" :key="h.id || h.created_at" class="bg-dark-200 rounded-xl p-3 text-xs space-y-1">
-              <div class="flex items-center justify-between">
-                <span class="font-semibold">{{ h.strategy_type || '全局' }} · {{ h.config_level }}</span>
-                <span class="text-text-tertiary">{{ fmtTime(h.created_at) }}</span>
-              </div>
-              <div class="grid grid-cols-2 gap-x-4 text-text-tertiary">
-                <div v-for="f in configFields" :key="f.key">
-                  {{ f.label }}: <span class="font-mono text-text-secondary">{{ (h.config_data && h.config_data[f.key]) ?? '--' }}{{ f.unit }}</span>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </Teleport>
 
     <!-- Toast -->
     <Teleport to="body">
@@ -704,14 +164,11 @@
         {{ toast.msg }}
       </div>
     </Teleport>
-
-    <!-- 隐藏文件输入 -->
-    <input ref="fileInput" type="file" accept=".json" style="display:none" @change="handleFileImport" />
   </div>
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { VueFlow } from '@vue-flow/core'
 import { Background } from '@vue-flow/background'
 import { Controls } from '@vue-flow/controls'
@@ -719,7 +176,6 @@ import '@vue-flow/core/dist/style.css'
 import '@vue-flow/core/dist/theme-default.css'
 import '@vue-flow/controls/dist/style.css'
 import api from '@/services/api.js'
-import dayjs from 'dayjs'
 
 // ── 策略类型 ────────────────────────────────────────────────────
 const strategyTypes = [
@@ -729,34 +185,28 @@ const strategyTypes = [
   { type: 'reverse_closing',  label: '反套平仓',  icon: '↖' },
 ]
 
-// CRUD 核心字段 — 对应 strategy_timing_configs 表
+// 引擎参数字段 — 对应 strategy_timing_configs 表（只读展示/对比）
 const configFields = [
-  // 触发控制
-  { key: 'trigger_check_interval', label: '触发检查间隔', unit: 's', step: 0.1, placeholder: '0.5', group: 'trigger' },
-  { key: 'opening_trigger_count',  label: '开仓触发次数', unit: '次', step: 1,  placeholder: '3',   group: 'trigger' },
-  { key: 'closing_trigger_count',  label: '平仓触发次数', unit: '次', step: 1,  placeholder: '3',   group: 'trigger' },
-  // 订单执行
-  { key: 'binance_timeout',        label: 'Binance超时', unit: 's', step: 0.5, placeholder: '5.0', group: 'order' },
-  { key: 'bybit_timeout',          label: 'Bybit超时',   unit: 's', step: 0.01, placeholder: '0.1', group: 'order' },
-  { key: 'order_check_interval',   label: '订单检查间隔', unit: 's', step: 0.05, placeholder: '0.2', group: 'order' },
-  { key: 'spread_check_interval',  label: '点差监控间隔', unit: 's', step: 0.1, placeholder: '2.0', group: 'order' },
-  { key: 'mt5_deal_sync_wait',     label: 'MT5同步等待', unit: 's', step: 0.5, placeholder: '3.0', group: 'order' },
-  // 流程控制
-  { key: 'api_spam_prevention_delay',             label: 'API防频繁延迟',  unit: 's', step: 0.5, placeholder: '3.0', group: 'flow' },
-  { key: 'delayed_single_leg_check_delay',        label: '单腿检测延迟',   unit: 's', step: 1,   placeholder: '10.0', group: 'flow' },
-  { key: 'delayed_single_leg_second_check_delay', label: '单腿二次延迟',   unit: 's', step: 0.1, placeholder: '1.0',  group: 'flow' },
-  // 重试
-  { key: 'api_retry_times',          label: 'API重试次数',        unit: '次', step: 1,   placeholder: '3',   group: 'retry' },
-  { key: 'api_retry_delay',          label: 'API重试延迟',        unit: 's',  step: 0.1, placeholder: '0.5', group: 'retry' },
-  { key: 'max_binance_limit_retries',label: 'Binance最大轮询次数', unit: '次', step: 1,   placeholder: '25',  group: 'retry' },
-  // 等待延迟
-  { key: 'open_wait_after_cancel_no_trade',  label: '开仓撤单未成交等待', unit: 's', step: 0.5, placeholder: '3.0', group: 'wait' },
-  { key: 'open_wait_after_cancel_part',      label: '开仓撤单部分等待',   unit: 's', step: 0.5, placeholder: '2.0', group: 'wait' },
-  { key: 'close_wait_after_cancel_no_trade', label: '平仓撤单未成交等待', unit: 's', step: 0.5, placeholder: '3.0', group: 'wait' },
-  { key: 'close_wait_after_cancel_part',     label: '平仓撤单部分等待',   unit: 's', step: 0.5, placeholder: '2.0', group: 'wait' },
-  // 前端
-  { key: 'status_polling_interval', label: '状态轮询间隔', unit: 's', step: 1,   placeholder: '5.0', group: 'frontend' },
-  { key: 'debounce_delay',          label: '防抖延迟',     unit: 's', step: 0.1, placeholder: '0.5', group: 'frontend' },
+  { key: 'trigger_check_interval', label: '触发检查间隔', unit: 's', group: 'trigger' },
+  { key: 'opening_trigger_count',  label: '开仓触发次数', unit: '次', group: 'trigger' },
+  { key: 'closing_trigger_count',  label: '平仓触发次数', unit: '次', group: 'trigger' },
+  { key: 'binance_timeout',        label: 'Binance超时', unit: 's', group: 'order' },
+  { key: 'bybit_timeout',          label: 'Bybit超时',   unit: 's', group: 'order' },
+  { key: 'order_check_interval',   label: '订单检查间隔', unit: 's', group: 'order' },
+  { key: 'spread_check_interval',  label: '点差监控间隔', unit: 's', group: 'order' },
+  { key: 'mt5_deal_sync_wait',     label: 'MT5同步等待', unit: 's', group: 'order' },
+  { key: 'api_spam_prevention_delay',             label: 'API防频繁延迟',  unit: 's', group: 'flow' },
+  { key: 'delayed_single_leg_check_delay',        label: '单腿检测延迟',   unit: 's', group: 'flow' },
+  { key: 'delayed_single_leg_second_check_delay', label: '单腿二次延迟',   unit: 's', group: 'flow' },
+  { key: 'api_retry_times',          label: 'API重试次数',        unit: '次', group: 'retry' },
+  { key: 'api_retry_delay',          label: 'API重试延迟',        unit: 's',  group: 'retry' },
+  { key: 'max_binance_limit_retries',label: 'Binance最大轮询次数', unit: '次', group: 'retry' },
+  { key: 'open_wait_after_cancel_no_trade',  label: '开仓撤单未成交等待', unit: 's', group: 'wait' },
+  { key: 'open_wait_after_cancel_part',      label: '开仓撤单部分等待',   unit: 's', group: 'wait' },
+  { key: 'close_wait_after_cancel_no_trade', label: '平仓撤单未成交等待', unit: 's', group: 'wait' },
+  { key: 'close_wait_after_cancel_part',     label: '平仓撤单部分等待',   unit: 's', group: 'wait' },
+  { key: 'status_polling_interval', label: '状态轮询间隔', unit: 's', group: 'frontend' },
+  { key: 'debounce_delay',          label: '防抖延迟',     unit: 's', group: 'frontend' },
 ]
 
 const configGroups = [
@@ -769,576 +219,162 @@ const configGroups = [
 ]
 
 // ── 状态 ──────────────────────────────────────────────────────
-const activeType      = ref('forward_opening')
-const crudOpen        = ref(false)
-
-// 画布
-const canvasError     = ref(null)
-const successMessage  = ref(null)
-const saving          = ref(false)
-const isLocked        = ref(false)
-const currentTemplate = ref('')
-const currentConfigId = ref(null)
-const configData      = ref({})
-const configHistory   = ref([])
-const customTemplates = ref([])
-const showHistoryModal      = ref(false)
-const showCompareModal      = ref(false)
-const showDocModal          = ref(false)
-const showSaveTemplateModal = ref(false)
-const showTemplateModal     = ref(false)
-const compareSource   = ref('')
-const compareData     = ref(null)
-const newTemplateName = ref('')
-const newTemplateDesc = ref('')
-const fileInput       = ref(null)
-
-// CRUD
-const allConfigs      = ref([])
-const effectiveConfig = ref(null)
-const loading         = ref(false)
-const loadingEffective= ref(false)
-const reloading       = ref(false)
-const showModal       = ref(false)
-const editingConfig   = ref(null)
-const showCrudHistory = ref(false)
-const crudHistoryList = ref([])
+const activeType       = ref('forward_opening')
+const viewMode         = ref('workflow')
+const crudOpen         = ref(false)
+const configData       = ref({})
+const effectiveConfig  = ref(null)
+const loadingEffective = ref(false)
+const runningStrategies = ref([])
+const compareEffective = ref({})
 const toast = ref({ show: false, type: 'success', msg: '' })
-const defaultForm = () => ({
-  config_level: 'strategy_type', strategy_type: activeType.value,
-  trigger_check_interval: 0.5, opening_trigger_count: 3, closing_trigger_count: 3,
-  binance_timeout: 5.0, bybit_timeout: 0.1, order_check_interval: 0.2,
-  spread_check_interval: 2.0, mt5_deal_sync_wait: 3.0,
-  api_spam_prevention_delay: 3.0, delayed_single_leg_check_delay: 10.0,
-  delayed_single_leg_second_check_delay: 1.0,
-  api_retry_times: 3, api_retry_delay: 0.5, max_binance_limit_retries: 25,
-  open_wait_after_cancel_no_trade: 3.0, open_wait_after_cancel_part: 2.0,
-  close_wait_after_cancel_no_trade: 3.0, close_wait_after_cancel_part: 2.0,
-  status_polling_interval: 5.0, debounce_delay: 0.5,
-})
-const form = ref(defaultForm())
 
-// ── 计算 ──────────────────────────────────────────────────────
+function showToast(type, msg) {
+  toast.value = { show: true, type, msg }
+  setTimeout(() => { toast.value.show = false }, 2600)
+}
+
 const strategyName = computed(() => ({
   forward_opening: '正向开仓', forward_closing: '正向平仓',
   reverse_opening: '反向开仓', reverse_closing: '反向平仓',
 }[activeType.value] || activeType.value))
 
-const typeConfigs = computed(() =>
-  allConfigs.value.filter(c => !c.strategy_type || c.strategy_type === activeType.value || c.config_level === 'global')
-)
+const isOpening = computed(() => activeType.value.endsWith('_opening'))
 
-// ── 内置模板 ──────────────────────────────────────────────────
-const builtinTemplates = {
-  conservative: {
-    name: '保守型',
-    config: { trigger_check_interval:1.0, opening_trigger_count:5, closing_trigger_count:5, binance_timeout:10.0, bybit_timeout:0.5, order_check_interval:0.5, spread_check_interval:5.0, api_spam_prevention_delay:5.0, delayed_single_leg_check_delay:15.0, delayed_single_leg_second_check_delay:2.0, api_retry_times:5, api_retry_delay:1.0, max_binance_limit_retries:50, open_wait_after_cancel_no_trade:5.0, open_wait_after_cancel_part:3.0, close_wait_after_cancel_no_trade:5.0, close_wait_after_cancel_part:3.0, status_polling_interval:10.0, debounce_delay:1.0 }
-  },
-  balanced: {
-    name: '平衡型',
-    config: { trigger_check_interval:0.5, opening_trigger_count:3, closing_trigger_count:3, binance_timeout:5.0, bybit_timeout:0.1, order_check_interval:0.2, spread_check_interval:2.0, api_spam_prevention_delay:3.0, delayed_single_leg_check_delay:10.0, delayed_single_leg_second_check_delay:1.0, api_retry_times:3, api_retry_delay:0.5, max_binance_limit_retries:25, open_wait_after_cancel_no_trade:3.0, open_wait_after_cancel_part:2.0, close_wait_after_cancel_no_trade:3.0, close_wait_after_cancel_part:2.0, status_polling_interval:5.0, debounce_delay:0.5 }
-  },
-  aggressive: {
-    name: '激进型',
-    config: { trigger_check_interval:0.2, opening_trigger_count:1, closing_trigger_count:1, binance_timeout:2.0, bybit_timeout:0.05, order_check_interval:0.1, spread_check_interval:1.0, api_spam_prevention_delay:1.0, delayed_single_leg_check_delay:5.0, delayed_single_leg_second_check_delay:0.5, api_retry_times:1, api_retry_delay:0.2, max_binance_limit_retries:10, open_wait_after_cancel_no_trade:1.0, open_wait_after_cancel_part:0.5, close_wait_after_cancel_no_trade:1.0, close_wait_after_cancel_part:0.5, status_polling_interval:3.0, debounce_delay:0.2 }
-  }
-}
+// ──────────────────────────────────────────────────────────────
+// 自动阶梯套利全链路工作流（基于 continuous_executor V2 真实执行链路）
+// 主干(main) + 护栏旁路(guard) + 循环/恢复(recover)
+// 节点 data: { id, type, icon, label, description, impact, params:[{key,label,value,unit}] }
+// params 仅用于只读展示；value 由 loadEffectiveIntoNodes() 用有效配置回填。
+// ──────────────────────────────────────────────────────────────
+function p(key, label, unit) { return { key, label, value: '--', unit } }
 
-// ── 节点构建 ──────────────────────────────────────────────────
 function makeElements(strategyType) {
-  const triggerParams = []
-  if (strategyType === 'reverse_opening' || strategyType === 'forward_opening') {
-    triggerParams.push({ key:'opening_trigger_count', label:'开仓触发次数', value:3, unit:'次', step:1, min:1, max:10, recommended:3 })
-  } else {
-    triggerParams.push({ key:'closing_trigger_count', label:'平仓触发次数', value:3, unit:'次', step:1, min:1, max:10, recommended:3 })
-  }
+  const opening = strategyType.endsWith('_opening')
+  const triggerCountParam = opening
+    ? p('opening_trigger_count', '开仓触发次数', '次')
+    : p('closing_trigger_count', '平仓触发次数', '次')
+  const X = (n) => n              // 列 x
+  const Y = (n) => n              // 行 y
+  const COL = { main: 360, guard: 0, side: 720 }
 
-  return [
-    { id:'0', type:'custom', position:{x:100,y:-180}, data:{ id:'0', type:'loop', icon:'🔁', label:'手数循环控制', description:'每轮执行单手数，累计达到总手数后结束。remaining = total_qty - current_position', impact:'单手数越小执行越灵活，总手数决定本次任务目标', params:[] } },
-    { id:'1', type:'custom', position:{x:100,y:50},   data:{ id:'1', type:'trigger', icon:'🎯', label:'触发控制', description:'每隔检查间隔轮询点差，累计满足触发次数后进入执行', impact:'触发次数越多越稳定，但响应越慢', params:triggerParams } },
-    { id:'2', type:'custom', position:{x:100,y:280},  data:{ id:'2', type:'order', icon:'📝', label:'Binance限价单', description:'POST_ONLY挂单，每隔检查间隔轮询成交状态，超时后撤单', impact:'Binance超时 = 检查间隔 × 轮询次数上限',
-        params:[
-          { key:'binance_timeout', label:'Binance挂单超时', value:5.0, unit:'秒', step:0.5, min:0.1, max:60, recommended:5.0 },
-          { key:'order_check_interval', label:'成交状态检查间隔', value:0.2, unit:'秒', step:0.05, min:0.05, max:5, recommended:0.2 },
-          { key:'spread_check_interval', label:'点差监控间隔(挂单中)', value:2.0, unit:'秒', step:0.1, min:0.1, max:30, recommended:2.0 }
-        ] } },
-    { id:'3', type:'custom', position:{x:100,y:530},  data:{ id:'3', type:'bybit', icon:'⚡', label:'Bybit MT5市价单', description:'Binance成交后立即下Bybit市价单，等待MT5成交数据同步', impact:'MT5同步等待时间决定成交量读取准确性',
-        params:[
-          { key:'bybit_timeout', label:'Bybit下单等待', value:0.1, unit:'秒', step:0.01, min:0.01, max:10, recommended:0.1 },
-          { key:'mt5_deal_sync_wait', label:'MT5成交同步等待', value:3.0, unit:'秒', step:0.5, min:0.5, max:30, recommended:3.0 }
-        ] } },
-    { id:'4', type:'custom', position:{x:500,y:530},  data:{ id:'4', type:'retry', icon:'🔄', label:'Bybit成交验证/重试', description:'读取MT5 deals验证实际成交量，不足95%则重试补单', impact:'重试次数越多越能保证双边成交，但耗时更长',
-        params:[
-          { key:'api_retry_times', label:'Bybit补单重试次数', value:1, unit:'次', step:1, min:0, max:5, recommended:1 },
-          { key:'api_retry_delay', label:'重试间隔', value:0.5, unit:'秒', step:0.1, min:0.1, max:10, recommended:0.5 },
-          { key:'max_binance_limit_retries', label:'Binance限价单最大轮询次数', value:25, unit:'次', step:1, min:5, max:100, recommended:25 }
-        ] } },
-    { id:'5', type:'custom', position:{x:500,y:280},  data:{ id:'5', type:'check', icon:'🔍', label:'单腿检测(异步)', description:'非阻塞异步任务：等待后对比仓位快照，Bybit/Binance < 60%则报警', impact:'延迟时间越长检测越准确，但报警越滞后',
-        params:[
-          { key:'delayed_single_leg_check_delay', label:'第一次检测延迟', value:10.0, unit:'秒', step:1, min:1, max:60, recommended:10.0 },
-          { key:'delayed_single_leg_second_check_delay', label:'第二次检测延迟', value:1.0, unit:'秒', step:0.1, min:0.1, max:10, recommended:1.0 }
-        ] } },
-    { id:'6', type:'custom', position:{x:100,y:780},  data:{ id:'6', type:'complete', icon:'✅', label:'手数累计 & 完成判断', description:'record_opening累加Binance成交量(主腿)，current_position >= total_qty则结束循环', impact:'每轮成交量以Binance主腿成交量计入',
-        params:[
-          { key:'api_spam_prevention_delay', label:'执行后防频繁延迟', value:3.0, unit:'秒', step:0.5, min:0.5, max:30, recommended:3.0 }
-        ] } },
-    { id:'7', type:'custom', position:{x:500,y:780},  data:{ id:'7', type:'cancel', icon:'❌', label:'撤单后等待', description:'Binance超时撤单后等待，区分未成交和部分成交两种情况', impact:'等待时间影响重新挂单的速度',
-        params:[
-          { key:'open_wait_after_cancel_no_trade', label:'开仓撤单-未成交等待', value:3.0, unit:'秒', step:0.5, min:0.5, max:30, recommended:3.0 },
-          { key:'open_wait_after_cancel_part', label:'开仓撤单-部分成交等待', value:2.0, unit:'秒', step:0.5, min:0.5, max:30, recommended:2.0 },
-          { key:'close_wait_after_cancel_no_trade', label:'平仓撤单-未成交等待', value:3.0, unit:'秒', step:0.5, min:0.5, max:30, recommended:3.0 },
-          { key:'close_wait_after_cancel_part', label:'平仓撤单-部分成交等待', value:2.0, unit:'秒', step:0.5, min:0.5, max:30, recommended:2.0 }
-        ] } },
-    { id:'8', type:'custom', position:{x:900,y:280},  data:{ id:'8', type:'frontend', icon:'🖥️', label:'前端交互', description:'前端轮询状态和防抖配置', impact:'轮询频率影响界面更新速度',
-        params:[
-          { key:'status_polling_interval', label:'状态轮询间隔', value:5.0, unit:'秒', step:1, min:1, max:30, recommended:5.0 },
-          { key:'debounce_delay', label:'防抖延迟', value:0.5, unit:'秒', step:0.1, min:0.1, max:2, recommended:0.5 }
-        ] } },
-    // 边
-    { id:'e0-1', source:'0', target:'1', type:'smoothstep', animated:true, label:'开始每轮' },
-    { id:'e1-2', source:'1', target:'2', type:'smoothstep', animated:true, label:'触发成功→挂Binance限价单' },
-    { id:'e2-3', source:'2', target:'3', type:'smoothstep', animated:true, label:'Binance成交→下Bybit市价单' },
-    { id:'e3-4', source:'3', target:'4', type:'smoothstep', animated:true, label:'验证MT5成交量' },
-    { id:'e4-6', source:'4', target:'6', type:'smoothstep', animated:true, label:'成交≥95%→累计手数' },
-    { id:'e6-0', source:'6', target:'0', type:'smoothstep', animated:true, style:{stroke:'#4ade80'}, label:'未达总手数→下一轮' },
-    { id:'e3-5', source:'3', target:'5', type:'smoothstep', style:{stroke:'#a78bfa',strokeDasharray:'5,5'}, label:'异步检测单腿' },
-    { id:'e2-7', source:'2', target:'7', type:'smoothstep', style:{stroke:'#f97316'}, label:'Binance超时撤单' },
-    { id:'e7-1', source:'7', target:'1', type:'smoothstep', style:{stroke:'#f97316'}, label:'等待后重新触发' },
-    { id:'e4-3', source:'4', target:'3', type:'smoothstep', style:{stroke:'#fb923c',strokeDasharray:'5,5'}, label:'成交不足→补单重试' },
-    { id:'e2-1', source:'2', target:'1', type:'smoothstep', style:{stroke:'#94a3b8',strokeDasharray:'5,5'}, label:'Binance未成交→重置触发' },
+  const nodes = [
+    // ── 主干（中列，自上而下） ──
+    { id:'n1', type:'custom', position:{x:COL.main,y:Y(-40)}, data:{ id:'n1', type:'start', icon:'▶', label:'用户启动 → 构造执行器',
+        description:'execute_continuous_opening/closing 读有效引擎参数(TimingConfig)注入执行器，写 strategy_active 键(TTL 3600s)', impact:'本页参数即此处注入的全局引擎参数', params:[] } },
+    { id:'n2', type:'custom', position:{x:COL.main,y:Y(150)}, data:{ id:'n2', type:'loop', icon:'🔁', label:'V2 主循环 + 心跳',
+        description:'while is_running and not stop_requested；每轮更新 _last_heartbeat（看门狗监控点）', impact:'挂死>90s→看门狗 cancel+开市自恢复', params:[] } },
+    { id:'n3', type:'custom', position:{x:COL.main,y:Y(330)}, data:{ id:'n3', type:'sys', icon:'⚙', label:'热重载 / 活跃键刷新',
+        description:'配置热重载(3s 回读DB重建阶梯mapper) + Redis 活跃键 30s 续期(防 scan 超时提前过期)', impact:'运行中改阶梯/参数≤3s生效', params:[] } },
+    { id:'n4', type:'custom', position:{x:COL.main,y:Y(510)}, data:{ id:'n4', type:'data', icon:'📊', label:'读持仓 → 账本对账 → 读点差',
+        description:'_get_live_position(8s超时) + flat 时清陈旧账本 + _get_current_spread', impact:'读取失败→sleep 触发间隔后重试',
+        params:[ p('trigger_check_interval','触发检查间隔','s') ] } },
+    { id:'n5', type:'custom', position:{x:COL.main,y:Y(700)}, data:{ id:'n5', type:'ladder', icon:'🪜', label:'阶梯定位（顺序填充）',
+        description:'LadderRangeMapper 按持仓段定位活跃阶梯+remaining_capacity；先填满低阶再进高阶。12s 周期重判防锁死', impact:'持仓0却跳阶梯=选择器bug(已修为按段定位)', params:[] } },
+    { id:'n6', type:'custom', position:{x:COL.main,y:Y(890)}, data:{ id:'n6', type:'trigger', icon:'🎯', label:'触发计数 + 二次校验',
+        description:'轮询点差，累计满足 trigger_count 次进入下单；触发后再读点差二次确认仍达阈值，否则 reset', impact:'次数越多越稳、响应越慢',
+        params:[ triggerCountParam, p('trigger_check_interval','检查间隔','s'), p('spread_check_interval','点差监控间隔','s') ] } },
+    { id:'n7', type:'custom', position:{x:COL.main,y:Y(1080)}, data:{ id:'n7', type:'calc', icon:'🧮', label:'计算本轮下单量',
+        description:'order_qty = min(order_qty_limit, remaining)；开仓再按 opening_ceiling 持仓上限钳制', impact:'容量护栏运行中缩容会撤在途单', params:[] } },
+    { id:'n8', type:'custom', position:{x:COL.main,y:Y(1270)}, data:{ id:'n8', type:'order', icon:'📝', label:'A腿 Binance 限价单(POST_ONLY)',
+        description:'挂单→轮询成交→点差朝不利方向偏离>容差则撤→超时撤单', impact:'撤单容差太紧→maker 老被撤(单向放宽0.35)',
+        params:[ p('binance_timeout','挂单超时','s'), p('order_check_interval','成交检查间隔','s'), p('max_binance_limit_retries','最大轮询次数','次') ] } },
+    { id:'n9', type:'custom', position:{x:COL.main,y:Y(1460)}, data:{ id:'n9', type:'bybit', icon:'⚡', label:'B腿 MT5 市价对冲',
+        description:'A腿成交后按 hedge_multiplier 折算B腿手数下市价单；retcode 10018→标记停市冻结', impact:'未对冲零头(U.H.X)累积到下轮',
+        params:[ p('bybit_timeout','下单等待','s'), p('mt5_deal_sync_wait','MT5成交同步等待','s') ] } },
+    { id:'n10', type:'custom', position:{x:COL.main,y:Y(1650)}, data:{ id:'n10', type:'verify', icon:'🔄', label:'成交验证 / 补单',
+        description:'读 MT5 deals 验证实际成交量，不足阈值则按重试次数补单', impact:'重试越多越保双边成交、越耗时',
+        params:[ p('api_retry_times','补单重试次数','次'), p('api_retry_delay','重试间隔','s') ] } },
+    { id:'n11', type:'custom', position:{x:COL.main,y:Y(1840)}, data:{ id:'n11', type:'record', icon:'🧾', label:'记账 + 前端推送',
+        description:'record_opening/closing 累加主腿成交量、写 pos_open_ledger(平均点差/阶梯进度唯一源)，WS 推持仓快照', impact:'每轮成交量以 Binance 主腿计入',
+        params:[ p('api_spam_prevention_delay','执行后防频繁延迟','s') ] } },
+    { id:'n12', type:'custom', position:{x:COL.main,y:Y(2030)}, data:{ id:'n12', type:'complete', icon:'✅', label:'完成判断',
+        description:'current_position ≥ total_qty → 进下一阶梯；平仓 position_exhausted(MT5无持仓) → 结束', impact:'未达总手数→回主循环下一轮', params:[] } },
+
+    // ── 下单前置闸（主干右侧，紧贴 n8 之前的闸） ──
+    { id:'g_pre', type:'custom', position:{x:COL.side,y:Y(1170)}, data:{ id:'g_pre', type:'gate', icon:'🚦', label:'下单前置闸（4道）',
+        description:'① 清理遗留 s-挂单 ② MT5 trade_mode 预检(10s缓存) ③ MT5 临时停市冻结闸 ④ 交易网关准入', impact:'任一不过→defer 本轮不下单', params:[] } },
+    // ── 异步单腿防线（主干右侧，紧贴 n11） ──
+    { id:'s_leg', type:'custom', position:{x:COL.side,y:Y(1740)}, data:{ id:'s_leg', type:'check', icon:'🔍', label:'单腿防线（异步 Phase2）',
+        description:'成交后延迟实盘总量对账：一腿成交另一腿缺口→大红告警+用户收口(只读)', impact:'延迟越长越准、告警越滞后',
+        params:[ p('delayed_single_leg_check_delay','第一次检测延迟','s'), p('delayed_single_leg_second_check_delay','第二次检测延迟','s') ] } },
+
+    // ── 横切护栏旁路（左列泳道，虚线接主循环） ──
+    { id:'gv1', type:'custom', position:{x:COL.guard,y:Y(150)}, data:{ id:'gv1', type:'guard', icon:'🛡', label:'背离护栏',
+        description:'ICMarkets XAUUSD vs Bybit XAU+ 中价背离：Redis quote_divergence:state，trip 0.7 软暂停 / recover 0.3 恢复', impact:'软暂停期只等不下单', params:[] } },
+    { id:'gv2', type:'custom', position:{x:COL.guard,y:Y(330)}, data:{ id:'gv2', type:'guard', icon:'🕒', label:'停市护栏',
+        description:'距 MT5 收盘≤15min 硬停(stop_reason=market_close)；开市自动恢复+预热(XAU 1min/ICXAU 2min)', impact:'休市期杜绝单腿', params:[] } },
+    { id:'gv3', type:'custom', position:{x:COL.guard,y:Y(510)}, data:{ id:'gv3', type:'guard', icon:'📉', label:'滑点保护',
+        description:'成交后比对实际点差：L1 偏离暂停(约3min自恢复)，L2 连续超阈需手动确认', impact:'maker 滑点两道护栏', params:[] } },
+    { id:'gv4', type:'custom', position:{x:COL.guard,y:Y(700)}, data:{ id:'gv4', type:'guard', icon:'📦', label:'容量护栏',
+        description:'运行中热重载把阶梯累计上限调小至<已开+在途→撤在途 s-单并结束本阶梯', impact:'仅撤策略自己的单(保留人工)', params:[] } },
+    { id:'gv5', type:'custom', position:{x:COL.guard,y:Y(890)}, data:{ id:'gv5', type:'guard', icon:'💓', label:'心跳看门狗',
+        description:'后台监控 _last_heartbeat，>90s 判挂死→强制 cancel+标记，开市由 ResumeMonitor 自恢复(15min>3次则停)', impact:'治"按钮在跑却不交易"', params:[] } },
+    { id:'gv6', type:'custom', position:{x:COL.guard,y:Y(1080)}, data:{ id:'gv6', type:'guard', icon:'🛑', label:'紧急停止',
+        description:'risk_monitor emergency_stop（Redis 键）激活→全员策略停下单', impact:'风控总闸', params:[] } },
+
+    // ── 主干边 ──
+    { id:'e1', source:'n1', target:'n2', type:'smoothstep', animated:true, style:{stroke:'#4CAF50'} },
+    { id:'e2', source:'n2', target:'n3', type:'smoothstep', animated:true, style:{stroke:'#4CAF50'} },
+    { id:'e3', source:'n3', target:'n4', type:'smoothstep', animated:true, style:{stroke:'#4CAF50'} },
+    { id:'e4', source:'n4', target:'n5', type:'smoothstep', animated:true, style:{stroke:'#4CAF50'} },
+    { id:'e5', source:'n5', target:'n6', type:'smoothstep', animated:true, style:{stroke:'#4CAF50'}, label:'定位到活跃阶梯' },
+    { id:'e6', source:'n6', target:'n7', type:'smoothstep', animated:true, style:{stroke:'#4CAF50'}, label:'触发达成' },
+    { id:'e7', source:'n7', target:'n8', type:'smoothstep', animated:true, style:{stroke:'#4CAF50'} },
+    { id:'e8', source:'n8', target:'n9', type:'smoothstep', animated:true, style:{stroke:'#4CAF50'}, label:'A腿成交→对冲' },
+    { id:'e9', source:'n9', target:'n10', type:'smoothstep', animated:true, style:{stroke:'#4CAF50'} },
+    { id:'e10', source:'n10', target:'n11', type:'smoothstep', animated:true, style:{stroke:'#4CAF50'}, label:'达标→记账' },
+    { id:'e11', source:'n11', target:'n12', type:'smoothstep', animated:true, style:{stroke:'#4CAF50'} },
+    // 循环/恢复边
+    { id:'e12', source:'n12', target:'n2', type:'smoothstep', style:{stroke:'#4ade80',strokeDasharray:'6,4'}, label:'未达总手数→下一轮' },
+    { id:'e_break', source:'n12', target:'n5', type:'smoothstep', style:{stroke:'#4ade80',strokeDasharray:'6,4'}, label:'本阶梯满→重选阶梯' },
+    // 前置闸 / 单腿
+    { id:'e_pre', source:'g_pre', target:'n8', type:'smoothstep', style:{stroke:'#FF9800'}, label:'四闸通过才下单' },
+    { id:'e_leg', source:'n11', target:'s_leg', type:'smoothstep', style:{stroke:'#a78bfa',strokeDasharray:'5,5'}, label:'异步对账' },
+    // 护栏旁路（虚线汇入主循环）
+    { id:'eg1', source:'gv1', target:'n2', type:'smoothstep', style:{stroke:'#f6465d',strokeDasharray:'4,4'} },
+    { id:'eg2', source:'gv2', target:'n2', type:'smoothstep', style:{stroke:'#f6465d',strokeDasharray:'4,4'} },
+    { id:'eg3', source:'gv3', target:'n2', type:'smoothstep', style:{stroke:'#f6465d',strokeDasharray:'4,4'} },
+    { id:'eg4', source:'gv4', target:'n7', type:'smoothstep', style:{stroke:'#f6465d',strokeDasharray:'4,4'} },
+    { id:'eg5', source:'gv5', target:'n2', type:'smoothstep', style:{stroke:'#f6465d',strokeDasharray:'4,4'} },
+    { id:'eg6', source:'gv6', target:'n2', type:'smoothstep', style:{stroke:'#f6465d',strokeDasharray:'4,4'} },
   ]
+  return nodes
 }
 
 const elements = ref(makeElements('forward_opening'))
 
-// ── 切换策略 ──────────────────────────────────────────────────
+// 将有效引擎参数回填到节点 params（只读展示）
+function loadEffectiveIntoNodes() {
+  const cfg = effectiveConfig.value || {}
+  elements.value.forEach(el => {
+    if (el.data && Array.isArray(el.data.params)) {
+      el.data.params.forEach(prm => {
+        if (cfg[prm.key] !== undefined && cfg[prm.key] !== null) prm.value = cfg[prm.key]
+      })
+    }
+  })
+}
+
+// ── 切换策略类型（只读：重画节点 + 拉有效配置回填） ──
 async function switchStrategy(type) {
   activeType.value = type
   elements.value = makeElements(type)
-  configData.value = {}
-  isLocked.value = false
-  currentTemplate.value = ''
-  currentConfigId.value = null
-  await Promise.all([loadWorkflowConfig(), fetchEffective(), fetchTemplatesForType()])
+  await fetchEffective()
+  loadEffectiveIntoNodes()
 }
 
-// ── 加载画布配置 ─────────────────────────────────────────────
-async function loadWorkflowConfig() {
-  try {
-    const r = await api.get(`/api/v1/timing-configs/effective/${activeType.value}`)
-    const config = r.data
-    configData.value = config
-
-    // 填充 nodes
-    elements.value.forEach(el => {
-      if (el.data?.params) {
-        el.data.params.forEach(p => {
-          if (config[p.key] !== undefined) p.value = config[p.key]
-        })
-      }
-    })
-
-    // 查配置锁定状态
-    const r2 = await api.get('/api/v1/timing-configs')
-    const configs = Array.isArray(r2.data) ? r2.data : r2.data?.configs ?? []
-    const found = configs.find(c => c.config_level === 'strategy_type' && c.strategy_type === activeType.value)
-    if (found) {
-      currentConfigId.value = found.id
-      isLocked.value = found.is_locked || false
-      currentTemplate.value = found.template || ''
-    }
-  } catch (err) {
-    console.error('加载画布配置失败', err)
-  }
-}
-
-async function loadWorkflowHistory() {
-  try {
-    const r = await api.get(`/api/v1/timing-configs/history/${activeType.value}`)
-    configHistory.value = Array.isArray(r.data) ? r.data : []
-  } catch { configHistory.value = [] }
-}
-
-async function loadCustomTemplates() {
-  try {
-    const r = await api.get(`/api/v1/timing-configs/templates/${activeType.value}`)
-    customTemplates.value = Array.isArray(r.data) ? r.data : []
-  } catch { customTemplates.value = [] }
-}
-
-// ── 参数验证 ──────────────────────────────────────────────────
-function findParam(key) {
-  for (const el of elements.value) {
-    if (el.data?.params) {
-      const p = el.data.params.find(p => p.key === key)
-      if (p) return p
-    }
-  }
-  return null
-}
-
-function validateParam(param) {
-  param.warning = null
-  param.error = null
-  if (param.value < param.min || param.value > param.max) {
-    param.error = `值必须在 ${param.min}-${param.max} 之间`
-    return
-  }
-  const deviation = Math.abs(param.value - param.recommended) / param.recommended
-  if (deviation > 0.5) param.warning = '偏离推荐值较大，可能影响性能'
-
-  const key = param.key
-  if (key === 'binance_timeout') {
-    const oci = findParam('order_check_interval')
-    if (oci && param.value < oci.value) { param.error = 'Binance超时不能小于订单检查间隔'; return }
-    if (param.value < 3.0) param.warning = '超时时间过短，可能导致订单未完成就超时'
-  }
-  if (key === 'order_check_interval') {
-    if (param.value < 0.1) { param.error = '订单检查间隔过小会导致API频繁调用'; return }
-    const bt = findParam('binance_timeout')
-    if (bt && param.value > bt.value) param.error = '订单检查间隔不能大于Binance超时时间'
-  }
-  if (key === 'api_spam_prevention_delay') {
-    if (param.value < 1.0) param.warning = '延迟过短可能导致API被限流'
-    if (param.value > 10.0) param.warning = '延迟过长会影响执行速度'
-  }
-  if (key === 'mt5_deal_sync_wait') {
-    if (param.value < 1.0) param.warning = '等待时间过短，MT5可能还未同步成交数据'
-    if (param.value > 10.0) param.warning = '等待时间过长会影响执行效率'
-  }
-  if (key === 'delayed_single_leg_check_delay') {
-    const sc = findParam('delayed_single_leg_second_check_delay')
-    if (sc && param.value < sc.value) param.error = '第一次检查延迟应该大于第二次检查延迟'
-  }
-  if (key === 'api_retry_delay') {
-    const rt = findParam('api_retry_times')
-    if (rt && param.value * rt.value > 10) param.warning = `总重试时间 (${(param.value * rt.value).toFixed(1)}秒) 过长`
-  }
-  if (key.includes('wait_after_cancel')) {
-    if (param.value < 1.0) param.warning = '等待时间过短可能导致订单状态未更新'
-    if (param.value > 10.0) param.warning = '等待时间过长会影响重新下单速度'
-  }
-}
-
-function onParamChange(nodeId, paramKey, value) {
-  configData.value[paramKey] = value
-  currentTemplate.value = ''
-}
-
-// ── 保存画布配置 ──────────────────────────────────────────────
-async function saveWorkflowConfig() {
-  saving.value = true
-  canvasError.value = null
-  successMessage.value = null
-  try {
-    let hasError = false
-    elements.value.forEach(el => {
-      el.data?.params?.forEach(p => { validateParam(p); if (p.error) hasError = true })
-    })
-    if (hasError) { canvasError.value = '配置验证失败，请检查标红的参数'; return }
-
-    const updateData = { template: currentTemplate.value }
-    elements.value.forEach(el => {
-      el.data?.params?.forEach(p => { updateData[p.key] = p.value })
-    })
-
-    const r2 = await api.get('/api/v1/timing-configs')
-    const configs = Array.isArray(r2.data) ? r2.data : r2.data?.configs ?? []
-    const existing = configs.find(c => c.config_level === 'strategy_type' && c.strategy_type === activeType.value)
-    if (existing) {
-      await api.put(`/api/v1/timing-configs/${existing.id}`, updateData)
-    } else {
-      await api.post('/api/v1/timing-configs', { config_level:'strategy_type', strategy_type:activeType.value, ...updateData })
-    }
-    await loadWorkflowHistory()
-    showFlash('配置保存成功！')
-  } catch (err) {
-    canvasError.value = '保存失败: ' + (err.response?.data?.detail || err.message)
-  } finally {
-    saving.value = false
-  }
-}
-
-function showFlash(msg) {
-  successMessage.value = msg
-  setTimeout(() => { successMessage.value = null }, 3000)
-}
-
-// ── 重置画布 ──────────────────────────────────────────────────
-function resetConfig() {
-  if (!confirm('确定要重置为默认值吗？')) return
-  const tpl = builtinTemplates.balanced
-  elements.value.forEach(el => {
-    el.data?.params?.forEach(p => {
-      if (tpl.config[p.key] !== undefined) {
-        p.value = tpl.config[p.key]
-        p.warning = null; p.error = null
-        configData.value[p.key] = p.value
-      }
-    })
-  })
-  currentTemplate.value = 'balanced'
-  showFlash('已重置为平衡型默认值')
-}
-
-// ── 锁定 ──────────────────────────────────────────────────────
-async function toggleLock() {
-  if (!currentConfigId.value) { canvasError.value = '配置不存在，无法锁定'; return }
-  const newState = !isLocked.value
-  if (!confirm(newState ? '确定要锁定此配置吗？' : '确定要解锁此配置吗？')) return
-  try {
-    await api.put(`/api/v1/timing-configs/${currentConfigId.value}`, { is_locked: newState })
-    isLocked.value = newState
-    showFlash(newState ? '配置已锁定' : '配置已解锁')
-  } catch (err) { canvasError.value = '切换锁定失败: ' + (err.response?.data?.detail || err.message) }
-}
-
-// ── 内置模板 ──────────────────────────────────────────────────
-function applyTemplateByKey(key) {
-  const tpl = builtinTemplates[key]
-  if (!tpl) return
-  if (!confirm(`确定要应用${tpl.name}配置吗？这将覆盖当前所有参数。`)) return
-  elements.value.forEach(el => {
-    el.data?.params?.forEach(p => {
-      if (tpl.config[p.key] !== undefined) {
-        p.value = tpl.config[p.key]
-        configData.value[p.key] = p.value
-        validateParam(p)
-      }
-    })
-  })
-  currentTemplate.value = key
-  showFlash(`已应用${tpl.name}配置模板`)
-}
-
-// ── 历史 ──────────────────────────────────────────────────────
-async function openHistoryModal() {
-  await loadWorkflowHistory()
-  showHistoryModal.value = true
-}
-
-function restoreHistory(h) {
-  if (!confirm(`确定要恢复到 ${formatTime(h.created_at)} 的配置吗？`)) return
-  const cfg = h.config_data || h.config || {}
-  elements.value.forEach(el => {
-    el.data?.params?.forEach(p => {
-      if (cfg[p.key] !== undefined) { p.value = cfg[p.key]; configData.value[p.key] = p.value; validateParam(p) }
-    })
-  })
-  currentTemplate.value = h.template || ''
-  showHistoryModal.value = false
-  showFlash('已恢复历史配置')
-}
-
-function compareWithHistory(h) {
-  const cfg = h.config_data || h.config || {}
-  compareSource.value = 'history_' + h.id
-  generateCompareData(cfg)
-  showHistoryModal.value = false
-  showCompareModal.value = true
-}
-
-// ── 对比 ──────────────────────────────────────────────────────
-function generateCompareData(compareCfg) {
-  if (!compareCfg) {
-    if (compareSource.value.startsWith('custom_')) {
-      const id = parseInt(compareSource.value.replace('custom_', ''))
-      const t = customTemplates.value.find(t => t.id === id)
-      if (t) compareCfg = t.config_data
-    } else if (builtinTemplates[compareSource.value]) {
-      compareCfg = builtinTemplates[compareSource.value].config
-    } else return
-  }
-  const labels = {}
-  elements.value.forEach(el => { el.data?.params?.forEach(p => { labels[p.key] = { label: p.label, unit: p.unit } }) })
-  compareData.value = Object.keys(compareCfg).filter(k => labels[k]).map(k => {
-    const current = configData.value[k]
-    const compare = compareCfg[k]
-    const isDifferent = current !== compare
-    return { key: k, label: labels[k].label, unit: labels[k].unit, current, compare, diff: isDifferent ? (current - compare) : 0, isDifferent }
-  })
-}
-
-// ── 自定义模板 ────────────────────────────────────────────────
-async function openTemplateModal() {
-  await loadCustomTemplates()
-  showTemplateModal.value = true
-}
-
-async function saveAsTemplate() {
-  if (!newTemplateName.value.trim()) return
-  try {
-    const cfg = {}
-    elements.value.forEach(el => { el.data?.params?.forEach(p => { cfg[p.key] = p.value }) })
-    await api.post('/api/v1/timing-configs/templates', {
-      strategy_type: activeType.value,
-      name: newTemplateName.value.trim(),
-      description: newTemplateDesc.value.trim() || null,
-      config_data: cfg
-    })
-    await loadCustomTemplates()
-    showSaveTemplateModal.value = false
-    newTemplateName.value = ''; newTemplateDesc.value = ''
-    showFlash('模板保存成功')
-  } catch (err) { canvasError.value = '保存模板失败: ' + (err.response?.data?.detail || err.message) }
-}
-
-function applyCustomTemplate(tpl) {
-  if (!confirm(`确定要应用模板"${tpl.name}"吗？这将覆盖当前所有参数。`)) return
-  elements.value.forEach(el => {
-    el.data?.params?.forEach(p => {
-      if (tpl.config_data[p.key] !== undefined) { p.value = tpl.config_data[p.key]; configData.value[p.key] = p.value; validateParam(p) }
-    })
-  })
-  currentTemplate.value = 'custom_' + tpl.id
-  showTemplateModal.value = false
-  showFlash(`已应用模板"${tpl.name}"`)
-}
-
-function compareWithTemplate(tpl) {
-  compareSource.value = 'custom_' + tpl.id
-  showTemplateModal.value = false
-  showCompareModal.value = true
-}
-
-async function deleteCustomTemplate(id) {
-  const tpl = customTemplates.value.find(t => t.id === id)
-  if (!tpl || !confirm(`确定要删除模板"${tpl.name}"吗？`)) return
-  try {
-    await api.delete(`/api/v1/timing-configs/templates/${id}`)
-    await loadCustomTemplates()
-    showFlash('模板已删除')
-  } catch (err) { canvasError.value = '删除模板失败: ' + (err.response?.data?.detail || err.message) }
-}
-
-// ── 导出/导入 ─────────────────────────────────────────────────
-function exportConfig() {
-  const cfg = {}
-  elements.value.forEach(el => { el.data?.params?.forEach(p => { cfg[p.key] = p.value }) })
-  const blob = new Blob([JSON.stringify({ strategy_type: activeType.value, template: currentTemplate.value, timestamp: new Date().toISOString(), config: cfg }, null, 2)], { type: 'application/json' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url; a.download = `timing_config_${activeType.value}_${Date.now()}.json`
-  document.body.appendChild(a); a.click(); document.body.removeChild(a)
-  URL.revokeObjectURL(url)
-  showFlash('配置已导出')
-}
-
-function importConfig() { fileInput.value.click() }
-
-function handleFileImport(event) {
-  const file = event.target.files[0]
-  if (!file) return
-  const reader = new FileReader()
-  reader.onload = e => {
-    try {
-      const data = JSON.parse(e.target.result)
-      if (!data.config) throw new Error('无效的配置文件格式')
-      if (!confirm(`确定要导入配置吗？\n来源: ${data.strategy_type || '未知'}\n时间: ${data.timestamp || '未知'}`)) return
-      elements.value.forEach(el => {
-        el.data?.params?.forEach(p => {
-          if (data.config[p.key] !== undefined) { p.value = data.config[p.key]; configData.value[p.key] = p.value; validateParam(p) }
-        })
-      })
-      currentTemplate.value = data.template || ''
-      showFlash('配置已导入')
-    } catch (err) { canvasError.value = '导入失败: ' + err.message }
-  }
-  reader.readAsText(file)
-  event.target.value = ''
-}
-
-// ── CRUD ──────────────────────────────────────────────────────
-async function fetchAllConfigs() {
-  loading.value = true
-  try {
-    const r = await api.get('/api/v1/timing-configs')
-    allConfigs.value = Array.isArray(r.data) ? r.data : r.data?.configs ?? []
-  } catch { allConfigs.value = [] }
-  finally { loading.value = false }
-}
-
+// ── 只读读取 ──────────────────────────────────────────────────
 async function fetchEffective() {
   loadingEffective.value = true
   effectiveConfig.value = null
   try {
     const r = await api.get(`/api/v1/timing-configs/effective/${activeType.value}`)
     effectiveConfig.value = r.data
+    configData.value = r.data || {}
   } catch { effectiveConfig.value = null }
   finally { loadingEffective.value = false }
 }
-
-async function fetchTemplatesForType() {
-  // loaded via loadCustomTemplates when needed
-}
-
-async function reloadConfigs() {
-  reloading.value = true
-  try {
-    await api.post('/api/v1/timing-configs/reload')
-    await fetchAllConfigs(); await fetchEffective()
-    showToast('success', '配置已重新加载')
-  } catch (e) { showToast('error', '重载失败：' + (e.response?.data?.detail ?? e.message)) }
-  finally { reloading.value = false }
-}
-
-function openCreateModal() {
-  editingConfig.value = null; form.value = defaultForm(); form.value.strategy_type = activeType.value; showModal.value = true
-}
-function openEditModal(cfg) {
-  editingConfig.value = cfg; form.value = { ...defaultForm(), ...cfg }; showModal.value = true
-}
-
-async function saveCrudConfig() {
-  if (!form.value.config_level) { showToast('error', '配置层级不能为空'); return }
-  saving.value = true
-  try {
-    if (editingConfig.value) {
-      await api.put(`/api/v1/timing-configs/${editingConfig.value.id}`, form.value)
-      showToast('success', '配置已更新')
-    } else {
-      await api.post('/api/v1/timing-configs', form.value)
-      showToast('success', '配置已创建')
-    }
-    showModal.value = false
-    await fetchAllConfigs(); await fetchEffective()
-  } catch (e) { showToast('error', '保存失败：' + (e.response?.data?.detail ?? e.message)) }
-  finally { saving.value = false }
-}
-
-async function deleteConfig(cfg) {
-  if (!confirm(`确认删除配置「${cfg.strategy_type || '全局'} (${cfg.config_level})」？`)) return
-  try {
-    await api.delete(`/api/v1/timing-configs/${cfg.id}`)
-    showToast('success', '已删除')
-    await fetchAllConfigs(); await fetchEffective()
-  } catch (e) { showToast('error', '删除失败') }
-}
-
-async function openCrudHistoryModal(cfg) {
-  crudHistoryList.value = []; showCrudHistory.value = true
-  try {
-    const r = await api.get(`/api/v1/timing-configs/history/${activeType.value}`)
-    crudHistoryList.value = Array.isArray(r.data) ? r.data : []
-  } catch { crudHistoryList.value = [] }
-}
-
-// ── 工具 ──────────────────────────────────────────────────────
-function showToast(type, msg) {
-  toast.value = { show: true, type, msg }
-  setTimeout(() => toast.value.show = false, 3000)
-}
-function formatTime(ts) { return ts ? new Date(ts).toLocaleString('zh-CN') : '' }
-function fmtTime(v) { return v ? dayjs(v).format('MM-DD HH:mm:ss') : '--' }
-
-// ── 监听 ──────────────────────────────────────────────────────
-watch(activeType, () => { fetchAllConfigs(); fetchEffective() })
-watch(compareSource, () => { if (compareSource.value && !compareSource.value.startsWith('history_')) generateCompareData(null) })
-
-// ── Running Strategies ──
-const runningStrategies = ref([])
-const viewMode = ref('workflow')
-const compareEffective = ref({})
 
 async function fetchRunningStrategies() {
   try {
@@ -1349,12 +385,12 @@ async function fetchRunningStrategies() {
 
 async function stopStrategy(rs) {
   const id = rs.strategy_id || rs.id
-  if (!id || !confirm('\u786e\u5b9a\u8981\u505c\u6b62\u7b56\u7565 ' + (rs.strategy_type || id) + ' \u5417\uff1f')) return
+  if (!id || !confirm('确定要停止策略 ' + (rs.strategy_type || id) + ' 吗？')) return
   try {
     await api.post('/api/v1/automation/strategies/' + id + '/stop')
-    showToast('success', '\u7b56\u7565\u5df2\u505c\u6b62')
+    showToast('success', '策略已停止')
     await fetchRunningStrategies()
-  } catch (e) { showToast('error', '\u505c\u6b62\u5931\u8d25: ' + (e.response?.data?.detail || e.message)) }
+  } catch (e) { showToast('error', '停止失败: ' + (e.response?.data?.detail || e.message)) }
 }
 
 async function loadAllEffective() {
@@ -1380,259 +416,68 @@ function compareMinVal(key) {
   return vals.length ? Math.min(...vals) : null
 }
 
-// ── Guard 时段规则 ──────────────────────────────────────────────
-const guardRules = ref({
-  monday_open: { enabled: true, volatility_start: '06:00', volatility_end: '06:30', min_spread_to_open: 4.0, min_funding_for_capture: 0.01, funding_capture_phases: [] },
-  wednesday_overnight: { enabled: true, start_hour: 18, forward: { base_cap_pct: 0.30, favorable_cap_pct: 0.50, favorable_conditions: { min_spread: 2.0, min_funding: 0.005 } }, reverse: { base_cap_pct: 0.20, favorable_cap_pct: 0.40, favorable_conditions: { min_spread: 3.0 } } },
-  friday_weekend: { enabled: true, phases: 'conditional_bidirectional', weekend_hold_min_spread: 3.0 }
-})
-const guardEditMode = ref({ monday: false, wednesday: false, friday: false })
-const guardDirty = ref(false)
-const guardBlocks = ref([])
-
-const guardCurrentBJT = computed(() => {
-  return new Date().toLocaleString('zh-CN', { hour12: false, timeZone: 'Asia/Shanghai' })
-})
-
-const guardActivePhase = computed(() => {
-  const now = new Date()
-  const bjt = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Shanghai' }))
-  const wd = bjt.getDay()
-  const h = bjt.getHours()
-  if (wd === 1 && h >= 6 && h < 8) return { label: '周一开盘', class: 'bg-yellow-900/40 text-yellow-400' }
-  if (wd === 3 && h >= 18) return { label: '周三过夜', class: 'bg-purple-900/40 text-purple-400' }
-  if ((wd === 5 && h >= 22) || wd === 6) return { label: '周五周末', class: 'bg-red-900/40 text-red-400' }
-  return { label: '常规交易', class: 'bg-dark-200 text-text-tertiary' }
-})
-
-async function loadGuardRules() {
-  try {
-    const r = await api.get('/api/v1/agent/guard-rules')
-    if (r.data && Object.keys(r.data).length) {
-      guardRules.value = r.data
-    }
-    guardDirty.value = false
-  } catch (e) { console.error('Load guard rules failed', e) }
-  await loadGuardBlocks()
-}
-
-async function saveGuardRules() {
-  try {
-    await api.put('/api/v1/agent/guard-rules', guardRules.value)
-    showToast('success', 'Guard 规则已更新，5秒内生效')
-    guardDirty.value = false
-  } catch (e) { showToast('error', '保存失败: ' + (e.response?.data?.detail || e.message)) }
-}
-
-async function loadGuardBlocks() {
-  try {
-    const r = await api.get('/api/v1/agent/decisions', { params: { verdict: 'rejected', limit: 30 } })
-    const items = r.data?.items || []
-    guardBlocks.value = items
-      .filter(d => {
-        const reason = d.reject_reason || ''
-        return reason.match(/monday_|wed_overnight|wed_evening|friday_weekend/)
-      })
-      .slice(0, 15)
-      .map(d => ({
-        id: d.id,
-        time: d.created_at ? dayjs(d.created_at).format('MM-DD HH:mm') : '--',
-        type: (d.reject_reason || '').startsWith('monday_') ? '周一' : (d.reject_reason || '').startsWith('wed_') ? '周三' : '周五',
-        reason: d.reject_reason || '--',
-        action: d.proposal?.action || '--',
-        qty: d.proposal?.qty || '--',
-      }))
-  } catch { guardBlocks.value = [] }
-}
-
-function guardTypeClass(type) {
-  if (type === '周一') return 'bg-yellow-900/30 text-yellow-400'
-  if (type === '周三') return 'bg-purple-900/30 text-purple-400'
-  return 'bg-red-900/30 text-red-400'
-}
-
 onMounted(async () => {
-  await Promise.all([fetchAllConfigs(), fetchEffective(), loadWorkflowConfig(), loadWorkflowHistory(), loadCustomTemplates(), fetchRunningStrategies()])
+  await Promise.all([fetchEffective(), fetchRunningStrategies()])
+  loadEffectiveIntoNodes()
 })
 </script>
 
 <style scoped>
-.strategies-page {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-  min-height: 100vh;
-  background: #1a1d23;
-}
+.strategies-page { display: flex; flex-direction: column; gap: 0; min-height: 100vh; background: #1a1d23; }
 
 /* 策略类型选择 */
-.type-selector {
-  display: flex;
-  gap: 12px;
-  padding: 16px 20px;
-  background: #252930;
-  border-bottom: 1px solid #2d3139;
-}
-.type-card {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 20px;
-  background: #2d3139;
-  border: 1px solid #3d4451;
-  border-radius: 8px;
-  cursor: pointer;
-  transition: all 0.2s;
-  color: #b0b8c4;
-  font-size: 14px;
-}
+.type-selector { display: flex; gap: 12px; padding: 16px 20px; background: #252930; border-bottom: 1px solid #2d3139; }
+.type-card { display: flex; align-items: center; gap: 8px; padding: 10px 20px; background: #2d3139; border: 1px solid #3d4451; border-radius: 8px; cursor: pointer; transition: all 0.2s; color: #b0b8c4; font-size: 14px; }
 .type-card:hover { border-color: #4CAF50; color: #e0e0e0; }
 .type-card.active { background: #4CAF50; border-color: #4CAF50; color: white; font-weight: 600; }
 .type-icon { font-size: 18px; }
 
 /* 画布 */
-.workflow-canvas {
-  display: flex;
-  flex-direction: column;
-  height: 900px;
-  background: #1a1d23;
-  border-bottom: 1px solid #2d3139;
-}
-.canvas-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 14px 20px;
-  background: #252930;
-  border-bottom: 1px solid #2d3139;
-  flex-wrap: wrap;
-  gap: 10px;
-}
+.workflow-canvas { display: flex; flex-direction: column; height: 920px; background: #1a1d23; border-bottom: 1px solid #2d3139; }
+.canvas-header { display: flex; justify-content: space-between; align-items: center; padding: 14px 20px; background: #252930; border-bottom: 1px solid #2d3139; flex-wrap: wrap; gap: 10px; }
 .header-left { display: flex; align-items: center; gap: 12px; }
 .canvas-header h2 { margin: 0; font-size: 15px; color: #e0e0e0; }
-.lock-badge { padding: 3px 10px; background: #ff9800; color: white; border-radius: 4px; font-size: 12px; }
+.readonly-badge { padding: 3px 10px; background: #475569; color: #e2e8f0; border-radius: 4px; font-size: 12px; }
 .header-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-.template-group { display: flex; gap: 6px; padding: 3px; background: #1a1d23; border-radius: 6px; }
-.btn-template { padding: 6px 14px; background: #2d3139; border: 1px solid #3d4451; border-radius: 4px; color: #e0e0e0; font-size: 13px; cursor: pointer; transition: all 0.2s; }
-.btn-template:hover { background: #3d4451; border-color: #4CAF50; }
-.btn-template.active { background: #4CAF50; border-color: #4CAF50; color: white; font-weight: 500; }
-.btn-template:disabled { opacity: 0.5; cursor: not-allowed; }
-.action-buttons { display: flex; gap: 6px; flex-wrap: wrap; }
-.btn-secondary { padding: 6px 12px; background: #2d3139; border: 1px solid #3d4451; border-radius: 4px; color: #e0e0e0; font-size: 12px; cursor: pointer; transition: all 0.2s; }
-.btn-secondary:hover { background: #3d4451; }
-.btn-secondary:disabled { opacity:0.5; cursor: not-allowed; }
-.btn-primary { padding: 6px 14px; background: #4CAF50; border: none; border-radius: 4px; color: white; font-size: 12px; font-weight: 600; cursor: pointer; transition: all 0.2s; }
-.btn-primary:hover { background: #43a047; }
-.btn-primary:disabled { opacity:0.5; cursor: not-allowed; }
+.legend { display: flex; gap: 14px; align-items: center; }
+.lg-item { display: flex; align-items: center; gap: 5px; font-size: 12px; color: #b0b8c4; }
+.lg-dot { width: 18px; height: 0; border-top: 2px solid; display: inline-block; }
+.lg-dot.main { border-color: #4CAF50; }
+.lg-dot.guard { border-color: #f6465d; border-top-style: dashed; }
+.lg-dot.recover { border-color: #4ade80; border-top-style: dashed; }
 .workflow-flow { flex: 1; background: #1a1d23; }
 
 /* 节点 */
-:deep(.custom-node) {
-  background: #252930;
-  border: 1px solid #3d4451;
-  border-radius: 8px;
-  min-width: 220px;
-  max-width: 280px;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-}
+:deep(.custom-node) { background: #252930; border: 1px solid #3d4451; border-radius: 8px; min-width: 210px; max-width: 270px; box-shadow: 0 2px 8px rgba(0,0,0,0.3); }
+:deep(.custom-node.start)    { border-color: #22c55e; }
 :deep(.custom-node.loop)     { border-color: #4CAF50; }
+:deep(.custom-node.sys)      { border-color: #64748b; }
+:deep(.custom-node.data)     { border-color: #38bdf8; }
+:deep(.custom-node.ladder)   { border-color: #f0b90b; }
 :deep(.custom-node.trigger)  { border-color: #2196F3; }
+:deep(.custom-node.calc)     { border-color: #14b8a6; }
 :deep(.custom-node.order)    { border-color: #FF9800; }
 :deep(.custom-node.bybit)    { border-color: #9C27B0; }
-:deep(.custom-node.retry)    { border-color: #F44336; }
-:deep(.custom-node.check)    { border-color: #a78bfa; }
+:deep(.custom-node.verify)   { border-color: #F44336; }
+:deep(.custom-node.record)   { border-color: #4ade80; }
 :deep(.custom-node.complete) { border-color: #4ade80; }
-:deep(.custom-node.cancel)   { border-color: #F97316; }
-:deep(.custom-node.frontend) { border-color: #64748b; }
-:deep(.node-header) { display:flex; align-items:center; gap:8px; padding:10px 12px; border-bottom:1px solid #2d3139; background:#2d3139; border-radius:8px 8px 0 0; }
-:deep(.node-icon) { font-size:16px; }
-:deep(.node-title) { font-size:13px; font-weight:600; color:#e0e0e0; }
-:deep(.node-content) { padding:10px 12px; }
-:deep(.param-row) { margin-bottom:8px; }
-:deep(.param-row label) { display:block; font-size:11px; color:#8899aa; margin-bottom:3px; }
-:deep(.param-input) { display:flex; align-items:center; gap:4px; }
-:deep(.param-input input) { flex:1; padding:4px 8px; background:#1a1d23; border:1px solid #3d4451; border-radius:4px; color:#e0e0e0; font-size:12px; font-family:monospace; }
-:deep(.param-input input:focus) { outline:none; border-color:#4CAF50; }
-:deep(.param-input input.warning) { border-color:#FF9800; }
-:deep(.param-input input.error) { border-color:#F44336; }
-:deep(.param-unit) { font-size:11px; color:#8899aa; white-space:nowrap; }
-:deep(.param-hint) { display:block; font-size:10px; color:#6b7280; margin-top:2px; }
-:deep(.text-warning) { color:#FF9800 !important; }
-:deep(.text-error) { color:#F44336 !important; }
-:deep(.node-description) { padding:6px 12px; font-size:11px; color:#8899aa; border-top:1px solid #2d3139; }
-:deep(.node-impact) { padding:4px 12px 8px; font-size:11px; color:#4CAF50; }
+:deep(.custom-node.gate)     { border-color: #FF9800; }
+:deep(.custom-node.check)    { border-color: #a78bfa; }
+:deep(.custom-node.guard)    { border-color: #f6465d; background: #2a2228; }
+:deep(.node-header) { display:flex; align-items:center; gap:8px; padding:9px 12px; border-bottom:1px solid #2d3139; background:#2d3139; border-radius:8px 8px 0 0; }
+:deep(.node-icon) { font-size:15px; }
+:deep(.node-title) { font-size:12.5px; font-weight:600; color:#e0e0e0; }
+:deep(.node-content) { padding:8px 12px; }
+:deep(.param-row-ro) { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:2px 0; }
+:deep(.param-label-ro) { font-size:11px; color:#8899aa; }
+:deep(.param-val-ro) { font-size:12px; font-family:monospace; color:#e0e0e0; font-weight:600; }
+:deep(.param-unit-ro) { font-size:10px; color:#8899aa; margin-left:1px; }
+:deep(.node-description) { padding:6px 12px; font-size:11px; color:#8899aa; border-top:1px solid #2d3139; line-height:1.5; }
+:deep(.node-impact) { padding:4px 12px 8px; font-size:11px; color:#4CAF50; line-height:1.4; }
 
-.error-message { padding: 8px 16px; background: #2d1b1b; color: #ff6b6b; font-size: 13px; border-top: 1px solid #4a2020; }
-.success-message { padding: 8px 16px; background: #1b2d1b; color: #6bff6b; font-size: 13px; border-top: 1px solid #204a20; }
-
-/* CRUD */
+/* 有效参数（只读） */
 .crud-section { background: #252930; border-top: 1px solid #2d3139; }
 .crud-header { display:flex; align-items:center; justify-content:space-between; padding: 12px 20px; cursor:pointer; user-select:none; }
 .crud-header:hover { background: #2d3139; }
-.effective-bar { margin: 0 20px 8px; padding: 12px; background: linear-gradient(to right, rgba(76,175,80,0.1), transparent); border: 1px solid rgba(76,175,80,0.3); border-radius: 12px; }
-.crud-toolbar { display:flex; gap:8px; padding:8px 20px; border-bottom:1px solid #2d3139; }
-.btn-sm-outline { padding:5px 12px; background:#1a1d23; border:1px solid #3d4451; border-radius:6px; color:#b0b8c4; font-size:12px; cursor:pointer; transition:all 0.2s; }
-.btn-sm-outline:hover { border-color:#4CAF50; color:#e0e0e0; }
-.btn-sm-outline:disabled { opacity:0.5; cursor:not-allowed; }
-.btn-sm-primary { padding:5px 12px; background:#4CAF50; border:none; border-radius:6px; color:white; font-size:12px; font-weight:600; cursor:pointer; }
-.config-list { padding: 0 20px 12px; }
-.config-row { display:flex; align-items:start; gap:12px; padding:12px 0; border-bottom:1px solid #2d3139; }
-.config-row:last-child { border-bottom:none; }
-.badge-level { font-size:11px; padding:1px 6px; background:#2d3139; border-radius:4px; color:#8899aa; }
-.badge-active { font-size:11px; padding:1px 6px; background:rgba(76,175,80,0.2); border-radius:4px; color:#4CAF50; }
-.badge-disabled { font-size:11px; padding:1px 6px; background:#2d3139; border-radius:4px; color:#6b7280; }
-.btn-xs { padding:4px 10px; font-size:11px; background:#2d3139; border:1px solid #3d4451; border-radius:6px; color:#b0b8c4; cursor:pointer; transition:all 0.2s; }
-.btn-xs:hover { border-color:#4CAF50; color:#e0e0e0; }
-.btn-xs.danger { color:#ef4444; border-color:rgba(239,68,68,0.3); }
-.btn-xs.danger:hover { background:rgba(239,68,68,0.1); }
-.input-field { @apply px-3 py-2 bg-dark-200 border border-border-primary rounded-lg text-sm focus:outline-none focus:border-primary text-text-primary transition-colors; }
-
-/* Modals */
-.modal-overlay { position:fixed; inset:0; z-index:50; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,0.7); padding:16px; }
-.modal-content { background:#252930; border:1px solid #3d4451; border-radius:12px; width:100%; max-width:560px; max-height:80vh; overflow-y:auto; box-shadow:0 20px 60px rgba(0,0,0,0.5); }
-.modal-large { max-width:760px; }
-.modal-header { display:flex; align-items:center; justify-content:space-between; padding:16px 20px; border-bottom:1px solid #2d3139; }
-.modal-header h3 { margin:0; font-size:15px; color:#e0e0e0; }
-.btn-close { background:none; border:none; color:#8899aa; font-size:16px; cursor:pointer; padding:4px; }
-.btn-close:hover { color:#e0e0e0; }
-.modal-body { padding:20px; }
-.empty-state { text-align:center; color:#6b7280; padding:32px; font-size:13px; }
-.history-list { display:flex; flex-direction:column; gap:8px; }
-.history-item { display:flex; align-items:center; justify-content:space-between; padding:10px 14px; background:#2d3139; border-radius:8px; }
-.history-info { display:flex; gap:12px; font-size:12px; }
-.history-time { color:#b0b8c4; }
-.history-user { color:#8899aa; }
-.history-template { color:#4CAF50; }
-.history-actions { display:flex; gap:6px; }
-.compare-controls { margin-bottom:12px; }
-.form-select { width:100%; padding:8px 12px; background:#1a1d23; border:1px solid #3d4451; border-radius:6px; color:#e0e0e0; font-size:13px; }
-.compare-table { overflow-x:auto; }
-.compare-table table { width:100%; border-collapse:collapse; font-size:13px; }
-.compare-table th { padding:8px 12px; text-align:left; background:#2d3139; color:#8899aa; font-weight:500; }
-.compare-table td { padding:8px 12px; border-top:1px solid #2d3139; color:#e0e0e0; }
-.compare-table tr.diff td { background:rgba(255,152,0,0.05); }
-.diff-badge { padding:2px 6px; background:rgba(255,152,0,0.2); color:#FF9800; border-radius:4px; font-size:11px; }
-.same-badge { color:#6b7280; font-size:11px; }
-.doc-content { font-size:13px; color:#b0b8c4; }
-.doc-section { margin-bottom:20px; }
-.doc-section h4 { color:#e0e0e0; font-size:14px; margin:0 0 10px; }
-.doc-item { margin-bottom:12px; padding-left:12px; border-left:2px solid #3d4451; }
-.doc-item strong { color:#e0e0e0; display:block; margin-bottom:4px; }
-.doc-item p { margin:4px 0; }
-.doc-impact { color:#4CAF50 !important; }
-.form-group { margin-bottom:14px; }
-.form-group label { display:block; font-size:12px; color:#8899aa; margin-bottom:6px; }
-.form-input { width:100%; padding:8px 12px; background:#1a1d23; border:1px solid #3d4451; border-radius:6px; color:#e0e0e0; font-size:13px; }
-.form-textarea { width:100%; padding:8px 12px; background:#1a1d23; border:1px solid #3d4451; border-radius:6px; color:#e0e0e0; font-size:13px; resize:vertical; }
-.modal-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:16px; }
-.template-list { display:flex; flex-direction:column; gap:8px; }
-.template-item { display:flex; align-items:center; justify-content:space-between; padding:12px 14px; background:#2d3139; border-radius:8px; }
-.template-info h4 { margin:0 0 4px; font-size:13px; color:#e0e0e0; }
-.template-desc { font-size:12px; color:#8899aa; margin:0 0 4px; }
-.template-time { font-size:11px; color:#6b7280; }
-.template-actions { display:flex; gap:6px; }
-.btn-sm { padding:5px 12px; background:#2d3139; border:1px solid #3d4451; border-radius:6px; color:#b0b8c4; font-size:12px; cursor:pointer; }
-.btn-sm.btn-primary { background:#4CAF50; border-color:#4CAF50; color:white; }
-.btn-sm.btn-danger { color:#ef4444; border-color:rgba(239,68,68,0.3); }
-.btn-sm.btn-danger:hover { background:rgba(239,68,68,0.1); }
+.effective-bar { margin: 0 20px 12px; padding: 12px; background: linear-gradient(to right, rgba(76,175,80,0.1), transparent); border: 1px solid rgba(76,175,80,0.3); border-radius: 12px; }
 </style>

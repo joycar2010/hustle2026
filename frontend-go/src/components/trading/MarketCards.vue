@@ -1,37 +1,15 @@
 <template>
   <div class="h-full flex flex-col max-lg:h-auto overflow-hidden w-full">
-    <!-- System Status Marquee -->
+    <!-- System Status Marquee (all notifications unified) — 仅状态滚动展示，不再点击弹出弹框（入口移至下方「系统状态」标签） -->
     <div class="p-1.5 lg:p-1.5 md:p-2 bg-[#252930] border-b border-[#2b3139] flex-shrink-0 w-full">
-      <button
-        @click="showSystemStatusModal = true"
-        :class="[
-          'w-full flex items-center px-3 py-2 rounded-lg transition-colors cursor-pointer',
-          systemHealthy ? 'bg-[#0ecb81]/20 hover:bg-[#0ecb81]/30' : 'bg-[#f6465d]/20 hover:bg-[#f6465d]/30'
-        ]"
-        :title="'点击查看详细系统状态'"
+      <div
+        :class="['w-full flex items-center px-3 py-2 rounded-lg transition-colors', marqueeButtonBg]"
       >
         <div class="marquee-container w-full overflow-hidden">
-          <div v-if="liqDangerActive"
-            class="marquee-content text-xs whitespace-nowrap text-[#ff0000] liq-flash font-bold">
-            {{ liqDangerText }} | {{ systemStatusText }}
-          </div>
-          <div v-else
-            class="marquee-content text-xs whitespace-nowrap" :class="systemHealthy ? 'text-[#0ecb81]' : 'text-[#f6465d]'">
-            {{ systemStatusText }}
+          <div :class="['marquee-content text-xs whitespace-nowrap', marqueeColorClass]">
+            {{ marqueeText }}
           </div>
         </div>
-      </button>
-    </div>
-
-    <!-- Market Close Warning -->
-    <div v-if="!marketOpen" class="px-1.5 lg:px-1.5 md:px-2 pt-1.5 bg-[#252930] border-b border-[#2b3139] flex-shrink-0 w-full">
-      <div class="bg-[#f6465d]/15 border border-[#f6465d]/30 rounded px-3 py-1.5 flex items-center justify-center gap-2">
-        <span class="text-[#f6465d] text-xs font-medium">{{ marketMessage }}</span>
-      </div>
-    </div>
-    <div v-else-if="marketWarning" class="px-1.5 lg:px-1.5 md:px-2 pt-1.5 bg-[#252930] border-b border-[#2b3139] flex-shrink-0 w-full">
-      <div class="bg-[#f0b90b]/15 border border-[#f0b90b]/30 rounded px-3 py-1.5 flex items-center justify-center gap-2">
-        <span class="text-[#f0b90b] text-xs font-medium">{{ marketMessage }}</span>
       </div>
     </div>
 
@@ -43,6 +21,38 @@
           {{ totalProfit >= 0 ? '+' : '' }}{{ formatNumber(Math.abs(totalProfit)) }}
         </span>
         <span class="text-xs lg:text-[10px] text-gray-400">USDT</span>
+        <span class="text-[10px] text-gray-600 mx-1">|</span>
+        <span class="text-xs lg:text-[10px] text-gray-400">实际利润</span>
+        <span class="text-base lg:text-sm md:text-lg font-bold font-mono" :class="actualProfit >= 0 ? 'text-[#0ecb81]' : 'text-[#f6465d]'">
+          {{ actualProfit >= 0 ? '+' : '' }}{{ formatNumber(Math.abs(actualProfit)) }}
+        </span>
+        <span class="text-xs lg:text-[10px] text-gray-400">USDT</span>
+      </div>
+      <!-- 主账户 / 对冲账户盈亏明细 -->
+      <div class="bg-[#1e2329] rounded p-1 flex items-center justify-between gap-1 w-full mt-1">
+        <div class="flex items-center gap-1.5 flex-1 min-w-0">
+          <span class="text-[10px] text-gray-500 whitespace-nowrap">主账户</span>
+          <span class="text-xs font-mono font-bold" :class="binanceFloatingProfit >= 0 ? 'text-[#0ecb81]' : 'text-[#f6465d]'">
+            {{ binanceFloatingProfit >= 0 ? '+' : '' }}{{ formatNumber(Math.abs(binanceFloatingProfit)) }}
+          </span>
+          <span class="text-[10px] text-gray-600">|</span>
+          <span class="text-[10px] text-gray-500">资金费</span>
+          <span class="text-[10px] font-mono" :class="mainFundingFee >= 0 ? 'text-[#0ecb81]' : 'text-[#f6465d]'">
+            {{ mainFundingFee >= 0 ? '+' : '' }}{{ mainFundingFee.toFixed(2) }}
+          </span>
+        </div>
+        <div class="w-px h-3 bg-[#2b3139]"></div>
+        <div class="flex items-center gap-1.5 flex-1 min-w-0 justify-end">
+          <span class="text-[10px] text-gray-500 whitespace-nowrap">对冲账户</span>
+          <span class="text-xs font-mono font-bold" :class="bybitFloatingProfit >= 0 ? 'text-[#0ecb81]' : 'text-[#f6465d]'">
+            {{ bybitFloatingProfit >= 0 ? '+' : '' }}{{ formatNumber(Math.abs(bybitFloatingProfit)) }}
+          </span>
+          <span class="text-[10px] text-gray-600">|</span>
+          <span class="text-[10px] text-gray-500">过夜费</span>
+          <span class="text-[10px] font-mono" :class="hedgeOvernightFee >= 0 ? 'text-[#0ecb81]' : 'text-[#f6465d]'">
+            {{ hedgeOvernightFee >= 0 ? '+' : '' }}{{ hedgeOvernightFee.toFixed(2) }}
+          </span>
+        </div>
       </div>
     </div>
 
@@ -98,14 +108,6 @@
               {{ formatPrice(bybit.bid) }}
             </div>
           </div>
-        </div>
-
-        <!-- Order Book Data Row (对冲账户 XAUUSD.s) -->
-        <div class="grid grid-cols-4 gap-0.5 mb-1 lg:mb-0.5 md:mb-1.5 text-base lg:text-sm md:text-xl">
-          <div class="text-center text-[#3b82f6] font-mono">{{ formatVolume(bybitOrderBook.ask_volume) }}</div>
-          <div class="text-center text-[#0ecb81] font-mono">{{ formatPrice(bybitOrderBook.ask_price) }}</div>
-          <div class="text-center text-[#f6465d] font-mono">{{ formatPrice(bybitOrderBook.bid_price) }}</div>
-          <div class="text-center text-[#3b82f6] font-mono">{{ formatVolume(bybitOrderBook.bid_volume) }}</div>
         </div>
 
         <!-- Lag Heartbeat -->
@@ -166,8 +168,13 @@
             <div :class="['text-xl lg:text-lg md:text-2xl font-mono font-bold', getPriceClass(binance.ask, binance.prevAsk)]">
               {{ formatPrice(binance.ask) }}
             </div>
+            <!-- 行情卖一: 量 + 价 (左→右) -->
+            <div class="flex justify-between mt-0.5 text-[11px] lg:text-[10px] md:text-sm font-mono">
+              <span class="text-[#3b82f6]">{{ formatVolume(binanceOrderBook.ask_volume) }}</span>
+              <span class="text-[#0ecb81]">{{ formatPrice(binanceOrderBook.ask_price) }}</span>
+            </div>
             <div v-if="askOrderCount > 0" class="absolute top-0.5 right-0.5 bg-yellow-600 text-white text-[9px] px-1 py-0.5 rounded font-bold">
-              挂{{ askOrderCount }}
+              挂{{ askOrderCount }}<span v-if="userAskOrder.source" class="ml-0.5">{{ userAskOrder.source === 'manual' ? '⚙手动' : (userAskOrder.source === 'strategy' ? '策略' : '') }}</span>
             </div>
           </div>
           <div class="bg-[#1e2329] rounded px-1.5 lg:px-1 py-0.5 lg:py-0.5 md:py-1 border border-[#2b3139] relative cursor-pointer hover:border-[#3b4149] transition-colors" @click="showPendingOrdersModal('BID')">
@@ -175,18 +182,23 @@
             <div :class="['text-xl lg:text-lg md:text-2xl font-mono font-bold', getPriceClass(binance.bid, binance.prevBid)]">
               {{ formatPrice(binance.bid) }}
             </div>
+            <!-- 行情买一: 价 + 量 (左→右) -->
+            <div class="flex justify-between mt-0.5 text-[11px] lg:text-[10px] md:text-sm font-mono">
+              <span class="text-[#f6465d]">{{ formatPrice(binanceOrderBook.bid_price) }}</span>
+              <span class="text-[#3b82f6]">{{ formatVolume(binanceOrderBook.bid_volume) }}</span>
+            </div>
             <div v-if="bidOrderCount > 0" class="absolute top-0.5 right-0.5 bg-yellow-600 text-white text-[9px] px-1 py-0.5 rounded font-bold">
-              挂{{ bidOrderCount }}
+              挂{{ bidOrderCount }}<span v-if="userBidOrder.source" class="ml-0.5">{{ userBidOrder.source === 'manual' ? '⚙手动' : (userBidOrder.source === 'strategy' ? '策略' : '') }}</span>
             </div>
           </div>
         </div>
 
-        <!-- Order Book Data Row (主账号 XAUUSDT) -->
+        <!-- User Pending Orders Row (当前用户 Binance 实时挂单: ASK 价格/数量 + BID 价格/数量) -->
         <div class="grid grid-cols-4 gap-0.5 mb-1 lg:mb-0.5 md:mb-1.5 text-base lg:text-sm md:text-xl">
-          <div class="text-center text-[#3b82f6] font-mono">{{ formatVolume(binanceOrderBook.ask_volume) }}</div>
-          <div class="text-center text-[#0ecb81] font-mono">{{ formatPrice(binanceOrderBook.ask_price) }}</div>
-          <div class="text-center text-[#f6465d] font-mono">{{ formatPrice(binanceOrderBook.bid_price) }}</div>
-          <div class="text-center text-[#3b82f6] font-mono">{{ formatVolume(binanceOrderBook.bid_volume) }}</div>
+          <div class="text-center text-[#3b82f6] font-mono">{{ formatVolume(userAskOrder.quantity) }}</div>
+          <div class="text-center text-[#0ecb81] font-mono">{{ formatPrice(userAskOrder.price) }}</div>
+          <div class="text-center text-[#f6465d] font-mono">{{ formatPrice(userBidOrder.price) }}</div>
+          <div class="text-center text-[#3b82f6] font-mono">{{ formatVolume(userBidOrder.quantity) }}</div>
         </div>
 
         <!-- Lag Heartbeat -->
@@ -205,9 +217,19 @@
         </div>
       </div>
 
-      <!-- Spread Data Table -->
-      <div class="mt-1">
-        <SpreadDataTable />
+      <!-- Market Bottom Tabs: K线图 + 系统状态（顶部跑马灯保留缩版摘要；此处内嵌完整系统状态监控面板）-->
+      <div class="mt-1 bg-[#252930] rounded border border-[#2b3139]">
+        <div class="flex border-b border-[#2b3139]">
+          <button @click="bottomTab = 'kline'" :class="['flex-1 px-2 py-1 text-xs font-medium transition-colors', bottomTab === 'kline' ? 'text-[#f0b90b] border-b-2 border-[#f0b90b] bg-[#1e2329]' : 'text-gray-400 hover:text-white']">K线图</button>
+          <button @click="bottomTab = 'status'" :class="['flex-1 px-2 py-1 text-xs font-medium transition-colors flex items-center justify-center gap-1', bottomTab === 'status' ? 'text-[#f0b90b] border-b-2 border-[#f0b90b] bg-[#1e2329]' : 'text-gray-400 hover:text-white']" title="系统状态监控（自动策略进程 / 机制状态 / 服务 / 代理IP）">
+            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+            系统状态
+          </button>
+        </div>
+        <MiniKlineChart v-show="bottomTab === 'kline'" :visible="bottomTab === 'kline'" />
+        <div v-show="bottomTab === 'status'">
+          <SystemStatusPanel :active="bottomTab === 'status'" :pairCode="currentPair" />
+        </div>
       </div>
 
       <!-- Pending Orders Modal -->
@@ -243,7 +265,7 @@
                       {{ order.side === 'buy' ? '买入' : '卖出' }}
                     </span>
                   </td>
-                  <td class="py-2 px-3 text-right text-white font-mono">{{ order.price?.toFixed(2) || '-' }}</td>
+                  <td class="py-2 px-3 text-right text-white font-mono">{{ order.price != null ? formatPrice(order.price) : '-' }}</td>
                   <td class="py-2 px-3 text-right text-white font-mono">{{ order.quantity?.toFixed(4) || '-' }}</td>
                   <td class="py-2 px-3 text-right text-white font-mono">{{ (order.executed_qty ?? order.cum_exec_qty)?.toFixed(4) || '0' }}</td>
                   <td class="py-2 px-3 text-white">{{ order.status || order.order_status }}</td>
@@ -257,9 +279,6 @@
 
       </div>
     </div>
-
-    <!-- System Status Modal -->
-    <SystemStatusModal :isOpen="showSystemStatusModal" @close="showSystemStatusModal = false" />
   </div>
 
     <!-- Liquidation Danger Notification Overlay (non-blocking) -->
@@ -286,19 +305,25 @@ import { useNotificationStore } from '@/stores/notification'
 import { useProxyStore } from '@/stores/proxy'
 import { PlatformId, isHedge } from '@/constants/platform'
 import { useStrategyStore } from '@/stores/strategy'
-import SystemStatusModal from '@/components/SystemStatusModal.vue'
 import api from '@/services/api'
-import SpreadDataTable from './SpreadDataTable.vue'
+import MiniKlineChart from './MiniKlineChart.vue'
+import SystemStatusPanel from '@/components/trading/SystemStatusPanel.vue'
 import { useTradingPair } from '@/composables/useTradingPair'
 
+const bottomTab = ref("kline")
 const marketStore = useMarketStore()
 const notificationStore = useNotificationStore()
 const { currentPair, pairConfig } = useTradingPair()
+// 行情/点差显示精度按对(20260706): 天然气价格量级~3.2(XNGUSD digits=4), 2位小数把
+// 第三位有效数字全部吞掉; NG族=3位, 其余维持2位。formatPrice 是全部行情位的中枢。
+const pxDecimals = computed(() => {
+  const pc = String(currentPair.value || '').toUpperCase()
+  return (pc.startsWith('NG') || pc.includes('XNG') || pc.includes('NATGAS')) ? 3 : 2
+})
 const proxyStore = useProxyStore()
 const strategyStore = useStrategyStore()
 
-// System Status Modal
-const showSystemStatusModal = ref(false)
+// System Status (inline marquee — no modal, no toggles)
 const systemStatusText = ref('系统正常运行')
 const systemHealthy = ref(true)
 const redisStatus = ref({ healthy: false, last_error: null })
@@ -423,6 +448,70 @@ const liqDangerText = computed(() => {
   return parts.length ? '⚠ ' + currentPair.value + ' ' + parts.join(' | ') : ''
 })
 
+// ── 行情背离软暂停状态（后端 QuoteDivergenceMonitor 广播）──
+const quoteDivergence = computed(() => marketStore.quoteDivergence)
+const quoteDiverged = computed(() => quoteDivergence.value?.diverged === true)
+const quoteRecoveredFlash = ref(false)
+let quoteRecoverTimer = null
+watch(quoteDiverged, (now, prev) => {
+  if (prev === true && now === false) {
+    quoteRecoveredFlash.value = true
+    if (quoteRecoverTimer) clearTimeout(quoteRecoverTimer)
+    quoteRecoverTimer = setTimeout(() => { quoteRecoveredFlash.value = false }, 5000)
+  }
+})
+
+// 单腿交易警告 → 跑马灯（推送渠道由 testadmin 通知模板 single_leg_alert 的 enable_marquee 控制；
+// 后端在 WS risk_alert 事件 data.marquee 里下发开关）。单腿是持续风险但后端不发"已解除"事件，
+// 故跑马灯红闪保留 10 分钟后自动消（弹窗已做强确认，跑马灯为二次持续提醒）。
+const singleLegMarquee = ref('')
+let singleLegMarqueeTimer = null
+function handleSingleLegMarquee(data) {
+  if (!data || data.marquee !== true) return  // 仅当模板开启跑马灯渠道
+  const txt = data.message || data.title || '单腿交易警告'
+  singleLegMarquee.value = '⚠️ 单腿交易警告 — ' + txt
+  if (singleLegMarqueeTimer) clearTimeout(singleLegMarqueeTimer)
+  singleLegMarqueeTimer = setTimeout(() => { singleLegMarquee.value = '' }, 10 * 60 * 1000)
+}
+
+const marqueeText = computed(() => {
+  const parts = []
+  if (singleLegMarquee.value) parts.push(singleLegMarquee.value)
+  if (quoteDiverged.value) {
+    const d = quoteDivergence.value
+    parts.push(`⛔ 行情背离 ICMarkets ${d?.ic ?? '-'} vs Bybit ${d?.ref ?? '-'} 差价 ${(d?.diff ?? 0).toFixed(2)}（已暂停下单）`)
+  } else if (quoteRecoveredFlash.value) {
+    parts.push(`✓ 行情已恢复（差价 ${(quoteDivergence.value?.diff ?? 0).toFixed(2)}），已继续运行`)
+  }
+  if (liqDangerActive.value) parts.push(liqDangerText.value)
+  if (!marketOpen.value && marketMessage.value) parts.push('⛔ ' + marketMessage.value)
+  else if (marketWarning.value && marketMessage.value) parts.push('⚠ ' + marketMessage.value)
+  parts.push(systemStatusText.value)
+  return parts.join(' | ')
+})
+
+const marqueeColorClass = computed(() => {
+  if (singleLegMarquee.value) return 'text-[#ff0000] liq-flash font-bold'
+  if (quoteDiverged.value) return 'text-[#ff0000] liq-flash font-bold'
+  if (quoteRecoveredFlash.value) return 'text-[#0ecb81] font-bold'
+  if (liqDangerActive.value) return 'text-[#ff0000] liq-flash font-bold'
+  if (!marketOpen.value) return 'text-[#f6465d] font-bold'
+  if (marketWarning.value) return 'text-[#f0b90b] font-bold'
+  if (!systemHealthy.value) return 'text-[#f6465d] liq-flash font-bold'
+  return 'text-[#0ecb81]'
+})
+
+const marqueeButtonBg = computed(() => {
+  if (singleLegMarquee.value) return 'bg-[#ff0000]/20 hover:bg-[#ff0000]/30'
+  if (quoteDiverged.value) return 'bg-[#ff0000]/20 hover:bg-[#ff0000]/30'
+  if (quoteRecoveredFlash.value) return 'bg-[#0ecb81]/20 hover:bg-[#0ecb81]/30'
+  if (liqDangerActive.value) return 'bg-[#ff0000]/20 hover:bg-[#ff0000]/30'
+  if (!marketOpen.value) return 'bg-[#f6465d]/20 hover:bg-[#f6465d]/30'
+  if (marketWarning.value) return 'bg-[#f0b90b]/20 hover:bg-[#f0b90b]/30'
+  if (!systemHealthy.value) return 'bg-[#f6465d]/20 hover:bg-[#f6465d]/30'
+  return 'bg-[#0ecb81]/20 hover:bg-[#0ecb81]/30'
+})
+
 // Non-blocking notification overlay for liq danger
 const liqNotification = ref(null)
 
@@ -510,9 +599,16 @@ const binanceLagCount = computed(() => {
 // Pending orders data
 const askOrderCount = ref(0)
 const bidOrderCount = ref(0)
+// 用户自己的最新一笔 Binance 挂单 (取价格最优的那笔)
+const userAskOrder = ref({ price: 0, quantity: 0 })
+const userBidOrder = ref({ price: 0, quantity: 0 })
 const showModal = ref(false)
 const modalType = ref('') // 'ASK' or 'BID'
 const pendingOrders = ref([])
+// WS full snapshots reconcile state; pending_order_event keeps trade-time updates immediate.
+const pendingOrderMap = ref({})
+const pendingOrdersSnapshot = ref([])
+let lastPendingOrdersWsAt = 0
 let orderFetchTimer = null
 
 // Order book data
@@ -528,6 +624,9 @@ const reverseActualPosition = ref(0)
 // 由 fetchAccountData / handleAccountBalanceUpdate 更新
 // key: platform_id，同平台多账户的 unrealized_pnl 会累加
 const accountsBalanceByPlatform = ref({})  // { 1: {unrealized_pnl: sum}, 2: ..., 4: ..., 5: ... }
+const dailyNetProfit = ref(null)  // 当日返佣后净利润(pnl_fast WS, 北京00:00→now)
+const binanceUpBase = ref(null)      // 上次 pnl_fast 推送的币安平台浮盈(USDT)
+const binanceMarkAtPush = ref(null)  // 上次推送时的币安标记价(用于 tick 插值)
 
 // Position spread data - store position details for cost calculation
 const binanceShortPositions = ref([]) // Binance SHORT positions
@@ -553,11 +652,42 @@ const bybitShortTotal = computed(() => {
 const bybitLongSwapFee = ref(0)
 const bybitShortSwapFee = ref(0)
 let bybitSwapRateTimer = null
+
+// WS-pushed market rates (10s interval from MarketRateStreamer)
+watch(() => marketStore.marketRates, (rates) => {
+  if (!rates) return
+  // 20260707: 不再消费 WS 广播的 funding — 后端 MarketRateStreamer 只推 XAUUSDT
+  // 单一品种, 在 ICXAG/CL/BZ/NG 页面每10s把按对REST取到的资金费覆盖成黄金的值。
+  // funding 唯一源 = fetchBinanceFundingRate(带pair_code, 60s轮询+切对即刷)。
+  // 20260706: 不再消费 WS 广播的 swap — 它是全站单一值(后端硬编码8001桥XAUUSD+
+  // = XAU对的broker), 在 ICXAU 等其它对上每10s把按对REST轮询到的正确过夜费覆盖成
+  // 别家broker的值(显示-0.79/+0.27而非IC的-0.56/+0.39)。swap 唯一源 =
+  // fetchBybitSwapRate(带pair_code, 60s轮询+切对即刷)。funding 广播(币安全站同值)不受影响。
+}, { deep: true })
+
+// 主账户资金费 = 持仓量(XAU) / 100 * cost_per_lot
+// 资金费合计(20260707修): binanceXxxTotal单位=A腿单位(盎司/桶/MMBtu),
+// long_cost_per_lot实际=每1个A腿单位的费用(fr×mark) → 原公式÷100全品种小100倍。
+const mainFundingFee = computed(() => {
+  const longFee = binanceLongTotal.value * binanceLongFundingRate.value
+  const shortFee = binanceShortTotal.value * binanceShortFundingRate.value
+  return longFee + shortFee
+})
+
+// 对冲过夜费合计(20260706修): bybitXxxTotal 单位=MT5标准手, fee ref=每0.01手费用
+// → 原公式(手数×每0.01手费用)全品种小100倍(黄金1手真实38.7/天却显示0.39)。
+// 正确 = MT5手数 × 每标准手swap(=fee×100), 与MT5账单一致。
+const hedgeOvernightFee = computed(() => {
+  const longFee = bybitLongTotal.value * bybitLongSwapFee.value * 100
+  const shortFee = bybitShortTotal.value * bybitShortSwapFee.value * 100
+  return longFee + shortFee
+})
 // Binance real-time funding rate (per lot = 100 XAU)
 const binanceLongFundingRate = ref(0)   // long_cost_per_lot: >0 long pays, <0 long receives
 const binanceShortFundingRate = ref(0)  // short_cost_per_lot: opposite sign
 const binanceFundingRatePct = ref(0)    // raw rate percentage for display
 const binanceNextFundingTime = ref(0)   // next settlement timestamp ms
+const binanceMarkPrice = ref(0)         // XAUUSDT mark price — 供"资金费/手"按 (pct/100)*mark 算,免 per-lot 污染
 let fundingRateTimer = null
 
 // USD/USDT exchange rate
@@ -619,6 +749,12 @@ const forwardSpread = computed(() => {
 // 优先使用后端已算好的 unrealized_pnl（来自 Binance totalUnrealizedProfit）
 // 后端 balance.unrealized_pnl 即为 Binance 账户当前持仓实时浮动盈亏（USDT）
 const binanceFloatingProfit = computed(() => {
+  // tick 级实时: 平台 5s 基准 + 实时标记价漂移(净持仓×Δmark, USDT), 每 5s 与平台重对齐
+  if (binanceUpBase.value != null && binanceMarkAtPush.value != null) {
+    const markNow = (binance.value && binance.value.mid) ? binance.value.mid : binanceMarkAtPush.value
+    const net = binanceLongTotal.value - binanceShortTotal.value
+    return binanceUpBase.value + net * (markNow - binanceMarkAtPush.value)
+  }
   const b = accountsBalanceByPlatform.value[1]
   if (b && b.unrealized_pnl != null) return parseFloat(b.unrealized_pnl)
 
@@ -665,6 +801,9 @@ const totalProfit = computed(() => {
   }
   return sum
 })
+
+// 实际利润 = 实时持仓盈利(浮动) + 当日返佣后净利润(与 /trading 同口径)
+const actualProfit = computed(() => totalProfit.value + (dailyNetProfit.value || 0))
 
 watch(() => marketStore.marketData, (data) => {
   if (!data) return
@@ -732,6 +871,7 @@ watch(() => marketStore.marketData, (data) => {
 
 // Watch global pair selection — refresh all market data when pair changes
 watch(currentPair, () => {
+  applyPendingOrdersSnapshot(pendingOrdersSnapshot.value, false)
   fetchOrderBook()
   fetchBinanceFundingRate()
   fetchBybitSwapRate()
@@ -749,8 +889,16 @@ watch(() => marketStore.lastMessage, (message) => {
   if (!message) return
   if (message.type === 'account_balance') {
     handleAccountBalanceUpdate(message.data)
+  } else if (message.type === 'pnl_fast') {
+    handlePnlFast(message.data)
   } else if (message.type === 'redis_status') {
     redisStatus.value = message.data
+  } else if (message.type === 'pending_order_event') {
+    handlePendingOrderEvent(message.data)
+  } else if (message.type === 'pending_orders') {
+    applyPendingOrdersSnapshot(message.data, true)
+  } else if (message.type === 'risk_alert' && message.data && message.data.alert_type === 'single_leg_alert') {
+    handleSingleLegMarquee(message.data)
   }
 }, { deep: false })
 
@@ -784,6 +932,28 @@ function handlePositionSnapshot(data) {
   if (bybitShortTotal.value !== newBS) bybitShortPositions.value = newBS > 0 ? [{ size: newBS }] : []
   if (binanceLongTotal.value !== newCL) binanceLongPositions.value = newCL > 0 ? [{ size: newCL }] : []
   if (binanceShortTotal.value !== newCS) binanceShortPositions.value = newCS > 0 ? [{ size: newCS }] : []
+}
+
+// pnl_fast: 后端高频推送平台权威浮动盈亏 + 当日返佣后净利润 → 浮动实时同步、零REST
+function handlePnlFast(data) {
+  if (!data) return
+  const ubp = data.unrealized_by_platform || {}
+  // 捕获币安浮盈基准 + 当时标记价 → 两次推送间用实时标记价做 tick 级插值
+  if (ubp['1'] !== undefined && ubp['1'] !== null) {
+    binanceUpBase.value = parseFloat(ubp['1'])
+    binanceMarkAtPush.value = (binance.value && binance.value.mid) ? binance.value.mid : binanceMarkAtPush.value
+  }
+  if (Object.keys(ubp).length > 0) {
+    const merged = { ...accountsBalanceByPlatform.value }
+    for (const pid of Object.keys(ubp)) {
+      const p = Number(pid)
+      merged[p] = { ...(merged[p] || {}), unrealized_pnl: ubp[pid] }
+    }
+    accountsBalanceByPlatform.value = merged  // 全量重赋值触发浮动盈亏 computed 实时刷新
+  }
+  if (data.daily_net_profit !== undefined && data.daily_net_profit !== null) {
+    dailyNetProfit.value = parseFloat(data.daily_net_profit)
+  }
 }
 
 function handleAccountBalanceUpdate(data) {
@@ -891,7 +1061,6 @@ onMounted(() => {
   // Fetch initial position data immediately on page load (prevents 0.00 display until WebSocket update)
   fetchAccountData()
   // Position data is then kept up-to-date via WebSocket (account_balance / position_snapshot)
-  fetchPendingOrderCounts()
   fetchOrderBook()
   fetchRedisStatus()
   fetchSSLCertStatus()
@@ -900,10 +1069,13 @@ onMounted(() => {
   fetchBinanceFundingRate()
   checkMarketStatus()
 
-  // Fetch pending order counts every 3 seconds
+  // WS is the normal path. REST runs only if no full snapshot arrives for 30s.
+  // This removes per-browser openOrders traffic while retaining degraded-mode recovery.
   orderFetchTimer = setInterval(() => {
-    fetchPendingOrderCounts()
-  }, 3000)
+    if (!lastPendingOrdersWsAt || Date.now() - lastPendingOrdersWsAt > 30000) {
+      fetchPendingOrderCounts()
+    }
+  }, 30000)
 
   // Order book now updated via WebSocket (market_data messages)
   // REST fetchOrderBook kept as one-shot initial load only
@@ -938,6 +1110,8 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  if (quoteRecoverTimer) clearTimeout(quoteRecoverTimer)
+  if (singleLegMarqueeTimer) clearTimeout(singleLegMarqueeTimer)
   if (lagTimer) clearInterval(lagTimer)
   if (orderFetchTimer) clearInterval(orderFetchTimer)
   // orderBookFetchTimer removed — orderbook now via WS
@@ -948,7 +1122,8 @@ onUnmounted(() => {
 })
 
 function formatPrice(price) {
-  return price ? price.toFixed(2) : '0.00'
+  const d = pxDecimals.value
+  return price ? price.toFixed(d) : (0).toFixed(d)
 }
 
 function getPriceClass(current, previous) {
@@ -1066,21 +1241,96 @@ async function fetchAccountData() {
   }
 }
 
+// 从 pendingOrderMap 派生 4 个标志 ref (事件与轮询共用同一派生逻辑 → 单一真源)
+function recomputePendingMarkers() {
+  const list = Object.values(pendingOrderMap.value)
+  const asks = list.filter(o => o.side === 'sell')
+  const bids = list.filter(o => o.side === 'buy')
+  askOrderCount.value = asks.length
+  bidOrderCount.value = bids.length
+  const askP = asks.filter(o => o.price > 0)
+  const bidP = bids.filter(o => o.price > 0)
+  userAskOrder.value = askP.length
+    ? (() => { const b = askP.reduce((a, c) => (a.price < c.price ? a : c)); return { price: b.price || 0, quantity: b.quantity || 0, source: b.source } })()
+    : { price: 0, quantity: 0 }
+  userBidOrder.value = bidP.length
+    ? (() => { const b = bidP.reduce((a, c) => (a.price > c.price ? a : c)); return { price: b.price || 0, quantity: b.quantity || 0, source: b.source } })()
+    : { price: 0, quantity: 0 }
+}
+
+// WS 事件驱动: maker 下单/撤单即时增删 (来源 source: manual/strategy/unknown)
+function handlePendingOrderEvent(data) {
+  if (!data) return
+  // 只关心当前 pair 的币安主账号 symbol, 避免他对的单串台
+  const wantSym = (pairConfig.value && pairConfig.value.binance) ? pairConfig.value.binance : null
+  if (wantSym && data.symbol && data.symbol !== wantSym) return
+  const oid = data.order_id != null ? String(data.order_id) : null
+  if (!oid) return
+  const m = { ...pendingOrderMap.value }
+  if (data.kind === 'add') {
+    m[oid] = {
+      side: (data.side || '').toLowerCase(),
+      // maker priceMatch=QUEUE 时后端 price 可能为 null → 先记 0, 轮询对账会补真实挂单价
+      price: data.price != null ? Number(data.price) : 0,
+      quantity: data.quantity != null ? Number(data.quantity) : 0,
+      source: data.source || 'unknown',
+      symbol: data.symbol || wantSym,
+      ts: Date.now(),
+    }
+    const row = {
+      id: oid,
+      side: (data.side || '').toLowerCase(),
+      price: data.price != null ? Number(data.price) : 0,
+      quantity: data.quantity != null ? Number(data.quantity) : 0,
+      source: data.source || 'unknown',
+      symbol: data.symbol || wantSym,
+      platform: 'binance',
+      timestamp: new Date().toISOString(),
+    }
+    pendingOrdersSnapshot.value = [
+      row,
+      ...pendingOrdersSnapshot.value.filter(o => String(o.id || '') !== oid),
+    ]
+  } else if (data.kind === 'remove') {
+    delete m[oid]
+    pendingOrdersSnapshot.value = pendingOrdersSnapshot.value.filter(
+      o => String(o.id || '') !== oid
+    )
+  }
+  pendingOrderMap.value = m
+  recomputePendingMarkers()
+}
+
+function applyPendingOrdersSnapshot(rows, fromWs = true) {
+  const orders = Array.isArray(rows) ? rows.slice() : []
+  if (fromWs) lastPendingOrdersWsAt = Date.now()
+  pendingOrdersSnapshot.value = orders
+
+  const wantSym = (pairConfig.value && pairConfig.value.binance) ? pairConfig.value.binance : null
+  const fresh = {}
+  for (const o of orders) {
+    if (o.platform && o.platform !== 'binance') continue
+    if (wantSym && o.symbol && o.symbol !== wantSym) continue
+    const oid = String(o.id || '')
+    if (!oid) continue
+    fresh[oid] = {
+      side: (o.side || '').toLowerCase(),
+      price: Number(o.price) || 0,
+      quantity: Number(o.quantity) || 0,
+      source: o.source || 'unknown',
+      symbol: o.symbol || wantSym,
+      ts: Date.now(),
+    }
+  }
+  pendingOrderMap.value = fresh
+  recomputePendingMarkers()
+}
+
 async function fetchPendingOrderCounts() {
+  // Degraded-mode reconciliation only; the shared IP weight gate queues this call.
   try {
     const response = await api.get('/api/v1/trading/orders/realtime')
-    const orders = response.data || []
-
-    console.log('[fetchPendingOrderCounts] Fetched orders:', orders.length, orders)
-
-    // Count ASK and BID orders (backend returns lowercase 'buy' and 'sell')
-    const askCount = orders.filter(order => order.side === 'sell').length
-    const bidCount = orders.filter(order => order.side === 'buy').length
-
-    askOrderCount.value = askCount
-    bidOrderCount.value = bidCount
-
-    console.log('[fetchPendingOrderCounts] ASK count:', askCount, 'BID count:', bidCount)
+    applyPendingOrdersSnapshot(response.data, false)
   } catch (error) {
     console.error('Failed to fetch pending orders:', error)
   }
@@ -1117,23 +1367,16 @@ async function fetchOrderBook() {
   }
 }
 
-async function showPendingOrdersModal(type) {
-  try {
-    const response = await api.get('/api/v1/trading/orders/realtime')
-    const orders = response.data || []
-
-    // Filter orders by type (backend returns lowercase 'buy' and 'sell')
-    if (type === 'ASK') {
-      pendingOrders.value = orders.filter(order => order.side === 'sell')
-    } else {
-      pendingOrders.value = orders.filter(order => order.side === 'buy')
-    }
-
-    modalType.value = type
-    showModal.value = true
-  } catch (error) {
-    console.error('Failed to fetch pending orders:', error)
-  }
+function showPendingOrdersModal(type) {
+  const wantSym = (pairConfig.value && pairConfig.value.binance) ? pairConfig.value.binance : null
+  const side = type === 'ASK' ? 'sell' : 'buy'
+  pendingOrders.value = pendingOrdersSnapshot.value.filter(order => {
+    if (order.platform && order.platform !== 'binance') return false
+    if (wantSym && order.symbol && order.symbol !== wantSym) return false
+    return String(order.side || '').toLowerCase() === side
+  })
+  modalType.value = type
+  showModal.value = true
 }
 
 function closeModal() {
@@ -1157,121 +1400,91 @@ function formatVolume(volume) {
   return volume.toFixed(2)
 }
 
-// System Status Update - 整合所有系统状态和服务状态
+// System Status Update - 整合所有系统状态;输出"自适应缩版"摘要:
+//   正常 → 极简一行(只列关键健康项的紧凑标记)
+//   异常 → 只列出现问题的项(配合 marqueeColorClass 在跑马灯里变红闪动)
+// 飞书告警由后端 system_health_monitor 单点带冷却发送,前端不再每浏览器发(避免刷爆)。
 async function updateSystemStatus() {
   try {
     const response = await api.get('/api/v1/system/status')
     const data = response.data
 
-    const statuses = []
+    // 逐项判定健康/异常,异常项收集到 bad[],健康关键项收集到 okBrief[]
+    const bad = []
+    const okBrief = []
 
-    // WebSocket状态
-    if (marketStore.connected) {
-      statuses.push('WS已连接')
-    } else {
-      statuses.push('WS未连接')
-    }
+    // WebSocket
+    if (marketStore.connected) okBrief.push('WS')
+    else bad.push('WS未连接')
 
-    // 数据库连接池状态
+    // DB 连接池
+    let dbUsage = 0
     if (data.dbPool) {
-      const usage = Math.round((data.dbPool.active / data.dbPool.max) * 100)
-      statuses.push(`DB连接池:${usage}%`)
+      dbUsage = data.dbPool.active / data.dbPool.max
+      const pct = Math.round(dbUsage * 100)
+      if (dbUsage >= 0.8) bad.push(`DB连接池${pct}%`)
+      else okBrief.push(`DB${pct}%`)
     }
 
-    // 后端服务状态
-    if (data.backend) {
-      statuses.push('后端API正常')
-    }
+    // 后端 API
+    if (!data.backend) bad.push('后端API异常')
 
-    // 持仓监控状态
-    if (data.positionMonitor) {
-      statuses.push('持仓监控运行中')
-    }
+    // 交易所/桥
+    if (data.binance === false) bad.push('Binance未连接')
+    if (data.mt5 === false) bad.push('MT5桥离线')
 
-    // 策略管理状态
-    if (data.strategyManager) {
-      statuses.push('策略管理运行中')
-    }
+    // 飞书服务
+    if (!notificationStore.feishuServiceStatus) bad.push('飞书服务异常')
+    else okBrief.push('飞书')
 
-    // Binance连接状态
-    if (data.binance) {
-      statuses.push('Binance已连接')
-    }
+    // Redis
+    if (redisStatus.value.healthy) okBrief.push('Redis')
+    else bad.push('Redis异常')
 
-    // Bybit连接状态
-    if (data.bybit) {
-      statuses.push('Bybit已连接')
-    }
-
-    // MT5连接状态
-    if (data.mt5) {
-      statuses.push('MT5已连接')
-    }
-
-    // 飞书服务状态
-    if (notificationStore.feishuServiceStatus) {
-      statuses.push('飞书服务正常')
-    } else {
-      statuses.push('飞书服务异常')
-    }
-
-    // Redis状态
-    if (redisStatus.value.healthy) {
-      statuses.push('Redis正常')
-    } else {
-      statuses.push('Redis异常')
-    }
-
-    // SSL证书状态
+    // SSL 证书
     if (sslCertStatus.value.status === 'healthy') {
-      statuses.push(`SSL证书正常(${sslCertStatus.value.days_remaining}天)`)
+      okBrief.push(`SSL ${sslCertStatus.value.days_remaining}d`)
     } else if (sslCertStatus.value.status === 'warning') {
-      statuses.push(`SSL证书即将过期(${sslCertStatus.value.days_remaining}天)`)
+      bad.push(`SSL证书将过期(${sslCertStatus.value.days_remaining}天)`)
     } else if (sslCertStatus.value.status === 'critical' || sslCertStatus.value.status === 'expired') {
-      statuses.push('SSL证书异常')
+      bad.push('SSL证书异常')
     }
 
-    // 系统运行时间
-    if (data.uptime) {
-      statuses.push(`运行:${data.uptime}`)
-    }
-
-    // 代理健康状态
+    // 代理健康(无代理=直连=健康)
+    const proxyHealthy = proxyHealthStatus.value.total === 0 ||
+      (proxyHealthStatus.value.avgHealth >= 50 && proxyHealthStatus.value.failed === 0)
     if (proxyHealthStatus.value.total > 0) {
-      const proxyStatus = `代理:${proxyHealthStatus.value.active}/${proxyHealthStatus.value.total}活跃`
-      if (proxyHealthStatus.value.avgHealth < 50) {
-        statuses.push(`⚠️${proxyStatus}(健康度:${proxyHealthStatus.value.avgHealth})`)
-      } else if (proxyHealthStatus.value.failed > 0) {
-        statuses.push(`${proxyStatus}(${proxyHealthStatus.value.failed}失败)`)
+      if (!proxyHealthy) {
+        bad.push(`代理异常(${proxyHealthStatus.value.active}/${proxyHealthStatus.value.total},健康${proxyHealthStatus.value.avgHealth})`)
       } else {
-        statuses.push(proxyStatus)
+        okBrief.push(`代理${proxyHealthStatus.value.active}/${proxyHealthStatus.value.total}`)
       }
     }
 
-    systemStatusText.value = statuses.join(' | ') || '系统正常运行'
-
-    // 判断系统健康状态
-    const dbUsage = data.dbPool ? (data.dbPool.active / data.dbPool.max) : 0
     const sslHealthy = ['healthy', 'warning'].includes(sslCertStatus.value.status)
-    // Proxy: no proxies configured = direct-connect, considered healthy
-    const proxyHealthy = proxyHealthStatus.value.total === 0 ||
-                         (proxyHealthStatus.value.avgHealth >= 50 && proxyHealthStatus.value.failed === 0)
-    systemHealthy.value = data.backend &&
-                          marketStore.connected &&
-                          dbUsage < 0.8 &&
-                          redisStatus.value.healthy &&
-                          sslHealthy &&
-                          proxyHealthy
+    const healthy = data.backend &&
+                    marketStore.connected &&
+                    dbUsage < 0.8 &&
+                    redisStatus.value.healthy &&
+                    sslHealthy &&
+                    proxyHealthy
+    systemHealthy.value = healthy
+
+    // 自适应缩版文案:异常只显示问题项(短、醒目);正常显示极简健康摘要
+    if (!healthy && bad.length) {
+      systemStatusText.value = '⚠ 系统异常: ' + bad.join(' · ')
+    } else {
+      systemStatusText.value = '● 系统正常 ' + okBrief.join(' ')
+    }
   } catch (error) {
-    systemStatusText.value = '无法获取系统状态'
+    systemStatusText.value = '⚠ 无法获取系统状态'
     systemHealthy.value = false
   }
 }
 
 async function fetchRedisStatus() {
   try {
-    // Use Go-native /monitor/status for Redis info (independent of Python backend).
-    // The Go handler pings Redis directly via db.Redis().
+    // Use /monitor/status for Redis info (Python backend).
     const response = await api.get('/api/v1/monitor/status')
     const redis = response.data?.redis
     redisStatus.value = {
@@ -1287,7 +1500,7 @@ async function fetchRedisStatus() {
 async function fetchSSLCertStatus() {
   try {
     const response = await api.get('/api/v1/monitor/ssl/current')
-    // Go /monitor/ssl/current returns {most_urgent: {status, days_remaining, ...}, certificates: [...]}
+    // /monitor/ssl/current returns {most_urgent: {status, days_remaining, ...}, certificates: [...]}
     const cert = response.data?.most_urgent || response.data
     if (cert && cert.is_valid !== undefined) {
       sslCertStatus.value = {
@@ -1326,24 +1539,21 @@ async function fetchProxyHealthStatus() {
   }
 }
 
-// Fetch USD/USDT exchange rate from Binance API
+// Fetch USD/USDT exchange rate through the same-origin backend proxy.
 async function fetchExchangeRate() {
   try {
-    // Use Binance public API to get USDT price relative to USD
-    // We use USDC/USDT as a proxy since USDC ≈ USD
-    const response = await fetch('https://api.binance.com/api/v3/ticker/price?symbol=USDCUSDT')
-    const data = await response.json()
-
-    if (data.price) {
-      // USDC/USDT price represents how many USDT = 1 USDC (≈ 1 USD)
-      // So USD/USDT rate = USDC/USDT rate
-      usdToUsdtRate.value = parseFloat(data.price)
-      console.log('USD/USDT exchange rate updated:', usdToUsdtRate.value)
+    const response = await api.get('/api/v1/market/exchange-rate')
+    const rate = Number(response.data?.price)
+    if (!Number.isFinite(rate) || rate <= 0) {
+      throw new Error(`Invalid exchange rate: ${response.data?.price}`)
     }
+
+    // USDC/USDT is used as the USD/USDT proxy rate.
+    usdToUsdtRate.value = rate
+    console.log('USD/USDT exchange rate updated:', usdToUsdtRate.value)
   } catch (error) {
-    console.error('Failed to fetch exchange rate, using default 1.0:', error)
-    // Fallback to 1:1 if API fails
-    usdToUsdtRate.value = 1.0
+    // Keep the last valid value (initially 1.0) during transient failures.
+    console.warn('Failed to refresh exchange rate, keeping previous value:', error)
   }
 }
 
@@ -1374,6 +1584,7 @@ async function fetchBinanceFundingRate() {
     binanceShortFundingRate.value = data.short_cost_per_lot ?? 0
     binanceFundingRatePct.value = data.funding_rate_pct ?? 0
     binanceNextFundingTime.value = data.next_funding_time ?? 0
+    binanceMarkPrice.value = data.mark_price ?? 0
   } catch (error) {
     console.error('Failed to fetch Binance funding rate:', error)
   }
@@ -1390,6 +1601,7 @@ defineExpose({
   binanceLongFundingRate,
   binanceShortFundingRate,
   binanceFundingRatePct,
+  binanceMarkPrice,
   binanceNextFundingTime,
   binanceLongTotal,
   binanceShortTotal,

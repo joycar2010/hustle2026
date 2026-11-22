@@ -164,7 +164,7 @@
 import { ref, onMounted, onUnmounted, watch } from 'vue'
 import api from '@/services/api'
 import { useMarketStore } from '@/stores/market'
-import { PlatformId } from '@/constants/platform'
+import { PlatformId, isHedge } from '@/constants/platform'
 
 const marketStore = useMarketStore()
 
@@ -227,51 +227,64 @@ watch(() => marketStore.lastMessage, (message) => {
 })
 
 function updateAccountData(data) {
-  if (data.summary) {
-    assets.value.total = data.summary.total_assets || assets.value.total
-    assets.value.net = data.summary.net_assets || assets.value.net
-    assets.value.available = data.summary.available_balance || assets.value.available
+  // A summary containing only failed accounts is a transport failure, not a
+  // real zero balance. Keep the last known good values until a valid snapshot
+  // arrives (the account cards still expose the connection error).
+  const hasFailedOnly = Array.isArray(data.failed_accounts) && data.failed_accounts.length > 0 && (!Array.isArray(data.accounts) || data.accounts.length === 0)
+  if (data.summary && !hasFailedOnly) {
+    const s = data.summary
+    const assignNumber = (target, targetKey, sourceKey) => {
+      if (Object.prototype.hasOwnProperty.call(s, sourceKey) && Number.isFinite(Number(s[sourceKey]))) target[targetKey] = Number(s[sourceKey])
+    }
+    assignNumber(assets.value, 'total', 'total_assets')
+    assignNumber(assets.value, 'net', 'net_assets')
+    assignNumber(assets.value, 'available', 'available_balance')
 
-    positions.value.count = data.summary.position_count || positions.value.count
-    positions.value.volume = data.summary.margin_balance || positions.value.volume
+    if (Number.isFinite(Number(s.position_count))) positions.value.count = Number(s.position_count)
+    if (Number.isFinite(Number(s.margin_balance))) positions.value.volume = Number(s.margin_balance)
 
-    pnl.value.today = data.summary.daily_pnl || pnl.value.today
-    pnl.value.todayPercent = data.summary.total_assets > 0
-      ? (data.summary.daily_pnl / data.summary.total_assets) * 100
+    if (Number.isFinite(Number(s.daily_pnl))) pnl.value.today = Number(s.daily_pnl)
+    pnl.value.todayPercent = Number(s.total_assets) > 0
+      ? (Number(s.daily_pnl || 0) / Number(s.total_assets)) * 100
       : pnl.value.todayPercent
 
-    risk.value.ratio = data.summary.risk_ratio || risk.value.ratio
-    risk.value.marginUsed = data.summary.margin_balance || risk.value.marginUsed
-    risk.value.marginAvailable = data.summary.available_balance || risk.value.marginAvailable
+    if (Number.isFinite(Number(s.risk_ratio))) risk.value.ratio = Number(s.risk_ratio)
+    if (Number.isFinite(Number(s.margin_balance))) risk.value.marginUsed = Number(s.margin_balance)
+    if (Number.isFinite(Number(s.available_balance))) risk.value.marginAvailable = Number(s.available_balance)
   }
 }
 
 async function fetchDashboardData() {
   try {
-    const response = await api.get('/api/v1/accounts/dashboard/aggregated')
+    const response = await api.get('/api/v1/accounts/dashboard/aggregated?view=merged')
     const data = response.data
 
-    if (data.summary) {
+    const hasFailedOnly = Array.isArray(data.failed_accounts) && data.failed_accounts.length > 0 && (!Array.isArray(data.accounts) || data.accounts.length === 0)
+    if (data.summary && !hasFailedOnly) {
       // Update assets
-      assets.value.total = data.summary.total_assets || 0
-      assets.value.net = data.summary.net_assets || 0
-      assets.value.available = data.summary.available_balance || 0
+      const s = data.summary
+      const assign = (target, field, source = field) => {
+        if (Object.prototype.hasOwnProperty.call(s, source) && Number.isFinite(Number(s[source]))) target[field] = Number(s[source])
+      }
+      assign(assets.value, 'total', 'total_assets')
+      assign(assets.value, 'net', 'net_assets')
+      assign(assets.value, 'available', 'available_balance')
       assets.value.totalChange = 0 // TODO: Calculate from historical data if available
 
       // Update positions
-      positions.value.count = data.summary.position_count || 0
-      positions.value.volume = data.summary.margin_balance || 0
+      assign(positions.value, 'count', 'position_count')
+      assign(positions.value, 'volume', 'margin_balance')
 
       // Update P&L
-      pnl.value.today = data.summary.daily_pnl || 0
-      pnl.value.todayPercent = data.summary.total_assets > 0
-        ? (data.summary.daily_pnl / data.summary.total_assets) * 100
-        : 0
+      assign(pnl.value, 'today', 'daily_pnl')
+      pnl.value.todayPercent = Number(s.total_assets) > 0
+        ? (Number(s.daily_pnl || 0) / Number(s.total_assets)) * 100
+        : pnl.value.todayPercent
 
       // Update risk
-      risk.value.ratio = data.summary.risk_ratio || 0
-      risk.value.marginUsed = data.summary.margin_balance || 0
-      risk.value.marginAvailable = data.summary.available_balance || 0
+      assign(risk.value, 'ratio', 'risk_ratio')
+      assign(risk.value, 'marginUsed', 'margin_balance')
+      assign(risk.value, 'marginAvailable', 'available_balance')
 
       // Calculate max drawdown and win rate from positions if available
       if (data.positions && data.positions.length > 0) {
@@ -284,17 +297,17 @@ async function fetchDashboardData() {
       // Find Binance accounts (platform_id === 1)
       const binanceAccounts = data.accounts.filter(acc => acc.platform_id === PlatformId.BINANCE)
       if (binanceAccounts.length > 0) {
-        accounts.value.binance.balance = binanceAccounts.reduce((sum, acc) =>
-          sum + (acc.balance?.total_assets || 0), 0)
+        const validBinance = binanceAccounts.filter(acc => Number.isFinite(Number(acc.balance?.total_assets)))
+        if (validBinance.length) accounts.value.binance.balance = validBinance.reduce((sum, acc) => sum + Number(acc.balance.total_assets), 0)
         accounts.value.binance.positions = binanceAccounts.reduce((sum, acc) =>
           sum + (acc.positions?.length || 0), 0)
       }
 
-      // Find Bybit accounts (platform_id === 2)
-      const bybitAccounts = data.accounts.filter(acc => acc.platform_id === PlatformId.BYBIT)
+      // Find hedge accounts (Bybit / IC Markets / ...)
+      const bybitAccounts = data.accounts.filter(acc => isHedge(acc.platform_id))
       if (bybitAccounts.length > 0) {
-        accounts.value.bybit.balance = bybitAccounts.reduce((sum, acc) =>
-          sum + (acc.balance?.total_assets || 0), 0)
+        const validHedge = bybitAccounts.filter(acc => Number.isFinite(Number(acc.balance?.total_assets)))
+        if (validHedge.length) accounts.value.bybit.balance = validHedge.reduce((sum, acc) => sum + Number(acc.balance.total_assets), 0)
         accounts.value.bybit.positions = bybitAccounts.reduce((sum, acc) =>
           sum + (acc.positions?.length || 0), 0)
       }

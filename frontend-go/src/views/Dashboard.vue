@@ -185,6 +185,7 @@ const reverseSpread = computed(() => {
 })
 
 let updateInterval = null
+let fallbackTimer = null   // WS 断线时的 REST 兜底轮询(看门狗判死→connected翻false即启动)
 
 onMounted(async () => {
   // Ensure WebSocket connection
@@ -204,7 +205,21 @@ onUnmounted(() => {
   if (updateInterval) {
     clearInterval(updateInterval)
   }
+  if (fallbackTimer) {
+    clearInterval(fallbackTimer)
+    fallbackTimer = null
+  }
 })
+
+// WS 断开时启动 REST 兜底轮询(5s),恢复即停。配合数据活性看门狗:
+// 半开假死时 connected 会被看门狗翻成 false → 这里才真正接管,页面不再静默冻结。
+watch(() => marketStore.connected, (val) => {
+  if (val) {
+    if (fallbackTimer) { clearInterval(fallbackTimer); fallbackTimer = null }
+  } else if (!fallbackTimer) {
+    fallbackTimer = setInterval(fetchPrices, 5000)
+  }
+}, { immediate: true })
 
 // Watch for WebSocket market data updates
 watch(() => marketStore.marketData, (newData) => {

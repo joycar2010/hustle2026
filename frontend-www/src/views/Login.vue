@@ -3,7 +3,7 @@
     <div class="w-full max-w-sm">
       <!-- Logo -->
       <div class="text-center mb-8">
-        <img src="/logo.png" alt="Hustle XAU" class="w-14 h-14 shadow-lg mb-3 inline-block" />
+        <img src="/logo.png" alt="HustleXAU" class="w-14 h-14 mb-3 mx-auto object-contain" />
         <h1 class="text-xl font-bold">HustleXAU</h1>
         <p class="text-sm text-text-tertiary mt-1">实时收益查看平台</p>
       </div>

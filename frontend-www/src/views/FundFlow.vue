@@ -30,6 +30,10 @@
         <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
           <span class="text-sm font-bold">资金流向</span>
           <div class="flex items-center gap-1.5 flex-shrink-0">
+            <select v-if="viewOptions.length > 1" v-model="activeView"
+              class="bg-dark-200 border border-border-primary rounded text-xs px-2 py-1 max-w-[40vw]">
+              <option v-for="o in viewOptions" :key="o.val" :value="o.val">{{ o.label }}</option>
+            </select>
             <select v-model.number="fundFlowDays" @change="loadFundFlow"
               class="bg-dark-200 border border-border-primary rounded text-xs px-2 py-1">
               <option :value="7">7 天</option>
@@ -42,7 +46,10 @@
             </button>
           </div>
         </div>
-        <div v-if="fundFlowLoading && !fundFlows.length" class="py-8 text-center text-text-tertiary text-sm">加载中…</div>
+        <div v-if="fundFlowLoading" class="py-8 flex flex-col items-center justify-center text-text-tertiary text-sm gap-2">
+          <span>加载中 {{ ffPct }}%</span>
+          <div class="w-40 h-1.5 rounded-full bg-dark-200 overflow-hidden"><div class="h-full bg-primary/70 transition-all duration-200" :style="{ width: ffPct + '%' }"></div></div>
+        </div>
         <div v-else-if="!fundFlows.length" class="py-8 text-center text-text-tertiary text-sm">近 {{ fundFlowDays }} 天无划转 / 充值 / 提现记录</div>
         <div v-else>
           <div class="hidden md:block max-h-[70vh] overflow-y-auto">
@@ -109,7 +116,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, watch, onMounted, onUnmounted } from 'vue'
 import { useMaintenance } from '@/composables/useMaintenance.js'
 import { useAuthStore } from '@/stores/auth.js'
 import api from '@/services/api.js'
@@ -127,10 +134,46 @@ const fundFlowDays = ref(30)
 const fundFlowErrors = ref('')
 const { connected: wsConnected, connect: wsConnect, disconnect: wsDisconnect, requestData } = useWebSocket()
 
+// 进度条(20260621): 资金流向取数无真实进度回调, 用基于经验耗时(合并视图打多账号桥~20s,
+// 单账号~8s)的模拟进度: 平滑爬到90%, 数据返回跳100%淡出。
+const ffPct = ref(0)
+let _ffTimer = null
+function startFfProgress() {
+  clearInterval(_ffTimer); ffPct.value = 1
+  const expect = (viewOptions.value.length > 1 && activeView.value === 'merged') ? 20000 : 8000
+  const t0 = Date.now()
+  _ffTimer = setInterval(() => {
+    const p = 90 * (1 - Math.exp(-(Date.now() - t0) / (expect * 0.55)))
+    ffPct.value = Math.min(90, Math.round(p))
+  }, 200)
+}
+function doneFfProgress() { clearInterval(_ffTimer); ffPct.value = 100; setTimeout(() => { if (!fundFlowLoading.value) ffPct.value = 0 }, 400) }
+
+// 收益关联(20260621): 资金流向同收益页, 加视图下拉(合并全部/各用户)
+const activeView = ref('merged')
+const viewOptions = ref([])
+// 切账号下拉即重拉(用 watch 比 select @change 可靠, 个别端 @change 不触发)
+watch(activeView, () => { loadFundFlow() })
+async function loadViewOptions() {
+  try {
+    const r = await api.get('/api/v1/pnl/link-options')
+    const linked = r.data?.linked || []
+    if (linked.length === 0) { viewOptions.value = []; return }
+    const self = r.data?.self
+    viewOptions.value = [
+      { label: '合并全部数据', val: 'merged' },
+      ...(self ? [{ label: self.username + '(本人)', val: self.user_id }] : []),
+      ...linked.map(u => ({ label: u.username, val: u.user_id })),
+    ]
+  } catch (e) { viewOptions.value = [] }
+}
+
 async function loadFundFlow() {
   fundFlowLoading.value = true
+  fundFlows.value = []      // 清旧, 切账号/范围重拉时立即让位给进度条(不滞留上批记录)
+  startFfProgress()
   try {
-    const r = await fetchFundFlow(fundFlowDays.value)
+    const r = await fetchFundFlow(fundFlowDays.value, activeView.value)
     fundFlows.value = r?.flows || []
     const errs = r?.errors || {}
     const errKeys = Object.keys(errs)
@@ -150,6 +193,7 @@ async function loadFundFlow() {
     }
   } finally {
     fundFlowLoading.value = false
+    doneFfProgress()
   }
 }
 
@@ -167,10 +211,11 @@ function fmtFlowTime(ts) {
   return dayjs(ts).format('MM-DD HH:mm')
 }
 
-onUnmounted(() => wsDisconnect())
+onUnmounted(() => { wsDisconnect(); clearInterval(_ffTimer) })
 onMounted(() => {
   wsConnect()
   setWsInstance({ connected: wsConnected, requestData })
+  loadViewOptions()   // 加载视图下拉(有关联用户才显示)
   loadFundFlow()
 })
 </script>

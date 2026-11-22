@@ -11,15 +11,15 @@
   <div v-else class="min-h-screen flex flex-col">
     <AnnouncementBanner />
     <header class="border-b border-border-primary px-3 sm:px-6 py-2 sm:py-3 flex flex-wrap items-center justify-between gap-2 overflow-x-hidden" style="background-color: #16181F">
-      <div class="flex items-center gap-6">
+      <div class="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-6 min-w-0 w-full lg:w-auto">
         <div class="flex items-center gap-2">
-          <img src="/logo.png" alt="Hustle XAU" class="w-8 h-8" />
+          <img src="/logo.png" alt="OpenCLAW" class="w-8 h-8 object-contain" />
           <div>
             <div class="font-bold text-base leading-tight">OpenCLAW</div>
             <div class="text-[10px] text-text-tertiary leading-tight">量化智能体控制台</div>
           </div>
         </div>
-        <nav class="flex gap-1 text-sm overflow-x-auto scrollbar-hide">
+        <nav class="flex gap-1 text-sm overflow-x-auto scrollbar-hide w-full sm:w-auto max-w-full min-w-0">
           <router-link v-for="n in nav" :key="n.path" :to="n.path"
             class="px-3 py-1.5 rounded hover:bg-dark-100 transition relative whitespace-nowrap"
             active-class="bg-dark-100 text-primary">
@@ -33,7 +33,7 @@
       </div>
 
       <!-- LLM stats widget + user -->
-      <div class="flex items-center gap-4">
+      <div class="flex flex-wrap items-center gap-3 sm:gap-4 min-w-0">
         <div class="hidden sm:flex items-center gap-3 px-3 py-1.5 bg-dark-100 rounded border border-border-primary text-xs">
           <div class="flex flex-col leading-tight">
             <span class="text-text-tertiary text-[10px]">模型</span>
@@ -93,6 +93,7 @@ const nav = [
   { path: '/decisions', label: '决策流' },
   { path: '/proposals', label: '提议中心' },
   { path: '/risk', label: '风控中心' },
+  { path: '/ladder-advisor', label: '阶梯调参' },
   { path: '/infra', label: '基础设施' },
 ]
 const me = ref(null)

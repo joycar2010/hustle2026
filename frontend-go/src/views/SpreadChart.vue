@@ -1,0 +1,760 @@
+<template>
+  <div class="min-h-screen bg-[#0a0a12] text-[#e5e7eb] p-4">
+    <div class="max-w-6xl mx-auto space-y-3">
+      <!-- Toolbar -->
+      <div class="flex items-center gap-2 flex-wrap">
+        <label class="text-[10px] text-[#6b7280]">开始:</label>
+        <input
+          type="datetime-local"
+          v-model="startInput"
+          @change="quickRange = null"
+          class="bg-[#1a1a22] border border-[#2d2d3d] rounded px-2 py-1 text-xs text-[#e5e7eb] focus:outline-none focus:border-[#fcd535]"
+        />
+        <label class="text-[10px] text-[#6b7280]">结束:</label>
+        <input
+          type="datetime-local"
+          v-model="endInput"
+          @change="quickRange = null"
+          class="bg-[#1a1a22] border border-[#2d2d3d] rounded px-2 py-1 text-xs text-[#e5e7eb] focus:outline-none focus:border-[#fcd535]"
+        />
+
+        <!-- 套利方向选择（单线：正向绿 / 反向红） -->
+        <label class="text-[10px] text-[#6b7280]">方向:</label>
+        <div class="flex rounded border border-[#2d2d3d] overflow-hidden">
+          <button
+            @click="setDirection('forward')"
+            :class="[
+              'px-3 py-1 text-[10px] border-r border-[#2d2d3d] transition-colors',
+              direction === 'forward'
+                ? 'bg-[#22c55e] text-black font-medium'
+                : 'text-[#6b7280] hover:bg-[#1e1e2e] hover:text-[#e5e7eb]'
+            ]"
+          >正向</button>
+          <button
+            @click="setDirection('reverse')"
+            :class="[
+              'px-3 py-1 text-[10px] transition-colors',
+              direction === 'reverse'
+                ? 'bg-[#ef4444] text-white font-medium'
+                : 'text-[#6b7280] hover:bg-[#1e1e2e] hover:text-[#e5e7eb]'
+            ]"
+          >反向</button>
+        </div>
+        <span class="text-[10px] px-2 py-0.5 rounded border border-[#fcd535] text-[#fcd535] font-mono">{{ currentPair }}</span>
+        <!-- 快捷时间范围(点差走势筛选): 最近1/2小时 -->
+        <label class="text-[10px] text-[#6b7280]">范围:</label>
+        <div class="flex rounded border border-[#2d2d3d] overflow-hidden">
+          <button
+            @click="setQuickRange(1)"
+            :class="[
+              'px-3 py-1 text-[10px] border-r border-[#2d2d3d] transition-colors',
+              quickRange === 1
+                ? 'bg-[#fcd535] text-black font-medium'
+                : 'text-[#6b7280] hover:bg-[#1e1e2e] hover:text-[#e5e7eb]'
+            ]"
+          >1小时</button>
+          <button
+            @click="setQuickRange(2)"
+            :class="[
+              'px-3 py-1 text-[10px] transition-colors',
+              quickRange === 2
+                ? 'bg-[#fcd535] text-black font-medium'
+                : 'text-[#6b7280] hover:bg-[#1e1e2e] hover:text-[#e5e7eb]'
+            ]"
+          >2小时</button>
+        </div>
+
+        <!-- 记录频率(秒) -->
+        <label class="text-[10px] text-[#6b7280]">记录频率(秒):</label>
+        <input
+          type="number"
+          min="1"
+          max="3600"
+          step="1"
+          v-model.number="intervalSec"
+          @keyup.enter="fetchData"
+          class="w-16 bg-[#1a1a22] border border-[#2d2d3d] rounded px-2 py-1 text-xs text-[#e5e7eb] focus:outline-none focus:border-[#fcd535]"
+        />
+
+        <button
+          @click="fetchData"
+          :disabled="loading"
+          class="px-3 py-1 bg-[#fcd535] text-black rounded text-[10px] font-medium hover:bg-[#e5c230] disabled:opacity-50"
+        >
+          {{ loading ? '加载中...' : '查询' }}
+        </button>
+
+        <span v-if="dataPointCount > 0" class="text-[10px] text-[#6b7280]">
+          {{ dataPointCount }} 个数据点
+        </span>
+      </div>
+
+      <!-- Legend (单线，跟随方向) -->
+      <div class="flex items-center gap-4 text-[10px] font-mono">
+        <span class="flex items-center gap-1">
+          <span class="w-3 h-0.5 inline-block" :style="{ background: dirColor }"></span>
+          <span class="text-[#6b7280]">{{ dirLabel }}开仓点差</span>
+        </span>
+      </div>
+
+      <!-- Range Statistics (单方向) -->
+      <div v-if="rangeStats.count > 0" class="flex items-center gap-3 text-[10px] font-mono flex-wrap bg-[#111118] rounded px-3 py-2 border border-[#2d2d3d]">
+        <span class="text-[#6b7280]">可视区间</span>
+        <span class="text-[#9ca3af]">{{ rangeStats.startTime }} ~ {{ rangeStats.endTime }}</span>
+        <span class="text-[#6b7280]">|</span>
+        <span class="text-[#6b7280]">{{ dirLabel }}</span>
+        <span :style="{ color: dirColor }">高 {{ rangeStats.max.toFixed(spreadDecimals) }}</span>
+        <span :style="{ color: dirColor }">低 {{ rangeStats.min.toFixed(spreadDecimals) }}</span>
+        <span class="text-[#e5e7eb]">均 {{ rangeStats.avg.toFixed(spreadDecimals) }}</span>
+        <span class="text-[#6b7280]">| {{ rangeStats.count }} 点</span>
+      </div>
+
+      <!-- Chart + Floating Tooltip -->
+      <div class="rounded border border-[#2d2d3d] overflow-hidden relative" ref="chartWrap">
+        <div ref="chartContainer" class="w-full" :style="{ height: chartHeight + 'px' }"></div>
+        <div
+          v-if="!loading && dataPointCount === 0"
+          class="absolute inset-0 flex items-center justify-center pointer-events-none text-xs text-[#6b7280]"
+        >
+          {{ dataError || '该时间段暂无有效点差记录' }}
+        </div>
+        <!-- Floating tooltip -->
+        <div
+          v-show="tooltip.show"
+          class="spread-tooltip"
+          :style="{ left: tooltip.x + 'px', top: tooltip.y + 'px' }"
+        >
+          <div class="tt-time">{{ tooltip.time }}</div>
+          <div class="tt-row">
+            <span class="tt-dot" :style="{ background: dirColor }"></span>
+            <span class="tt-label">{{ dirLabel }}</span>
+            <span class="tt-val" :style="{ color: dirColor }">{{ tooltip.val }}</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Usage Hint -->
+      <div class="text-[10px] text-[#4b5563] text-center">
+        拖拽平移 · 滚轮缩放 · 切换方向查看正向/反向单线 · Y轴固定刻度网格
+      </div>
+    </div>
+
+    <!-- ── 资金费/过夜费走势 (20260706, 跟随导航栏交易对与上方时间范围) ── -->
+    <div class="mt-4 bg-[#0a0a12] rounded border border-[#2d2d3d] p-3">
+      <div class="flex items-center justify-between mb-2 flex-wrap gap-1">
+        <h3 class="text-sm font-semibold text-[#fcd535]">资金费 / 过夜费走势
+          <span class="ml-2 text-[10px] px-2 py-0.5 rounded border border-[#fcd535] text-[#fcd535] font-mono">{{ currentPair }}</span>
+        </h3>
+        <div class="text-[10px] text-[#6b7280]">
+          <span class="mr-3"><span class="inline-block w-2 h-2 rounded-full align-middle mr-1" style="background:#f0b90b"></span>资金费率%(右轴)</span>
+          <span class="mr-3"><span class="inline-block w-2 h-2 rounded-full align-middle mr-1" style="background:#ef4444"></span>过夜费·多/手(左轴)</span>
+          <span><span class="inline-block w-2 h-2 rounded-full align-middle mr-1" style="background:#0ecb81"></span>过夜费·空/手(左轴)</span>
+        </div>
+      </div>
+      <div ref="ratesContainer" class="w-full" style="height: 220px"></div>
+      <div v-if="ratesEmpty" class="text-center text-[10px] text-[#6b7280] mt-1">该产品对暂无费率采样(采样器约60秒记录一次, 新交易对稍候即有数据)</div>
+    </div>
+
+    <!-- ── 滑点保护事件审计 (审计专用, 不可操作) ───────────────────── -->
+    <div class="mt-4 bg-[#0a0a12] rounded border border-[#2d2d3d] p-3">
+      <div class="flex items-center justify-between mb-2">
+        <h3 class="text-sm font-semibold text-[#fcd535]">滑点保护事件</h3>
+        <div class="flex items-center gap-2">
+          <select v-model="slipPairFilter" @change="loadSlippageEvents" class="text-xs bg-[#1a1a22] border border-[#2d2d3d] rounded px-2 py-0.5 text-[#e5e7eb]">
+            <option value="">全部产品对</option>
+            <option v-for="p in (slipPairList || [])" :key="p" :value="p">{{ p }}</option>
+          </select>
+          <button @click="loadSlippageEvents" class="text-[10px] text-[#6b7280] hover:text-[#e5e7eb] px-2 py-0.5 border border-[#2d2d3d] rounded">刷新</button>
+        </div>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-xs">
+          <thead>
+            <tr class="text-left text-[#6b7280] border-b border-[#2d2d3d]">
+              <th class="py-1.5 px-1">时间</th>
+              <th class="py-1.5 px-1">产品对</th>
+              <th class="py-1.5 px-1">策略</th>
+              <th class="py-1.5 px-1">阈值</th>
+              <th class="py-1.5 px-1">实际价差</th>
+              <th class="py-1.5 px-1">滑点</th>
+              <th class="py-1.5 px-1">级别</th>
+              <th class="py-1.5 px-1">Binance 均价</th>
+              <th class="py-1.5 px-1">MT5 均价</th>
+              <th class="py-1.5 px-1">订单号</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-if="!slipEvents.length">
+              <td colspan="10" class="text-center py-4 text-[#6b7280]">暂无滑点事件</td>
+            </tr>
+            <tr v-for="ev in slipEvents" :key="ev.id" class="border-b border-[#1a1a22]">
+              <td class="py-1 px-1 text-[#6b7280]">{{ formatSlipTime(ev.created_at) }}</td>
+              <td class="py-1 px-1 font-mono text-[#fcd535]">{{ ev.pair_code }}</td>
+              <td class="py-1 px-1 text-[#9ca3af]">{{ ev.strategy_type }}</td>
+              <td class="py-1 px-1 font-mono">{{ (ev.spread_threshold ?? 0).toFixed(3) }}</td>
+              <td class="py-1 px-1 font-mono">{{ (ev.actual_spread ?? 0).toFixed(3) }}</td>
+              <td class="py-1 px-1 font-mono" :class="Math.abs(ev.slippage ?? 0) > 1.2 ? 'text-[#ef4444]' : 'text-[#f0b90b]'">
+                {{ (ev.slippage ?? 0).toFixed(3) }}
+              </td>
+              <td class="py-1 px-1">
+                <span :class="ev.level === 2 ? 'bg-[#ef4444]/20 text-[#ef4444] px-1.5 rounded text-[10px]' : 'bg-[#f0b90b]/20 text-[#f0b90b] px-1.5 rounded text-[10px]'">
+                  L{{ ev.level }}
+                </span>
+              </td>
+              <td class="py-1 px-1 font-mono">{{ (ev.binance_avg_price ?? 0).toFixed(2) }}</td>
+              <td class="py-1 px-1 font-mono">{{ (ev.bybit_avg_price ?? 0).toFixed(2) }}</td>
+              <td class="py-1 px-1 font-mono text-[10px] text-[#6b7280] truncate max-w-[100px]">{{ ev.binance_order_id || '-' }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="mt-2 text-[10px] text-[#6b7280]">
+        L1 = 单次 |滑点| > 0.9 (10分钟无操作自动恢复) · L2 = 连续2次 |滑点| > 1.2 (需用户强制启动)
+      </div>
+    </div>
+  </div>
+</template>
+
+<script setup>
+import { ref, reactive, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
+import { useTradingPair } from '@/composables/useTradingPair'
+import { createChart, LineSeries, ColorType, CrosshairMode } from 'lightweight-charts'
+import api from '@/services/api'
+
+// 20260706 多产品对联动: 图表/滑点事件跟随导航栏交易对(事件驱动, 无轮询)
+const { currentPair } = useTradingPair()
+// 点差走势精度按对(20260706): 天然气点差量级小(~0.0x), 3位小数; 其余维持2位。
+const spreadDecimals = computed(() => {
+  const pc = String(currentPair.value || '').toUpperCase()
+  return (pc.startsWith('NG') || pc.includes('XNG') || pc.includes('NATGAS')) ? 3 : 2
+})
+
+// ── 滑点保护事件审计 ───────────────────────────────
+const slipEvents = ref([])
+const slipPairFilter = ref('')
+const slipPairList = computed(() => {
+  const set = new Set()
+  if (currentPair.value) set.add(currentPair.value)
+  for (const e of slipEvents.value) if (e.pair_code) set.add(e.pair_code)
+  return Array.from(set)
+})
+
+async function loadSlippageEvents() {
+  try {
+    const params = {}
+    if (slipPairFilter.value) params.pair_code = slipPairFilter.value
+    params.limit = 200
+    const r = await api.get('/api/v1/strategies/slippage-events', { params })
+    slipEvents.value = r.data?.events || []
+  } catch (e) {
+    console.error('Failed to load slippage events:', e)
+    slipEvents.value = []
+  }
+}
+
+function formatSlipTime(ts) {
+  if (!ts) return '-'
+  try {
+    const d = new Date(ts)
+    if (isNaN(d.getTime())) return ts
+    return d.toLocaleString('zh-CN', { hour12: false })
+  } catch { return ts }
+}
+
+const isMobile = ref(window.innerWidth < 768)
+const chartHeight = computed(() => isMobile.value ? 300 : 440)
+
+function getBJLocalISO(date) {
+  const bj = new Date(date.toLocaleString('en-US', { timeZone: 'Asia/Shanghai' }))
+  const y = bj.getFullYear()
+  const m = String(bj.getMonth() + 1).padStart(2, '0')
+  const d = String(bj.getDate()).padStart(2, '0')
+  const h = String(bj.getHours()).padStart(2, '0')
+  const min = String(bj.getMinutes()).padStart(2, '0')
+  return `${y}-${m}-${d}T${h}:${min}`
+}
+
+function bjSecToFull(bjSec) {
+  const d = new Date(bjSec * 1000)
+  const y = d.getUTCFullYear()
+  const mo = String(d.getUTCMonth() + 1).padStart(2, '0')
+  const day = String(d.getUTCDate()).padStart(2, '0')
+  const hh = String(d.getUTCHours()).padStart(2, '0')
+  const mm = String(d.getUTCMinutes()).padStart(2, '0')
+  const ss = String(d.getUTCSeconds()).padStart(2, '0')
+  return `${y}-${mo}-${day} ${hh}:${mm}:${ss}`
+}
+
+function bjSecToShort(bjSec) {
+  const d = new Date(bjSec * 1000)
+  const mo = String(d.getUTCMonth() + 1).padStart(2, '0')
+  const day = String(d.getUTCDate()).padStart(2, '0')
+  const hh = String(d.getUTCHours()).padStart(2, '0')
+  const mm = String(d.getUTCMinutes()).padStart(2, '0')
+  const ss = String(d.getUTCSeconds()).padStart(2, '0')
+  return `${mo}-${day} ${hh}:${mm}:${ss}`
+}
+
+const now = new Date()
+const startDefault = new Date(now.getTime() - (isMobile.value ? 2 : 24) * 3600000)
+const startInput = ref(getBJLocalISO(startDefault))
+const endInput = ref(getBJLocalISO(now))
+const intervalSec = ref(5)
+const loading = ref(false)
+const dataPointCount = ref(0)
+const dataError = ref('')
+
+// 套利方向：forward=正向(绿) / reverse=反向(红)
+const direction = ref('forward')
+const quickRange = ref(null)  // 快捷时间范围(小时); null=自定义
+const dirColor = computed(() => direction.value === 'forward' ? '#22c55e' : '#ef4444')
+const dirLabel = computed(() => direction.value === 'forward' ? '正向' : '反向')
+
+const tooltip = reactive({ show: false, x: 0, y: 0, time: '', val: '' })
+
+const rangeStats = ref({
+  count: 0, startTime: '', endTime: '',
+  max: 0, min: 0, avg: 0,
+})
+
+const chartWrap = ref(null)
+const chartContainer = ref(null)
+let chart = null
+let lineSeries = null
+let fwdData = []
+let revData = []
+let queryVisibleRange = null
+let spreadFetchController = null
+let spreadFetchSequence = 0
+let ratesFetchController = null
+// 固定刻度网格：根据数据自动取整到"漂亮"的边界与步长
+let scaleBounds = null
+
+function activeData() {
+  return direction.value === 'forward' ? fwdData : revData
+}
+
+// 计算 Y 轴"漂亮"边界（自动适应数据 + 固定整齐刻度）
+function computeNiceBounds(data) {
+  if (!data || !data.length) { scaleBounds = null; return }
+  let lo = Infinity, hi = -Infinity
+  for (const p of data) {
+    if (p.value < lo) lo = p.value
+    if (p.value > hi) hi = p.value
+  }
+  if (!isFinite(lo) || !isFinite(hi)) { scaleBounds = null; return }
+  if (lo === hi) { lo -= 1; hi += 1 }
+  const pad = (hi - lo) * 0.08
+  lo -= pad; hi += pad
+  const rawStep = (hi - lo) / 6
+  const mag = Math.pow(10, Math.floor(Math.log10(rawStep)))
+  const norm = rawStep / mag
+  let step
+  if (norm <= 1) step = 1
+  else if (norm <= 2) step = 2
+  else if (norm <= 2.5) step = 2.5
+  else if (norm <= 5) step = 5
+  else step = 10
+  step *= mag
+  const niceMin = Math.floor(lo / step) * step
+  const niceMax = Math.ceil(hi / step) * step
+  scaleBounds = { min: niceMin, max: niceMax, step }
+}
+
+function initChart() {
+  if (!chartContainer.value || chart) return
+  chart = createChart(chartContainer.value, {
+    layout: {
+      background: { type: ColorType.Solid, color: '#0a0a12' },
+      textColor: '#9ca3af',
+      fontSize: 11,
+    },
+    grid: {
+      vertLines: { color: '#1e1e2e' },
+      horzLines: { color: '#26263a' },
+    },
+    crosshair: {
+      mode: CrosshairMode.Normal,
+      vertLine: { color: '#fcd535', width: 1, style: 2, labelBackgroundColor: '#fcd535' },
+      horzLine: { color: '#9ca3af', width: 1, style: 2, labelBackgroundColor: '#2d2d3d' },
+    },
+    timeScale: {
+      timeVisible: true,
+      secondsVisible: true,
+      borderColor: '#2d2d3d',
+    },
+    rightPriceScale: {
+      borderColor: '#2d2d3d',
+      // 固定刻度网格：禁用自动留白，刻度按 computeNiceBounds 的整齐边界绘制
+      scaleMargins: { top: 0.05, bottom: 0.05 },
+    },
+    localization: {
+      timeFormatter: (time) => bjSecToFull(time),
+    },
+    width: chartContainer.value.clientWidth,
+    height: chartHeight.value,
+  })
+
+  lineSeries = chart.addSeries(LineSeries, {
+    color: dirColor.value,
+    lineWidth: 1.5,
+    title: dirLabel.value,
+    priceLineVisible: false,
+    lastValueVisible: true,
+    priceFormat: { type: 'price', precision: spreadDecimals.value, minMove: Math.pow(10, -spreadDecimals.value) },
+    // 固定刻度网格：以 computeNiceBounds 的整齐边界作为 Y 轴范围
+    autoscaleInfoProvider: () => (
+      scaleBounds
+        ? { priceRange: { minValue: scaleBounds.min, maxValue: scaleBounds.max } }
+        : null
+    ),
+  })
+
+  chart.subscribeCrosshairMove((param) => {
+    if (!param || !param.time || !param.point || param.point.x < 0 || param.point.y < 0) {
+      tooltip.show = false
+      return
+    }
+    const pt = param.seriesData.get(lineSeries)
+    if (!pt) {
+      tooltip.show = false
+      return
+    }
+
+    tooltip.time = bjSecToFull(param.time)
+    tooltip.val = pt.value.toFixed(spreadDecimals.value)
+
+    const chartRect = chartContainer.value.getBoundingClientRect()
+    const mouseX = param.point.x
+    const mouseY = param.point.y
+
+    const tooltipW = 150
+    const tooltipH = 56
+    let tx = mouseX + 15
+    let ty = mouseY - tooltipH - 10
+
+    if (tx + tooltipW > chartRect.width) tx = mouseX - tooltipW - 15
+    if (ty < 0) ty = mouseY + 15
+    if (tx < 0) tx = 5
+
+    tooltip.x = tx
+    tooltip.y = ty
+    tooltip.show = true
+  })
+
+  chart.timeScale().subscribeVisibleLogicalRangeChange(() => {
+    computeRangeStats()
+  })
+
+  nextTick(() => {
+    if (chartContainer.value) {
+      const links = chartContainer.value.querySelectorAll('a[href*="tradingview"]')
+      links.forEach(a => a.style.display = 'none')
+    }
+  })
+}
+
+function computeRangeStats() {
+  const data = activeData()
+  if (!chart || !data.length) {
+    rangeStats.value = { count: 0, startTime: '', endTime: '', max: 0, min: 0, avg: 0 }
+    return
+  }
+  const logicalRange = chart.timeScale().getVisibleLogicalRange()
+  if (!logicalRange) return
+
+  const startIdx = Math.max(0, Math.ceil(logicalRange.from))
+  const endIdx = Math.min(data.length - 1, Math.floor(logicalRange.to))
+  if (startIdx > endIdx) return
+
+  let vMax = -Infinity, vMin = Infinity, sum = 0, count = 0
+  for (let i = startIdx; i <= endIdx; i++) {
+    const v = data[i].value
+    if (v > vMax) vMax = v
+    if (v < vMin) vMin = v
+    sum += v
+    count++
+  }
+  if (count === 0) return
+  rangeStats.value = {
+    count,
+    startTime: bjSecToShort(data[startIdx].time),
+    endTime: bjSecToShort(data[endIdx].time),
+    max: vMax, min: vMin, avg: sum / count,
+  }
+}
+
+// 应用当前方向：换色 + 换数据 + 重算固定刻度 + 统计
+function applyDirection() {
+  if (!chart || !lineSeries) return
+  const data = activeData()
+  lineSeries.applyOptions({ color: dirColor.value, title: dirLabel.value })
+  computeNiceBounds(data)
+  lineSeries.setData(data)
+  if (queryVisibleRange && data.length) {
+    chart.timeScale().setVisibleRange(queryVisibleRange)
+  } else {
+    chart.timeScale().fitContent()
+  }
+  computeRangeStats()
+}
+
+function setQuickRange(hours) {
+  quickRange.value = hours
+  const nowD = new Date()
+  const startD = new Date(nowD.getTime() - hours * 3600000)
+  startInput.value = getBJLocalISO(startD)
+  endInput.value = getBJLocalISO(nowD)
+  fetchData()
+}
+
+function setDirection(d) {
+  if (direction.value === d) return
+  direction.value = d
+  applyDirection()
+}
+
+function destroyChart() {
+  if (chart) { chart.remove(); chart = null; lineSeries = null }
+}
+
+async function fetchData() {
+  const requestId = ++spreadFetchSequence
+  spreadFetchController?.abort()
+  ratesFetchController?.abort()
+  const controller = new AbortController()
+  spreadFetchController = controller
+  loading.value = true
+  try {
+    if (!intervalSec.value || intervalSec.value < 1) intervalSec.value = 1
+
+    const startUTC = new Date(startInput.value + ':00+08:00')
+    const endUTC = new Date(endInput.value + ':00+08:00')
+    const requestedVisibleRange = {
+      from: Math.floor((startUTC.getTime() + 8 * 3600000) / 1000),
+      to: Math.floor((endUTC.getTime() + 8 * 3600000) / 1000),
+    }
+
+    const params = new URLSearchParams({
+      start_time: startUTC.toISOString(),
+      end_time: endUTC.toISOString(),
+      interval: String(intervalSec.value),
+      pair_code: currentPair.value || 'XAU',
+    })
+
+    const token = localStorage.getItem('token')
+    const resp = await fetch(`/api/v1/market/spread/chart?${params}`, {
+      headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+      signal: controller.signal,
+    })
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+    const data = await resp.json()
+    if (requestId !== spreadFetchSequence) return
+    dataError.value = ''
+    queryVisibleRange = requestedVisibleRange
+    dataPointCount.value = data.length
+
+    if (!chart) { await nextTick(); initChart() }
+    if (!chart || !lineSeries) {
+      console.warn('Chart not initialized yet, retry next tick')
+      await nextTick()
+      if (!chart) initChart()
+      if (!chart || !lineSeries) {
+        console.error('Chart still null after retry — skipping setData')
+        return
+      }
+    }
+
+    fwdData = []
+    revData = []
+    for (const row of data) {
+      // row.t 为裸 UTC(无时区后缀)；强制按 UTC 解析，避免随浏览器本地时区偏移
+      const _raw = row.t
+      const utcMs = new Date(/[zZ]|[+\-]\d\d:?\d\d$/.test(_raw) ? _raw : _raw + 'Z').getTime()
+      const bjSec = Math.floor((utcMs + 8 * 3600000) / 1000)
+      fwdData.push({ time: bjSec, value: row.fs })
+      revData.push({ time: bjSec, value: row.rs })
+    }
+
+    fwdData.sort((a, b) => a.time - b.time)
+    revData.sort((a, b) => a.time - b.time)
+
+    // 精度随当前对刷新(NG=3位, 其余2位); 图表实例只建一次, 须applyOptions更新
+    if (lineSeries) lineSeries.applyOptions({ priceFormat: { type: 'price', precision: spreadDecimals.value, minMove: Math.pow(10, -spreadDecimals.value) } })
+    applyDirection()
+  } catch (e) {
+    if (e?.name !== 'AbortError') {
+      dataError.value = '点差数据查询失败'
+      dataPointCount.value = 0
+      console.error('Fetch spread chart failed:', e)
+    }
+  } finally {
+    if (requestId === spreadFetchSequence) {
+      loading.value = false
+      if (spreadFetchController === controller) spreadFetchController = null
+    }
+  }
+  if (requestId === spreadFetchSequence) fetchRates()
+}
+
+// ── 资金费/过夜费走势(20260706): 数据源 /api/v1/market/rates/chart(采样器60s落库) ──
+const ratesContainer = ref(null)
+const ratesEmpty = ref(false)
+let ratesChart = null
+let frSeries = null
+let lsSeries = null
+let ssSeries = null
+
+function initRatesChart() {
+  if (!ratesContainer.value || ratesChart) return
+  ratesChart = createChart(ratesContainer.value, {
+    layout: { background: { type: ColorType.Solid, color: '#0a0a12' }, textColor: '#6b7280', fontSize: 10 },
+    grid: { vertLines: { color: '#16161f' }, horzLines: { color: '#16161f' } },
+    width: ratesContainer.value.clientWidth,
+    height: 220,
+    timeScale: { timeVisible: true, secondsVisible: false, borderColor: '#2d2d3d' },
+    rightPriceScale: { visible: true, borderColor: '#2d2d3d' },
+    leftPriceScale: { visible: true, borderColor: '#2d2d3d' },
+    crosshair: { mode: CrosshairMode.Normal },
+  })
+  frSeries = ratesChart.addSeries(LineSeries, { color: '#f0b90b', lineWidth: 1, priceScaleId: 'right', priceFormat: { type: 'price', precision: 4, minMove: 0.0001 } })
+  lsSeries = ratesChart.addSeries(LineSeries, { color: '#ef4444', lineWidth: 1, priceScaleId: 'left', priceFormat: { type: 'price', precision: 3, minMove: 0.001 } })
+  ssSeries = ratesChart.addSeries(LineSeries, { color: '#0ecb81', lineWidth: 1, priceScaleId: 'left', priceFormat: { type: 'price', precision: 3, minMove: 0.001 } })
+}
+
+async function fetchRates() {
+  ratesFetchController?.abort()
+  const controller = new AbortController()
+  ratesFetchController = controller
+  try {
+    const startUTC = new Date(startInput.value + ':00+08:00')
+    const endUTC = new Date(endInput.value + ':00+08:00')
+    const params = new URLSearchParams({
+      start_time: startUTC.toISOString(),
+      end_time: endUTC.toISOString(),
+      interval: '60',
+      pair_code: currentPair.value || 'XAU',
+    })
+    const token = localStorage.getItem('token')
+    const resp = await fetch(`/api/v1/market/rates/chart?${params}`, {
+      headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+      signal: controller.signal,
+    })
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+    const data = await resp.json()
+    if (!ratesChart) { await nextTick(); initRatesChart() }
+    if (!ratesChart) return
+    const fr = []
+    const ls = []
+    const ss = []
+    for (const row of data) {
+      // row.t 为裸UTC; 与点差图同法强制UTC解析+东八区偏移
+      const _raw = row.t
+      const utcMs = new Date(/[zZ]|[+\-]\d\d:?\d\d$/.test(_raw) ? _raw : _raw + 'Z').getTime()
+      const bjSec = Math.floor((utcMs + 8 * 3600000) / 1000)
+      if (row.fr != null) fr.push({ time: bjSec, value: row.fr * 100 })
+      if (row.ls != null) ls.push({ time: bjSec, value: row.ls })
+      if (row.ss != null) ss.push({ time: bjSec, value: row.ss })
+    }
+    fr.sort((a, b) => a.time - b.time)
+    ls.sort((a, b) => a.time - b.time)
+    ss.sort((a, b) => a.time - b.time)
+    if (frSeries) frSeries.setData(fr)
+    if (lsSeries) lsSeries.setData(ls)
+    if (ssSeries) ssSeries.setData(ss)
+    ratesEmpty.value = (fr.length + ls.length + ss.length) === 0
+    ratesChart.timeScale().fitContent()
+  } catch (e) {
+    if (e?.name !== 'AbortError') console.error('Fetch rates chart failed:', e)
+  } finally {
+    if (ratesFetchController === controller) ratesFetchController = null
+  }
+}
+
+function onResize() {
+  isMobile.value = window.innerWidth < 768
+  if (chart && chartContainer.value) {
+    chart.applyOptions({ width: chartContainer.value.clientWidth, height: chartHeight.value })
+  }
+  if (ratesChart && ratesContainer.value) {
+    ratesChart.applyOptions({ width: ratesContainer.value.clientWidth })
+  }
+}
+
+let resizeObs = null
+// 导航栏切对 → 重拉当前对点差走势 + 滑点事件筛选默认跟随(页内下拉仍可手动改看其它品种)
+watch(currentPair, (pc) => {
+  slipPairFilter.value = pc || ''
+  fetchData()
+  loadSlippageEvents()
+})
+
+onMounted(() => {
+  window.addEventListener('resize', onResize)
+  slipPairFilter.value = currentPair.value || ''
+  nextTick(() => { initChart(); fetchData(); loadSlippageEvents() })
+  if (window.ResizeObserver && chartContainer.value) {
+    resizeObs = new ResizeObserver(() => {
+      if (chart && chartContainer.value) {
+        chart.applyOptions({ width: chartContainer.value.clientWidth, height: chartHeight.value })
+      }
+    })
+    resizeObs.observe(chartContainer.value)
+  }
+})
+
+onUnmounted(() => {
+  spreadFetchController?.abort()
+  ratesFetchController?.abort()
+  window.removeEventListener('resize', onResize)
+  if (resizeObs) resizeObs.disconnect()
+  destroyChart()
+})
+</script>
+
+<style scoped>
+input[type="datetime-local"]::-webkit-calendar-picker-indicator {
+  filter: invert(0.7);
+}
+:deep(a[href*="tradingview"]) {
+  display: none !important;
+}
+
+.spread-tooltip {
+  position: absolute;
+  z-index: 100;
+  pointer-events: none;
+  background: rgba(20, 20, 32, 0.95);
+  border: 1px solid #2d2d3d;
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  line-height: 1.6;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+  white-space: nowrap;
+}
+.tt-time {
+  color: #fcd535;
+  font-weight: 600;
+  margin-bottom: 3px;
+}
+.tt-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.tt-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.tt-label {
+  color: #6b7280;
+  min-width: 24px;
+}
+.tt-val {
+  font-weight: 600;
+}
+</style>

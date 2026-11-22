@@ -58,14 +58,14 @@
       <div class="action-buttons">
         <button
           @click="executeTrade('buy')"
-          :disabled="loading"
+          :disabled="inflight || loading"
           class="btn btn-buy"
         >
           买入开多
         </button>
         <button
           @click="executeTrade('sell')"
-          :disabled="loading"
+          :disabled="inflight || loading"
           class="btn btn-sell"
         >
           卖出开空
@@ -76,14 +76,14 @@
       <div class="close-buttons">
         <button
           @click="closePosition('long')"
-          :disabled="loading"
+          :disabled="inflight || loading"
           class="btn btn-close-long"
         >
           多仓平空
         </button>
         <button
           @click="closePosition('short')"
-          :disabled="loading"
+          :disabled="inflight || loading"
           class="btn btn-close-short"
         >
           空仓平多
@@ -91,7 +91,7 @@
       </div>
 
       <!-- Status message -->
-      <div v-if="statusMsg" :class="['status-msg', statusOk ? 'status-success' : 'status-error']">
+      <div v-if="statusMsg" :class="['status-msg', statusClass]">
         {{ statusMsg }}
       </div>
 
@@ -99,14 +99,14 @@
       <div class="quick-actions">
         <button
           @click="closeAllPositions"
-          :disabled="loading"
+          :disabled="inflight || loading"
           class="btn btn-danger"
         >
           平仓所有持仓
         </button>
         <button
           @click="cancelAllOrders"
-          :disabled="loading"
+          :disabled="inflight || loading"
           class="btn btn-secondary"
         >
           取消所有挂单
@@ -117,14 +117,35 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, watch, onUnmounted } from 'vue'
 import api from '@/services/api'
 import { useTradingPair } from '@/composables/useTradingPair'
+import { useMarketStore } from '@/stores/market'
 import { PlatformId, platformKey } from '@/constants/platform'
 
 const emit = defineEmits(['orderExecuted'])
 
 const { currentPair, pairConfig } = useTradingPair()
+
+// Per-user WS results arrive via the SAME mechanism StrategyPanel.vue uses:
+// the market store's `lastMessage` ref (manual_trade_result is NOT a strategy_*
+// type, so it lands in lastMessage, not strategyMessage). We do NOT open a raw WS.
+const marketStore = useMarketStore()
+
+// Component-level single-flight lock: ALL six buttons stay disabled from the
+// moment any action is fired until its manual_trade_result arrives (or the
+// 8s watchdog fires). pendingReqs maps request_id -> { timer, action }.
+const inflight = ref(false)
+const pendingReqs = ref(new Map())
+
+// Human labels for the per-action messages.
+const ACTION_LABELS = {
+  'order': '下单',
+  'close-long': '多仓平空',
+  'close-short': '空仓平多',
+  'close-all': '平仓所有持仓',
+  'cancel-all': '取消所有挂单',
+}
 
 const EXCHANGE_BINANCE = platformKey(PlatformId.BINANCE)  // 'binance'
 const EXCHANGE_BYBIT = platformKey(PlatformId.BYBIT)      // 'bybit'
@@ -159,6 +180,10 @@ const modeHint = computed(() => {
 const loading = ref(false)
 const statusMsg = ref('')
 const statusOk = ref(true)
+// Three-state status: 'success' (green) | 'error' (red) | 'warn' (amber).
+// 'warn' is used for the watchdog's unconfirmed-result case — amber, NOT success.
+const statusKind = ref('success')
+const statusClass = computed(() => `status-${statusKind.value}`)
 
 // Dynamic unit labels based on pair config
 const aUnitLabel = computed(() => pairConfig.value.unitA || 'XAU')
@@ -180,75 +205,87 @@ function convertForPlatform(qty, exch) {
   return qty
 }
 
-function showStatus(msg, ok = true) {
+// kind: true|'success' (green), false|'error' (red), 'warn' (amber).
+function showStatus(msg, kind = 'success') {
+  const k = kind === true ? 'success' : kind === false ? 'error' : kind
+  statusKind.value = k
+  statusOk.value = k === 'success'
   statusMsg.value = msg
-  statusOk.value = ok
   setTimeout(() => { statusMsg.value = '' }, 4000)
 }
 
-async function fetchMarketPrice() {
-  const cfg = pairConfig.value
-  const r = await api.get('/api/v1/market/spread', { params: { binance_symbol: cfg.binance, bybit_symbol: cfg.mt5 } })
-  return r.data
+// Generate a fresh correlation id for one click.
+function newRequestId() {
+  return (typeof crypto !== 'undefined' && crypto.randomUUID)
+    ? crypto.randomUUID()
+    : String(Date.now()) + Math.random()
 }
 
-function validateCustomPrice(price, side, spreadData) {
-  const isBinance = exchange.value === EXCHANGE_BINANCE
-  const quote = isBinance ? spreadData?.binance_quote : spreadData?.bybit_quote
-  const bid = quote?.bid_price || 0
-  const ask = quote?.ask_price || 0
-  const mid = (bid + ask) / 2
-  if (!mid) return null
-
-  const deviation = Math.abs(price - mid) / mid
-  if (deviation > 0.02) {
-    const platform = isBinance ? '主账号' : '对冲账号'
-    return `挂单价 ${price} 偏离${platform}市场价 ${mid.toFixed(2)} 超过2% (${(deviation * 100).toFixed(1)}%)，请确认价格是否正确`
-  }
-
-  if (isBinance) {
-    if (side === 'buy' && price >= ask) {
-      return `买入价 ${price} >= 卖一价 ${ask.toFixed(2)}，Maker单会被拒绝(会吃单)。请降低价格或改用对冲账号。`
-    }
-    if (side === 'sell' && price <= bid) {
-      return `卖出价 ${price} <= 买一价 ${bid.toFixed(2)}，Maker单会被拒绝(会吃单)。请提高价格或改用对冲账号。`
-    }
-  }
-  return null
+// Track an async (202) action's result AND lock the buttons until the result
+// (manual_trade_result WS) arrives or the watchdog fires. 防重入根因修复
+// (2026-06-26): 此前 inflight 从未被置 true, 按钮仅在 ~300ms HTTP 往返期(loading)
+// 被禁用, 202 ACK 一回来 finally 即点亮按钮 —— 而真正下单还在后台跑。用户第二次触碰
+// (手抖/触摸重复派发/回车)就发出另一笔【独立 request_id】的相同单, 后端单飞窗口仅 6s
+// 拦不住相隔较久的二次提交 → 出现"感觉没操作却又开一单"。修复: 调用方在 202 分支置
+// inflight=true, 此处 watchdog 超时复位; WS 回执处(manual_trade_result watcher)也复位。
+function armWatchdog(request_id, action) {
+  const timer = setTimeout(() => {
+    pendingReqs.value.delete(request_id)
+    inflight.value = false  // 结果迟迟未到, 解锁按钮(避免永久卡死), 并提示用户自查
+    showStatus('结果未确认，请核对持仓/挂单', 'warn')
+  }, 8000)
+  pendingReqs.value.set(request_id, { timer, action })
 }
 
-async function executeTrade(side) {
+async function executeTrade(side, confirmDuplicate = false) {
   if (loading.value) return
   loading.value = true
   try {
     const actualQuantity = convertForPlatform(quantity.value, exchange.value)
     const price = customParam.value ? parseFloat(customParam.value) : null
+    // No client-side fetchMarketPrice()/validateCustomPrice pre-call: the
+    // backend re-fetches the live quote and applies the authoritative
+    // price-deviation guard synchronously (returns 4xx) before the ACK.
 
-    if (price) {
-      const spread = await fetchMarketPrice()
-      const err = validateCustomPrice(price, side, spread)
-      if (err) {
-        if (!confirm(err + '\n\n确定继续下单吗？')) {
-          loading.value = false
-          return
-        }
-      }
-    }
-
+    const request_id = newRequestId()
     const payload = {
       exchange: exchange.value,
       side,
       quantity: actualQuantity,
       pair_code: currentPair.value,
+      request_id,
     }
     if (price) payload.price = price
     payload.order_type = exchange.value === EXCHANGE_BINANCE ? 'maker' : 'taker'
+    if (confirmDuplicate) payload.confirm_duplicate = true
 
-    await api.post('/api/v1/trading/manual/order', payload)
-    showStatus(`${side === 'buy' ? '买入' : '卖出'}指令已发送 (${exchange.value === EXCHANGE_BINANCE ? 'Maker' : price ? 'Limit' : 'Market'})`, true)
-    emit('orderExecuted')
+    const res = await api.post('/api/v1/trading/manual/order', payload)
+    const rid = res.data?.request_id
+    if (rid) {
+      // Async (202): stay disabled until manual_trade_result or watchdog.
+      inflight.value = true  // 防重入: 保持按钮禁用直到 WS 回执/watchdog 超时
+      armWatchdog(rid, 'order')
+      showStatus('指令已发送，执行中…', true)
+    } else {
+      // Synchronous success (no request_id echoed): already executed.
+      showStatus(`${side === 'buy' ? '买入' : '卖出'}指令已发送 (${exchange.value === EXCHANGE_BINANCE ? 'Maker' : price ? 'Limit' : 'Market'})`, true)
+      emit('orderExecuted')
+    }
   } catch (e) {
-    showStatus(e.response?.data?.detail || '下单失败', false)
+    inflight.value = false
+    const status = e.response?.status
+    const detail = e.response?.data?.detail
+    // 后端重复开仓兜底: 409 + DUPLICATE_CONFIRM → 二次确认后带 confirm_duplicate 重发
+    if (status === 409 && detail && typeof detail === 'object' && detail.code === 'DUPLICATE_CONFIRM') {
+      loading.value = false
+      if (confirm(detail.message || '检测到短时间内的重复开仓，确认要再下一笔吗？')) {
+        return executeTrade(side, true)
+      }
+      showStatus('已取消重复下单', 'warn')
+      return
+    }
+    const detailMsg = (typeof detail === 'string') ? detail : (detail?.message)
+    showStatus(status === 409 ? '重复指令执行中' : (detailMsg || '下单失败'), false)
   } finally {
     loading.value = false
   }
@@ -259,34 +296,36 @@ async function closePosition(positionType) {
   loading.value = true
   try {
     const actualQuantity = convertForPlatform(quantity.value, exchange.value)
-    const endpoint = positionType === 'short' ? '/api/v1/trading/manual/close-short' : '/api/v1/trading/manual/close-long'
+    const action = positionType === 'short' ? 'close-short' : 'close-long'
+    const endpoint = `/api/v1/trading/manual/${action}`
     const price = customParam.value ? parseFloat(customParam.value) : null
+    // Backend re-fetches the live quote and applies the authoritative
+    // price-deviation guard synchronously before the ACK.
 
-    if (price) {
-      const closeSide = positionType === 'short' ? 'buy' : 'sell'
-      const spread = await fetchMarketPrice()
-      const err = validateCustomPrice(price, closeSide, spread)
-      if (err) {
-        if (!confirm(err + '\n\n确定继续下单吗？')) {
-          loading.value = false
-          return
-        }
-      }
-    }
-
+    const request_id = newRequestId()
     const payload = {
       exchange: exchange.value,
       quantity: actualQuantity,
       pair_code: currentPair.value,
+      request_id,
     }
     if (price) payload.price = price
     payload.order_type = exchange.value === EXCHANGE_BINANCE ? 'maker' : 'taker'
 
-    await api.post(endpoint, payload)
-    showStatus(`${positionType === 'short' ? '空仓平多' : '多仓平空'}指令已发送`, true)
-    emit('orderExecuted')
+    const res = await api.post(endpoint, payload)
+    const rid = res.data?.request_id
+    if (rid) {
+      inflight.value = true  // 防重入: 保持按钮禁用直到 WS 回执/watchdog 超时
+      armWatchdog(rid, action)
+      showStatus('指令已发送，执行中…', true)
+    } else {
+      showStatus(`${positionType === 'short' ? '空仓平多' : '多仓平空'}指令已发送`, true)
+      emit('orderExecuted')
+    }
   } catch (e) {
-    showStatus(e.response?.data?.detail || '平仓失败', false)
+    inflight.value = false
+    const status = e.response?.status
+    showStatus(status === 409 ? '重复指令执行中' : (e.response?.data?.detail || '平仓失败'), false)
   } finally {
     loading.value = false
   }
@@ -298,13 +337,24 @@ async function closeAllPositions() {
   if (loading.value) return
   loading.value = true
   try {
+    const request_id = newRequestId()
     const res = await api.post('/api/v1/trading/manual/close-all', {
       pair_code: currentPair.value,
+      request_id,
     })
-    showStatus(`平仓指令已发送，共 ${res.data.results?.length || 0} 笔`, true)
-    emit('orderExecuted')
+    const rid = res.data?.request_id
+    if (rid) {
+      inflight.value = true  // 防重入: 保持按钮禁用直到 WS 回执/watchdog 超时
+      armWatchdog(rid, 'close-all')
+      showStatus('指令已发送，执行中…', true)
+    } else {
+      showStatus(`平仓指令已发送，共 ${res.data.results?.length || 0} 笔`, true)
+      emit('orderExecuted')
+    }
   } catch (e) {
-    showStatus(e.response?.data?.detail || '平仓失败', false)
+    inflight.value = false
+    const status = e.response?.status
+    showStatus(status === 409 ? '重复指令执行中' : (e.response?.data?.detail || '平仓失败'), false)
   } finally {
     loading.value = false
   }
@@ -315,17 +365,80 @@ async function cancelAllOrders() {
   if (loading.value) return
   loading.value = true
   try {
+    const request_id = newRequestId()
     const res = await api.post('/api/v1/trading/manual/cancel-all', {
       pair_code: currentPair.value,
+      request_id,
     })
-    showStatus(`撤单指令已发送，共 ${res.data.results?.length || 0} 笔`, true)
-    emit('orderExecuted')
+    const rid = res.data?.request_id
+    if (rid) {
+      inflight.value = true  // 防重入: 保持按钮禁用直到 WS 回执/watchdog 超时
+      armWatchdog(rid, 'cancel-all')
+      showStatus('指令已发送，执行中…', true)
+    } else {
+      showStatus(`撤单指令已发送，共 ${res.data.results?.length || 0} 笔`, true)
+      emit('orderExecuted')
+    }
   } catch (e) {
-    showStatus(e.response?.data?.detail || '撤单失败', false)
+    inflight.value = false
+    const status = e.response?.status
+    showStatus(status === 409 ? '重复指令执行中' : (e.response?.data?.detail || '撤单失败'), false)
   } finally {
     loading.value = false
   }
 }
+
+// ── Per-user WS result watcher ─────────────────────────────────────────────
+// Reuses the SAME mechanism StrategyPanel.vue uses: the market store's
+// `lastMessage` ref. `manual_trade_result` is delivered over the production
+// per-user path (Redis ws:user_event -> hub) and is NOT a strategy_* type, so
+// it lands in lastMessage. We resolve only request_ids we ourselves armed.
+watch(() => marketStore.lastMessage, (message) => {
+  if (!message || message.type !== 'manual_trade_result') return
+  const data = message.data || {}
+  const rid = data.request_id
+  if (!rid || !pendingReqs.value.has(rid)) return
+
+  const entry = pendingReqs.value.get(rid)
+  clearTimeout(entry.timer)
+  pendingReqs.value.delete(rid)
+  inflight.value = false
+
+  if (data.success) {
+    if (entry.action === 'cancel-all') {
+      const rs = Array.isArray(data.results) ? data.results : []
+      const summ = rs.find(r => r && r.kind === 'cancel_summary')
+      const mc = summ ? (summ.manual_cancelled || 0) : rs.filter(r => r && r.success && r.client_order_id).length
+      const sk = summ ? (summ.strategy_kept || 0) : 0
+      let msg = mc > 0 ? `已撤手动挂单 ${mc} 笔` : '未发现手动挂单'
+      if (sk > 0) msg += `，保留自动策略挂单 ${sk} 笔（如需撤销请到策略面板停止策略）`
+      showStatus(msg, true)
+    } else {
+      showStatus('执行成功', true)
+    }
+  } else {
+    // Prefer an explicit top-level error; otherwise summarize failing legs
+    // (close-all/cancel-all may attempt several legs).
+    let msg = data.error
+    if (!msg && Array.isArray(data.results)) {
+      const failed = data.results.filter(r => r && r.success === false)
+      if (failed.length) {
+        msg = failed
+          .map(r => `${r.leg || r.exchange || '腿'}: ${r.error || '失败'}`)
+          .join('；')
+      }
+    }
+    const label = ACTION_LABELS[entry.action] || entry.action || '指令'
+    showStatus(msg ? `${label}失败 — ${msg}` : `${label}失败`, false)
+  }
+  // Refresh positions/orders regardless of success.
+  emit('orderExecuted')
+})
+
+onUnmounted(() => {
+  for (const { timer } of pendingReqs.value.values()) clearTimeout(timer)
+  pendingReqs.value.clear()
+})
 </script>
 
 <style scoped>
@@ -475,6 +588,11 @@ async function cancelAllOrders() {
 .status-error {
   color: #f6465d;
   background-color: rgba(246, 70, 93, 0.1);
+}
+
+.status-warn {
+  color: #f0b90b;
+  background-color: rgba(240, 185, 11, 0.1);
 }
 
 .quick-actions {

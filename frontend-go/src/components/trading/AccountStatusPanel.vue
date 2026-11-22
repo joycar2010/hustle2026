@@ -84,7 +84,12 @@
               <div class="mt-0.5 text-[9px] opacity-75">系统已自动降低请求频率，请耐心等待</div>
             </div>
             <div v-else>
-              错误: {{ account.error }}
+              <!-- 失败原因分类徽标（区分 IP未白名单 / 密钥失效 …），引导用户处理 -->
+              <span v-if="account.error_kind && account.error_kind !== 'transient'"
+                class="inline-block mb-0.5 px-1.5 py-0.5 rounded font-semibold text-[10px]"
+                :class="kindBadgeClass(account.error_kind)"
+              >{{ kindLabel(account.error_kind) }}</span>
+              <div :class="account.error_kind === 'ip_not_whitelisted' || account.error_kind === 'key_invalid' ? 'text-[#f6465d]' : ''">{{ account.error }}</div>
             </div>
           </div>
           <!-- 强平价已移至 MarketCards 行情卡片中展示（实时价格左/右侧） -->
@@ -293,10 +298,30 @@ async function fetchAccountData() {
       })))
     }
 
-    // NOTE: data.failed_accounts is intentionally NOT merged into the active
-    // account list. The backend emits it only for admin (include_inactive=true)
-    // or for transient fetch errors; either way those accounts must not show up
-    // in the regular user sidebar. Errors surface via notificationStore below.
+    // 把「已启用但实时拉取失败」的账户也并入列表，避免健康但暂时不可达的账户被静默隐藏
+    // （例：币安 IP 未加白 / 密钥失效）。后端已在 failed_accounts 上打了 error_kind/error_hint，
+    // 这里渲染成带分类徽标的失败卡片，引导用户自行处理。零值 balance 不污染强平/风险。
+    if (Array.isArray(data.failed_accounts) && data.failed_accounts.length > 0) {
+      const seen = new Set(allAccounts.map(a => a.account_id))
+      for (const fa of data.failed_accounts) {
+        if (fa.is_active === false) continue          // 禁用账户不进侧栏
+        if (seen.has(fa.account_id)) continue          // 去重保险
+        allAccounts.push({
+          ...fa,
+          is_active: true,
+          fetch_failed: true,
+          // 限流保留原始 'RATE_LIMIT:<ms>' 以复用既有倒计时 UI；其余用可操作的中文提示
+          error: (fa.error && String(fa.error).startsWith('RATE_LIMIT'))
+            ? fa.error
+            : (fa.error_hint || fa.error || '实时余额获取失败'),
+          balance: {
+            total_assets: 0, available_balance: 0, net_assets: 0,
+            margin_balance: 0, frozen_assets: 0, total_positions: 0,
+            daily_pnl: 0, funding_fee: 0, risk_ratio: 0
+          }
+        })
+      }
+    }
 
     // ★ aggregated API 已包含MT5余额数据，直接渲染
     activeAccounts.value = allAccounts
@@ -339,7 +364,12 @@ async function fetchProxyStatus() {
       const response = await api.get(`/api/v1/accounts/${account.account_id}/proxy/${account.platform_id}`)
       if (response.data) {
         // ProxyPool 绑定记录存在，直接使用（含 health_score / avg_latency_ms）
-        accountProxies.value[key] = { ...response.data, platform_id: account.platform_id }
+        const configState = account.proxy_config ? proxyConfigState(account.proxy_config) : {}
+        accountProxies.value[key] = {
+          ...response.data,
+          ...configState,
+          platform_id: account.platform_id,
+        }
         return
       }
     } catch (error) {
@@ -365,11 +395,15 @@ async function fetchProxyStatus() {
           port = pc.port || pc.proxy_port || 0
         }
         if (host && port) {
+          const state = proxyConfigState(pc)
           accountProxies.value[key] = {
             platform_id: account.platform_id,
             host,
             port,
-            health_score: 100,      // 静态IP视为健康
+            health_score: state.health_score,
+            health_status: state.health_status,
+            auth_failed: state.auth_failed,
+            auth_error_code: state.auth_error_code,
             avg_latency_ms: null,
             _from_proxy_config: true // 标记来源，区分 ProxyPool 绑定
           }
@@ -386,6 +420,26 @@ async function fetchProxyStatus() {
   await Promise.all(promises)
 }
 
+// 供应商的“已分配”与 Binance API 认证成功是两个独立状态。
+// 认证结果优先，避免静态代理降级路径把 IP 白名单失败误报为正常。
+function proxyConfigState(pc) {
+  const cfg = pc && typeof pc === 'object' ? pc : {}
+  const health = String(cfg.health_status || cfg.auth_status || '').toLowerCase()
+  const auth = String(cfg.auth_status || '').toLowerCase()
+  const code = String(cfg.health_error_code || cfg.auth_error_code || '').toLowerCase()
+  const failed = ['failed', 'auth_failed', 'authentication_failed', 'error'].includes(health) ||
+    ['failed', 'auth_failed', 'authentication_failed', 'error'].includes(auth) ||
+    code === 'binance_ip_not_whitelisted' || code.includes('not_whitelisted')
+  const verified = !failed && ['verified', 'authenticated', 'healthy'].includes(auth)
+  return {
+    health_score: failed ? 0 : 100,
+    health_status: failed ? 'auth_failed' : (health || null),
+    auth_verified: verified,
+    auth_failed: failed,
+    auth_error_code: failed ? (code || null) : null,
+  }
+}
+
 function getProxyStatus(account) {
   const key = `${account.account_id}_${account.platform_id}`
   return accountProxies.value[key]
@@ -394,6 +448,7 @@ function getProxyStatus(account) {
 function getProxyStatusColor(account) {
   const proxy = getProxyStatus(account)
   if (!proxy) return 'bg-gray-500'
+  if (proxy.auth_failed) return 'bg-[#f6465d]'
   const health = proxy.health_score ?? 100
   if (health >= 80) return 'bg-[#0ecb81]'
   if (health >= 50) return 'bg-[#f0b90b]'
@@ -403,6 +458,7 @@ function getProxyStatusColor(account) {
 function getProxyStatusTextColor(account) {
   const proxy = getProxyStatus(account)
   if (!proxy) return 'text-gray-400'
+  if (proxy.auth_failed) return 'text-[#f6465d]'
   const health = proxy.health_score ?? 100
   if (health >= 80) return 'text-[#0ecb81]'
   if (health >= 50) return 'text-[#f0b90b]'
@@ -412,7 +468,13 @@ function getProxyStatusTextColor(account) {
 function getProxyStatusText(account) {
   const proxy = getProxyStatus(account)
   if (!proxy) return '当前直连'
+  if (proxy.auth_failed) {
+    const reason = proxy.auth_error_code === 'binance_ip_not_whitelisted' ||
+      proxy.auth_error_code?.includes('not_whitelisted') ? 'Binance IP未白名单' : '认证失败'
+    return `${proxy.host}:${proxy.port} (${reason})`
+  }
   const health = proxy.health_score ?? 100
+  if (proxy.auth_verified) return `${proxy.host}:${proxy.port} (已认证)`
   const latency = proxy.avg_latency_ms ? `${Math.round(proxy.avg_latency_ms)}ms` : (proxy._from_proxy_config ? '静态IP' : '-')
   return `${proxy.host}:${proxy.port} (${health}/100, ${latency})`
 }
@@ -481,6 +543,22 @@ function getPlatformDisplayName(account) {
   const map = { 1: '币安', 2: 'Bybit', 3: 'IC Markets Global', 4: 'Gate.io', 5: 'OKX', 6: 'Bitget' }
   const pname = map[account.platform_id] || '未知'
   return account.is_mt5_account ? ('MT5·' + pname) : pname
+}
+
+// 失败原因分类徽标：区分 IP未白名单 / 密钥失效 / 网络 / 限流，引导用户处理
+function kindLabel(kind) {
+  return {
+    ip_not_whitelisted: 'IP未白名单',
+    key_invalid: '密钥失效',
+    network: '网络异常',
+    rate_limited: 'API限流',
+  }[kind] || '连接失败'
+}
+function kindBadgeClass(kind) {
+  // 需用户立即处理的（IP/密钥）用红色，其余用黄色
+  return (kind === 'ip_not_whitelisted' || kind === 'key_invalid')
+    ? 'bg-[#f6465d]/15 text-[#f6465d]'
+    : 'bg-[#f0b90b]/15 text-[#f0b90b]'
 }
 
 // 角色标签：有角色显示角色名，无角色显示"无配置"

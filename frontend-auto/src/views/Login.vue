@@ -2,7 +2,7 @@
   <div class="min-h-screen flex items-center justify-center" style="background-color: #16181F">
     <div class="p-8 rounded-xl border border-border-primary w-96" style="background-color: #16181F">
       <div class="text-center mb-6">
-        <img src="/logo.png" alt="Hustle XAU" class="w-14 h-14 mx-auto mb-2" />
+        <img src="/logo.png" alt="OpenCLAW" class="w-16 h-16 mx-auto mb-3 object-contain" />
         <div class="text-2xl font-bold">OpenCLAW</div>
         <div class="text-xs text-text-tertiary mt-1">智能体控制台 · 操作员登录</div>
       </div>

@@ -2,11 +2,44 @@
   <div class="container mx-auto px-4 py-6">
     <div class="flex items-center justify-between mb-6">
       <h1 class="text-3xl font-bold">交易历史数据</h1>
-      <div v-if="hasData" class="flex items-center gap-2">
-        <span class="text-sm text-gray-400">套利组合总盈亏:</span>
-        <span class="text-2xl font-bold" :class="totalArbitragePnL >= 0 ? 'text-green-500' : 'text-red-500'">
-          {{ totalArbitragePnL >= 0 ? '+' : '' }}{{ totalArbitragePnL.toFixed(2) }} USDT
-        </span>
+      <div v-if="hasData" class="flex items-center gap-3 flex-wrap">
+        <div class="flex items-center gap-1">
+          <span class="text-xs text-gray-400">平仓利润:</span>
+          <span class="text-lg font-bold" :class="closingProfit >= 0 ? 'text-green-500' : 'text-red-500'" title="平仓利润 = 币安已实现盈亏 + MT5已实现盈亏(仅两腿平仓盈亏,不含资金费/手续费/返佣)">
+            {{ closingProfit >= 0 ? '+' : '' }}{{ closingProfit.toFixed(2) }}
+          </span>
+        </div>
+        <span class="text-gray-600">|</span>
+        <div class="flex items-center gap-1">
+          <span class="text-xs text-gray-400">平仓总净利润:</span>
+          <span class="text-lg font-bold" :class="netProfitAfterRebate >= 0 ? 'text-green-500' : 'text-red-500'" title="平仓总净利润 = 平仓利润 + 资金费 + 过夜费 − 全部手续费 + 返佣(到手净额)">
+            {{ netProfitAfterRebate >= 0 ? '+' : '' }}{{ netProfitAfterRebate.toFixed(2) }}
+          </span>
+        </div>
+        <span class="text-gray-600">|</span>
+        <div class="flex items-center gap-1 text-[11px]">
+          <span class="text-gray-500">主账户:</span>
+          <span class="text-gray-400">资金费</span>
+          <span :class="(stats.fundingFee||0)>=0?'text-green-400':'text-red-400'">{{ (stats.fundingFee||0).toFixed(2) }}</span>
+          <span class="text-gray-600">/</span>
+          <span class="text-gray-400">手续费</span>
+          <span class="text-red-400">{{ (stats.totalFees||0).toFixed(2) }}</span>
+          <span class="text-gray-600">/</span>
+          <span class="text-gray-400">返佣</span>
+          <span class="text-green-400">{{ (stats.binanceRebate||0).toFixed(2) }}</span>
+        </div>
+        <span class="text-gray-600">|</span>
+        <div class="flex items-center gap-1 text-[11px]">
+          <span class="text-gray-500">对冲账户:</span>
+          <span class="text-gray-400">过夜费</span>
+          <span class="text-red-400">{{ (stats.mt5OvernightFee||0).toFixed(2) }}</span>
+          <span class="text-gray-600">/</span>
+          <span class="text-gray-400">手续费</span>
+          <span class="text-red-400">{{ (stats.mt5Fee||0).toFixed(2) }}</span>
+          <span class="text-gray-600">/</span>
+          <span class="text-gray-400">返佣</span>
+          <span class="text-green-400">{{ (stats.mt5Rebate||0).toFixed(2) }}</span>
+        </div>
       </div>
     </div>
 
@@ -74,6 +107,121 @@
       <ul class="text-yellow-200/90 text-xs space-y-0.5 ml-4 list-disc">
         <li v-for="(w, i) in queryWarnings" :key="i">{{ w }}</li>
       </ul>
+    </div>
+
+    <!-- 配对宽表: 主+冲并排同行 + 分类查询 -->
+    <div v-if="pairedTrades.length > 0" class="card mb-6">
+      <div class="flex items-center justify-between flex-wrap gap-3 mb-4">
+        <h3 class="text-lg font-semibold">套利配对成交历史</h3>
+        <div class="flex items-center gap-2">
+          <label class="text-sm text-gray-400">分类:</label>
+          <select v-model="pairFilter" class="px-3 py-1.5 bg-dark-100 border border-border-primary rounded text-sm focus:outline-none focus:border-primary">
+            <option value="all">全部 ({{ pairedTrades.length }})</option>
+            <option value="strategy">自动交易 ({{ pairedStrategyCount }})</option>
+            <option value="manual">手动交易 ({{ pairedManualCount }})</option>
+          </select>
+        </div>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-xs">
+          <thead>
+            <tr class="text-left text-gray-400 border-b border-gray-700">
+              <th class="pb-2 px-1">来源</th>
+              <th class="pb-2 px-1 whitespace-nowrap">时间(主)</th>
+              <th class="pb-2 px-1">方向</th>
+              <th class="pb-2 px-1">主账号均价</th>
+              <th class="pb-2 px-1">数量</th>
+              <th class="pb-2 px-1 bg-dark-100">价差</th>
+              <th class="pb-2 px-1 bg-dark-100">阈值</th>
+              <th class="pb-2 px-1 bg-dark-100">滑点</th>
+              <th class="pb-2 px-1 text-gray-500">滑点(触发)</th>
+              <th class="pb-2 px-1">对冲均价</th>
+              <th class="pb-2 px-1">数量(对冲)</th>
+              <th class="pb-2 px-1">方向(对冲)</th>
+              <th class="pb-2 px-1 whitespace-nowrap">时间(对冲)</th>
+              <th class="pb-2 px-1 bg-dark-100" title="净利 = 毛利 − 手续费 + 过夜费 + 资金费">净利润</th>
+              <th class="pb-2 px-1 bg-dark-100">手续费</th>
+              <th class="pb-2 px-1 bg-dark-100">过夜费</th>
+              <th class="pb-2 px-1 bg-dark-100" title="正=收到资金费(入金), 负=支付">资金费</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-if="filteredPairedTrades.length === 0">
+              <td colspan="16" class="text-center py-8 text-gray-500">该分类下暂无配对记录</td>
+            </tr>
+            <tr v-for="p in filteredPairedTrades" :key="p.id" class="border-b border-gray-800 hover:bg-dark-200">
+              <td class="py-2 px-1">
+                <span :class="p.source === 'strategy' ? 'text-[#0ecb81] bg-[#0ecb81]/10 px-1.5 py-0.5 rounded text-[10px]' : 'text-[#fcd535] bg-[#fcd535]/10 px-1.5 py-0.5 rounded text-[10px]'">
+                  {{ p.source === 'strategy' ? '自动' : '手动' }}
+                </span>
+              </td>
+              <td class="py-2 px-1 text-gray-400 whitespace-nowrap">{{ formatPairedTime(p.timestamp_primary) }}</td>
+              <td class="py-2 px-1">
+                <span :class="p.side_primary === 'buy' ? 'text-green-500' : 'text-red-500'">
+                  {{ p.side_primary === 'buy' ? '买入' : '卖出' }}
+                </span>
+              </td>
+              <td class="py-2 px-1 font-mono">{{ p.avg_price_primary != null ? Number(p.avg_price_primary).toFixed(2) : '-' }}</td>
+              <td class="py-2 px-1 font-mono">{{ p.qty_primary != null ? Number(p.qty_primary).toFixed(2) : '-' }}</td>
+              <td class="py-2 px-1 font-mono bg-dark-100">
+                <span v-if="p.source === 'strategy' && p.spread != null">{{ Number(p.spread).toFixed(2) }}</span>
+                <span v-else class="text-gray-600">-</span>
+              </td>
+              <td class="py-2 px-1 font-mono bg-dark-100">
+                <span v-if="p.source === 'strategy' && p.threshold != null">{{ Number(p.threshold).toFixed(2) }}</span>
+                <span v-else class="text-gray-600">-</span>
+              </td>
+              <td class="py-2 px-1 font-mono bg-dark-100">
+                <span v-if="p.source === 'strategy' && p.slippage != null"
+                      :class="p.slippage <= 0 ? 'text-green-500' : 'text-red-500'">
+                  {{ p.slippage > 0 ? '+' : '' }}{{ Number(p.slippage).toFixed(2) }}
+                </span>
+                <span v-else class="text-gray-600">-</span>
+              </td>
+              <td class="py-2 px-1 font-mono">
+                <span v-if="p.source === 'strategy' && p.slippage_vs_trigger != null"
+                      :class="p.slippage_vs_trigger <= 0 ? 'text-green-600' : 'text-red-400'"
+                      :title="p.trigger_spread != null ? ('触发价差=' + Number(p.trigger_spread).toFixed(2)) : ''">
+                  {{ p.slippage_vs_trigger > 0 ? '+' : '' }}{{ Number(p.slippage_vs_trigger).toFixed(2) }}
+                </span>
+                <span v-else class="text-gray-600">-</span>
+              </td>
+              <td class="py-2 px-1 font-mono">
+                <span v-if="p.avg_price_hedge != null">{{ Number(p.avg_price_hedge).toFixed(2) }}</span>
+                <span v-else class="text-yellow-500">未匹配</span>
+              </td>
+              <td class="py-2 px-1 font-mono">{{ p.qty_hedge != null ? Number(p.qty_hedge).toFixed(2) : '-' }}</td>
+              <td class="py-2 px-1">
+                <span v-if="p.side_hedge" :class="p.side_hedge === 'buy' ? 'text-green-500' : 'text-red-500'">
+                  {{ p.side_hedge === 'buy' ? '买入' : '卖出' }}
+                </span>
+                <span v-else class="text-gray-600">-</span>
+              </td>
+              <td class="py-2 px-1 text-gray-400 whitespace-nowrap">{{ formatPairedTime(p.timestamp_hedge) }}</td>
+              <td class="py-2 px-1 font-mono bg-dark-100">
+                <span v-if="p.pair_profit != null" :class="pairNetProfit(p) >= 0 ? 'text-green-500' : 'text-red-500'" :title="`毛利${Number(p.pair_profit).toFixed(2)} − 手续费${Number(p.pair_total_fee||0).toFixed(2)} + 过夜费${Number(p.hedge_overnight||0).toFixed(2)} + 资金费${Number(p.funding_fee||0).toFixed(2)}`">
+                  {{ pairNetProfit(p) >= 0 ? '+' : '' }}{{ pairNetProfit(p).toFixed(2) }}
+                </span>
+                <span v-else class="text-gray-600">-</span>
+              </td>
+              <td class="py-2 px-1 font-mono text-red-400 bg-dark-100">{{ p.pair_total_fee != null ? Number(p.pair_total_fee).toFixed(4) : '-' }}</td>
+              <td class="py-2 px-1 font-mono bg-dark-100">
+                <span v-if="p.hedge_overnight != null && p.hedge_overnight != 0" class="text-red-400">{{ Number(p.hedge_overnight).toFixed(2) }}</span>
+                <span v-else class="text-gray-600">0</span>
+              </td>
+              <td class="py-2 px-1 font-mono bg-dark-100">
+                <span v-if="p.funding_fee != null && p.funding_fee != 0" :class="p.funding_fee >= 0 ? 'text-green-400' : 'text-red-400'">
+                  {{ p.funding_fee >= 0 ? '+' : '' }}{{ Number(p.funding_fee).toFixed(4) }}
+                </span>
+                <span v-else class="text-gray-600">0</span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="mt-2 text-xs text-gray-500">
+        <span>说明: 价差=方向化实得价差(反向=主-对冲,正向=对冲-主); 滑点=实得价差相对设定阈值的偏离(=价差−阈值,开/平符号化),更有利为负(绿)、更差为正(红),与实时滑点护栏同口径; 滑点(触发)=相对触发瞬时真实价差的纯执行滑点(审计用,悬停看触发价差); 配对按主账号maker成交因果FIFO匹配对冲taker成交. 手动交易不展示.</span>
+      </div>
     </div>
 
     <!-- Statistics Section -->
@@ -150,6 +298,10 @@
                 </div>
               </div>
             </div>
+            <div class="bg-gray-800 p-3 rounded">
+              <div class="text-xs text-gray-400 mb-1">主账户返佣</div>
+              <div class="text-lg font-bold text-green-500">{{ (stats.binanceRebate || 0).toFixed(4) }} USDT</div>
+            </div>
           </div>
         </div>
 
@@ -174,11 +326,16 @@
               <div class="text-xs text-gray-400 mb-1">MT5手续费</div>
               <div class="text-lg font-bold text-red-500">{{ stats.mt5Fee.toFixed(2) }} USDT</div>
             </div>
-            <div class="bg-gray-800 p-3 rounded col-span-2">
+            <div class="bg-gray-800 p-3 rounded">
               <div class="text-xs text-gray-400 mb-1">MT5已实现盈亏</div>
               <div class="text-lg font-bold" :class="(stats.mt5RealizedPnL || 0) >= 0 ? 'text-green-500' : 'text-red-500'">
                 {{ (stats.mt5RealizedPnL || 0) >= 0 ? '+' : '' }}{{ (stats.mt5RealizedPnL || 0).toFixed(2) }} USDT
               </div>
+            </div>
+            <div class="bg-gray-800 p-3 rounded">
+              <div class="text-xs text-gray-400 mb-1">对冲账户返佣</div>
+              <div class="text-lg font-bold text-green-500">{{ (stats.mt5Rebate || 0).toFixed(2) }} USDT</div>
+              <div class="text-[10px] text-gray-500 mt-0.5">MT5返佣需确认入账格式</div>
             </div>
           </div>
         </div>
@@ -203,11 +360,13 @@
                 <th class="pb-2">类别</th>
                 <th class="pb-2">时间 (北京)</th>
                 <th class="pb-2">手续费</th>
+                <th class="pb-2">资金费</th>
+                <th class="pb-2">利润</th>
               </tr>
             </thead>
             <tbody>
               <tr v-if="accountTrades.length === 0">
-                <td colspan="8" class="text-center py-8 text-gray-500">暂无数据</td>
+                <td colspan="10" class="text-center py-8 text-gray-500">暂无数据</td>
               </tr>
               <tr v-for="trade in accountTrades" :key="trade.id" class="border-b border-gray-800">
                 <td class="py-3">{{ trade.symbol }}</td>
@@ -216,9 +375,9 @@
                     {{ trade.side === 'buy' ? '买入' : '卖出' }}
                   </span>
                 </td>
-                <td>{{ trade.price != null ? Number(trade.price).toFixed(2) : '-' }} USDT</td>
+                <td>{{ trade.price != null ? Number(trade.price).toFixed(2) : '-' }}</td>
                 <td>{{ trade.quantity != null ? Number(trade.quantity).toFixed(2) : '-' }}</td>
-                <td>{{ trade.amount != null ? Number(trade.amount).toFixed(2) : '-' }} USDT</td>
+                <td>{{ trade.amount != null ? Number(trade.amount).toFixed(2) : '-' }}</td>
                 <td class="text-xs">
                   <span :class="trade.maker ? 'text-blue-500' : 'text-orange-500'">
                     {{ trade.maker ? '挂单' : '吃单' }}
@@ -230,8 +389,22 @@
                     {{ Number(trade.fee_bnb).toFixed(6) }} BNB
                   </template>
                   <template v-else>
-                    {{ trade.fee != null ? Number(trade.fee).toFixed(4) : '-' }} USDT
+                    {{ trade.fee != null ? Number(trade.fee).toFixed(4) : '-' }}
                   </template>
+                </td>
+                <td class="text-xs font-mono">
+                  <span v-if="trade.funding_fee != null && trade.funding_fee != 0"
+                        :class="trade.funding_fee >= 0 ? 'text-green-400' : 'text-red-400'">
+                    {{ trade.funding_fee >= 0 ? '+' : '' }}{{ Number(trade.funding_fee).toFixed(4) }}
+                  </span>
+                  <span v-else class="text-gray-600">0</span>
+                </td>
+                <td class="text-xs font-mono">
+                  <span v-if="trade.realizedPnl != null && trade.realizedPnl != 0"
+                        :class="trade.realizedPnl >= 0 ? 'text-green-500' : 'text-red-500'">
+                    {{ trade.realizedPnl >= 0 ? '+' : '' }}{{ Number(trade.realizedPnl).toFixed(4) }}
+                  </span>
+                  <span v-else class="text-gray-600">0</span>
                 </td>
               </tr>
             </tbody>
@@ -251,14 +424,15 @@
                 <th class="pb-2">成交价</th>
                 <th class="pb-2">成交量</th>
                 <th class="pb-2">成交额</th>
-                <th class="pb-2">过夜费</th>
                 <th class="pb-2">时间 (北京)</th>
                 <th class="pb-2">手续费</th>
+                <th class="pb-2">过夜费</th>
+                <th class="pb-2">利润</th>
               </tr>
             </thead>
             <tbody>
               <tr v-if="mt5Trades.length === 0">
-                <td colspan="8" class="text-center py-8 text-gray-500">暂无数据</td>
+                <td colspan="9" class="text-center py-8 text-gray-500">暂无数据</td>
               </tr>
               <tr v-for="trade in mt5Trades" :key="trade.id" class="border-b border-gray-800">
                 <td class="py-3">{{ trade.symbol }}</td>
@@ -267,18 +441,26 @@
                     {{ trade.side === 'buy' ? '买入' : '卖出' }}
                   </span>
                 </td>
-                <td>{{ trade.price != null ? Number(trade.price).toFixed(2) : '-' }} USDT</td>
+                <td>{{ trade.price != null ? Number(trade.price).toFixed(2) : '-' }}</td>
                 <td>{{ trade.quantity != null ? Number(trade.quantity).toFixed(2) : '-' }}</td>
-                <td>{{ trade.amount != null ? Number(trade.amount).toFixed(2) : '-' }} USDT</td>
-                <td class="text-red-500">{{ trade.overnight_fee != null ? Number(trade.overnight_fee).toFixed(2) : '0.00' }} USDT</td>
+                <td>{{ trade.amount != null ? Number(trade.amount).toFixed(2) : '-' }}</td>
                 <td class="text-xs text-gray-400">{{ formatDateTime(trade.timestamp) }}</td>
-                <td class="text-red-500">{{ trade.fee != null ? Number(trade.fee).toFixed(2) : '-' }} USDT</td>
+                <td class="text-red-500">{{ trade.fee != null ? Number(trade.fee).toFixed(2) : '-' }}</td>
+                <td class="text-red-500">{{ trade.overnight_fee != null ? Number(trade.overnight_fee).toFixed(2) : '0.00' }}</td>
+                <td class="text-xs font-mono">
+                  <span v-if="trade.profit != null && trade.profit != 0"
+                        :class="trade.profit >= 0 ? 'text-green-500' : 'text-red-500'">
+                    {{ trade.profit >= 0 ? '+' : '' }}{{ Number(trade.profit).toFixed(2) }}
+                  </span>
+                  <span v-else class="text-gray-600">0</span>
+                </td>
               </tr>
             </tbody>
           </table>
         </div>
       </div>
     </div>
+
   </div>
 </template>
 
@@ -338,16 +520,115 @@ const stats = ref({
 const accountTrades = ref([])
 const mt5Trades = ref([])
 const queryWarnings = ref([])
+let historyAbortController = null
+let historyRequestSequence = 0
+const HISTORY_REQUEST_TIMEOUT_MS = 45000
+
+async function requestHistory(params) {
+  historyAbortController?.abort()
+  const controller = new AbortController()
+  historyAbortController = controller
+  const requestId = ++historyRequestSequence
+  const timer = window.setTimeout(() => controller.abort(), HISTORY_REQUEST_TIMEOUT_MS)
+  try {
+    const response = await api.get('/api/v1/trading/history/realtime', {
+      params,
+      signal: controller.signal,
+    })
+    return response.data
+  } finally {
+    window.clearTimeout(timer)
+    if (requestId === historyRequestSequence) {
+      historyAbortController = null
+      loading.value = false
+    }
+  }
+}
+
+function isHistoryRequestCancelled(error) {
+  return error?.name === 'AbortError' || error?.name === 'CanceledError' || error?.code === 'ERR_CANCELED'
+}
+
+// 配对成交数据 + 分类过滤
+const pairedTrades = ref([])
+const pairFilter = ref('all')  // all | strategy | manual
+
+const pairedStrategyCount = computed(() => pairedTrades.value.filter(p => p.source === 'strategy').length)
+const pairedManualCount = computed(() => pairedTrades.value.filter(p => p.source === 'manual').length)
+const filteredPairedTrades = computed(() => {
+  if (pairFilter.value === 'all') return pairedTrades.value
+  return pairedTrades.value.filter(p => p.source === pairFilter.value)
+})
+
+// 配对净利 = 毛利(两腿已实现) − 手续费(主+对冲,正成本) + 过夜费(已带符号,支出为负) + 资金费(已带符号,入金为正)
+// 符号约定: pair_total_fee 是正数成本故减; hedge_overnight/funding_fee 来自交易所原值已带正负故加。
+function pairNetProfit(p) {
+  const gross = Number(p?.pair_profit || 0)
+  const fee = Number(p?.pair_total_fee || 0)
+  const overnight = Number(p?.hedge_overnight || 0)
+  const funding = Number(p?.funding_fee || 0)
+  return gross - fee + overnight + funding
+}
+
+// 导出用: 把"套利配对成交历史"表(当前筛选后)转成表头+数据行, 列与页面橙框一致。
+// 导出页面所见即所得(含 all/strategy/manual 筛选)。
+const PAIRED_EXPORT_HEADERS = [
+  '来源', '时间(主)', '方向', '主账号均价', '数量', '价差', '阈值', '滑点',
+  '滑点(触发)', '对冲均价', '数量(对冲)', '方向(对冲)', '时间(对冲)',
+  '净利润', '毛利润', '手续费', '过夜费', '资金费'
+]
+function buildPairedRows() {
+  const fmtSide = (s) => s === 'buy' ? '买入' : (s === 'sell' ? '卖出' : '-')
+  const n = (v, d = 2) => (v != null && v !== '' && !isNaN(v)) ? Number(v).toFixed(d) : '-'
+  return filteredPairedTrades.value.map(p => [
+    p.source === 'strategy' ? '自动' : (p.source === 'manual' ? '手动' : (p.source || '-')),
+    formatPairedTime(p.timestamp_primary),
+    fmtSide(p.side_primary),
+    n(p.avg_price_primary, 4),
+    n(p.qty_primary, 2),
+    p.spread != null ? n(p.spread, 4) : '-',
+    p.threshold != null ? n(p.threshold, 4) : '-',
+    p.slippage != null ? n(p.slippage, 4) : '-',
+    p.slippage_vs_trigger != null ? n(p.slippage_vs_trigger, 4) : '-',
+    p.avg_price_hedge != null ? n(p.avg_price_hedge, 4) : '-',
+    p.qty_hedge != null ? n(p.qty_hedge, 2) : '-',
+    fmtSide(p.side_hedge),
+    p.timestamp_hedge ? formatPairedTime(p.timestamp_hedge) : '-',
+    pairNetProfit(p).toFixed(2),
+    n(p.pair_profit, 2),
+    n(p.pair_total_fee, 4),
+    p.hedge_overnight != null ? n(p.hedge_overnight, 2) : '0.00',
+    p.funding_fee != null ? n(p.funding_fee, 4) : '0.0000'
+  ])
+}
+
+function formatPairedTime(ts) {
+  if (!ts) return '-'
+  try {
+    // Keep the backend's Beijing-time string; Date parsing would shift it again.
+    const match = typeof ts === 'string'
+      ? ts.match(/^\d{2}(\d{2}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})/)
+      : null
+    if (match) return `${match[1]} ${match[2]}`
+    return ts
+  } catch {
+    return ts
+  }
+}
 
 // Computed Net Profit
 const netProfit = computed(() => {
   return stats.value.totalReturnProfit - stats.value.totalFees - stats.value.overnightFees
 })
 
-// Computed Total Arbitrage PnL (MT5 + Binance)
-const totalArbitragePnL = computed(() => {
-  return (stats.value.mt5RealizedPnL || 0) + (stats.value.realizedPnL || 0)
+// 平仓利润(币安已实现+MT5已实现) + 平仓总净利润(全口径净额) + 返佣前利润(保留, 内部/导出仍可用)
+const closingProfit = computed(() => {
+  // 后端已给 closingProfit; 兜底用 realizedPnL + mt5RealizedPnL 现算(老后端无该字段时)
+  if (stats.value.closingProfit != null) return stats.value.closingProfit
+  return Number(stats.value.realizedPnL || 0) + Number(stats.value.mt5RealizedPnL || 0)
 })
+const profitBeforeRebate = computed(() => stats.value.profitBeforeRebate || 0)
+const netProfitAfterRebate = computed(() => stats.value.netProfitAfterRebate || 0)
 
 // 主账号（Binance/Bybit API）是否有成交
 const hasBinanceData = computed(() => accountTrades.value.length > 0)
@@ -373,20 +654,19 @@ async function queryData() {
     const startTimeStr = startTime.value.replace('T', ' ') + ':00'
     const endTimeStr = endTime.value.replace('T', ' ') + ':59'
 
-    const response = await api.get('/api/v1/trading/history/realtime', {
-      params: {
-        start_time: startTimeStr,
-        end_time: endTimeStr,
-        pair_code: currentPair.value
-      }
+    const data = await requestHistory({
+      start_time: startTimeStr,
+      end_time: endTimeStr,
+      pair_code: currentPair.value,
     })
-    updateData(response.data)
+    updateData(data)
   } catch (error) {
+    if (isHistoryRequestCancelled(error)) return
     console.error('Failed to query trading data:', error)
     alert('查询失败: ' + (error.response?.data?.detail || error.message))
     clearData()
   } finally {
-    loading.value = false
+    if (!historyAbortController) loading.value = false
   }
 }
 
@@ -417,20 +697,19 @@ async function showRecentDays(days) {
     startTime.value = startTimeStr.replace(' ', 'T').substring(0, 16)
     endTime.value = endTimeStr.replace(' ', 'T').substring(0, 16)
 
-    const response = await api.get('/api/v1/trading/history/realtime', {
-      params: {
-        start_time: startTimeStr,
-        end_time: endTimeStr,
-        pair_code: currentPair.value
-      }
+    const data = await requestHistory({
+      start_time: startTimeStr,
+      end_time: endTimeStr,
+      pair_code: currentPair.value,
     })
-    updateData(response.data)
+    updateData(data)
   } catch (error) {
+    if (isHistoryRequestCancelled(error)) return
     console.error('Failed to query recent data:', error)
     alert('查询失败: ' + (error.response?.data?.detail || error.message))
     clearData()
   } finally {
-    loading.value = false
+    if (!historyAbortController) loading.value = false
   }
 }
 
@@ -454,6 +733,11 @@ function updateData(data) {
       const timeB = new Date(b.timestamp).getTime()
       return timeB - timeA
     })
+  }
+  if (data.pairedTrades) {
+    pairedTrades.value = data.pairedTrades
+  } else {
+    pairedTrades.value = []
   }
 }
 
@@ -484,6 +768,7 @@ function clearData() {
   }
   accountTrades.value = []
   mt5Trades.value = []
+  pairedTrades.value = []
 }
 
 function formatDateTime(timestamp) {
@@ -546,6 +831,9 @@ function exportToCSV(filename) {
     trade.fee != null ? Number(trade.fee).toFixed(2) : '-'
   ])
 
+  // 套利配对成交历史(页面橙框, 所见即所得含筛选) — 用户要求导出这张表
+  const pairedRows = buildPairedRows()
+
   const csvContent = [
     ['交易历史数据报告'],
     [`查询时间: ${startTime.value} 至 ${endTime.value}`],
@@ -565,6 +853,11 @@ function exportToCSV(filename) {
     ['MT5过夜费', (stats.value.mt5OvernightFee?.toFixed(2) || '0.00') + ' USDT'],
     ['MT5手续费', (stats.value.mt5Fee?.toFixed(2) || '0.00') + ' USDT'],
     ['MT5已实现盈亏', (stats.value.mt5RealizedPnL?.toFixed(2) || '0.00') + ' USDT'],
+    [],
+    [`=== 套利配对成交历史 (${pairFilter.value === 'all' ? '全部' : (pairFilter.value === 'strategy' ? '自动交易' : '手动交易')}, ${pairedRows.length}条) ===`],
+    ['说明: 净利润 = 毛利润 − 手续费 + 过夜费 + 资金费; 资金费正=入金/负=支付'],
+    PAIRED_EXPORT_HEADERS,
+    ...pairedRows,
     [],
     ['=== 主账号成交历史 ==='],
     binanceHeaders,
@@ -608,6 +901,15 @@ function exportToExcel(filename) {
   ]
   const statsSheet = XLSX.utils.aoa_to_sheet(statsData)
   XLSX.utils.book_append_sheet(wb, statsSheet, '统计数据')
+
+  // 套利配对成交历史 sheet (用户要求, 列与页面橙框一致; 含净利润)
+  const pairedData = [
+    ['说明: 净利润 = 毛利润 − 手续费 + 过夜费 + 资金费; 资金费正=入金/负=支付'],
+    PAIRED_EXPORT_HEADERS,
+    ...buildPairedRows()
+  ]
+  const pairedSheet = XLSX.utils.aoa_to_sheet(pairedData)
+  XLSX.utils.book_append_sheet(wb, pairedSheet, '套利配对成交历史')
 
   // Binance sheet
   const binanceData = [
@@ -697,6 +999,34 @@ function exportToPDF(filename) {
       headStyles: { fillColor: [231, 76, 60] }
     })
 
+    // Arbitrage paired trade history (用户要求, 净利润口径; PDF用ASCII表头避免中文不渲染)
+    currentY = doc.previousAutoTable.finalY + 10
+    if (currentY > 240) { doc.addPage(); currentY = 15 }
+    const _pairLabel = pairFilter.value === 'all' ? 'All' : (pairFilter.value === 'strategy' ? 'Auto' : 'Manual')
+    doc.text(`Arbitrage Paired Trades (${_pairLabel}) - Net = Gross - Fee + Swap + Funding`, 14, currentY)
+    autoTable(doc, {
+      startY: currentY + 5,
+      head: [['Time', 'Side', 'A-Price', 'Qty', 'Spread', 'Thr', 'Slip', 'H-Price', 'H-Qty', 'Net', 'Gross', 'Fee', 'Swap', 'Funding']],
+      body: filteredPairedTrades.value.map(p => [
+        formatPairedTime(p.timestamp_primary),
+        p.side_primary === 'buy' ? 'Buy' : (p.side_primary === 'sell' ? 'Sell' : '-'),
+        p.avg_price_primary != null ? Number(p.avg_price_primary).toFixed(2) : '-',
+        p.qty_primary != null ? Number(p.qty_primary).toFixed(2) : '-',
+        p.spread != null ? Number(p.spread).toFixed(2) : '-',
+        p.threshold != null ? Number(p.threshold).toFixed(2) : '-',
+        p.slippage != null ? Number(p.slippage).toFixed(2) : '-',
+        p.avg_price_hedge != null ? Number(p.avg_price_hedge).toFixed(2) : '-',
+        p.qty_hedge != null ? Number(p.qty_hedge).toFixed(2) : '-',
+        pairNetProfit(p).toFixed(2),
+        p.pair_profit != null ? Number(p.pair_profit).toFixed(2) : '-',
+        p.pair_total_fee != null ? Number(p.pair_total_fee).toFixed(2) : '-',
+        p.hedge_overnight != null ? Number(p.hedge_overnight).toFixed(2) : '0.00',
+        p.funding_fee != null ? Number(p.funding_fee).toFixed(2) : '0.00'
+      ]),
+      styles: { fontSize: 6 },
+      headStyles: { fillColor: [243, 156, 18] }
+    })
+
     // Binance trades table
     currentY = doc.previousAutoTable.finalY + 10
     doc.text('Main Account Trade History', 14, currentY)
@@ -771,6 +1101,9 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  historyAbortController?.abort()
+  historyAbortController = null
+  historyRequestSequence += 1
   document.removeEventListener('click', handleClickOutside)
 })
 

@@ -269,12 +269,12 @@
       <h2 class="text-sm font-semibold text-text-tertiary uppercase tracking-wider px-1">基础设施</h2>
       <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
 
-        <!-- Card A: 服务集群 (API + MT5 Bridge) -->
-        <div class="bg-dark-100 rounded-xl p-4 border" :class="goStatus.online && mt5System.online ? 'border-green-800/30' : 'border-red-800/30'">
+        <!-- Card A: 服务集群 (Python API + Rust Market Engine + MT5 Bridge) -->
+        <div class="bg-dark-100 rounded-xl p-4 border" :class="goStatus.online && rustStatus.online && mt5System.online ? 'border-green-800/30' : 'border-red-800/30'">
           <div class="flex items-center justify-between mb-3">
             <span class="text-sm font-semibold">服务集群</span>
-            <span class="text-[10px] px-1.5 py-0.5 rounded-full" :class="goStatus.online && mt5System.online ? 'bg-green-900/40 text-green-400' : 'bg-red-900/40 text-red-400'">
-              {{ goStatus.online && mt5System.online ? '全部在线' : '部分异常' }}
+            <span class="text-[10px] px-1.5 py-0.5 rounded-full" :class="goStatus.online && rustStatus.online && mt5System.online ? 'bg-green-900/40 text-green-400' : 'bg-red-900/40 text-red-400'">
+              {{ goStatus.online && rustStatus.online && mt5System.online ? '全部在线' : '部分异常' }}
             </span>
           </div>
           <div class="space-y-2">
@@ -285,10 +285,10 @@
               <span class="font-mono text-text-tertiary text-[10px] w-16 text-right">{{ goStatus.uptime || '--' }}</span>
             </div>
             <div class="flex items-center gap-2 text-xs">
-              <div :class="['w-1.5 h-1.5 rounded-full flex-shrink-0', goStatus.online ? 'bg-green-500' : 'bg-red-500']"></div>
-              <span class="text-text-tertiary w-16">Go API</span>
-              <span class="font-mono text-text-secondary flex-1 text-right">:8080</span>
-              <span class="font-mono text-text-tertiary text-[10px] w-16 text-right">{{ goStatus.memory || '--' }}</span>
+              <div :class="['w-1.5 h-1.5 rounded-full flex-shrink-0', rustStatus.online ? 'bg-green-500' : 'bg-red-500']"></div>
+              <span class="text-text-tertiary w-16">Rust 行情</span>
+              <span class="font-mono text-text-secondary flex-1 text-right">:8090</span>
+              <span class="font-mono text-text-tertiary text-[10px] w-16 text-right">{{ rustStatus.ticks }}t/{{ rustStatus.ws_clients }}ws</span>
             </div>
             <div class="border-t border-border-secondary my-1"></div>
             <div class="flex items-center gap-2 text-xs">
@@ -299,8 +299,8 @@
             </div>
             <div class="flex items-center gap-2 text-xs">
               <div class="w-1.5 h-1.5 flex-shrink-0"></div>
-              <span class="text-text-tertiary w-16">内存</span>
-              <span class="font-mono text-text-secondary flex-1 text-right">API {{ goStatus.memory || '--' }} / MT5 {{ mt5System.memory || '--' }}</span>
+              <span class="text-text-tertiary w-16">Rust Pairs</span>
+              <span class="font-mono text-primary font-bold flex-1 text-right">{{ rustStatus.pairs }} 产品对 · {{ rustStatus.status }}</span>
             </div>
           </div>
         </div>
@@ -343,6 +343,17 @@
                 {{ feishuText(monitorData.feishu?.status) }}
               </span>
             </div>
+            <div class="flex justify-between"><span>AiCoin 行情</span>
+              <span :class="aicoinStatus.healthy ? 'text-green-400' : aicoinStatus.configured ? 'text-yellow-400' : 'text-text-tertiary'">
+                {{ aicoinStatus.healthy ? (aicoinStatus.level || '正常') : aicoinStatus.configured ? '异常' : '未配置' }}
+              </span>
+            </div>
+            <div v-if="aicoinStatus.expires_at" class="flex justify-between"><span>AiCoin 到期</span>
+              <span class="font-mono" :class="aicoinDaysLeft <= 7 ? 'text-red-400' : aicoinDaysLeft <= 30 ? 'text-yellow-400' : 'text-text-secondary'">
+                {{ aicoinExpiresText }}
+              </span>
+            </div>
+
           </div>
         </div>
 
@@ -365,10 +376,18 @@
                 {{ mt5Infra.bridges?.alive || 0 }}/{{ mt5Infra.bridges?.total || 0 }} 活跃
               </span>
             </div>
+            <div v-if="bootStatus.reachable && bootStatus.progress_pct < 100" class="flex justify-between">
+              <span>启动进度</span>
+              <span class="font-mono" :class="bootStatus.summary?.stuck ? 'text-red-400' : 'text-yellow-400'">{{ bootStatus.progress_pct }}%{{ bootStatus.summary?.stuck ? ' ⚠'+bootStatus.summary.stuck+'卡住' : '' }}</span>
+            </div>
             <div v-if="mt5Infra.bridges?.detail" class="grid grid-cols-2 gap-x-3 gap-y-0.5 mt-1">
               <div v-for="b in mt5Infra.bridges.detail" :key="b.service" class="flex items-center justify-between text-[10px]">
                 <span class="truncate text-text-tertiary" :title="b.service">:{{ b.port }}</span>
-                <div :class="['w-1.5 h-1.5 rounded-full', b.state === 'running' || b.state === 'paused' ? 'bg-green-500' : 'bg-red-500']"></div>
+                <div class="flex items-center gap-1">
+                  <span v-if="bootPhaseLabel(b.port)" :class="bootPhase(b.port)?.stuck ? 'text-red-400 font-semibold' : bootPhase(b.port)?.phase==='attaching' ? 'text-yellow-400' : 'text-sky-400'" class="text-[9px]">{{ bootPhaseLabel(b.port) }}</span>
+                  <span v-if="bootPhase(b.port)?.mt5" class="text-green-500 text-[9px]" title="MT5已挂载">✓</span>
+                  <div :class="['w-1.5 h-1.5 rounded-full', bootDotClass(b.port)]" :title="bootPhase(b.port)?.phase || b.state"></div>
+                </div>
               </div>
             </div>
           </div>
@@ -593,7 +612,7 @@
             class="bg-dark-200 rounded-lg px-3 py-2.5 text-xs">
             <div class="flex items-center justify-between mb-1">
               <span class="font-medium text-text-primary truncate max-w-[60%]">{{ acc.account_name }}</span>
-              <span v-if="acc.proxy_config" class="px-1.5 py-0.5 rounded" :class="proxyStatusClass(acc.proxy_config.ip_status || proxyIPStatus(acc))">
+              <span v-if="acc.proxy_config" class="px-1.5 py-0.5 rounded" :class="proxyStatusClass(acc.proxy_config.ip_status || proxyIPStatus(acc))" :title="proxyStatusTitle(acc.proxy_config.ip_status || proxyIPStatus(acc))">
                 {{ proxyStatusText(acc.proxy_config.ip_status || proxyIPStatus(acc)) }}
               </span>
             </div>
@@ -638,9 +657,20 @@ const usersLoading = ref(true)
 const lastUpdate = ref('--')
 
 const goStatus = ref({ online: false, uptime: '', memory: '', redis: false })
+const rustStatus = ref({ online: false, status: '--', ticks: 0, pairs: 0, ws_clients: 0 })
+const aicoinStatus = ref({ configured: false, enabled: false, healthy: false, level: null, expires_at: null, quota_used: null, quota_remaining: null, quota_total: null })
+const aicoinDaysLeft = computed(() => { if (!aicoinStatus.value.expires_at) return 999; const diff = new Date(aicoinStatus.value.expires_at).getTime() - Date.now(); return Math.max(0, Math.floor(diff / 86400000)) })
+const aicoinExpiresText = computed(() => { if (!aicoinStatus.value.expires_at) return "--"; const d = aicoinDaysLeft.value; const ds = new Date(aicoinStatus.value.expires_at).toLocaleDateString("zh-CN"); if (d <= 0) return ds + " (已过期)"; if (d <= 7) return ds + " (" + d + "天)"; return ds + " (剩" + d + "天)" })
+function fmtQuota(n) { if (n == null) return "--"; if (n >= 1000000) return (n/1000000).toFixed(1) + "M"; if (n >= 1000) return (n/1000).toFixed(1) + "K"; return String(n) }
 const dbPool = ref({ active: 0, idle: 0, max: 0 })
 const mt5System = ref({ online: false })
 const mt5Infra = ref({ reachable: false, status: null, uptime_seconds: 0, instances: { running: 0, total: 0 }, bridges: { alive: 0, total: 0, detail: [] } })
+// 桥启动相位(2026-07-09): boot-status 给每桥 stopped/starting/attaching/healthy+stuck
+const bootStatus = ref({ reachable: false, progress_pct: 0, summary: {}, bridges: [] })
+const bootByPort = computed(() => { const m = {}; for (const b of (bootStatus.value.bridges || [])) m[b.port] = b; return m })
+function bootPhase(port) { return bootByPort.value[port] || null }
+function bootDotClass(port) { const b = bootByPort.value[port]; if (!b) return 'bg-gray-500'; if (b.stuck) return 'bg-red-500 animate-pulse'; return { healthy: 'bg-green-500', attaching: 'bg-yellow-500', starting: 'bg-sky-500', stopped: 'bg-red-500' }[b.phase] || 'bg-gray-500' }
+function bootPhaseLabel(port) { const b = bootByPort.value[port]; if (!b) return ''; if (b.stuck) return '卡住'; return { healthy: '', attaching: '挂载中', starting: '启动中', stopped: '停' }[b.phase] || '' }
 const stats = ref({ wsConnections: 0, totalUsers: 0, activeAccounts: 0, totalPositions: 0 })
 const allAccounts = ref([])
 const userFinancials = ref([])
@@ -914,6 +944,23 @@ async function fetchMonitorStatus() {
       }
     }
   } catch { goStatus.value.online = false }
+  // Fetch AiCoin service status
+  try {
+    const aicR = await api.get('/api/v1/system/aicoin-status')
+    aicoinStatus.value = { ...aicoinStatus.value, ...aicR.data }
+  } catch { aicoinStatus.value.healthy = false }
+  // Fetch Rust engine health
+  try {
+    const rustR = await api.get('/api/v1/health')
+    const rd = rustR.data || {}
+    rustStatus.value = {
+      online: rd.status === 'ok' || rd.status === 'degraded',
+      status: rd.status || '--',
+      ticks: rd.tick_count || 0,
+      pairs: (rd.pairs || []).length,
+      ws_clients: rd.ws_clients || 0,
+    }
+  } catch { rustStatus.value.online = false }
 }
 
 async function fetchMT5Status() {
@@ -928,6 +975,13 @@ async function fetchMT5Status() {
       connected: d.reachable ?? false,
     }
   } catch { mt5System.value = { online: false } }
+}
+
+async function fetchBootStatus() {
+  try {
+    const r = await api.get('/api/v1/mt5-infra/boot-status')
+    bootStatus.value = r.data || bootStatus.value
+  } catch { bootStatus.value = { ...bootStatus.value, reachable: false } }
 }
 
 async function fetchMT5Infra() {
@@ -1005,20 +1059,21 @@ async function fetchProxyAccounts() {
       const ipipR = await api.get('/api/v1/users/ipipgo-orders')
       const orders = ipipR.data?.orders || []
       for (const acc of proxyAccounts.value) {
-        if (!acc.proxy_config?.region) continue
-        const region = acc.proxy_config.region.replace(/[-\s]/g, '').toLowerCase()
-        const order = orders.find(o => {
-          const country = (o.country || '').replace(/[-\s]/g, '').toLowerCase()
-          return country === region || country.includes(region) || region.includes(country)
-        })
+        const host = String(acc.proxy_config?.host || '').trim()
+        if (!host) continue
+        const order = orders.find(o => ipipgoOrderHost(o) === host)
         if (order) {
           acc.proxy_config.allocated_at = acc.proxy_config.allocated_at || order.allocated_at
           acc.proxy_config.expires_at = acc.proxy_config.expires_at || order.expires_at
-          acc.proxy_config.ip_status = order.ip_status
+          acc.proxy_config.provider_status = order.ip_status || null
         }
       }
     } catch {}
   } catch {}
+}
+
+function ipipgoOrderHost(order) {
+  return String(order?.ip || order?.host || order?.proxy_ip || order?.ip_address || '').trim()
 }
 
 async function fetchAgentOverview() {
@@ -1111,7 +1166,7 @@ function getHedgePosition(pair, side) {
 
 async function refreshAll() {
   refreshing.value = true
-  await Promise.all([fetchMonitorStatus(), fetchStats(), fetchUserFinancials(), fetchMT5Status(), fetchMT5Infra(), fetchProxyAccounts(), fetchHedgingPairs(), fetchSparkline(), fetchPnlHistory(), fetchPlatformDist(), fetchAgentOverview()])
+  await Promise.all([fetchMonitorStatus(), fetchStats(), fetchUserFinancials(), fetchMT5Status(), fetchMT5Infra(), fetchBootStatus(), fetchProxyAccounts(), fetchHedgingPairs(), fetchSparkline(), fetchPnlHistory(), fetchPlatformDist(), fetchAgentOverview()])
   lastUpdate.value = dayjs().format('HH:mm:ss')
   lastUpdateTs.value = Date.now()
 
@@ -1202,11 +1257,19 @@ function sslDaysClass(d) { return d == null ? 'text-text-tertiary' : d <= 7 ? 't
 function sslStatusText(s) { return { healthy: '正常', warning: '即将过期', critical: '紧急', expired: '已过期', error: '错误' }[s] || '--' }
 function sslStatusBadge(s) { return { healthy: 'bg-green-900/40 text-green-400', warning: 'bg-yellow-900/40 text-yellow-400', critical: 'bg-red-900/40 text-red-400', expired: 'bg-red-900/60 text-red-300' }[s] || 'bg-dark-300 text-text-tertiary' }
 function feishuText(s) { return { healthy: '正常', disabled: '已禁用', not_configured: '未配置' }[s] || '--' }
-function proxyIPStatus(acc) { return acc.proxy_config?.expires_at && new Date(acc.proxy_config.expires_at) < new Date() ? 'expired' : 'active' }
+function proxyIPStatus(acc) {
+  const cfg = acc.proxy_config || {}
+  if (cfg.expires_at && new Date(cfg.expires_at) < new Date()) return 'expired'
+  if (['auth_failed', 'failed'].includes(cfg.health_status)) return cfg.health_status
+  if (cfg.provider_status === 'active') return 'active'
+  if (['expired', 'pending', 'cancelled'].includes(cfg.provider_status)) return cfg.provider_status
+  return 'unverified'
+}
 function proxyDaysLeft(acc) { const exp = acc.proxy_config?.expires_at; return exp ? Math.ceil((new Date(exp) - new Date()) / 86400000) : '--' }
 function proxyDaysClass(d) { return d === '--' ? 'text-text-secondary' : d <= 7 ? 'text-red-400 font-bold' : d <= 30 ? 'text-yellow-400' : 'text-text-secondary' }
-function proxyStatusClass(s) { return { active: 'bg-green-900/40 text-green-400', expired: 'bg-red-900/40 text-red-400' }[s] || 'bg-dark-300 text-text-tertiary' }
-function proxyStatusText(s) { return { active: '正常', expired: '已过期', pending: '待生效' }[s] || s || '未知' }
+function proxyStatusClass(s) { return { active: 'bg-blue-900/40 text-blue-300', expired: 'bg-red-900/40 text-red-400', failed: 'bg-red-900/40 text-red-400', auth_failed: 'bg-red-900/40 text-red-400', pending: 'bg-yellow-900/40 text-yellow-400', cancelled: 'bg-dark-300 text-text-tertiary', unverified: 'bg-dark-300 text-text-tertiary' }[s] || 'bg-dark-300 text-text-tertiary' }
+function proxyStatusText(s) { return { active: '已分配', expired: '已过期', failed: '检测失败', auth_failed: '认证失败', pending: '待生效', cancelled: '已取消', unverified: '未验证' }[s] || '未验证' }
+function proxyStatusTitle(s) { return s === 'active' ? '供应商记录显示该 IP 已分配，未代表代理认证已通过' : s === 'unverified' ? '尚无认证级健康检查结果' : proxyStatusText(s) }
 
 // --- Lifecycle ---
 onMounted(async () => {

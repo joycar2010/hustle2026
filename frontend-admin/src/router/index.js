@@ -23,16 +23,34 @@ const routes = [
     meta: { requiresAuth: true }
   },
   {
-    path: '/spread',
-    name: 'SpreadAnalysis',
-    component: () => import('@/views/SpreadAnalysis.vue'),
-    meta: { requiresAuth: true }
-  },
-  {
     path: '/strategies',
     name: 'Strategies',
     component: () => import('@/views/Strategies.vue'),
     meta: { requiresAuth: true }
+  },
+  {
+    path: '/guard-rules',
+    name: 'GuardRules',
+    component: () => import('@/views/GuardRules.vue'),
+    meta: { requiresAuth: true }
+  },
+  {
+    path: '/strategy-processes',
+    name: 'StrategyProcesses',
+    component: () => import('@/views/StrategyProcesses.vue'),
+    meta: { requiresAuth: true }
+  },
+  {
+    path: '/ai-arb',
+    name: 'AiArbAnalysis',
+    component: () => import('@/views/AiArbAnalysis.vue'),
+    meta: { requiresAuth: true },
+  },
+  {
+    path: '/ledger-summary',
+    name: 'LedgerSummary',
+    component: () => import('@/views/LedgerSummary.vue'),
+    meta: { requiresAuth: true },
   },
   {
     path: '/hedging',
@@ -50,12 +68,6 @@ const routes = [
     path: '/system',
     name: 'SystemAdmin',
     component: () => import('@/views/SystemAdmin.vue'),
-    meta: { requiresAuth: true }
-  },
-  {
-    path: '/risk',
-    name: 'RiskPanel',
-    component: () => import('@/views/RiskPanel.vue'),
     meta: { requiresAuth: true }
   }
 ]

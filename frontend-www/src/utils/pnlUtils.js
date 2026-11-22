@@ -29,8 +29,8 @@ function _cacheSet(key, data) {
 
 export function clearPnlCache() { _cache.clear() }
 
-export async function fetchDailyPnl(startDate, endDate) {
-  const key = _cacheKey('pnl', startDate, endDate)
+export async function fetchDailyPnl(startDate, endDate, view = 'merged') {
+  const key = _cacheKey('pnl', startDate, endDate, view)
   const cached = _cacheGet(key)
   if (cached) return cached
 
@@ -38,7 +38,7 @@ export async function fetchDailyPnl(startDate, endDate) {
   if (_inflight.has(key)) return _inflight.get(key)
 
   const promise = api.get('/api/v1/pnl/daily', {
-    params: { start_date: startDate, end_date: endDate, platform: 'all' }
+    params: { start_date: startDate, end_date: endDate, platform: 'all', view }
   }).then(r => {
     _cacheSet(key, r.data)
     _inflight.delete(key)
@@ -52,16 +52,16 @@ export async function fetchDailyPnl(startDate, endDate) {
   return promise
 }
 
-export async function fetchFundFlow(days) {
+export async function fetchFundFlow(days, view = 'merged') {
   const d = days || 30
-  const key = _cacheKey('ff', d)
+  const key = _cacheKey('ff', d, view)
   const cached = _cacheGet(key)
   if (cached) return cached
 
   if (_inflight.has(key)) return _inflight.get(key)
 
   const promise = api.get('/api/v1/accounts/me/fund-flow', {
-    params: { days: d }
+    params: { days: d, view }
   }).then(r => {
     _cacheSet(key, r.data)
     _inflight.delete(key)
@@ -78,7 +78,8 @@ export async function fetchFundFlow(days) {
 export function aggregateWeekly(dailyList) {
   const weeks = {}
   for (const d of dailyList) {
-    const weekStart = dayjs(d.date).startOf('week').format('YYYY-MM-DD')
+    const _dd = dayjs(d.date)
+    const weekStart = _dd.subtract((_dd.day() + 6) % 7, 'day').format('YYYY-MM-DD')  // 周一起
     if (!weeks[weekStart]) weeks[weekStart] = { week: weekStart, net_pnl: 0, trade_count: 0, days: 0 }
     weeks[weekStart].net_pnl += d.net_pnl
     weeks[weekStart].trade_count += d.trade_count

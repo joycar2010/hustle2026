@@ -62,13 +62,23 @@
                 </div>
                 <div>
                   <label class="block text-sm font-medium mb-2">飞书手机号</label>
-                  <input
-                    v-model="formData.feishu_mobile"
-                    type="text"
-                    class="w-full px-3 py-2 bg-dark-100 border border-border-primary rounded focus:outline-none focus:border-primary"
-                    placeholder="+8613800138000"
-                  />
-                  <p class="text-xs text-text-secondary mt-1">需包含国家代码，如 +86</p>
+                  <div class="flex gap-2">
+                    <input
+                      v-model="formData.feishu_mobile"
+                      type="text"
+                      class="flex-1 px-3 py-2 bg-dark-100 border border-border-primary rounded focus:outline-none focus:border-primary"
+                      placeholder="+8613800138000"
+                    />
+                    <button
+                      type="button"
+                      @click="lookupFeishuId"
+                      :disabled="feishuLookupLoading || !formData.feishu_mobile"
+                      class="px-3 py-2 bg-[#3370ff] hover:bg-[#2860e6] text-white rounded text-sm font-medium whitespace-nowrap transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      {{ feishuLookupLoading ? '查询中...' : '获取飞书ID' }}
+                    </button>
+                  </div>
+                  <p class="text-xs text-text-secondary mt-1">需包含国家代码，如 +86；点击「获取飞书ID」按手机号自动回填 Open ID / Union ID</p>
                 </div>
                 <div>
                   <label class="block text-sm font-medium mb-2">飞书 Union ID</label>
@@ -142,8 +152,33 @@ const emit = defineEmits(['close', 'updated'])
 
 const authStore = useAuthStore()
 const loading = ref(false)
+const feishuLookupLoading = ref(false)
 const errorMessage = ref('')
 const successMessage = ref('')
+
+// 按飞书手机号查询并回填 Open ID / Union ID（用户自助，参考 testadmin「获取飞书ID」）
+async function lookupFeishuId() {
+  const mobile = (formData.value.feishu_mobile || '').trim()
+  if (!mobile) {
+    errorMessage.value = '请先输入飞书手机号'
+    return
+  }
+  feishuLookupLoading.value = true
+  errorMessage.value = ''
+  successMessage.value = ''
+  try {
+    const r = await api.post('/api/v1/users/me/feishu-lookup', { mobile })
+    const openId = r.data.open_id || r.data.feishu_open_id
+    const unionId = r.data.union_id || r.data.feishu_union_id
+    if (openId) formData.value.feishu_open_id = openId
+    if (unionId) formData.value.feishu_union_id = unionId
+    successMessage.value = r.data.name ? `已找到飞书用户：${r.data.name}，ID 已回填` : '飞书 ID 已回填'
+  } catch (e) {
+    errorMessage.value = e.response?.data?.detail || '飞书查询失败，请检查手机号或飞书服务配置'
+  } finally {
+    feishuLookupLoading.value = false
+  }
+}
 
 const formData = ref({
   username: '',

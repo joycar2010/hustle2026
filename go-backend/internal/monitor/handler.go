@@ -21,10 +21,10 @@ import (
 var startTime = time.Now()
 
 var sslCertPaths = []string{
-	"/etc/letsencrypt/live/go.hustle2026.xyz/fullchain.pem",
-	"/etc/letsencrypt/live/admin.hustle2026.xyz/fullchain.pem",
-	"/etc/letsencrypt/live/www.hustle2026.xyz/fullchain.pem",
-	"/etc/letsencrypt/live/auto.hustle2026.xyz/fullchain.pem",
+	"/etc/letsencrypt/live/test.hustle2026.xyz/fullchain.pem",
+	"/etc/letsencrypt/live/test.hustle2026.xyz/fullchain.pem",
+	"/etc/letsencrypt/live/test.hustle2026.xyz/fullchain.pem",
+	"/etc/letsencrypt/live/test.hustle2026.xyz/fullchain.pem",
 }
 
 func checkRedis(ctx context.Context) map[string]interface{} {

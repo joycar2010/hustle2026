@@ -50,9 +50,9 @@
         </button>
       </div>
       <!-- 自定义时间 -->
-      <input type="datetime-local" v-model="startTime" class="px-2 py-1.5 bg-dark-100 border border-border-primary rounded-lg text-xs focus:outline-none focus:border-primary" />
+      <input type="datetime-local" v-model="startTime" @change="clampRange" class="px-2 py-1.5 bg-dark-100 border border-border-primary rounded-lg text-xs focus:outline-none focus:border-primary" />
       <span class="text-text-tertiary text-xs">至</span>
-      <input type="datetime-local" v-model="endTime" class="px-2 py-1.5 bg-dark-100 border border-border-primary rounded-lg text-xs focus:outline-none focus:border-primary" />
+      <input type="datetime-local" v-model="endTime" @change="clampRange" class="px-2 py-1.5 bg-dark-100 border border-border-primary rounded-lg text-xs focus:outline-none focus:border-primary" />
       <select v-model.number="pageSize" class="px-2 py-1.5 bg-dark-100 border border-border-primary rounded-lg text-xs focus:outline-none focus:border-primary">
         <option v-for="n in [20,50,100,200,500]" :key="n" :value="n">{{ n }} 条/页</option>
       </select>
@@ -203,7 +203,7 @@ const activeRange = ref('1h')
 const activeDir = ref('all')
 const limit = ref(300)
 const oppThreshold = ref(2.0)
-const startTime = ref(dayjs().subtract(1, 'hour').format('YYYY-MM-DDTHH:mm'))
+const startTime = ref(dayjs().subtract(1, 'hour').format('YYYY-MM-DDTHH:mm'))  // default 1h, capped at 2h
 const endTime = ref(dayjs().format('YYYY-MM-DDTHH:mm'))
 const currentPage = ref(1)
 const pageSize = ref(50)
@@ -215,29 +215,34 @@ const chartKey = ref(0)
 let fallbackTimer = null
 
 const timeRanges = [
-  { label: '15分钟', val: '15m' }, { label: '1小时', val: '1h' },
-  { label: '6小时', val: '6h' }, { label: '1天', val: '1d' }, { label: '2天', val: '2d' },
+  { label: '5分钟', val: '5m' },
+  { label: '15分钟', val: '15m' },
+  { label: '30分钟', val: '30m' },
+  { label: '1小时', val: '1h' },
+  { label: '2小时', val: '2h' },
 ]
+// 最大允许时间跨度 (分钟) - 不可超过 2 小时
+const MAX_RANGE_MINUTES = 120
 const directions = [
   { label: '全部', val: 'all' }, { label: '正套', val: 'forward' }, { label: '反套', val: 'reverse' },
 ]
 
 // ── WS message handler ──
 watch(lastMessage, (msg) => {
-  if (!msg || msg.type !== 'spread' || !msg.data) return
+  if (!msg || (msg.type !== 'spread' && msg.type !== 'market_data') || !msg.data) return
   const d = msg.data
-  const pc = d.pair_code || msg.pair_code
+  const pc = msg.pair_code || d.pair_code || msg.data?.pair_code
   if (!pc) return
 
   // Update live data for all pairs
   liveData.value[pc] = {
     forwardEntry: d.forward_entry_spread ?? d.forward_spread ?? 0,
     reverseEntry: d.reverse_entry_spread ?? d.reverse_spread ?? 0,
-    binanceBid: d.binance_bid ?? 0,
-    binanceAsk: d.binance_ask ?? 0,
-    bybitBid: d.bybit_bid ?? 0,
-    bybitAsk: d.bybit_ask ?? 0,
-    ts: msg.timestamp || Date.now(),
+    binanceBid: d.binance_bid ?? d.binance_quote?.bid_price ?? 0,
+    binanceAsk: d.binance_ask ?? d.binance_quote?.ask_price ?? 0,
+    bybitBid: d.bybit_bid ?? d.bybit_quote?.bid_price ?? 0,
+    bybitAsk: d.bybit_ask ?? d.bybit_quote?.ask_price ?? 0,
+    ts: msg.timestamp || d.timestamp || Date.now(),
     hasData: true,
   }
 
@@ -468,10 +473,21 @@ function selectPair(pc) {
 function setRange(val) {
   activeRange.value = val
   currentPage.value = 1
-  const map = { '15m': 15, '1h': 60, '6h': 360, '1d': 1440, '2d': 2880 }
+  const map = { '5m': 5, '15m': 15, '30m': 30, '1h': 60, '2h': 120 }
   startTime.value = dayjs().subtract(map[val], 'minute').format('YYYY-MM-DDTHH:mm')
   endTime.value = dayjs().format('YYYY-MM-DDTHH:mm')
   fetchHistory(1)
+}
+
+// Enforce max 2-hour range on user-typed datetime (clamps start to end - 2h)
+function clampRange() {
+  const start = dayjs(startTime.value)
+  const end = dayjs(endTime.value)
+  if (!start.isValid() || !end.isValid()) return
+  if (end.diff(start, 'minute') > MAX_RANGE_MINUTES) {
+    startTime.value = end.subtract(MAX_RANGE_MINUTES, 'minute').format('YYYY-MM-DDTHH:mm')
+    alert('时间跨度最大 2 小时, 起始时间已自动调整')
+  }
 }
 
 function goToPage(n) {
@@ -490,13 +506,17 @@ async function fetchHistory(page = 1) {
   currentPage.value = page
   const pairConfig = pairs.value.find(p => p.pair_code === activePair.value)
   const binSymbol = pairConfig?.symbol_a?.symbol || pairConfig?.cex_symbol || 'XAUUSDT'
+  const mt5Symbol = pairConfig?.symbol_b?.symbol || pairConfig?.mt5_symbol || binSymbol
   try {
+    // Convert displayed Beijing time to UTC ISO for backend (DB stores UTC)
+    const startUTC = new Date(startTime.value).toISOString()
+    const endUTC = new Date(endTime.value).toISOString()
     const r = await api.get('/api/v1/market/spread/history', {
       params: {
         binance_symbol: binSymbol,
-        bybit_symbol: binSymbol,
-        start_time: startTime.value + ':00',
-        end_time: endTime.value + ':00',
+        bybit_symbol: mt5Symbol,
+        start_time: startUTC,
+        end_time: endUTC,
         page,
         page_size: pageSize.value,
       }
@@ -574,6 +594,8 @@ function spreadColor(v) {
 onMounted(async () => {
   await loadPairs()
   wsConnect()
+  // 自动加载默认时间范围 (1小时) 的历史数据 — 避免页面空白
+  await fetchHistory(1)
   // Subscribe after short delay to ensure WS is connected
   setTimeout(() => {
     if (wsConnected.value) {

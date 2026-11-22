@@ -72,6 +72,7 @@
               <h3 class="font-bold mb-2">后端版本</h3>
               <div class="text-2xl font-mono text-primary mb-2">{{ systemInfo.backend_version }}</div>
               <div class="text-sm text-text-secondary">Python: {{ systemInfo.python_version }}</div>
+              <div class="text-sm text-text-secondary">Rust: {{ systemInfo.rust_version || '1.95.0' }} <span class="text-success text-xs">:8090</span></div>
             </div>
             <div class="bg-dark-200 rounded p-4">
               <h3 class="font-bold mb-2">数据库版本</h3>
@@ -2154,6 +2155,7 @@ const systemInfo = ref({
   frontend_build_time: '2026-02-19 12:00:00',
   backend_version: '1.0.0',
   python_version: '3.13.7',
+  rust_version: '1.95.0',
   db_version: '16.1',
   uptime: '2天 5小时',
   start_time: '2026-02-17 07:00:00'
@@ -3394,7 +3396,8 @@ async function pushToGitHub() {
   if (!confirm('确定要推送当前版本到GitHub吗？')) return
   try {
     const response = await api.post('/api/v1/system/github/push', {
-      remark: pushRemark.value || undefined
+      remark: pushRemark.value || undefined,
+      branch: 'rust'
     })
 
     // Check if there's a warning about excluded large files
@@ -3431,7 +3434,7 @@ async function refreshVersionHistory() {
 async function rollbackToVersion(hash) {
   if (!confirm(`确定要回滚到版本 ${hash.substring(0, 7)} 吗？这将重置当前代码！`)) return
   try {
-    await api.post('/api/v1/system/github/rollback', { hash })
+    await api.post('/api/v1/system/github/rollback', { hash, branch: 'rust' })
     alert('回滚成功，请重启系统')
     await loadVersionHistory()
   } catch (error) {
@@ -3457,7 +3460,7 @@ async function rollbackVersion() {
   const version = prompt('请输入要回滚到的版本号:')
   if (!version) return
   try {
-    await api.post('/api/v1/system/github/rollback', { version })
+    await api.post('/api/v1/system/github/rollback', { version, branch: 'rust' })
     alert('回滚成功，请重启系统')
   } catch (error) {
     console.error('Failed to rollback:', error)
@@ -3505,7 +3508,7 @@ async function handleBackupSelect(type) {
   if (type === 'github') {
     if (!confirm('确定要备份数据库至 GitHub 吗？')) return
     try {
-      const response = await api.post('/api/v1/system/github/push', { remark: '数据库备份' })
+      const response = await api.post('/api/v1/system/github/push', { remark: '数据库备份', branch: 'rust' })
       alert(`备份至 GitHub 成功: ${response.data.branch}`)
     } catch (error) {
       console.error('Failed to backup to GitHub:', error)

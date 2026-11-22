@@ -6,7 +6,7 @@
         <!-- Logo -->
         <div class="flex items-center space-x-6">
           <router-link to="/" class="flex items-center space-x-3 flex-shrink-0">
-            <img src="/logo.png" alt="Hustle XAU" class="w-10 h-10 shadow-lg" />
+            <img src="/logo.png" alt="HustleXAU Admin" class="w-10 h-10 object-contain" />
             <div class="hidden md:block">
               <div class="text-lg font-bold text-text-primary">HustleXAU Admin</div>
               <div class="text-xs text-red-400">总控管理平台</div>
@@ -112,11 +112,13 @@ function openDetached(path) {
 const navItems = [
   { path: '/', label: '总控面板', icon: 'dashboard', dblClickHint: '双击独立窗口', onDblClick: () => openDetached('/') },
   { path: '/ws-monitor', label: 'WS监控', icon: 'signal', dblClickHint: '双击独立窗口', onDblClick: () => openDetached('/ws-monitor') },
-  { path: '/spread', label: '点差分析', icon: 'chart', dblClickHint: '双击独立窗口', onDblClick: () => openDetached('/spread') },
-  { path: '/strategies', label: '策略配置', icon: 'gear', dblClickHint: '双击独立窗口', onDblClick: () => openDetached('/strategies') },
+  { path: '/strategies', label: '策略引擎配置', icon: 'gear', dblClickHint: '双击独立窗口', onDblClick: () => openDetached('/strategies') },
+  { path: '/guard-rules', label: 'Guard 规则', icon: 'cog', dblClickHint: '双击独立窗口', onDblClick: () => openDetached('/guard-rules') },
+  { path: '/strategy-processes', label: '策略进程', icon: 'signal', dblClickHint: '双击独立窗口', onDblClick: () => openDetached('/strategy-processes') },
   { path: '/hedging', label: '对冲管理', icon: 'exchange', dblClickHint: '双击独立窗口', onDblClick: () => openDetached('/hedging') },
+  { path: '/ai-arb', label: 'AI套利分析', icon: 'signal', dblClickHint: '双击独立窗口', onDblClick: () => openDetached('/ai-arb') },
+  { path: '/ledger-summary', label: '手工对账汇总', icon: 'cog', dblClickHint: '双击独立窗口', onDblClick: () => openDetached('/ledger-summary') },
   { path: '/users', label: '用户管理', icon: 'users', dblClickHint: '双击独立窗口', onDblClick: () => openDetached('/users') },
-  { path: '/risk', label: '风控面板', icon: 'chart', dblClickHint: '双击独立窗口', onDblClick: () => openDetached('/risk') },
   { path: '/system', label: '系统管理', icon: 'cog', dblClickHint: '双击独立窗口', onDblClick: () => openDetached('/system') },
 ]
 

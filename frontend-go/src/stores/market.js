@@ -2,7 +2,7 @@ import { defineStore } from 'pinia'
 import { ref, watch } from 'vue'
 import { useTradingPair } from '@/composables/useTradingPair'
 
-// Same-origin WebSocket by default: nginx routes /ws → Go (8080) /api/v1/ws.
+// Same-origin WebSocket by default: nginx routes /ws → Rust Engine (8090) /api/v1/ws.
 // Runtime construction guarantees wss:// on HTTPS pages (avoids mixed-content blocks).
 const WS_URL = (
   import.meta.env.VITE_WS_URL
@@ -14,7 +14,21 @@ export const useMarketStore = defineStore('market', () => {
   const accountBalanceData = ref(null) // 新增：账户余额数据
   const connected = ref(false)
   const lastMessage = ref(null)
+  const strategyMessage = ref(null)
+  const _STRATEGY_MSG_TYPES = new Set([
+    'strategy_trigger_progress',
+    'strategy_trigger_reset',
+    'strategy_position_change',
+    'strategy_execution_started',
+    'strategy_execution_completed',
+    'strategy_execution_error',
+    'strategy_order_executed',
+    'strategy_orders_filled',
+    'strategy_stop_confirmed',
+  ])
   // Real-time position snapshot — updated on every position_snapshot WebSocket message
+  const marketRates = ref({ funding: null, swap: null })
+  const quoteDivergence = ref(null)  // 行情背离软暂停状态
   const positionSnapshot = ref({
     bybit_long_lots: 0,
     bybit_short_lots: 0,
@@ -28,9 +42,101 @@ export const useMarketStore = defineStore('market', () => {
   let ws = null
   let reconnectTimer = null
   let token = null
+  let deadTimer = null
+  let freshnessTimer = null
+  let lastMarketDataAt = 0
+  let lastMarketTimestamp = 0
+  let restRefreshInFlight = false
+
+  // 数据活性看门狗:Rust /ws 对每个连接每≤3.5s 推一帧;静默 >20s 判半开假死 → close 触发重连。
+  // (服务端不回应用层 pong,故以"入站消息活性"判活,而非等 pong。)
+  function _armDead() {
+    if (deadTimer) clearTimeout(deadTimer)
+    deadTimer = setTimeout(() => { try { ws && ws.close() } catch (_) {} }, 20000)
+  }
+  function _clearDead() { if (deadTimer) { clearTimeout(deadTimer); deadTimer = null } }
+  // 聚焦/联网自愈:回前台/联网,断了立即重连,连着则补探活性。
+  function _wake() {
+    if (!ws || ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING) {
+      if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null }
+      connect()
+    } else if (ws.readyState === WebSocket.OPEN) {
+      _armDead()
+    }
+  }
 
   function getToken() {
     return localStorage.getItem('token') || ''
+  }
+
+  function _finite(value, fallback = 0) {
+    const n = Number(value)
+    return Number.isFinite(n) ? n : fallback
+  }
+
+  function _markMarketFresh(sourceTimestamp) {
+    const timestamp = Number(sourceTimestamp)
+    if (!Number.isFinite(timestamp) || timestamp <= 0) {
+      lastMarketDataAt = Date.now()
+      return
+    }
+    if (timestamp > lastMarketTimestamp) {
+      lastMarketTimestamp = timestamp
+      lastMarketDataAt = Date.now()
+    }
+  }
+
+  function _applyMarketData(data) {
+    if (!data || data.error) return false
+    const a = data.binance_quote || data.a_quote || {}
+    const b = data.bybit_quote || data.b_quote || {}
+    const binanceBid = _finite(a.bid_price ?? data.binance_bid)
+    const binanceAsk = _finite(a.ask_price ?? data.binance_ask)
+    const bybitBid = _finite(b.bid_price ?? data.bybit_bid)
+    const bybitAsk = _finite(b.ask_price ?? data.bybit_ask)
+    if (!binanceBid || !binanceAsk || !bybitBid || !bybitAsk) return false
+
+    marketData.value = {
+      binance_bid: binanceBid,
+      binance_ask: binanceAsk,
+      binance_mid: _finite(data.binance_mid, (binanceBid + binanceAsk) / 2),
+      binance_bid_qty: _finite(a.bid_qty ?? data.binance_bid_qty),
+      binance_ask_qty: _finite(a.ask_qty ?? data.binance_ask_qty),
+      bybit_bid: bybitBid,
+      bybit_ask: bybitAsk,
+      bybit_mid: _finite(data.bybit_mid, (bybitBid + bybitAsk) / 2),
+      bybit_bid_qty: _finite(b.bid_qty ?? data.bybit_bid_qty),
+      bybit_ask_qty: _finite(b.ask_qty ?? data.bybit_ask_qty),
+      timestamp: data.timestamp ?? Date.now(),
+    }
+    _markMarketFresh(data.timestamp)
+    return true
+  }
+
+  async function _refreshMarketDataViaRest(force = false) {
+    if (restRefreshInFlight) return
+    if (!force && Date.now() - lastMarketDataAt < 6000) return
+    restRefreshInFlight = true
+    const requestedPair = currentPair.value || 'XAU'
+    try {
+      const authToken = getToken()
+      const response = await fetch(`/api/v1/market/spread?pair=${encodeURIComponent(requestedPair)}`, {
+        cache: 'no-store',
+        headers: authToken ? { Authorization: `Bearer ${authToken}` } : {},
+      })
+      if (!response.ok) return
+      const data = await response.json()
+      if (currentPair.value === requestedPair) _applyMarketData(data)
+    } catch (_) {
+      // WebSocket remains the primary path; the next watchdog pass retries REST.
+    } finally {
+      restRefreshInFlight = false
+    }
+  }
+
+  function _ensureFreshnessWatch() {
+    if (freshnessTimer) return
+    freshnessTimer = setInterval(() => _refreshMarketDataViaRest(false), 2000)
   }
 
   function connect() {
@@ -48,25 +154,35 @@ export const useMarketStore = defineStore('market', () => {
     }
 
     const url = `${WS_URL}?token=${token}`
-    console.log('[WebSocket] Connecting to:', url)
+    console.log('[WebSocket] Connecting to:', WS_URL)
 
-    ws = new WebSocket(url)
+    const socket = new WebSocket(url)
+    ws = socket
 
-    ws.onopen = () => {
+    socket.onopen = () => {
+      if (ws !== socket) {
+        socket.close()
+        return
+      }
       console.log('[WebSocket] Connected successfully')
       connected.value = true
+      _armDead()
       if (reconnectTimer) {
         clearTimeout(reconnectTimer)
         reconnectTimer = null
       }
       // 连接成功后立即请求持仓快照，避免等待30s定时广播
-      ws.send(JSON.stringify({ type: 'request_snapshot' }))
+      socket.send(JSON.stringify({ type: 'request_snapshot' }))
       // Subscribe to current trading pair room for per-pair market data
       const { currentPair } = useTradingPair()
-      ws.send(JSON.stringify({ type: 'subscribe', pairs: [currentPair.value] }))
+      socket.send(JSON.stringify({ type: 'subscribe', pairs: [currentPair.value] }))
+      _ensureFreshnessWatch()
+      _refreshMarketDataViaRest(true)
     }
 
-    ws.onmessage = (event) => {
+    socket.onmessage = (event) => {
+      if (ws !== socket) return
+      _armDead()
       try {
         const msg = JSON.parse(event.data)
 
@@ -75,8 +191,12 @@ export const useMarketStore = defineStore('market', () => {
           console.log('[WebSocket] Received account_balance message', new Date().toISOString())
         }
 
-        // Store last message for components to watch
-        lastMessage.value = msg
+        // Route strategy messages to dedicated ref (avoids triggering unrelated watchers)
+        if (_STRATEGY_MSG_TYPES.has(msg.type)) {
+          strategyMessage.value = msg
+        } else {
+          lastMessage.value = msg
+        }
 
         // Global risk_alert handler — must run regardless of which page/component is active.
         // Previously only Risk.vue watched for this, so alerts were lost on TradingDashboard etc.
@@ -85,6 +205,14 @@ export const useMarketStore = defineStore('market', () => {
           import('@/stores/notification').then(({ useNotificationStore }) => {
             useNotificationStore().handleRiskAlert(msg.data)
           }).catch(e => console.error('[WebSocket] risk_alert dispatch failed:', e))
+        }
+
+        if (msg.type === 'market_rates' && msg.data) {
+          marketRates.value = msg.data
+        }
+
+        if (msg.type === 'quote_divergence' && msg.data) {
+          quoteDivergence.value = msg.data
         }
 
         if (msg.type === 'position_snapshot' && msg.data) {
@@ -108,38 +236,11 @@ export const useMarketStore = defineStore('market', () => {
         }
 
         if (msg.type === 'market_data' && msg.data) {
-          const d = msg.data
-          // Normalise field names from SpreadData model
-          marketData.value = {
-            binance_bid: d.binance_quote?.bid_price ?? d.binance_bid ?? 0,
-            binance_ask: d.binance_quote?.ask_price ?? d.binance_ask ?? 0,
-            binance_mid: d.binance_mid ?? ((d.binance_quote?.bid_price + d.binance_quote?.ask_price) / 2) ?? 0,
-            binance_bid_qty: d.binance_quote?.bid_qty ?? 0,
-            binance_ask_qty: d.binance_quote?.ask_qty ?? 0,
-            bybit_bid: d.bybit_quote?.bid_price ?? d.bybit_bid ?? 0,
-            bybit_ask: d.bybit_quote?.ask_price ?? d.bybit_ask ?? 0,
-            bybit_mid: d.bybit_mid ?? ((d.bybit_quote?.bid_price + d.bybit_quote?.ask_price) / 2) ?? 0,
-            bybit_bid_qty: d.bybit_quote?.bid_qty ?? 0,
-            bybit_ask_qty: d.bybit_quote?.ask_qty ?? 0,
-            timestamp: d.timestamp,
-          }
+          _applyMarketData(msg.data)
         }
-        // Go native pusher sends type:"spread" with both Binance+Bybit prices every 500ms
+        // Rust Engine sends type:"spread" with both Binance+Bybit prices every 500ms
         else if (msg.type === 'spread' && msg.data) {
-          const d = msg.data
-          marketData.value = {
-            binance_bid: d.binance_bid ?? 0,
-            binance_ask: d.binance_ask ?? 0,
-            binance_mid: d.binance_bid != null ? (d.binance_bid + d.binance_ask) / 2 : 0,
-            binance_bid_qty: d.binance_bid_qty ?? 0,
-            binance_ask_qty: d.binance_ask_qty ?? 0,
-            bybit_bid:   d.bybit_bid   ?? 0,
-            bybit_ask:   d.bybit_ask   ?? 0,
-            bybit_mid:   d.bybit_bid   != null ? (d.bybit_bid + d.bybit_ask) / 2 : 0,
-            bybit_bid_qty: d.bybit_bid_qty ?? 0,
-            bybit_ask_qty: d.bybit_ask_qty ?? 0,
-            timestamp:   d.timestamp,
-          }
+          _applyMarketData(msg.data)
         }
         // Go TickPusher: 250ms Binance-only tick — merge into marketData
         else if (msg.type === 'tick' && msg.data) {
@@ -158,6 +259,7 @@ export const useMarketStore = defineStore('market', () => {
             bybit_ask_qty: prev?.bybit_ask_qty ?? 0,
             timestamp: d.timestamp ?? prev?.timestamp,
           }
+          _markMarketFresh(d.timestamp)
         }
         // Handle account balance updates
         else if (msg.type === 'account_balance' && msg.data) {
@@ -177,9 +279,11 @@ export const useMarketStore = defineStore('market', () => {
       }
     }
 
-    ws.onclose = (event) => {
+    socket.onclose = (event) => {
+      if (ws !== socket) return
       connected.value = false
       ws = null
+      _clearDead()
 
       // If closed due to authentication failure (code 1008), don't reconnect
       // User needs to login again
@@ -200,20 +304,29 @@ export const useMarketStore = defineStore('market', () => {
       reconnectTimer = setTimeout(connect, 500)
     }
 
-    ws.onerror = () => {
-      ws?.close()
+    socket.onerror = () => {
+      socket.close()
     }
   }
 
   function disconnect() {
+    _clearDead()
+    if (freshnessTimer) {
+      clearInterval(freshnessTimer)
+      freshnessTimer = null
+    }
     if (reconnectTimer) {
       clearTimeout(reconnectTimer)
       reconnectTimer = null
     }
     if (ws) {
-      ws.onclose = null
-      ws.close()
+      const socket = ws
       ws = null
+      socket.onopen = null
+      socket.onmessage = null
+      socket.onerror = null
+      socket.onclose = null
+      socket.close()
     }
     connected.value = false
   }
@@ -221,6 +334,11 @@ export const useMarketStore = defineStore('market', () => {
   // Force a full reconnect — used on user switch so the new JWT is used.
   // Token is re-read from localStorage inside connect().
   function reconnect() {
+    const latestToken = getToken()
+    if (ws && token === latestToken &&
+        (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN)) {
+      return
+    }
     disconnect()
     token = null  // force getToken() to re-read fresh token
     positionSnapshot.value = {
@@ -234,8 +352,9 @@ export const useMarketStore = defineStore('market', () => {
   }
 
   // Keep fetchMarketData for any legacy callers — returns last known data
-  function fetchMarketData() {
-    return Promise.resolve(marketData.value)
+  async function fetchMarketData() {
+    await _refreshMarketDataViaRest(true)
+    return marketData.value
   }
 
   // Request an immediate position snapshot from the backend (bypasses 30s broadcast cycle)
@@ -249,17 +368,32 @@ export const useMarketStore = defineStore('market', () => {
   // Re-subscribe to correct pair room when global pair selector changes
   const { currentPair } = useTradingPair()
   watch(currentPair, (newPair, oldPair) => {
+    // 20260707: 切对即清空行情快照 — 否则新对无数据流时(如新建对Rust未重启/休市)
+    // 页面会一直显示上一个对的残价(BTC页显示XAUUSDT金价实证), 错值比空值危险。
+    marketData.value = null
+    lastMarketDataAt = 0
+    lastMarketTimestamp = 0
     if (ws && ws.readyState === WebSocket.OPEN) {
       if (oldPair) ws.send(JSON.stringify({ type: 'unsubscribe', pairs: [oldPair] }))
       ws.send(JSON.stringify({ type: 'subscribe', pairs: [newPair] }))
     }
+    _refreshMarketDataViaRest(true)
   })
 
+  // 聚焦/联网自愈监听(store 单例,仅注册一次)
+  if (typeof window !== 'undefined') {
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') _wake() })
+    window.addEventListener('online', _wake)
+  }
+
   return {
+    marketRates,
+    quoteDivergence,
     marketData,
     accountBalanceData,
     connected,
     lastMessage,
+    strategyMessage,
     positionSnapshot,
     connect,
     disconnect,
