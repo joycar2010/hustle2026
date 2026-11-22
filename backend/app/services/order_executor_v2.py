@@ -136,8 +136,8 @@ class OrderExecutorV2:
         self.bybit_timeout = 1.0  # 0.3→1.0: ICMarkets撮合需要更多等待时间
         self.max_retries = 3  # 1→3: 增加重试次数，降低单腿风险
         self.order_check_interval = 0.5  # 0.2→0.5: 每次平仓REST调用减少60%，防止IP封禁
-        self.spread_check_interval = 0.5
-        self.spread_cancel_tolerance = 0.5
+        self.spread_check_interval = 0.1   # 0.5→0.1: 100ms guard tick, faster reaction to unfavorable spread drift
+        self.spread_cancel_tolerance = 0.2  # 0.5→0.2: tighter ribbon; cancel when spread moves 0.2 against us
         self.mt5_deal_sync_wait = 5.0  # 3.0→5.0: MT5成交同步最大等待时间
         self.mt5_poll_interval = 0.5  # 新增：轮询检查间隔（每0.5秒检查一次）
         self.mt5_deal_recheck_wait = 1.0  # 2.0→1.0: 二次确认等待时间缩短
@@ -1357,6 +1357,7 @@ class OrderExecutorV2:
                 spread_threshold=spread_threshold,
                 compare_op=compare_op,
                 strategy_type=strategy_type,
+                pair_code=pair_code,
             )
         elif account.platform_id == 2:
             return await self._monitor_bybit_linear_order(
@@ -1458,7 +1459,8 @@ class OrderExecutorV2:
         timeout: float,
         spread_threshold: float = None,
         compare_op: str = None,
-        strategy_type: str = None
+        strategy_type: str = None,
+        pair_code: str = "XAU",
     ) -> dict:
         """
         Monitor Binance order via User Data Stream (ORDER_TRADE_UPDATE) — zero REST polling.
@@ -1498,7 +1500,13 @@ class OrderExecutorV2:
                     if fill_event.is_set():
                         break
                     try:
-                        market_data = await market_data_service.get_current_spread()
+                        # CRITICAL: query the SAME pair the strategy is on (e.g. ICXAU),
+                        # not the default XAU. Mismatched symbols = guard reads wrong
+                        # spread = never fires = unfavorable drift goes unchecked.
+                        sym_a_g, sym_b_g = _get_pair_symbols(pair_code)
+                        market_data = await market_data_service.get_current_spread(
+                            binance_symbol=sym_a_g, bybit_symbol=sym_b_g
+                        )
                         spreads = market_data_service.calculate_spread(
                             market_data.binance_quote,
                             market_data.bybit_quote

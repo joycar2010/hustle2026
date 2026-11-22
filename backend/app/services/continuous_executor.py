@@ -12,6 +12,7 @@ from app.services.trigger_manager import TriggerCountManager, CompareOperator
 from app.services.market_service import market_data_service
 from app.services.strategy_status_pusher import status_pusher
 from app.utils.quantity_converter import quantity_converter
+from app.core.config import settings
 
 
 logger = logging.getLogger(__name__)
@@ -89,6 +90,81 @@ class ContinuousStrategyExecutor:
         self.current_ladder_index = 0
         self.trigger_mgr: Optional[TriggerCountManager] = None
         self.user_id: Optional[str] = None
+        self._active_key: Optional[str] = None
+
+    async def _init_redis(self):
+        if not hasattr(self, '_redis') or self._redis is None:
+            import redis.asyncio as aioredis
+            self._redis = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
+
+    def _make_active_key(self, strategy_type: str) -> str:
+        direction = 'reverse' if 'reverse' in strategy_type else 'forward'
+        action = 'opening' if 'opening' in strategy_type else 'closing'
+        return f"strategy_active:{self.user_id}:{direction}_{action}"
+
+    async def _is_peer_running(self, strategy_type: str) -> bool:
+        try:
+            direction = 'reverse' if 'reverse' in strategy_type else 'forward'
+            if 'opening' in strategy_type:
+                peer_key = f"strategy_active:{self.user_id}:{direction}_closing"
+            else:
+                peer_key = f"strategy_active:{self.user_id}:{direction}_opening"
+            return bool(await self._redis.exists(peer_key))
+        except Exception:
+            return False
+
+    _rest_pos_cache: dict = {}
+    _REST_POS_CACHE_TTL = 3.0
+
+    async def _get_live_position(self, binance_account, strategy_type: str) -> float:
+        """Get actual Binance position — WS cache first, REST fallback."""
+        sym_a, _, _ = _get_pair_config(self.pair_code)
+        try:
+            from app.tasks.broadcast_tasks import position_streamer
+            uid = self.user_id or "_default"
+            bn = position_streamer._binance_positions.get(uid, {})
+            if sym_a in bn:
+                long_v, short_v = bn[sym_a]
+                return short_v if 'reverse' in strategy_type else long_v
+            bn_def = position_streamer._binance_positions.get("_default", {})
+            if sym_a in bn_def:
+                long_v, short_v = bn_def[sym_a]
+                return short_v if 'reverse' in strategy_type else long_v
+        except Exception:
+            pass
+
+        import time as _time
+        cache_key = f"{self.user_id}:{self.pair_code}:{strategy_type}"
+        cached = ContinuousStrategyExecutor._rest_pos_cache.get(cache_key)
+        now = _time.time()
+        if cached and (now - cached[1]) < self._REST_POS_CACHE_TTL:
+            return cached[0]
+
+        try:
+            from app.services.binance_client import BinanceFuturesClient
+            if not hasattr(binance_account, '_pos_client'):
+                from app.core.proxy_utils import build_proxy_url
+                binance_account._pos_client = BinanceFuturesClient(
+                    binance_account.api_key, binance_account.api_secret,
+                    proxy_url=build_proxy_url(getattr(binance_account, 'proxy_config', None)),
+                )
+            positions = await binance_account._pos_client.get_position_risk(symbol=sym_a)
+            total = 0.0
+            for pos in positions:
+                amt = float(pos.get('positionAmt', 0))
+                if 'reverse' in strategy_type:
+                    if amt < 0:
+                        total += abs(amt)
+                else:
+                    if amt > 0:
+                        total += amt
+            ContinuousStrategyExecutor._rest_pos_cache[cache_key] = (total, now)
+            return total
+        except Exception as e:
+            logger.warning(f"Failed to query live position: {e}")
+            if cached:
+                return cached[0]
+            return -1.0
 
     # ----- MT5 first-trade preflight check -----
     # When MT5 broker reopens (weekend/daily break), QUOTE feed comes back 3-5 min
@@ -102,8 +178,16 @@ class ContinuousStrategyExecutor:
     MT5_PREFLIGHT_TTL_S: float = 2 * 3600.0
 
     async def _ensure_mt5_trade_mode(self, bybit_account, sym_b: str) -> bool:
-        """Pre-trade gate: only the FIRST trade after >2h idle actually probes
-        MT5 trade_mode. Subsequent trades short-circuit on cached verification."""
+        """Pre-trade gate that PREVENTS the closed-market single-leg.
+
+        FIX(2026-06): trade_mode is a STATIC symbol permission and stays == 4 (FULL)
+        even when the market session is closed, so it could NOT catch the
+        "open quote feed but trade engine rejects with retcode=10018 Market closed"
+        window. We now require symbol_info.trade_allowed == True (the real-time
+        tradability flag) plus quote freshness, and we re-check on EVERY trade
+        (short 8s cache) because a session can close at any time.
+        Any uncertainty -> return False (refuse), never optimistic.
+        """
         import time as _t, os, httpx
         from app.services.order_executor_v2 import _get_trading_bridge_url
 
@@ -115,34 +199,65 @@ class ContinuousStrategyExecutor:
 
         key = (bridge_url, sym_b)
         now = _t.time()
+        # Short cache: only reuse a recent POSITIVE result for up to 8s.
         last_ok = ContinuousStrategyExecutor._mt5_trade_mode_verified_at.get(key)
-        if last_ok is not None and (now - last_ok) < self.MT5_PREFLIGHT_TTL_S:
+        if last_ok is not None and (now - last_ok) < 8.0:
             return True
 
-        api_key = os.getenv("MT5_API_KEY", os.getenv("MT5_BRIDGE_API_KEY", ""))
+        api_key = os.getenv("MT5_API_KEY", os.getenv("MT5_BRIDGE_API_KEY", "OQ6bUimHZDmXEZzJKE"))
         headers = {"X-Api-Key": api_key} if api_key else {}
         try:
             async with httpx.AsyncClient(timeout=3.0) as c:
                 r = await c.get(f"{bridge_url}/mt5/symbol_info/{sym_b}", headers=headers)
             if r.status_code != 200:
-                logger.warning(f"[MT5_PREFLIGHT] {sym_b}@{bridge_url} http={r.status_code} - refusing first trade")
+                logger.warning(f"[MT5_PREFLIGHT] {sym_b}@{bridge_url} http={r.status_code} - refusing trade")
                 return False
             info = r.json()
+
+            # 1) Real-time tradability flag (PRIMARY signal).
+            trade_allowed = info.get("trade_allowed")
+            # 2) Static permission (secondary).
             tmode_raw = info.get("trade_mode")
-            if tmode_raw is None:
-                logger.info(f"[MT5_PREFLIGHT] {sym_b}@{bridge_url} old bridge (no trade_mode field) - proceeding optimistically")
-                ContinuousStrategyExecutor._mt5_trade_mode_verified_at[key] = now
-                return True
-            tmode = int(tmode_raw)
-            if tmode == 4:
-                ContinuousStrategyExecutor._mt5_trade_mode_verified_at[key] = now
-                logger.info(f"[MT5_PREFLIGHT] OK {sym_b}@{bridge_url} trade_mode=FULL verified, next probe in {int(self.MT5_PREFLIGHT_TTL_S/60)}min unless idle")
-                return True
-            mode_name = {0:"DISABLED",1:"LONGONLY",2:"SHORTONLY",3:"CLOSEONLY",4:"FULL"}.get(tmode, str(tmode))
-            logger.warning(f"[MT5_PREFLIGHT] BLOCK {sym_b}@{bridge_url} trade_mode={mode_name} ({tmode}) - MT5 broker not fully open yet; deferring iter")
-            return False
+            tmode = int(tmode_raw) if tmode_raw is not None else None
+            # 3) Quote freshness: stale quotes => session likely closed/feed down.
+            q_time = info.get("time")
+            fresh = True
+            if q_time:
+                try:
+                    fresh = (now - float(q_time)) <= 120.0
+                except (TypeError, ValueError):
+                    fresh = True
+
+            # Block conditions (any) -> refuse, no caching.
+            if trade_allowed is False:
+                logger.warning(
+                    f"[MT5_PREFLIGHT] BLOCK {sym_b}@{bridge_url} trade_allowed=False "
+                    f"(market session closed) - deferring to prevent single-leg"
+                )
+                return False
+            if tmode is not None and tmode != 4:
+                mode_name = {0:"DISABLED",1:"LONGONLY",2:"SHORTONLY",3:"CLOSEONLY",4:"FULL"}.get(tmode, str(tmode))
+                logger.warning(f"[MT5_PREFLIGHT] BLOCK {sym_b}@{bridge_url} trade_mode={mode_name} - deferring")
+                return False
+            if not fresh:
+                logger.warning(
+                    f"[MT5_PREFLIGHT] BLOCK {sym_b}@{bridge_url} stale quote (age>120s) - deferring"
+                )
+                return False
+            if trade_allowed is None and (tmode is None):
+                # Old bridge with neither field -> cannot verify, refuse for safety
+                logger.warning(f"[MT5_PREFLIGHT] {sym_b}@{bridge_url} no trade_allowed/trade_mode field - refusing (safe default)")
+                return False
+
+            # Passed all checks.
+            ContinuousStrategyExecutor._mt5_trade_mode_verified_at[key] = now
+            logger.info(
+                f"[MT5_PREFLIGHT] OK {sym_b}@{bridge_url} trade_allowed=True "
+                f"trade_mode={tmode} fresh={fresh}"
+            )
+            return True
         except Exception as e:
-            logger.warning(f"[MT5_PREFLIGHT] {sym_b}@{bridge_url} probe error: {e} - refusing first trade (safe default)")
+            logger.warning(f"[MT5_PREFLIGHT] {sym_b}@{bridge_url} probe error: {e} - refusing trade (safe default)")
             return False
 
     def _mt5_preflight_refresh(self, bybit_account, sym_b: str) -> None:
@@ -195,9 +310,11 @@ class ContinuousStrategyExecutor:
         self.user_id = user_id
         self._bybit_account = bybit_account
         self._binance_account = binance_account  # stored for position snapshot
-        self.position_mgr.reset_strategy(self.strategy_id)
+        await self._init_redis()
+        self._active_key = self._make_active_key('reverse_opening')
 
         try:
+            await self._redis.set(self._active_key, "1", ex=3600)
             return await self._execute_continuous_v2(
                 strategy_type='reverse_opening',
                 binance_account=binance_account,
@@ -222,6 +339,14 @@ class ContinuousStrategyExecutor:
                     pass
             return {'success': False, 'error': str(e)}
         finally:
+            if self._active_key:
+                try:
+                    import redis.asyncio as _aioredis
+                    _r = _aioredis.from_url(settings.REDIS_URL, decode_responses=True)
+                    await _r.delete(self._active_key)
+                    await _r.aclose()
+                except Exception:
+                    pass
             self.is_running = False
 
     async def _execute_ladder(
@@ -267,11 +392,15 @@ class ContinuousStrategyExecutor:
         MIN_HEDGE_LOT = 0.01         # ICMarkets minimum lot size
         loop_count = 0
         current_position = 0  # initialise so the post-loop debug block always has a value
+        # Reset position counter for this ladder iteration — V2 passes total_qty
+        # as the remaining capacity (not absolute), so the counter must start at 0.
+        self.position_mgr.reset_ladder(self.strategy_id, ladder_idx)
+
         while self.is_running and not self.stop_requested:
             loop_count += 1
 
             # Step 1: Check position
-            # Get memory position (how much we've opened/closed so far)
+            # Get memory position (how much we've opened/closed IN THIS ITERATION)
             position_info = self.position_mgr.get_position(
                 self.strategy_id,
                 ladder_idx,
@@ -721,6 +850,7 @@ class ContinuousStrategyExecutor:
 
                 # CRITICAL FIX: Even if execution failed, record Binance filled qty to prevent over-trading
                 binance_filled = exec_result.get('binance_filled_qty', 0)
+                bybit_filled = exec_result.get('bybit_filled_qty', 0)
                 if binance_filled > 0:
                     # Record the filled quantity to position manager
                     self.position_mgr.record_opening(
@@ -730,6 +860,24 @@ class ContinuousStrategyExecutor:
                         binance_filled
                     )
                     logger.warning(f"Execution failed but Binance filled {binance_filled} XAU - recorded to prevent over-trading")
+
+                # ── CRITICAL SAFETY (2026-06): opening single-leg => HALT immediately ──
+                # A-side (Binance) filled but B-side (MT5/Bybit) did NOT. Continuing the
+                # loop here is what accumulated the 20-lot naked short on 2026-06-01.
+                # Stop the strategy NOW so no further batches open against a closed/failed
+                # hedge market. Risk-alert already fired via the single-leg detector.
+                if ('opening' in strategy_type) and binance_filled > 0 and bybit_filled == 0:
+                    logger.error(
+                        f"[SINGLE_LEG_HALT] Opening single-leg (Binance={binance_filled} XAU, "
+                        f"MT5=0) - HALTING strategy to prevent further naked exposure"
+                    )
+                    self.is_running = False
+                    self.stop_requested = True
+                    try:
+                        await self._push_stop_confirmed(strategy_type)
+                    except Exception:
+                        pass
+                    return {'success': False, 'error': 'single_leg_halt', 'single_leg': True}
 
                 self.trigger_mgr.reset()
                 await self._push_trigger_reset(ladder_idx, strategy_type)
@@ -945,28 +1093,39 @@ class ContinuousStrategyExecutor:
         ladders,
         order_qty_limit: float,
     ):
-        """Position-based continuous execution with dynamic ladder selection.
+        """Position-based continuous execution with live exchange position.
 
-        Replaces the sequential for-loop through ladders. Runs a SINGLE loop that:
-        1. Reads global position
-        2. Reads current spread
-        3. Uses LadderRangeMapper to determine active ladder + remaining capacity
-        4. Calls _execute_ladder() with a synthetic config for the active ladder
-        5. Re-evaluates after each ladder completion
+        Uses _get_live_position (WS cache, zero REST) as source of truth instead
+        of in-memory position_mgr counters.
+
+        Solo mode (single button): exits when all ladders filled/closed.
+        Dual mode (both buttons): loops forever until manual stop.
         """
         from app.services.ladder_range_mapper import LadderRangeMapper
         mapper = LadderRangeMapper(ladders)
         is_opening = 'opening' in strategy_type
+        scan_count = 0
 
         logger.info(
-            f"[V2] Starting position-based execution: strategy={self.strategy_id} "
+            f"[V2] Starting live-position execution: strategy={self.strategy_id} "
             f"type={strategy_type} ladders={len(ladders)} capacity={mapper.get_global_capacity()}"
         )
 
         while self.is_running and not self.stop_requested:
-            global_pos = self.position_mgr.get_global_position(
-                self.strategy_id, strategy_type
-            )
+            scan_count += 1
+
+            # Refresh Redis TTL periodically
+            if self._active_key and scan_count % 200 == 1:
+                try:
+                    await self._redis.set(self._active_key, "1", ex=3600)
+                except Exception:
+                    pass
+
+            # Get LIVE position from exchange (not memory counter)
+            live_pos = await self._get_live_position(binance_account, strategy_type)
+            if live_pos < 0:
+                await asyncio.sleep(self.trigger_check_interval)
+                continue
 
             try:
                 current_spread = await self._get_current_spread(strategy_type)
@@ -976,33 +1135,29 @@ class ContinuousStrategyExecutor:
                 continue
 
             if is_opening:
-                active = mapper.get_active_ladder_for_opening(global_pos, current_spread)
+                active = mapper.get_active_ladder_for_opening(live_pos, current_spread)
             else:
-                held_pos = mapper.get_global_capacity() - global_pos
-                active = mapper.get_active_ladder_for_closing(held_pos, current_spread)
+                active = mapper.get_active_ladder_for_closing(live_pos, current_spread)
 
             if active is None:
-                if is_opening and global_pos >= mapper.get_global_capacity():
-                    logger.info(f"[V2] All ladders filled: pos={global_pos}/{mapper.get_global_capacity()}")
-                    break
-                if not is_opening and global_pos >= mapper.get_global_capacity():
-                    logger.info(f"[V2] All positions closed: executed={global_pos}/{mapper.get_global_capacity()}")
-                    break
+                peer_running = await self._is_peer_running(strategy_type)
+                if not peer_running:
+                    if is_opening and live_pos >= mapper.get_global_capacity():
+                        logger.info(f"[V2] All ladders filled (solo): live_pos={live_pos}/{mapper.get_global_capacity()}")
+                        break
+                    if not is_opening and live_pos <= 0.001:
+                        logger.info(f"[V2] All positions closed (solo): live_pos={live_pos}")
+                        break
+                if scan_count % 100 == 1:
+                    logger.debug(f"[V2] No active ladder: live_pos={live_pos:.2f} spread={current_spread:.3f}")
                 await asyncio.sleep(self.trigger_check_interval)
                 continue
 
-            if is_opening:
-                logger.info(
-                    f"[V2] Active ladder {active.index}: pos={global_pos}, "
-                    f"spread={current_spread:.3f}, remaining={active.remaining_capacity}, "
-                    f"range=[{active.range_lower}, {active.range_upper}]"
-                )
-            else:
-                logger.info(
-                    f"[V2] Active ladder {active.index}: held={mapper.get_global_capacity() - global_pos}, executed={global_pos}, "
-                    f"spread={current_spread:.3f}, remaining={active.remaining_capacity}, "
-                    f"range=[{active.range_lower}, {active.range_upper}]"
-                )
+            logger.info(
+                f"[V2] Active ladder {active.index}: live_pos={live_pos:.2f}, "
+                f"spread={current_spread:.3f}, remaining={active.remaining_capacity:.2f}, "
+                f"range=[{active.range_lower}, {active.range_upper}]"
+            )
 
             iter_config = LadderConfig(
                 enabled=True,
@@ -1021,21 +1176,17 @@ class ContinuousStrategyExecutor:
                 strategy_type=strategy_type,
                 binance_account=binance_account,
                 bybit_account=bybit_account,
-                order_qty_limit=order_qty_limit,
+                order_qty_limit=min(order_qty_limit, active.remaining_capacity),
             )
 
             if not result['success']:
                 logger.error(f"[V2] Ladder {active.index} failed: {result.get('error')}")
                 return result
 
-            # FIX: If _execute_ladder signals position_exhausted (MT5 has no more positions
-            # to close), exit the entire V2 loop. No closing ladder can run without MT5
-            # positions, so re-entering would create a zombie loop. This is the only safe
-            # exit path for "B-side dry" cases.
             if result.get('position_exhausted'):
                 logger.info(
                     f"[V2] Position exhausted — closing strategy fully terminated. "
-                    f"pos={global_pos}, capacity={mapper.get_global_capacity()}"
+                    f"live_pos={live_pos}, capacity={mapper.get_global_capacity()}"
                 )
                 break
 
@@ -1815,9 +1966,11 @@ class ContinuousStrategyExecutor:
         self.user_id = user_id
         self._bybit_account = bybit_account
         self._binance_account = binance_account
-        self.position_mgr.reset_strategy(self.strategy_id)
+        await self._init_redis()
+        self._active_key = self._make_active_key('forward_opening')
 
         try:
+            await self._redis.set(self._active_key, "1", ex=3600)
             return await self._execute_continuous_v2(
                 strategy_type='forward_opening',
                 binance_account=binance_account,
@@ -1842,6 +1995,14 @@ class ContinuousStrategyExecutor:
                     pass
             return {'success': False, 'error': str(e)}
         finally:
+            if self._active_key:
+                try:
+                    import redis.asyncio as _aioredis
+                    _r = _aioredis.from_url(settings.REDIS_URL, decode_responses=True)
+                    await _r.delete(self._active_key)
+                    await _r.aclose()
+                except Exception:
+                    pass
             self.is_running = False
 
     async def execute_reverse_closing_continuous(
@@ -1872,9 +2033,11 @@ class ContinuousStrategyExecutor:
         self.user_id = user_id
         self._bybit_account = bybit_account
         self._binance_account = binance_account
-        self.position_mgr.reset_strategy(self.strategy_id)
+        await self._init_redis()
+        self._active_key = self._make_active_key('reverse_closing')
 
         try:
+            await self._redis.set(self._active_key, "1", ex=3600)
             result = await self._execute_continuous_v2(
                 strategy_type='reverse_closing',
                 binance_account=binance_account,
@@ -1902,6 +2065,14 @@ class ContinuousStrategyExecutor:
                     pass
             return {'success': False, 'error': str(e)}
         finally:
+            if self._active_key:
+                try:
+                    import redis.asyncio as _aioredis
+                    _r = _aioredis.from_url(settings.REDIS_URL, decode_responses=True)
+                    await _r.delete(self._active_key)
+                    await _r.aclose()
+                except Exception:
+                    pass
             self.is_running = False
 
     async def execute_forward_closing_continuous(
@@ -1932,9 +2103,11 @@ class ContinuousStrategyExecutor:
         self.user_id = user_id
         self._bybit_account = bybit_account
         self._binance_account = binance_account
-        self.position_mgr.reset_strategy(self.strategy_id)
+        await self._init_redis()
+        self._active_key = self._make_active_key('forward_closing')
 
         try:
+            await self._redis.set(self._active_key, "1", ex=3600)
             result = await self._execute_continuous_v2(
                 strategy_type='forward_closing',
                 binance_account=binance_account,
@@ -1962,5 +2135,13 @@ class ContinuousStrategyExecutor:
                     pass
             return {'success': False, 'error': str(e)}
         finally:
+            if self._active_key:
+                try:
+                    import redis.asyncio as _aioredis
+                    _r = _aioredis.from_url(settings.REDIS_URL, decode_responses=True)
+                    await _r.delete(self._active_key)
+                    await _r.aclose()
+                except Exception:
+                    pass
             self.is_running = False
 
