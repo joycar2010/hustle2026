@@ -212,7 +212,7 @@ def maker_pair_residual_report(path: Path, *, since_ts: float = 0.0) -> dict[str
 
 
 def late_edge_activity_report(path: Path, *, since_ts: float = 0.0) -> dict[str, Any]:
-    """Activity KPIs from positions journal (eth5m/sol5m late_edge ledgers)."""
+    """Activity KPIs from positions journal (crypto late_edge product ledgers)."""
     empty = {
         "sessions": 0,
         "open_sessions": 0,

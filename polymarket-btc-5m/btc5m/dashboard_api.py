@@ -47,9 +47,15 @@ _PRODUCT_GROUPS = frozenset(
         "btc5m",
         "eth5m",
         "sol5m",
+        "xrp5m",
+        "bnb5m",
+        "doge5m",
+        "hype5m",
     }
 )
-_LATE_EDGE_PRODUCTS = frozenset({"eth5m", "sol5m"})
+_LATE_EDGE_PRODUCTS = frozenset(
+    {"eth5m", "sol5m", "xrp5m", "bnb5m", "doge5m", "hype5m"}
+)
 _MAKER_PRODUCT_KEYS = frozenset(
     {
         "B",
@@ -67,6 +73,10 @@ _MAKER_PRODUCT_KEYS = frozenset(
 _SLUG_PREFIX = {
     "eth5m": "eth-updown",
     "sol5m": "sol-updown",
+    "xrp5m": "xrp-updown",
+    "bnb5m": "bnb-updown",
+    "doge5m": "doge-updown",
+    "hype5m": "hype-updown",
     "btc5m": "btc-updown-5m",
     "btc15m": "btc-updown-15m",
 }
@@ -139,10 +149,8 @@ def _product_db_path(product_key: str) -> Path:
         return cfg.data_dir / "split_sell_paper.db"
     if key == "btc15m":
         return cfg.data_dir / "split_sell_15m_paper.db"
-    if key == "eth5m":
-        return cfg.data_dir / "paper_eth5m.db"
-    if key == "sol5m":
-        return cfg.data_dir / "paper_sol5m.db"
+    if key in _LATE_EDGE_PRODUCTS:
+        return cfg.data_dir / f"paper_{key}.db"
     if key in {"atp", "cs", "nba", "nfl", "dota", "soccer_unl"}:
         return cfg.data_dir / f"sports_mm_{key}_paper.db"
     return cfg.data_dir / f"{key}_paper.db"
@@ -412,8 +420,6 @@ def _product_payload(product) -> dict[str, Any]:
     hb_modes = {
         "btc5m": "split_sell",
         "btc15m": "split_sell_15m",
-        "eth5m": "late_edge_eth5m",
-        "sol5m": "late_edge_sol5m",
         "atp": "sports_mm_atp",
         "cs": "sports_mm_cs",
         "nba": "sports_mm_nba",
@@ -421,6 +427,8 @@ def _product_payload(product) -> dict[str, Any]:
         "dota": "sports_mm_dota",
         "soccer_unl": "sports_mm_soccer_unl",
     }
+    for late_key in _LATE_EDGE_PRODUCTS:
+        hb_modes[late_key] = f"late_edge_{late_key}"
     hb_all = status_report(cfg.data_dir, stale_sec=cfg.heartbeat_stale_sec)
     mode = hb_modes.get(product.key)
     hb = hb_all.get("groups", {}).get(mode or "", {}) if mode else {}

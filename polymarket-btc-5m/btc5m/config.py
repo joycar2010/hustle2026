@@ -49,7 +49,7 @@ class Config:
     split_db_name: str
     maker_db_name: str
     late_edge_db_name: str
-    crypto_asset: str  # btc | eth | sol
+    crypto_asset: str  # btc | eth | sol | xrp | doge | bnb | hype
     odds_sport_keys: str  # comma-separated The Odds API sport keys
 
     entry_window_sec: float

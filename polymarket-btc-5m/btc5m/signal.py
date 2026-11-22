@@ -1,8 +1,8 @@
-"""Crypto spot signal vs the window open (BTC / ETH / SOL).
+"""Crypto spot signal vs the window open (BTC / ETH / SOL / XRP / …).
 
 Resolution uses Chainlink TWAP proxies. We approximate with a multi-venue
-median (OKX / Coinbase / Kraken), project closing TWAP in the final minute,
-and attach empirical lead-hold win rates (P3). Asset is selected via
+median (OKX / Coinbase / Kraken / Binance), project closing TWAP in the final
+minute, and attach empirical lead-hold win rates (P3). Asset is selected via
 Config.crypto_asset (default btc — BTC 5m unchanged).
 """
 from __future__ import annotations
@@ -133,6 +133,36 @@ def _kraken_open(pair: str, result_key: str, start_ts: float) -> float:
     raise RuntimeError(f"kraken: no candle for window open ({pair})")
 
 
+def _binance_spot(symbol: str) -> float:
+    """Spot last via Binance public data API (HYPE/BNB backup host)."""
+    r = requests.get(
+        "https://data-api.binance.vision/api/v3/ticker/price",
+        params={"symbol": symbol},
+        timeout=3,
+    )
+    r.raise_for_status()
+    return float(r.json()["price"])
+
+
+def _binance_open(symbol: str, start_ts: float) -> float:
+    start_ms = int(start_ts * 1000)
+    r = requests.get(
+        "https://data-api.binance.vision/api/v3/klines",
+        params={
+            "symbol": symbol,
+            "interval": "1m",
+            "startTime": start_ms,
+            "limit": 1,
+        },
+        timeout=3,
+    )
+    r.raise_for_status()
+    rows = r.json() or []
+    if not rows:
+        raise RuntimeError(f"binance: no candle for window open ({symbol})")
+    return float(rows[0][1])  # open price of the 1m bar
+
+
 # Per-asset venue callables
 _ASSET_SPOT: dict[str, dict[str, Callable[[], float]]] = {
     "btc": {
@@ -150,6 +180,25 @@ _ASSET_SPOT: dict[str, dict[str, Callable[[], float]]] = {
         "coinbase": lambda: _coinbase_spot("SOL-USD"),
         "kraken": lambda: _kraken_spot("SOLUSD", "SOLUSD"),
     },
+    "xrp": {
+        "okx": lambda: _okx_spot("XRP-USDT"),
+        "coinbase": lambda: _coinbase_spot("XRP-USD"),
+        "kraken": lambda: _kraken_spot("XXRPZUSD", "XXRPZUSD"),
+    },
+    "doge": {
+        "okx": lambda: _okx_spot("DOGE-USDT"),
+        "coinbase": lambda: _coinbase_spot("DOGE-USD"),
+        "kraken": lambda: _kraken_spot("DOGEUSD", "DOGEUSD"),
+    },
+    "bnb": {
+        "okx": lambda: _okx_spot("BNB-USDT"),
+        "binance": lambda: _binance_spot("BNBUSDT"),
+        "kraken": lambda: _kraken_spot("BNBUSD", "BNBUSD"),
+    },
+    "hype": {
+        "okx": lambda: _okx_spot("HYPE-USDT"),
+        "binance": lambda: _binance_spot("HYPEUSDT"),
+    },
 }
 
 _ASSET_OPEN: dict[str, dict[str, Callable[[float], float]]] = {
@@ -164,6 +213,23 @@ _ASSET_OPEN: dict[str, dict[str, Callable[[float], float]]] = {
     "sol": {
         "okx": lambda ts: _okx_open("SOL-USDT", ts),
         "kraken": lambda ts: _kraken_open("SOLUSD", "SOLUSD", ts),
+    },
+    "xrp": {
+        "okx": lambda ts: _okx_open("XRP-USDT", ts),
+        "kraken": lambda ts: _kraken_open("XXRPZUSD", "XXRPZUSD", ts),
+    },
+    "doge": {
+        "okx": lambda ts: _okx_open("DOGE-USDT", ts),
+        "kraken": lambda ts: _kraken_open("DOGEUSD", "DOGEUSD", ts),
+    },
+    "bnb": {
+        "okx": lambda ts: _okx_open("BNB-USDT", ts),
+        "binance": lambda ts: _binance_open("BNBUSDT", ts),
+        "kraken": lambda ts: _kraken_open("BNBUSD", "BNBUSD", ts),
+    },
+    "hype": {
+        "okx": lambda ts: _okx_open("HYPE-USDT", ts),
+        "binance": lambda ts: _binance_open("HYPEUSDT", ts),
     },
 }
 
