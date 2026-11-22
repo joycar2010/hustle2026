@@ -127,6 +127,142 @@ SOL_5M = ProductProfile(
     },
 )
 
+
+def _sol_like_late_edge(
+    *,
+    asset: str,
+    spot_ref: float,
+    db_name: str,
+    # SOL template ≈ +17.1bp / −28.5bp absolute Δ at ~$70
+    up_bp: float = 17.1,
+    down_bp: float = 28.5,
+    lead_min_bp: float = 3.0,
+    up_lead_min_bp: float = 2.5,
+    down_lead_min_bp: float = 4.0,
+    opening_gap_min_bp: float = 8.0,
+    max_entry_price: float = 0.78,
+    opening_gap_max_entry_price: float = 0.76,
+    price_hosts: Optional[str] = None,
+) -> dict[str, Any]:
+    """Clone SOL5m late_edge gates with bp→USD scaling for other crypto 5m series."""
+    up = round(spot_ref * (up_bp / 10_000.0), 6)
+    down = -round(spot_ref * (down_bp / 10_000.0), 6)
+    out: dict[str, Any] = {
+        "mode": "late_edge",
+        "crypto_asset": asset,
+        "late_edge_db_name": db_name,
+        "up_min_delta_usd": up,
+        "down_max_delta_usd": down,
+        "lead_min_bp": lead_min_bp,
+        "up_lead_min_bp": up_lead_min_bp,
+        "down_lead_min_bp": down_lead_min_bp,
+        "opening_gap_min_bp": opening_gap_min_bp,
+        "lead_table_enabled": False,
+        "max_entry_price": max_entry_price,
+        "opening_gap_max_entry_price": opening_gap_max_entry_price,
+    }
+    if price_hosts:
+        out["price_hosts"] = price_hosts
+    return out
+
+
+# P10: alt crypto 5m paper scaffolds (SOL-like late_edge; independent ledgers)
+XRP_5M = ProductProfile(
+    key="xrp5m",
+    series_slug="xrp-up-or-down-5m",
+    family="crypto_updown",
+    phase=1,
+    enabled=True,
+    window_sec=300,
+    market_slug_prefix="xrp-updown-5m",
+    split_db_name="unused_xrp_split.db",
+    maker_db_name="unused_xrp_maker.db",
+    preferred_mode="late_edge",
+    description="XRP Up/Down 5m — paper late_edge (SOL-like bp gates; first alt pilot)",
+    overlays=_sol_like_late_edge(
+        asset="xrp",
+        spot_ref=0.93,
+        db_name="paper_xrp5m.db",
+    ),
+)
+
+BNB_5M = ProductProfile(
+    key="bnb5m",
+    series_slug="bnb-up-or-down-5m",
+    family="crypto_updown",
+    phase=1,
+    enabled=True,
+    window_sec=300,
+    market_slug_prefix="bnb-updown-5m",
+    split_db_name="unused_bnb_split.db",
+    maker_db_name="unused_bnb_maker.db",
+    preferred_mode="late_edge",
+    description="BNB Up/Down 5m — paper late_edge (thinner book → slightly tighter entry)",
+    overlays=_sol_like_late_edge(
+        asset="bnb",
+        spot_ref=558.0,
+        db_name="paper_bnb5m.db",
+        lead_min_bp=3.5,
+        up_lead_min_bp=3.0,
+        down_lead_min_bp=4.5,
+        opening_gap_min_bp=9.0,
+        max_entry_price=0.77,
+        opening_gap_max_entry_price=0.75,
+        price_hosts="okx,binance",
+    ),
+)
+
+DOGE_5M = ProductProfile(
+    key="doge5m",
+    series_slug="doge-up-or-down-5m",
+    family="crypto_updown",
+    phase=1,
+    enabled=True,
+    window_sec=300,
+    market_slug_prefix="doge-updown-5m",
+    split_db_name="unused_doge_split.db",
+    maker_db_name="unused_doge_maker.db",
+    preferred_mode="late_edge",
+    description="DOGE Up/Down 5m — paper late_edge (thin book; stricter bp/entry)",
+    overlays=_sol_like_late_edge(
+        asset="doge",
+        spot_ref=0.055,
+        db_name="paper_doge5m.db",
+        lead_min_bp=4.0,
+        up_lead_min_bp=3.0,
+        down_lead_min_bp=5.0,
+        opening_gap_min_bp=10.0,
+        max_entry_price=0.76,
+        opening_gap_max_entry_price=0.74,
+    ),
+)
+
+HYPE_5M = ProductProfile(
+    key="hype5m",
+    series_slug="hype-up-or-down-5m",
+    family="crypto_updown",
+    phase=1,
+    enabled=True,
+    window_sec=300,
+    market_slug_prefix="hype-updown-5m",
+    split_db_name="unused_hype_split.db",
+    maker_db_name="unused_hype_maker.db",
+    preferred_mode="late_edge",
+    description="HYPE Up/Down 5m — paper late_edge (thinnest; okx+binance hosts)",
+    overlays=_sol_like_late_edge(
+        asset="hype",
+        spot_ref=63.0,
+        db_name="paper_hype5m.db",
+        lead_min_bp=4.0,
+        up_lead_min_bp=3.0,
+        down_lead_min_bp=5.0,
+        opening_gap_min_bp=10.0,
+        max_entry_price=0.76,
+        opening_gap_max_entry_price=0.74,
+        price_hosts="okx,binance",
+    ),
+)
+
 # --- Phase 2: odds bus + event state (mainline only) -------------------------
 ATP = ProductProfile(
     key="atp",
@@ -259,6 +395,14 @@ PRODUCTS: dict[str, ProductProfile] = {
     ETH_5M.key: ETH_5M,
     SOL_5M.series_slug: SOL_5M,
     SOL_5M.key: SOL_5M,
+    XRP_5M.series_slug: XRP_5M,
+    XRP_5M.key: XRP_5M,
+    BNB_5M.series_slug: BNB_5M,
+    BNB_5M.key: BNB_5M,
+    DOGE_5M.series_slug: DOGE_5M,
+    DOGE_5M.key: DOGE_5M,
+    HYPE_5M.series_slug: HYPE_5M,
+    HYPE_5M.key: HYPE_5M,
     ATP.series_slug: ATP,
     ATP.key: ATP,
     CS.series_slug: CS,
@@ -311,6 +455,10 @@ def list_products() -> list[ProductProfile]:
         BTC_15M,
         ETH_5M,
         SOL_5M,
+        XRP_5M,
+        BNB_5M,
+        DOGE_5M,
+        HYPE_5M,
         ATP,
         CS,
         NBA,
