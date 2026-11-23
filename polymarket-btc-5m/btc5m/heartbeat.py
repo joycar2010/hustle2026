@@ -71,6 +71,8 @@ def status_report(
         "late_edge_bnb5m",
         "late_edge_doge5m",
         "late_edge_hype5m",
+        "late_edge_btc5m_solgate",
+        "late_edge_btc15m_le",
         "maker",
         "split_sell",
         "split_sell_15m",

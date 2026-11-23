@@ -44,7 +44,9 @@ _PRODUCT_GROUPS = frozenset(
         "dota",
         "soccer_unl",
         "btc15m",
+        "btc15m_le",
         "btc5m",
+        "btc5m_solgate",
         "eth5m",
         "sol5m",
         "xrp5m",
@@ -54,7 +56,16 @@ _PRODUCT_GROUPS = frozenset(
     }
 )
 _LATE_EDGE_PRODUCTS = frozenset(
-    {"eth5m", "sol5m", "xrp5m", "bnb5m", "doge5m", "hype5m"}
+    {
+        "eth5m",
+        "sol5m",
+        "xrp5m",
+        "bnb5m",
+        "doge5m",
+        "hype5m",
+        "btc5m_solgate",
+        "btc15m_le",
+    }
 )
 _MAKER_PRODUCT_KEYS = frozenset(
     {
@@ -78,7 +89,9 @@ _SLUG_PREFIX = {
     "doge5m": "doge-updown",
     "hype5m": "hype-updown",
     "btc5m": "btc-updown-5m",
+    "btc5m_solgate": "btc-updown-5m",
     "btc15m": "btc-updown-15m",
+    "btc15m_le": "btc-updown-15m",
 }
 
 app = FastAPI(title="Poly BTC 5m Paper Dashboard", docs_url=None, redoc_url=None)
@@ -149,6 +162,9 @@ def _product_db_path(product_key: str) -> Path:
         return cfg.data_dir / "split_sell_paper.db"
     if key == "btc15m":
         return cfg.data_dir / "split_sell_15m_paper.db"
+    # P11-B: late_edge ledger is paper_btc15m.db (not paper_btc15m_le.db)
+    if key == "btc15m_le":
+        return cfg.data_dir / "paper_btc15m.db"
     if key in _LATE_EDGE_PRODUCTS:
         return cfg.data_dir / f"paper_{key}.db"
     if key in {"atp", "cs", "nba", "nfl", "dota", "soccer_unl"}:

@@ -130,7 +130,10 @@ def test_deveig_and_list_products_include_new():
     p_h, p_a = deveig_two_way(2.0, 2.0)
     assert abs(p_h - 0.5) < 1e-9
     keys = [p.key for p in list_products()]
-    assert keys[:4] == ["btc5m", "btc15m", "eth5m", "sol5m"]
+    assert keys[0] == "btc5m"
+    assert keys.index("btc5m") < keys.index("btc15m") < keys.index("eth5m") < keys.index(
+        "sol5m"
+    )
     assert "nba" in keys and "nfl" in keys
     assert NBA.enabled
 

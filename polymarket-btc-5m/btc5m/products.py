@@ -68,6 +68,98 @@ BTC_15M = ProductProfile(
     },
 )
 
+
+def _btc_half_solgate(
+    *,
+    db_name: str,
+    spot_ref: float = 90_000.0,
+    # Half-tier vs SOL full (~17.1 / 28.5 bp): mid of 8–12 / 14–18
+    up_bp: float = 10.0,
+    down_bp: float = 16.0,
+    lead_min_bp: float = 2.5,
+    up_lead_min_bp: float = 2.0,
+    down_lead_min_bp: float = 3.5,
+    opening_gap_min_bp: float = 6.5,
+    max_entry_price: float = 0.78,
+    opening_gap_max_entry_price: float = 0.76,
+    entry_window_sec: Optional[float] = None,
+    min_t_remaining_sec: Optional[float] = None,
+    opening_gap_window_sec: Optional[float] = None,
+    confirm_checks: Optional[int] = None,
+) -> dict[str, Any]:
+    """BTC late_edge gates: SOL-structure half-tier bp, keep BTC hold table."""
+    up = round(spot_ref * (up_bp / 10_000.0), 2)
+    down = -round(spot_ref * (down_bp / 10_000.0), 2)
+    out: dict[str, Any] = {
+        "mode": "late_edge",
+        "crypto_asset": "btc",
+        "late_edge_db_name": db_name,
+        "up_min_delta_usd": up,
+        "down_max_delta_usd": down,
+        "lead_min_bp": lead_min_bp,
+        "up_lead_min_bp": up_lead_min_bp,
+        "down_lead_min_bp": down_lead_min_bp,
+        "opening_gap_min_bp": opening_gap_min_bp,
+        # Keep BTC lead/hold table — do not clone SOL's lead_table=False
+        "lead_table_enabled": True,
+        "max_entry_price": max_entry_price,
+        "opening_gap_max_entry_price": opening_gap_max_entry_price,
+    }
+    if entry_window_sec is not None:
+        out["entry_window_sec"] = entry_window_sec
+    if min_t_remaining_sec is not None:
+        out["min_t_remaining_sec"] = min_t_remaining_sec
+    if opening_gap_window_sec is not None:
+        out["opening_gap_window_sec"] = opening_gap_window_sec
+    if confirm_checks is not None:
+        out["confirm_checks"] = confirm_checks
+    return out
+
+
+# P11-A: BTC 5m A shadow lane (SOL-structure half gates; independent ledger)
+BTC_5M_SOLGATE = ProductProfile(
+    key="btc5m_solgate",
+    series_slug="btc-up-or-down-5m",
+    family="crypto_updown",
+    phase=1,
+    enabled=True,
+    window_sec=300,
+    market_slug_prefix="btc-updown-5m",
+    split_db_name="unused_btc5m_solgate_split.db",
+    maker_db_name="unused_btc5m_solgate_maker.db",
+    preferred_mode="late_edge",
+    description=(
+        "BTC 5m A′ shadow — SOL-structure half-tier bp gates; "
+        "keep hold table; paper_btc5m_solgate.db (baseline A untouched)"
+    ),
+    overlays=_btc_half_solgate(db_name="paper_btc5m_solgate.db"),
+)
+
+# P11-B: BTC 15m late_edge paper (parallel to C split_sell; does not replace C)
+BTC_15M_LE = ProductProfile(
+    key="btc15m_le",
+    series_slug="btc-up-or-down-15m",
+    family="crypto_updown",
+    phase=1,
+    enabled=True,
+    window_sec=900,
+    market_slug_prefix="btc-updown-15m",
+    split_db_name="split_sell_15m_paper.db",
+    maker_db_name="maker_15m_paper.db",
+    preferred_mode="late_edge",
+    description=(
+        "BTC 15m late_edge paper — half-tier SOL gates + time-stretched windows; "
+        "ledger paper_btc15m.db (C split_sell_15m untouched)"
+    ),
+    overlays=_btc_half_solgate(
+        db_name="paper_btc15m.db",
+        entry_window_sec=120.0,
+        min_t_remaining_sec=30.0,
+        opening_gap_window_sec=120.0,
+        confirm_checks=4,
+    ),
+)
+
 ETH_5M = ProductProfile(
     key="eth5m",
     series_slug="eth-up-or-down-5m",
@@ -389,8 +481,11 @@ SOCCER_UNL = ProductProfile(
 PRODUCTS: dict[str, ProductProfile] = {
     BTC_5M.series_slug: BTC_5M,
     BTC_5M.key: BTC_5M,
+    # Shadow / dual-mode keys share series_slug with baseline — key-only registration
+    BTC_5M_SOLGATE.key: BTC_5M_SOLGATE,
     BTC_15M.series_slug: BTC_15M,
     BTC_15M.key: BTC_15M,
+    BTC_15M_LE.key: BTC_15M_LE,
     ETH_5M.series_slug: ETH_5M,
     ETH_5M.key: ETH_5M,
     SOL_5M.series_slug: SOL_5M,
@@ -452,7 +547,9 @@ def list_products() -> list[ProductProfile]:
     out: list[ProductProfile] = []
     for p in (
         BTC_5M,
+        BTC_5M_SOLGATE,
         BTC_15M,
+        BTC_15M_LE,
         ETH_5M,
         SOL_5M,
         XRP_5M,

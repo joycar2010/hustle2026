@@ -158,6 +158,9 @@ def test_sports_mm_quotes_when_fair_edge(tmp_path: Path, monkeypatch):
 
 def test_list_products_ordered_phases():
     keys = [p.key for p in list_products()]
-    assert keys[:4] == ["btc5m", "btc15m", "eth5m", "sol5m"]
+    assert keys[0] == "btc5m"
+    assert keys.index("btc5m") < keys.index("btc15m") < keys.index("eth5m") < keys.index(
+        "sol5m"
+    )
     assert "atp" in keys and "cs" in keys
     assert get_product("counter-strike").key == "cs"
