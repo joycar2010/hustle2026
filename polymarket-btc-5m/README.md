@@ -4,7 +4,7 @@
 
 默认 **纸面交易（paper）**，不会下真单。实盘需同时满足：`--live` + `.env` 中 `LIVE_TRADING_ENABLED=true`（仅 `late_edge`）。
 
-## P0 → P10（v1.10.0）
+## P0 → P11（v1.11.0）
 
 - **A/B/C BTC 5m**：行为冻结；默认 `SERIES_SLUG=btc-up-or-down-5m`  
 - **P6 C**：join-touch 双边 + 残仓 SLA  
@@ -16,10 +16,14 @@
   4. `ODDS_API_KEY` 仅走环境变量 / secrets，禁止入库  
 - **P9**：C merge 现金落盘 + `repair-split`；B 从未配对则 `UNPAIRED_ABORT`；eth/sol dashboard DB 路由  
 - **P10**：XRP/BNB/DOGE/HYPE 5m paper late_edge（SOL bp 标定；独立 `paper_*5m.db`）  
+- **P11**：BTC5m A′ `btc5m_solgate` 半档影子 + BTC15m late_edge `btc15m_le` 纸面（C 不动）  
 
 ```bash
 python -m btc5m --mode split_sell                    # BTC 5m C
 python -m btc5m --series btc15m --mode split_sell    # BTC 15m C
+python -m btc5m --series btc5m_solgate --mode late_edge  # BTC 5m A′ shadow
+python -m btc5m --series btc15m --mode late_edge     # BTC 15m late_edge paper
+python -m btc5m --series btc15m_le --mode late_edge  # same as above (explicit key)
 python -m btc5m --series eth5m --mode late_edge      # ETH 5m A
 python -m btc5m --series sol5m --mode late_edge      # SOL 5m A
 python -m btc5m --series xrp5m --mode late_edge      # XRP 5m paper
@@ -35,7 +39,7 @@ python -m btc5m heartbeat
 ```
 
 部署（含 systemd **C**）：`PEM=... HOST=ec2-user@18.179.50.168 bash scripts/deploy_polydex.sh`  
-详见 `ops/P5_NOTES.md` · `ops/P6_NOTES.md` · `ops/P7_NOTES.md` · `ops/P8_NOTES.md` · `ops/P9_MERGE_UNPAIRED_ROUTING.md` · `ops/P10_ALT_CRYPTO_5M.md`。
+详见 `ops/P5_NOTES.md` · `ops/P6_NOTES.md` · `ops/P7_NOTES.md` · `ops/P8_NOTES.md` · `ops/P9_MERGE_UNPAIRED_ROUTING.md` · `ops/P10_ALT_CRYPTO_5M.md` · `ops/P11_BTC_SOLGATE_15M_LE.md`。
 
 ## 两种模式
 

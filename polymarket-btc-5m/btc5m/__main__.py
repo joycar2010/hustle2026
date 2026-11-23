@@ -113,7 +113,20 @@ def main(argv: list[str] | None = None) -> int:
         logging.error("%s", exc)
         return 2
 
+    # P11-B: --series btc15m --mode late_edge → btc15m_le paper lane (C untouched)
+    if (
+        args.mode == "late_edge"
+        and getattr(cfg, "product_key", "") == "btc15m"
+    ):
+        from btc5m.products import apply_product
+
+        cfg, _ = apply_product(cfg, "btc15m_le")
+
     mode = args.mode or cfg.mode
+    if args.mode and cfg.mode != args.mode:
+        from dataclasses import replace
+
+        cfg = replace(cfg, mode=args.mode)
 
     if args.command == "repair-split":
         from btc5m.split_sell import repair_split_merge_accounting
@@ -144,6 +157,8 @@ def main(argv: list[str] | None = None) -> int:
             "paper_bnb5m.db",
             "paper_doge5m.db",
             "paper_hype5m.db",
+            "paper_btc5m_solgate.db",
+            "paper_btc15m.db",
             "maker_paper.db",
             "split_sell_paper.db",
             "split_sell_15m_paper.db",

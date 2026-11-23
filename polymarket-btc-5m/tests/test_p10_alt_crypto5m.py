@@ -73,7 +73,13 @@ def test_signal_venues_cover_new_assets():
 
 def test_list_products_includes_alts_after_sol():
     keys = [p.key for p in list_products()]
-    assert keys[:4] == ["btc5m", "btc15m", "eth5m", "sol5m"]
+    assert keys[0] == "btc5m"
+    assert "btc15m" in keys
+    assert "eth5m" in keys
+    assert "sol5m" in keys
+    assert keys.index("btc5m") < keys.index("btc15m") < keys.index("eth5m") < keys.index(
+        "sol5m"
+    )
     for k in ("xrp5m", "bnb5m", "doge5m", "hype5m"):
         assert k in keys
     # sports still after crypto alts
