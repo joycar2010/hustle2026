@@ -1,0 +1,29 @@
+﻿{
+    "release":  "/home/ec2-user/polymarketbot-test/releases/polytest-polyauto-a-20261118T000000Z",
+    "source_strategy":  "polyauto:/home/ec2-user/polymarket-btc-5m/btc5m/strategy.py",
+    "source_sha256":  "923420ad1d324cbad6942141f7bd35b526eba27fedf4102ea37e806f1a408aee",
+    "target_adapter":  "bot/strategy.py (_decide_polyauto_a)",
+    "target_adapter_sha256":  "cff7ed9230a2ff89368703e0055b6d5af13d6a9bfae7d0a8919308cb552e58a8",
+    "paper_lane":  "single BTC A",
+    "removed_lanes":  [
+                          "BASELINE",
+                          "FILTERED",
+                          "paper-p3 state"
+                      ],
+    "settings":  {
+                     "entry_price":  "0.75-0.88",
+                     "entry_window_sec":  60,
+                     "min_t_remaining_sec":  15,
+                     "min_net_edge":  0.08,
+                     "taker_fee_rate":  0.07,
+                     "confirm_checks":  3,
+                     "btc_delta":  "UP\u003e=25 / DOWN\u003c=-25",
+                     "paper_equity_usd":  200,
+                     "order_fixed_notional_usd":  10,
+                     "max_open_positions":  1,
+                     "daily_loss_fraction":  0.2,
+                     "paper_slippage_ticks":  1
+                 },
+    "live_enabled":  false,
+    "comparison_enabled":  false
+}

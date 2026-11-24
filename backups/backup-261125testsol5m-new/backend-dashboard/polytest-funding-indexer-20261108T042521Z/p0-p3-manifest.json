@@ -1,0 +1,30 @@
+{
+  "target": "polytest.hustle2026.xyz",
+  "release": "/home/ec2-user/polymarketbot-test/releases/polytest-p0p3-20261107T175746Z",
+  "executed_at_utc": "2026-11-07T18:10:00Z",
+  "mode": "paper",
+  "p0": {
+    "persistent_exit_intents": true,
+    "restart_safe_cooldown": true,
+    "ambiguous_exit_reconcile_before_retry": true,
+    "blind_taker_retry_blocked": true
+  },
+  "p1": {
+    "relayer_state_projected_to_monitor_ledger": true,
+    "mergeable_ctf_merge_supported": true,
+    "negative_risk_visible_and_manual_review": true,
+    "relayer_preflight": "passed",
+    "candidate_count_at_validation": 0,
+    "submitted_at_validation": 0,
+    "ledger_after_sync": {"mined": 39, "unmatched_manual_review": 4}
+  },
+  "p2": {
+    "replay": "p2-paper-downside-replay-20261107.json",
+    "real_orders": false
+  },
+  "p3": {
+    "live_preflight": "passed",
+    "live_worker_started": false,
+    "paper_worker": "running"
+  }
+}

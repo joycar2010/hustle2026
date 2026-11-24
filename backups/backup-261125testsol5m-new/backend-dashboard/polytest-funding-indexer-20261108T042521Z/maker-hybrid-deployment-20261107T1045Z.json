@@ -1,0 +1,35 @@
+{
+  "deployed_at_utc": "2026-11-07T10:51:55Z",
+  "target": "polytest.hustle2026.xyz",
+  "release": "/home/ec2-user/polymarketbot-test/releases/polyauto-d-20261101",
+  "ui_root": "/var/www/polytest-releases/polytest-chain-pnl-fix-20261107T042500Z",
+  "worker_started": false,
+  "config": {
+    "entry_order_mode": "MAKER_FIRST",
+    "entry_maker_ttl_sec": 3,
+    "entry_maker_post_only": true,
+    "entry_maker_fallback_taker": true,
+    "profit_exit_enabled": true,
+    "profit_exit_order_mode": "MAKER_FIRST",
+    "profit_target_fraction": 0.05,
+    "profit_target_ticks": 2,
+    "profit_maker_ttl_sec": 2,
+    "profit_maker_post_only": true,
+    "profit_maker_fallback_taker": true,
+    "stop_exit_order_mode": "TAKER",
+    "reversal_exit_order_mode": "TAKER",
+    "near_close_exit_enabled": true,
+    "near_close_exit_window_sec": 15,
+    "near_close_exit_order_mode": "TAKER"
+  },
+  "files": {
+    "/home/ec2-user/polymarketbot-test/releases/polyauto-d-20261101/bot/config.py": "3d36562e55a5318a94ce56b940ed861f030f6ed31b78eb2a07504bbcb7f1fbaa",
+    "/home/ec2-user/polymarketbot-test/releases/polyauto-d-20261101/bot/orders.py": "c241dc8b156b711cfba1282923ccd5640be88d5c0950cbe164c1f10912611071",
+    "/home/ec2-user/polymarketbot-test/releases/polyauto-d-20261101/bot/main.py": "9d5967d135becf3093a37d632e986a2941d82997e0b5b322578d7a6b698487c8",
+    "/home/ec2-user/polymarketbot-test/releases/polyauto-d-20261101/bot/store.py": "5acef021f42c5262aeb80302b8b589a91268b08d60d89474a3a29158775c8bc1",
+    "/home/ec2-user/polymarketbot-test/releases/polyauto-d-20261101/server/dashboard.py": "e5d99e93d41fe5a7ef0c26d7de696938673d8ccdb95b0c97b0258b338da21314",
+    "/var/www/polytest-releases/polytest-chain-pnl-fix-20261107T042500Z/index.html": "0d2492dcb96d7f334492250f38ebf4d55be574bcb307cca9dab8c7bbaf756ea1",
+    "/var/www/polytest-releases/polytest-chain-pnl-fix-20261107T042500Z/assets/index-B5L7Fwpr.js": "134d5c5c7e92d4b0d5f025bc1f64ab6aba35c76f791b881410b3fdfab14f3f0d",
+    "/var/www/polytest-releases/polytest-chain-pnl-fix-20261107T042500Z/assets/index-x7HO4ylz.css": "43311bae9a6c2ff5bc6d5ad459e6d024c2a884b102aaed92b0fcf1561198ca85"
+  }
+}

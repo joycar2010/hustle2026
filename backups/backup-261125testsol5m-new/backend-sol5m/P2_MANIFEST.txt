@@ -1,0 +1,14 @@
+UTC=20261121T140426Z
+RELEASE=/home/ec2-user/polymarketbot-test/releases/polytest-sol5m-20261121T140426Z
+PRODUCT=sol5m
+PAPER_SERVICE=polytest-sol5m-paper.service active
+API_SERVICE=polytest-sol5m-api.service active port=8095
+PRODUCTION_TEMPLATE=polytest-sol5m-production.service disabled/inactive
+LIVE=false
+LIVE_TRADING_ENABLED=false
+DB=/home/ec2-user/polymarketbot-test/releases/polytest-sol5m-20261121T140426Z/data/paper_sol5m.db
+EXTERNAL_HEALTH=/api/sol5m
+EXTERNAL_PROFILE=/api/sol5m/profile
+EXTERNAL_WS=/api/sol5m/ws
+NGINX_CONFIG_BACKUP=/etc/nginx/conf.d/polytest.conf.before-sol5m-20261121T140622Z
+BTC_RELEASE_UNTOUCHED=true

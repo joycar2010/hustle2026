@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+set -euo pipefail
+asset="${1:?asset required}"
+[[ "$asset" == BTC ]] || exit 2
+cd "/home/ec2-user/polymarketbot-test/releases/polyauto-d-20261101"
+export PYTHONPATH="/home/ec2-user/polymarketbot-test/releases/polyauto-d-20261101"
+export TRADES_DB_PATH="/home/ec2-user/polymarketbot-test/releases/85056d2-20261025/trades-test.db"
+export BTC_LIVE_ENABLED=false
+export ETH_TRADING_ENABLED=false
+export WEATHER_LIVE_TRADING_ENABLED=false
+export SPORTS_LIVE_TRADING_ENABLED=false
+"/home/ec2-user/polymarketbot-test/releases/85056d2-20261025/.venv/bin/python" "/home/ec2-user/polymarketbot-test/releases/polyauto-d-20261101/scripts/write_runtime_manifest.py" "/home/ec2-user/polymarketbot-test/releases/85056d2-20261025/runtime-manifest.json" D-production
+printf 'paper\n' > "/home/ec2-user/polymarketbot-test/releases/85056d2-20261025/bot.mode"
+printf '%s\n' "$$" > "/home/ec2-user/polymarketbot-test/releases/85056d2-20261025/bot_btc.pid"
+exec "/home/ec2-user/polymarketbot-test/releases/85056d2-20261025/.venv/bin/python" -m bot.main --asset "$asset"
