@@ -1,0 +1,8 @@
+[Unit]
+Description=Periodic sol5m Paper settlement
+[Timer]
+OnBootSec=1min
+OnUnitInactiveSec=30s
+AccuracySec=3s
+[Install]
+WantedBy=timers.target

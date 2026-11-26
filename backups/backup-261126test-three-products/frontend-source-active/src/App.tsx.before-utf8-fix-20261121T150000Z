@@ -1,0 +1,2800 @@
+﻿import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import type { CSSProperties, ReactNode } from 'react';
+import { cachedPnlDaily, controlLive, fetchConsensusHistory, fetchLlmSettings, fetchOrdersPage, fetchPnlDaily, fetchPolymarketFunding, fetchState, probeLlm, putPaperService, putRiskSettings, saveLlmSettings, testLlm, toggleLiveService } from './api';
+import type { OrdersPage, OrdersPeriodFilter, PnlDailyPage } from './api';
+import type {
+  Book,
+  Decision,
+  AgentStatus,
+  LlmSettings,
+  LlmModelProfile,
+  LlmUsageSnapshot,
+  Order,
+  PaperPosition,
+  Position,
+  PriceHistoryPoint,
+  SlowLoopProposal,
+  State,
+} from './types';
+import { fmtDur, fmtNum, fmtPct, fmtPx, fmtTime, fmtUsd } from './format';
+import PaperComparison from './PaperComparison';
+import './StrategyLayout.css';
+
+// State snapshots include the paper comparison and accounting ledgers.  They
+// can take several seconds while a large run is being compacted, so polling
+// must remain available during the WebSocket handshake without piling up
+// concurrent requests.
+const POLL_MS = 3000;
+
+export default function App() {
+  const [state, setState] = useState<State | null>(null);
+  const llmUsage: LlmUsageSnapshot | null = state?.llm?.usage ?? null;
+  const [err, setErr] = useState<string | null>(null);
+  const [now, setNow] = useState<number>(Date.now() / 1000);
+  const [flash, setFlash] = useState<boolean>(false);
+  const [lastFlashAt, setLastFlashAt] = useState<number>(0);
+  const [showSettings, setShowSettings] = useState<boolean>(false);
+  const [activeModal, setActiveModal] = useState<'positions' | 'orders' | 'orders-all' | 'pnl-history' | 'consensus-history' | 'decisions' | 'agent' | 'product' | 'wallet' | null>(null);
+  const [activeProduct, setActiveProduct] = useState<'BTC' | 'SOL' | 'ETH' | 'WEATHER' | 'SPORTS'>('BTC');
+  const [activeAgentRole, setActiveAgentRole] = useState<typeof OPENCLAW_ROLES[number] | null>(null);
+  const [operatorToken, setOperatorToken] = useState<string>('');
+  const [liveBusy, setLiveBusy] = useState<boolean>(false);
+  const [liveMessage, setLiveMessage] = useState<string>('');
+  const [serviceBusy, setServiceBusy] = useState<string | null>(null);
+  const [transport, setTransport] = useState<'ws' | 'rest'>('rest');
+  const [musicEnabled, setMusicEnabled] = useState(false);
+  const musicRef = useRef<HTMLVideoElement | null>(null);
+  const lastSeenOrderId = useRef<number>(-1);
+
+  // State transport: WebSocket push first, REST polling as automatic
+  // fallback (and during reconnect backoff).  Both carry the same payload.
+  useEffect(() => {
+    let cancelled = false;
+    let ws: WebSocket | null = null;
+    let pollId: number | null = null;
+    let pollInFlight = false;
+    let retry = 0;
+    const applyState = (s: State) => {
+      if (cancelled) return;
+      setState(s);
+      setErr(null);
+      const orders = Array.isArray(s.orders) ? s.orders : [];
+      const newest = orders.length ? orders[0].id : -1;
+      if (lastSeenOrderId.current < 0) {
+        lastSeenOrderId.current = newest;
+      } else if (newest > lastSeenOrderId.current) {
+        const o = s.orders[0];
+        if (o && o.dry_run === 0 && (o.status === 'matched' || o.status === 'filled')) {
+          setFlash(false);
+          setTimeout(() => {
+            setFlash(true);
+            setLastFlashAt(Date.now());
+          }, 0);
+          setTimeout(() => setFlash(false), 5000);
+        }
+        lastSeenOrderId.current = newest;
+      }
+    };
+    const startPolling = () => {
+      if (pollId != null || cancelled) return;
+      setTransport('rest');
+      const tick = async () => {
+        if (pollInFlight || cancelled) return;
+        pollInFlight = true;
+        try { applyState(await fetchState()); }
+        catch (e) { if (!cancelled) setErr(String(e)); }
+        finally { pollInFlight = false; }
+      };
+      tick();
+      pollId = window.setInterval(tick, POLL_MS);
+    };
+    const stopPolling = () => {
+      if (pollId != null) { window.clearInterval(pollId); pollId = null; }
+    };
+    let lastFrameAt = 0;
+    // Start the fallback immediately.  A healthy WS will take ownership after
+    // its first complete frame; this keeps a slow first snapshot from leaving
+    // the dashboard on its empty initial state.
+    startPolling();
+    let receivedWsFrame = false;
+    const connect = () => {
+      if (cancelled) return;
+      let socket: WebSocket;
+      try {
+        const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
+        socket = new WebSocket(`${proto}://${window.location.host}/api/ws/state`);
+      } catch { startPolling(); return; }
+      ws = socket;
+      socket.onopen = () => { retry = 0; lastFrameAt = Date.now(); setTransport('ws'); };
+      socket.onmessage = (event) => {
+        lastFrameAt = Date.now();
+        try {
+          applyState(JSON.parse(event.data));
+          if (!receivedWsFrame) { receivedWsFrame = true; stopPolling(); }
+        } catch { /* skip bad frame */ }
+      };
+      socket.onerror = () => { try { socket.close(); } catch { /* already closed */ } };
+      socket.onclose = () => {
+        if (cancelled) return;
+        startPolling(); // never leave the board blind while reconnecting
+        const delay = Math.min(15000, 1000 * 2 ** Math.min(retry++, 4));
+        window.setTimeout(connect, delay);
+      };
+    };
+    // Watchdog: allow the expensive first snapshot to finish before declaring
+    // a stalled socket.  Polling is already active until the first valid frame.
+    const watchdog = window.setInterval(() => {
+      if (ws && ws.readyState === WebSocket.OPEN && lastFrameAt && Date.now() - lastFrameAt > 10000) {
+        try { ws.close(); } catch { /* noop */ }
+      }
+    }, 1000);
+    connect();
+    return () => { cancelled = true; window.clearInterval(watchdog); stopPolling(); try { ws?.close(); } catch { /* noop */ } };
+  }, []);
+
+  // Token telemetry now rides the WS state frame (state.llm.usage); the
+  // dedicated REST poller was the last non-WS data path and is gone.
+
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now() / 1000), 200);
+    return () => clearInterval(id);
+  }, []);
+
+  useEffect(() => {
+    if (!activeModal) return undefined;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setActiveModal(null);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [activeModal]);
+
+  const viewportWidth = useViewportWidth();
+  // The design board reserves a narrow preview rail on wide screens, so use
+  // the two-column terminal layout until there is enough room for all three
+  // live data columns without squeezing the cards.
+  const compactLayout = viewportWidth < 1180;
+
+  const toggleLive = async () => {
+    const live = state?.bot_running && state.bot_mode === 'live';
+    const action = live ? 'stop' : 'start';
+    if (!operatorToken.trim()) {
+      setLiveMessage('è¯·å…ˆå¡«å†™å®žç›˜æ“ä½œä»¤ç‰Œã€‚');
+      return;
+    }
+    if (action === 'start') {
+      const balance = state?.wallet.balance_pusd;
+      const balanceText = balance == null ? 'ä½™é¢æœªçŸ¥' : `pUSD $${balance.toFixed(2)}`;
+      if (!window.confirm(`å³å°†å¯åŠ¨çœŸå®žè®¢å•ï¼ˆ${balanceText}ï¼‰ã€‚ç¡®è®¤ç»§ç»­ï¼Ÿ`)) return;
+    } else if (!window.confirm('ç¡®è®¤å…³é—­å®žç›˜ï¼Ÿåªä¼šåœæ­¢æœºå™¨äººå¾ªçŽ¯ï¼Œä¸ä¼šè‡ªåŠ¨å–å‡ºå·²æœ‰æŒä»“ã€‚')) {
+      return;
+    }
+    setLiveBusy(true);
+    setLiveMessage(action === 'start' ? 'æ­£åœ¨æ‰§è¡Œå®žç›˜é¢„æ£€å¹¶å¯åŠ¨â€¦' : 'æ­£åœ¨åœæ­¢å®žç›˜â€¦');
+    try {
+      const result = await controlLive(action, operatorToken.trim());
+      setLiveMessage(result.note || (action === 'start' ? 'å®žç›˜å·²å¼€å¯ã€‚' : 'å®žç›˜å·²å…³é—­ã€‚'));
+      const refreshed = await fetchState();
+      setState(refreshed);
+    } catch (e) {
+      setLiveMessage(`æ“ä½œå¤±è´¥ï¼š${e}`);
+    } finally {
+      setLiveBusy(false);
+    }
+  };
+
+  const toggleService = async (asset: string, enabled: boolean) => {
+    if (!operatorToken.trim()) { setLiveMessage('è¯·å…ˆå¡«å†™å®žç›˜æ“ä½œä»¤ç‰Œã€‚'); return; }
+    if (enabled && !window.confirm(`ç¡®è®¤ä»…ä¸º ${asset} å¼€å¯å®žç›˜èµ„æ ¼ï¼Ÿå¼€å¯èµ„æ ¼ä¸ä¼šè‡ªåŠ¨å¯åŠ¨è®¢å•ã€‚`)) return;
+    setServiceBusy(asset);
+    try { await toggleLiveService(asset, enabled, operatorToken.trim()); setState(await fetchState()); setLiveMessage(`${asset} å®žç›˜èµ„æ ¼å·²${enabled ? 'å¼€å¯' : 'å…³é—­'}ã€‚`); }
+    catch (e) { setLiveMessage(`æ“ä½œå¤±è´¥ï¼š${e}`); }
+    finally { setServiceBusy(null); }
+  };
+
+  const toggleMusic = async () => {
+    const audio = musicRef.current;
+    if (!audio) return;
+    if (musicEnabled) {
+      audio.pause();
+      setMusicEnabled(false);
+      return;
+    }
+    audio.volume = 0.18;
+    audio.muted = false;
+    try {
+      // Reset the playhead before replaying. Calling load() here can cancel
+      // Chromium's transient user activation and make the second click look
+      // like an autoplay attempt.
+      audio.pause();
+      audio.currentTime = 0;
+      const playPromise = audio.play();
+      if (playPromise) await playPromise;
+      setMusicEnabled(true);
+    } catch {
+      setLiveMessage('æµè§ˆå™¨é˜»æ­¢è‡ªåŠ¨æ’­æ”¾ï¼Œè¯·å†æ¬¡ç‚¹å‡»éŸ³ä¹å¼€å…³ã€‚');
+    }
+  };
+
+  const m = state?.market;
+  const tRem = m ? Math.max(0, m.end_ts - now) : null;
+  const activeLive = serviceIsLive(state, 'BTC');
+  const cash = activeLive ? state?.wallet.balance_pusd : state?.mode_split?.paper?.cash_usd;
+  const openValue = activeLive ? state?.wallet.value_usd : state?.mode_split?.paper?.open_value_usd;
+  const totalEquity = !activeLive && state?.mode_split?.paper?.equity_usd != null
+    ? state.mode_split.paper.equity_usd : cash != null && Number.isFinite(cash) && openValue != null && Number.isFinite(openValue)
+    ? cash + openValue
+    : null;
+  const pnl = state?.pnl;
+  const winRate =
+    pnl && pnl.wins != null && pnl.losses != null && pnl.wins + pnl.losses > 0
+      ? (pnl.wins / (pnl.wins + pnl.losses)) * 100
+      : null;
+  const hourlyCap = state?.config.max_orders_per_hour ?? 0;
+  const ordersPerHourLabel =
+    hourlyCap > 0
+      ? `${state?.config.target_min_orders_per_hour ?? '?'}-${hourlyCap} / h`
+      : 'off';
+  const earlyEntryLabel =
+    state?.config.early_entry_enabled
+      ? `${state.config.seconds_before_close}-${state.config.early_entry_seconds_before_close}s >= ${fmtPx(state.config.early_entry_min_price)}`
+      : 'off';
+  const tailEntryLabel =
+    state?.config.tail_entry_enabled
+      ? `${state.config.tail_entry_window_sec}-${state.config.tail_entry_min_t_remaining_sec}s > ${fmtPx(state.config.tail_entry_min_price)} ${state.config.tail_entry_confirm_checks}x ${fmtPct(state.config.tail_entry_risk_fraction * 100)}`
+      : 'off';
+  const midEntryLabel =
+    state?.config.mid_entry_enabled
+      ? `${state.config.mid_entry_window_sec}-${state.config.mid_entry_min_t_remaining_sec}s ${fmtPx(state.config.mid_entry_min_price)}-${fmtPx(state.config.mid_entry_max_price)} ${state.config.mid_entry_confirm_checks}x ${fmtPct(state.config.mid_entry_risk_fraction * 100)} UP>${state.config.mid_btc_up_min_delta_usd} DOWN<${state.config.mid_btc_down_max_delta_usd}`
+      : 'off';
+  const strongDeltaEntryLabel =
+    state?.config.strong_delta_entry_enabled
+      ? `${state.config.strong_delta_entry_window_sec}-${state.config.strong_delta_entry_min_t_remaining_sec}s >${fmtPx(state.config.strong_delta_entry_min_price)} UP>=${fmtUsd(state.config.strong_delta_entry_up_min_delta_usd)} DOWN<=${fmtUsd(state.config.strong_delta_entry_down_max_delta_usd)} ${state.config.strong_delta_entry_confirm_checks}x`
+      : 'off';
+  const earlyStrongDeltaEntryLabel =
+    state?.config.early_strong_delta_entry_enabled
+      ? `${state.config.early_strong_delta_entry_window_sec}-${state.config.early_strong_delta_entry_min_t_remaining_sec}s >${fmtPx(state.config.early_strong_delta_entry_min_price)} <${fmtPx(state.config.early_strong_delta_entry_max_price)} ${state.config.early_strong_delta_entry_hedge_enabled ? 'price-only always-hedge' : `UP>=${fmtUsd(state.config.early_strong_delta_entry_up_min_delta_usd)} DOWN<=${fmtUsd(state.config.early_strong_delta_entry_down_max_delta_usd)}`} ${state.config.early_strong_delta_entry_confirm_checks}x${state.config.early_strong_delta_entry_hedge_enabled ? ' hedge' : ''}`
+      : 'off';
+  const lateEdgeConfirmLabel = state
+    ? state.config.late_edge_entry_window_sec <= 60
+      ? `${state.config.late_edge_entry_window_sec}-30s ${state.config.late_edge_entry_mid_confirm_checks}x; 30-${state.config.late_edge_entry_min_t_remaining_sec}s ${state.config.late_edge_entry_late_confirm_checks}x`
+      : `${state.config.late_edge_entry_window_sec}-60s ${state.config.late_edge_entry_confirm_checks}x; 60-30s ${state.config.late_edge_entry_mid_confirm_checks}x; 30-${state.config.late_edge_entry_min_t_remaining_sec}s ${state.config.late_edge_entry_late_confirm_checks}x`
+    : '';
+  const lateEdgeEntryLabel =
+    state?.config.late_edge_entry_enabled
+      ? state.config.late_edge_entry_delta_filter_enabled
+        ? `${state.config.late_edge_entry_window_sec}-${state.config.late_edge_entry_min_t_remaining_sec}s ${fmtPx(state.config.late_edge_entry_min_price)}-${fmtPx(state.config.late_edge_entry_max_price)} UP>=${fmtUsd(state.config.late_edge_entry_up_min_delta_usd)} DOWN<=${fmtUsd(state.config.late_edge_entry_down_max_delta_usd)} ${lateEdgeConfirmLabel} ${fmtPct(state.config.late_edge_entry_risk_fraction * 100)}`
+        : `${state.config.late_edge_entry_window_sec}-${state.config.late_edge_entry_min_t_remaining_sec}s ${fmtPx(state.config.late_edge_entry_min_price)}-${fmtPx(state.config.late_edge_entry_max_price)} price-only ${lateEdgeConfirmLabel} ${fmtPct(state.config.late_edge_entry_risk_fraction * 100)}`
+      : 'off';
+  const stableDeltaEntryLabel =
+    state?.config.stable_delta_entry_enabled
+      ? `${state.config.stable_delta_entry_window_sec}-${state.config.stable_delta_entry_min_t_remaining_sec}s ${fmtPx(state.config.stable_delta_entry_min_price)}-${fmtPx(state.config.stable_delta_entry_max_price)} abs=${fmtMoneyCompact(state.config.stable_delta_entry_min_abs_delta_usd)}-${fmtMoneyCompact(state.config.stable_delta_entry_max_abs_delta_usd)} move<${fmtMoneyCompact(state.config.stable_delta_entry_max_delta_move_usd)} ${state.config.stable_delta_entry_confirm_checks}x ${fmtPct(state.config.stable_delta_entry_risk_fraction * 100)}`
+      : 'off';
+  const entryMomentumLabel =
+    state?.config.entry_momentum_filter_enabled
+      ? state.config.entry_momentum_max_ask_move > 0
+        ? `${fmtPx(state.config.entry_momentum_min_price)}-${fmtPx(state.config.entry_momentum_max_price)} final>=prev-1t move<${fmtPx(state.config.entry_momentum_max_ask_move)}`
+        : 'all non-tail final>=prev-1t'
+      : 'off';
+  const trendOverheatLabel =
+    state?.config.trend_overheat_filter_enabled
+      ? `${state.config.trend_overheat_min_streak}x same-dir price>=${fmtPx(state.config.trend_overheat_price_floor)} skip`
+      : 'off';
+  const highEdgeLabel =
+    state?.config.high_price_edge_threshold !== undefined && state.config.high_price_edge_threshold > 0
+      ? `> ${fmtPx(state.config.min_net_edge)}; >=${fmtPx(state.config.high_price_edge_threshold)} BTC abs>=${fmtMoneyCompact(state.config.high_price_btc_delta_usd)}`
+      : `> ${fmtPx(state?.config.min_net_edge)}`;
+  const btcSignal = state?.btc_signal ?? null;
+  const btcFilterLabel = state?.config.btc_delta_filter_enabled
+    ? `${state.config.btc_price_symbol} UP>=${fmtMoneyCompact(state.config.btc_up_min_delta_usd)} DOWN<=${fmtMoneyCompact(state.config.btc_down_max_delta_usd)} ${state.config.confirm_checks}x`
+    : 'off';
+  const scaleInLabel =
+    state?.config.scale_in_after_early_enabled
+      ? [
+          `early${state.config.early_strong_delta_entry_hedge_enabled ? ' hedge' : ''}`,
+          state.config.strong_delta_entry_enabled ? 'strong' : '',
+          state.config.normal_scale_in_enabled ? `${state.config.seconds_before_close}-${state.config.min_t_remaining_sec}s` : '',
+          state.config.late_edge_entry_enabled ? `${state.config.late_edge_entry_window_sec}-${state.config.late_edge_entry_min_t_remaining_sec}s` : '',
+          state.config.tail_entry_enabled ? 'tail' : '',
+        ]
+          .filter(Boolean)
+          .join(' + ') + `; max ${state.config.max_buys_per_market}; per-slot side`
+      : 'off';
+  const strongNormalReverseLabel =
+    state?.config.strong_normal_reverse_enabled
+      ? `strong->normal held<=${fmtPx(state.config.strong_normal_reverse_held_bid_threshold)} reverse ${state.config.strong_normal_reverse_confirm_checks}x ${fmtPct(state.config.strong_normal_reverse_risk_fraction * 100)}`
+      : 'off';
+  const btcDeltaLabel = btcSignal
+    ? `${btcSignal.delta_usd >= 0 ? '+' : ''}${fmtUsd(btcSignal.delta_usd)} ${btcSignal.signal_side}${btcSignal.stale ? ' STALE' : ''}`
+    : '--';
+  const btcPriceLabel = btcSignal
+    ? `${fmtUsd(btcSignal.current_price)} / ${fmtUsd(btcSignal.price_to_beat)}`
+    : '--';
+  const btcPriceKey = btcSignal?.source?.includes('rtds') ? 'BTC TWAP PX / BEAT' : 'BTC PX / BEAT';
+  const realizedCapFraction = state?.config.max_daily_realized_profit_fraction ?? state?.risk_snapshot?.max_daily_realized_profit_fraction ?? 0;
+  const realizedCapUsd = state?.risk_snapshot?.daily_profit_target_usd ?? state?.config.max_daily_realized_profit_usd ?? 0;
+  const priceGuardLabel = state?.config.price_source_guard_enabled
+    ? state.config.allow_binance_proxy_chainlink_entries
+      ? 'WARN proxy allowed'
+      : state.config.price_signal_source?.toLowerCase().includes('rtds')
+        ? 'ON: RTDS TWAP required'
+        : 'ON: block Binance proxy on Chainlink'
+    : 'off';
+  const sizeLabel =
+    (state?.config.order_fixed_notional_usd ?? 0) > 0
+      ? `${fmtUsd(state?.config.order_fixed_notional_usd)} fixed`
+      : `${fmtPct((state?.config.order_risk_fraction ?? 0) * 100)} equity`;
+  const oneSideLabel = state?.config.one_side_per_market
+    ? `on; max ${state.config.max_buys_per_market}`
+    : 'off';
+  const partialExitTrigger =
+    (state?.config.reversal_partial_held_bid_threshold ?? 0) > 0
+      ? `held<${fmtPx(state?.config.reversal_partial_held_bid_threshold)}`
+      : `dd>${fmtPx(state?.config.reversal_partial_held_bid_drawdown)}`;
+  const reversalTrigger =
+    (state?.config.reversal_held_bid_threshold ?? 0) > 0
+      ? `held<${fmtPx(state?.config.reversal_held_bid_threshold)}`
+      : `dd>=${fmtPct((state?.config.reversal_held_bid_drawdown ?? 0) * 100)}`;
+  const earlyReversalLabel =
+    state?.config.early_reversal_exit_enabled
+      ? `${state.config.early_reversal_exit_window_sec}-${state.config.early_reversal_exit_min_t_remaining_sec}s held<${fmtPx(state.config.early_reversal_held_bid_threshold)} ${state.config.early_reversal_confirm_checks}x / ${fmtPct(state.config.early_reversal_exit_fraction * 100)}`
+      : 'off';
+  const reversalLabel =
+    state?.config.reversal_exit_enabled
+      ? `${state.config.reversal_partial_exit_enabled ? `${state.config.reversal_partial_exit_window_sec}-${state.config.reversal_partial_exit_min_t_remaining_sec}s ${partialExitTrigger} ${state.config.reversal_partial_confirm_checks}x / ${fmtPct((state.config.reversal_partial_exit_fraction ?? 0) * 100)}; ` : ''}${state.config.reversal_exit_window_sec}-${state.config.reversal_normal_min_t_remaining_sec}s ${reversalTrigger} ${state.config.reversal_confirm_checks}x / ${fmtPct(state.config.reversal_exit_order_fraction * 100)}; ${state.config.reversal_late_exit_enabled ? `${state.config.reversal_late_window_sec}-${state.config.reversal_exit_min_t_remaining_sec}s held<${fmtPx(state.config.reversal_late_held_bid_threshold)} ${state.config.reversal_late_confirm_checks}x` : 'late off'}`
+      : 'off';
+
+  return (
+    <>
+      {/* Trade flash is a background notification; never let it cover or
+          momentarily black out an open data modal. */}
+      {flash && !activeModal && <div className="flash-screen" />}
+      <div className="terminal-shell" style={shellStyle}>
+        <TopBar
+          time={now}
+          botRunning={state?.bot_running ?? false}
+          botMode={state?.active_lane ?? state?.bot_mode ?? 'stopped'}
+          // `risk_state` can carry a diagnostic cursor/source reason while
+          // the isolated Paper snapshot still explicitly permits entries.
+          // Use the authoritative allow_entries bit for the Paper status pill;
+          // live mode continues to use the strict risk state.
+          riskState={state?.bot_mode === 'paper'
+            ? state?.risk_snapshot?.allow_entries === false ? (state?.risk_state ?? 'BLOCKED') : 'OK'
+            : (state?.risk_state ?? 'UNKNOWN')}
+          err={err}
+          lastFlashAt={lastFlashAt}
+          onSettings={() => setShowSettings(true)}
+          operatorToken={operatorToken}
+          onOperatorTokenChange={setOperatorToken}
+          liveBusy={liveBusy}
+          liveMessage={liveMessage}
+          onToggleLive={toggleLive}
+          serviceModes={state?.service_modes}
+          paperServices={state?.paper_services}
+          serviceBusy={serviceBusy}
+          onToggleService={toggleService}
+          riskConfig={{
+            maxDailyLossFraction: state?.config.max_daily_loss_fraction,
+            maxDailyRealizedProfitFraction: realizedCapFraction,
+            maxDailyRealizedProfitUsd: realizedCapUsd,
+            paperEquityUsd: state?.mode_split?.paper?.capital_base_usd ?? undefined,
+            kellySizingEnabled: state?.kelly_sizing_enabled,
+            minEntryPrice: state?.config.min_entry_price,
+            maxEntryPrice: state?.config.max_entry_price,
+            secondsBeforeClose: state?.config.seconds_before_close,
+            minTRemainingSec: state?.config.min_t_remaining_sec,
+            orderRiskFraction: state?.config.order_risk_fraction,
+            reversalExitWindowSec: state?.config.reversal_exit_window_sec,
+            reversalHeldBidDrawdown: state?.config.reversal_held_bid_drawdown,
+            confirmChecks: state?.config.confirm_checks,
+            reversalConfirmChecks: state?.config.reversal_confirm_checks,
+            maxOpenPositions: state?.config.max_open_positions,
+            reversalPartialExitEnabled: state?.config.reversal_partial_exit_enabled,
+            reversalPartialExitFraction: state?.config.reversal_partial_exit_fraction,
+            sellFokSlippageTicks: state?.config.sell_fok_slippage_ticks,
+            sellExitMaxDepthTicks: state?.config.sell_exit_max_depth_ticks,
+            sellExitMaxDepthLevels: state?.config.sell_exit_max_depth_levels,
+            sellExitFakFallbackEnabled: state?.config.sell_exit_fak_fallback_enabled,
+            sellExitReconcileTrades: state?.config.sell_exit_reconcile_trades,
+            entryOrderMode: state?.config.entry_order_mode,
+            entryMakerOrderType: state?.config.entry_maker_order_type,
+            entryMakerTtlSec: state?.config.entry_maker_ttl_sec,
+            entryMakerPostOnly: state?.config.entry_maker_post_only,
+            entryMakerFallbackTaker: state?.config.entry_maker_fallback_taker,
+            profitExitEnabled: state?.config.profit_exit_enabled,
+            profitExitOrderMode: state?.config.profit_exit_order_mode,
+            profitTargetFraction: state?.config.profit_target_fraction,
+            profitTargetTicks: state?.config.profit_target_ticks,
+            profitExitFraction: state?.config.profit_exit_fraction,
+            profitMakerOrderType: state?.config.profit_maker_order_type,
+            profitMakerTtlSec: state?.config.profit_maker_ttl_sec,
+            profitMakerPostOnly: state?.config.profit_maker_post_only,
+            profitMakerFallbackTaker: state?.config.profit_maker_fallback_taker,
+            stopExitOrderMode: state?.config.stop_exit_order_mode,
+            reversalExitOrderMode: state?.config.reversal_exit_order_mode,
+            nearCloseExitEnabled: state?.config.near_close_exit_enabled,
+            nearCloseExitWindowSec: state?.config.near_close_exit_window_sec,
+            nearCloseExitOrderMode: state?.config.near_close_exit_order_mode,
+          }}
+          musicEnabled={musicEnabled}
+          onToggleMusic={toggleMusic}
+          llmUsage={llmUsage || state?.llm?.usage || null}
+          llmModels={state?.llm?.settings}
+          accountLive={activeLive}
+          profileName={state?.wallet?.polymarket_profile?.name || state?.wallet?.polymarket_profile?.pseudonym || state?.wallet?.user_name || state?.wallet?.profile?.name || state?.wallet?.profile?.pseudonym}
+          portfolioValue={activeLive ? state?.wallet?.polymarket_profile?.portfolio_value_usd ?? state?.wallet?.polymarket_profile?.balance_usd ?? state?.wallet?.portfolio_value_usd ?? null : totalEquity}
+        />
+
+        <KpiStrip state={state} totalEquity={totalEquity} winRate={winRate} onWallet={() => setActiveModal('wallet')} onPositions={() => setActiveModal('positions')} onPnlHistory={() => setActiveModal('pnl-history')} />
+
+        <PencilDashboard state={state} onPositions={() => setActiveModal('positions')} onDecisions={() => setActiveModal('decisions')} onOrdersAll={() => setActiveModal('orders-all')} onConsensusHistory={() => setActiveModal('consensus-history')} onAssetClick={(asset) => { setActiveProduct(asset); setActiveModal('product'); }} />
+
+        <PaperComparison />
+
+        <details className="legacy-details">
+          <summary>è¯¦ç»†ç›‘æŽ§ä¸Žç­–ç•¥ / å®žæ—¶æ•°æ®</summary>
+        <div className="terminal-grid" style={compactLayout ? compactGridStyle : gridStyle}>
+          <div style={compactLayout ? compactLeftColStack : colStack}>
+            <Panel title="é’±åŒ… / èµ„äº§">
+              <Row k="é’±åŒ…ç»‘å®š" v={state?.wallet.binding?.status ?? (state?.wallet.deposit ? 'å·²ç»‘å®š' : 'æœªç»‘å®š')} colored={state?.wallet.binding?.bound ? 1 : -1} relaxed />
+              <Row k={activeLive ? 'pUSD çŽ°é‡‘' : 'æ¨¡æ‹ŸçŽ°é‡‘'} v={fmtUsd(cash)} hi relaxed />
+              <Row
+                k="æŒä»“å¸‚å€¼"
+                v={fmtUsd(openValue)}
+                relaxed
+                clickable
+                onClick={() => setActiveModal('positions')}
+                ariaLabel="æ‰“å¼€å½“å‰æŒä»“"
+              />
+              <Sep />
+              <Row k="æ€»èµ„äº§" v={fmtUsd(totalEquity)} hi big relaxed />
+            </Panel>
+
+            <Panel title="ä»Šæ—¥ç›ˆäº" onClick={() => setActiveModal('orders')} ariaLabel="æ‰“å¼€æœ€è¿‘è®¢å•">
+              <Row k="å·²å®žçŽ°ç›ˆäº" v={fmtUsd(pnl?.realized_usd)} colored={pnl?.realized_usd} relaxed />
+              <Row k="èƒœ / è´Ÿ" v={`${pnl?.wins ?? 0} / ${pnl?.losses ?? 0}`} relaxed />
+              <Row k="èƒœçŽ‡" v={fmtPct(winRate ?? null)} relaxed />
+              <Row k="å¾…ç»“ç®—" v={String(pnl?.pending ?? 0)} dim relaxed />
+              <Row k="ç»Ÿè®¡èµ·å§‹" v={pnl?.period_start_ts ? fmtTime(pnl.period_start_ts) : '--'} dim mono relaxed />
+            </Panel>
+
+            <Panel title="é£Žé™© / æ•žå£">
+              <RiskSnapshotPanel snapshot={state?.risk_snapshot} riskState={state?.risk_state} />
+            </Panel>
+
+            <Panel title="äº¤æ˜“ç­–ç•¥" flex>
+              <div style={strategyStackStyle}>
+                <div style={strategySectionStyle}>
+                  <div style={subTitleStyle}>BTC</div>
+                  <Row k="ä¸‹è¡Œå…¥åœº" v={`${fmtPx(state?.config.min_entry_price)}-${fmtPx(state?.config.max_entry_price)}`} mono />
+                  <Row k="ä¸Šè¡Œå…¥åœº" v={`${fmtPx(state?.config.up_min_entry_price)}-${fmtPx(state?.config.up_max_entry_price)}`} mono />
+                  <Row k="BTC è¿‡æ»¤å™¨" v={btcFilterLabel} mono />
+                  <Row k="æ—©æœŸå¼ºä¿¡å·" v={earlyStrongDeltaEntryLabel} mono />
+                  <Row k="å¼º Delta" v={strongDeltaEntryLabel} mono />
+                  <Row k="å°¾ç›˜è¾¹é™…" v={lateEdgeEntryLabel} mono />
+                  <Row k="ç¨³å®š Delta" v={stableDeltaEntryLabel} mono />
+                  <Row k="å…¥åœºåŠ¨é‡" v={entryMomentumLabel} mono />
+                  <Row k="è¶‹åŠ¿è¿‡çƒ­" v={trendOverheatLabel} mono />
+                  <Row k="ä¸‹å•è§„æ¨¡" v={sizeLabel} mono />
+                </div>
+              </div>
+              <Sep />
+              <Row k="å‡€è¾¹é™…" v={highEdgeLabel} mono />
+              <Row k="ä»·æ ¼ä¿æŠ¤" v={priceGuardLabel} mono colored={state?.config.price_source_guard_enabled && !state?.config.allow_binance_proxy_chainlink_entries ? 1 : -1} />
+              <Row k="æ—¶é—´çª—å£" v={`${state?.config.min_t_remaining_sec ?? '?'}-${state?.config.seconds_before_close ?? '?'}s`} mono />
+              <Row k="æå‰å…¥åœº" v={earlyEntryLabel} mono />
+              <Row k="ä¸­æ®µå…¥åœº" v={midEntryLabel} mono />
+              <Row k="å°¾ç›˜å…¥åœº" v={tailEntryLabel} mono />
+              <Row k="åˆ†æ‰¹åŠ ä»“" v={scaleInLabel} mono />
+              <Row k="å•è¾¹é™åˆ¶" v={oneSideLabel} mono />
+              <Row k="å¼ºè½¬æ™®é€š" v={strongNormalReverseLabel} mono />
+              <Row k="æœ€å°è®¢å•" v={fmtUsd(state?.config.min_order_notional_usd)} mono />
+              <Row k="ä½™é¢é¢„ç•™" v={fmtUsd(state?.config.order_balance_reserve_usd)} mono />
+              <Row k="æ¯å°æ—¶è®¢å•" v={ordersPerHourLabel} mono />
+              <Row k="æ—©æœŸåè½¬é€€å‡º" v={earlyReversalLabel} mono />
+              <Row k="åè½¬é€€å‡º" v={reversalLabel} mono />
+              <Row k="ç¡®è®¤æ¬¡æ•°" v={`${state?.config.confirm_checks ?? '?'}x`} mono />
+              <Row
+                k="é‡è¯•ç­–ç•¥"
+                v={`${state?.config.max_buy_retries_per_market === 0 ? 'unlimited' : `${state?.config.max_buy_retries_per_market ?? '?'}x`} / ${state?.config.order_retry_cooldown_sec ?? '?'}s / >=${state?.config.retry_min_t_remaining_sec ?? '?'}s / ${state?.config.max_retry_price_drift_ticks != null && state.config.max_retry_price_drift_ticks < 0 ? 'drift unlimited' : `+${state?.config.max_retry_price_drift_ticks ?? '?'}t`}`}
+                mono
+              />
+              <Row k="FOK ç¼“å†²" v={`${state?.config.fok_price_buffer_ticks ?? 0} tick`} mono />
+              <Row k="å–å‡ºæ»‘ç‚¹" v={`${state?.config.sell_fok_slippage_ticks ?? 0} tick`} mono />
+              <Sep />
+              <Row k="æœªç»“ç®—ä¸Šé™" v={String(state?.config.max_open_positions ?? '')} mono />
+              <Row k="æ¯æ—¥äºæŸä¸Šé™" v={fmtPct((state?.config.max_daily_loss_fraction ?? 0) * 100)} mono />
+              <Row k="æ¯æ—¥æ”¶ç›ŠçŽ‡ä¸Šé™" v={realizedCapFraction > 0 ? `${fmtPct(realizedCapFraction * 100)} Â· ${fmtUsd(realizedCapUsd)}` : (realizedCapUsd > 0 ? fmtUsd(realizedCapUsd) : 'å…³é—­')} mono />
+            </Panel>
+          </div>
+
+          <div className="legacy-removed-column" style={compactLayout ? compactMiddleColStack : colStack}>
+            <Panel title="ç»„åˆæ›²çº¿ // æˆäº¤é‡">
+              <PortfolioChart state={state} />
+            </Panel>
+            <Panel
+              title={m ? `${m.synthetic ? 'BTC è®¡æ—¶å™¨' : 'å®žæ—¶å¸‚åœº'} // ${m.market_slug}${m.synthetic ? ' // ä»…å±•ç¤º' : ''}` : 'æš‚æ— å®žæ—¶å¸‚åœº'}
+              contentStyle={{ position: 'relative', overflow: 'hidden' }}
+            >
+              {m ? (
+                <MarketPanelBody>
+                  <VolatilityChart asset="BTC" history={state?.btc_price_history} currentPrice={btcSignal?.current_price} />
+                  <div className="market-panel-foreground">
+                    <Row
+                      k="BTC ä»·æ ¼å·®"
+                      v={btcDeltaLabel}
+                      hi
+                      mono
+                      colored={btcSignal ? btcSignal.delta_usd : null}
+                    />
+                    <Row k={btcPriceKey.replace('TWAP PX / BEAT', 'TWAP / åŸºå‡†').replace('PX / BEAT', 'ä»·æ ¼ / åŸºå‡†')} v={btcPriceLabel} mono />
+                    <Sep />
+                    <Row
+                      k="å€’è®¡æ—¶"
+                      v={fmtDur(tRem)}
+                      hi
+                      big
+                      colored={tRem != null && tRem < 60 ? 1 : -1}
+                    />
+                    <BookView
+                      label="ä¸Šæ¶¨"
+                      book={state?.book_up}
+                      cap={state?.config.up_max_entry_price ?? 0.87}
+                      floor={state?.config.up_min_entry_price ?? 0.84}
+                    />
+                    <BookView
+                      label="ä¸‹è·Œ"
+                      book={state?.book_down}
+                      cap={state?.config.max_entry_price ?? 0.95}
+                      floor={state?.config.min_entry_price ?? 0.80}
+                    />
+                  </div>
+                </MarketPanelBody>
+              ) : (
+                <div style={{ color: 'var(--txt-dim)', padding: '6px 0' }}>
+                  ç­‰å¾…ä¸‹ä¸€ä¸ª 5 åˆ†é’Ÿ BTC çª—å£<span className="caret">_</span>
+                </div>
+              )}
+            </Panel>
+
+          </div>
+
+          <div className="legacy-removed-column" style={compactLayout ? compactRightColStack : colStack}>
+            <Panel title="æ¦‚çŽ‡é¢„æµ‹ // å®žæ—¶">
+              <ProbabilityPanel state={state} />
+            </Panel>
+            <Panel title="å†³ç­–æ—¥å¿— // å®žæ—¶" flex>
+              <DecisionsTable decisions={state?.decisions ?? []} />
+            </Panel>
+          </div>
+        </div>
+        </details>
+
+        <BottomBar state={state} transport={transport} llmUsage={llmUsage || state?.llm?.usage || null} onAgentClick={(role) => { setActiveAgentRole(role); setActiveModal('agent'); }} />
+        <ProposalToasts state={state} />
+        <video ref={musicRef} src="/poluauto1.mp4" loop preload="auto" playsInline aria-hidden="true" tabIndex={-1} style={{ display: 'none' }} />
+      </div>
+      {showSettings && <SystemSettings onClose={() => setShowSettings(false)} />}
+      {activeModal === 'wallet' && (
+        activeLive ? <WalletActivityModal state={state} onClose={() => setActiveModal(null)} /> :
+        <DataModal title="PAPER æ¨¡æ‹Ÿèµ„é‡‘ / å½“å‰ç­–ç•¥è´¦æœ¬" onClose={() => setActiveModal(null)}>
+          <Row k="æ¨¡æ‹Ÿåˆå§‹æœ¬é‡‘" v={fmtUsd(state?.mode_split?.paper?.capital_base_usd)} relaxed />
+          <Row k="å½“å‰æ¨¡æ‹ŸçŽ°é‡‘" v={fmtUsd(state?.mode_split?.paper?.cash_usd)} relaxed />
+          <Row k="æ¨¡æ‹Ÿæƒç›Š" v={fmtUsd(state?.mode_split?.paper?.equity_usd)} relaxed />
+          <Row k="ç´¯è®¡æ¨¡æ‹Ÿè´¹ç”¨" v={fmtUsd(state?.mode_split?.paper?.fees_usd)} relaxed />
+          <div className="positions-sync-note">å½“å‰ç­–ç•¥çš„ç‹¬ç«‹æ¨¡æ‹Ÿè´¦æœ¬ï¼Œä¸åŒ…å«é“¾ä¸Šå……å€¼ã€æçŽ°æˆ–å®žç›˜èµ„é‡‘ã€‚</div>
+        </DataModal>
+      )}
+      {activeModal === 'positions' && (
+        <DataModal title={activeLive ? 'å®žç›˜å½“å‰æŒä»“ / å¾…ç»“ç®—' : 'PAPER å½“å‰æŒä»“ä¸Žç»“ç®—åŽ†å²'} onClose={() => setActiveModal(null)}>
+          {!activeLive && <>
+            <div className="settled-position-note">æ¨¡æ‹Ÿä»“ï¼ˆæœªç»“ç®— paper å…¥åœºï¼Œåˆè®¡ {fmtUsd((state?.paper_positions ?? []).reduce((sum, p) => sum + (p.notional_usd || 0), 0))}ï¼‰ï¼š</div>
+            <PaperPositionsTable rows={state?.paper_positions ?? []} />
+            <div className="settled-position-note">å·²ç»“ç®—åŽ†å²ï¼š{state?.paper_settled_count ?? state?.paper_settled_positions?.length ?? 0} æ¡ã€‚ç»“ç®—æ¬¾å·²è®¡å…¥æ¨¡æ‹ŸçŽ°é‡‘ï¼Œä¸å±žäºŽå¾…å…‘æ¢ï¼Œä¹Ÿä¸è®¡å…¥å½“å‰æŒä»“ã€‚</div>
+            <PaperSettledTable rows={state?.paper_settled_positions ?? []} />
+          </>}
+          {activeLive && <>
+            <PositionsTable positions={state?.positions ?? []} />
+          </>}
+          {activeLive && !!state?.settled_positions?.length && <>
+            <div className="settled-position-note">å·²ç»“ç®— / å¾…èµŽå›žï¼š{state.settled_positions.length} æ¡ã€‚å®ƒä»¬ä¸ä¼šè®¡å…¥å½“å‰é£Žé™©æ•žå£ã€‚</div>
+            <PositionsTable positions={state.settled_positions} />
+          </>}
+        </DataModal>
+      )}
+      {activeModal === 'orders' && (
+        <OrdersAllModal initialLane={serviceIsLive(state, 'BTC') ? 'live' : 'paper'} onClose={() => setActiveModal(null)} />
+      )}
+      {activeModal === 'decisions' && (
+        <DataModal title="å†³ç­–æ—¥å¿— // è¯¦æƒ…" onClose={() => setActiveModal(null)}>
+          <DecisionsTable decisions={state?.decisions ?? []} />
+        </DataModal>
+      )}
+      {activeModal === 'orders-all' && (
+        <OrdersAllModal initialLane={serviceIsLive(state, 'BTC') ? 'live' : 'paper'} onClose={() => setActiveModal(null)} />
+      )}
+      {activeModal === 'pnl-history' && (
+        <PnlHistoryModal initialLane={serviceIsLive(state, 'BTC') ? 'live' : 'paper'} onClose={() => setActiveModal(null)} />
+      )}
+      {activeModal === 'consensus-history' && (
+        <ConsensusHistoryModal onClose={() => setActiveModal(null)} />
+      )}
+      {activeModal === 'agent' && activeAgentRole && (
+        <AgentDetailModal role={activeAgentRole} status={findAgentStatus(state?.agent_status, activeAgentRole.keys)} state={state} onClose={() => { setActiveModal(null); setActiveAgentRole(null); }} />
+      )}
+      {activeModal === 'product' && (
+        <ProductDetailModal asset={activeProduct} state={state} onClose={() => setActiveModal(null)} />
+      )}
+    </>
+  );
+}
+
+const PRICE_PERIODS = ['å®žæ—¶', '15åˆ†', '1æ—¶', 'ä»Šæ—¥'] as const;
+
+function PencilDashboard({ state, onPositions, onDecisions, onOrdersAll, onConsensusHistory, onAssetClick }: { state: State | null; onPositions: () => void; onDecisions: () => void; onOrdersAll: () => void; onConsensusHistory: () => void; onAssetClick: (asset: 'BTC' | 'SOL' | 'ETH' | 'WEATHER' | 'SPORTS') => void }) {
+  const [pricePeriod, setPricePeriod] = useState<(typeof PRICE_PERIODS)[number]>('å®žæ—¶');
+  const priceSince = pricePeriod === 'å®žæ—¶' ? null
+    : pricePeriod === '15åˆ†' ? Date.now() / 1000 - 900
+    : pricePeriod === '1æ—¶' ? Date.now() / 1000 - 3600
+    : (state?.pnl?.period_start_ts ?? null);
+  const risk = state?.risk_snapshot;
+  const riskIsLive = serviceIsLive(state, 'BTC');
+  const [solHealth, setSolHealth] = useState<{ db?: { events?: number; positions?: number }; live?: boolean; live_trading_enabled?: boolean } | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    const load = () => fetch('/api/sol5m', { cache: 'no-store' }).then((r) => r.ok ? r.json() : null).then((value) => { if (!cancelled) setSolHealth(value); }).catch(() => { if (!cancelled) setSolHealth(null); });
+    load();
+    const timer = window.setInterval(load, 5000);
+    return () => { cancelled = true; window.clearInterval(timer); };
+  }, []);
+  const assets: Array<['BTC' | 'SOL', number | null | undefined, string, boolean]> = [
+    ['BTC', state?.btc_signal?.current_price, '#f5c451', serviceIsLive(state, 'BTC')],
+    ['SOL', null, '#4ec0ff', false],
+  ];
+  void onPositions;
+  return <div className="pencil-board-main">
+    <div className="pencil-analysis-grid">
+      <section className="pencil-panel pencil-chart-panel">
+        <div className="pencil-panel-title"><span>ç»„åˆå‡€å€¼ / BTC {serviceIsLive(state, 'BTC') ? 'LIVE' : 'PAPER'}</span>
+          <span className="pencil-period" role="tablist" aria-label="æ—¶é—´æ®µ">
+            {PRICE_PERIODS.map((p) => (
+              <button key={p} type="button"
+                className={pricePeriod === p ? 'active' : ''}
+                onClick={() => setPricePeriod(p)}>
+                {p}
+              </button>
+            ))}
+          </span>
+        </div>
+        <PortfolioChart state={state} asset="BTC" history={state?.btc_price_history} sinceTs={priceSince} />
+      </section>
+      <div className="pencil-side-stack">
+        <section className="pencil-panel pencil-orders-panel pencil-decisions-clickable" onClick={onDecisions} role="button" tabIndex={0} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onDecisions(); } }}>
+          <div className="pencil-panel-title">å†³ç­–æ—¥å¿— // å®žæ—¶</div>
+          <DecisionLogPreview state={state} />
+        </section>
+        <section className="pencil-panel pencil-prob-panel"><div className="pencil-panel-title">æ¦‚çŽ‡é¢„æµ‹ / åŒæ¨¡åž‹å¤æ ¸</div><ProbabilityPanel state={state} /></section>
+      </div>
+    </div>
+    <div className="pencil-risk-row">
+      {(() => {
+        const lane: 'paper' | 'live' = riskIsLive ? 'live' : 'paper';
+        const base = riskIsLive
+          ? finiteValue(risk?.day_start_equity_usd ?? risk?.capital_base_usd)
+          : state?.mode_split?.paper?.capital_base_usd;
+        // ç†”æ–­åªè®¡äºæŸï¼šä¸Ž worker risk.allowed_to_trade åŒå£å¾„ï¼ˆpnl <= -limit æ‰åœï¼‰ã€‚
+        // ç›ˆåˆ©æ—¥ pnl>0 æ¶ˆè€— 0 äºæŸé¢åº¦ï¼Œä¸èƒ½ç”¨ abs æŠŠå½“æ—¥ç›ˆåˆ©é”™å½“äºæŸæ˜¾ç¤ºã€‚
+        const dailyPnl = riskIsLive ? finiteValue(risk?.daily_net_pnl_usd)
+          : finiteValue(state?.mode_split?.paper?.daily_economic_pnl_usd ?? state?.mode_split?.paper?.realized_usd);
+        const lossFrac = dailyPnl != null && base != null && base > 0 ? Math.max(0, -dailyPnl) / base : null;
+        const limitFrac = finiteValue(risk?.max_daily_loss_fraction) ?? (riskIsLive ? null : 0.05);
+        const lossTone: 'green' | 'amber' = lossFrac == null || (limitFrac != null && limitFrac > 0 && lossFrac >= limitFrac * 0.6) ? 'amber' : 'green';
+        return <PencilMetric label="æ—¥äºæŸç†”æ–­" value={`${fmtPct(lossFrac == null ? null : lossFrac * 100)} / ${fmtPct(limitFrac == null ? null : limitFrac * 100)}`} tone={lossTone} mode={lane} />;
+      })()}
+      <PencilMetric label="æ€»æ•žå£" value={fmtUsd(riskIsLive ? risk?.position_value_usd : state?.mode_split?.paper?.open_value_usd)} tone="amber" mode={riskIsLive ? 'live' : 'paper'} />
+      {(() => {
+        const live = serviceIsLive(state, 'BTC');
+        const todayN = live ? state?.order_counts?.today_live : state?.order_counts?.today_paper;
+        const lifetimeN = live ? state?.order_counts?.live : state?.order_counts?.paper;
+        return <PencilMetric label="æ»‘ç‚¹å®¹å·® Â· è®¢å•ç»Ÿè®¡" value={`ä¹° ${state?.config.fok_price_buffer_ticks ?? '--'}t / å– ${state?.config.sell_fok_slippage_ticks ?? '--'}t Â· ä»Š ${todayN ?? 'â€”'} / ç´¯ ${lifetimeN ?? 'â€”'}`} tone="green" />;
+      })()}
+      <PencilMetric label="å…¨éƒ¨è®¢å•" value={String(state?.orders_total ?? '--')} tone="blue" onClick={onOrdersAll} />
+      <PencilMetric
+        label="æ¨¡åž‹ä¸€è‡´æ€§"
+        value={(() => {
+          const consensus = state?.slow_loop?.digest?.consensus;
+          if (!consensus) return state?.llm?.usage?.models?.length ? 'åœ¨çº¿' : '--';
+          const agreed = (consensus.reason || '').includes('ä¸€è‡´');
+          if (!agreed) return 'åˆ†æ­§Â·æŒæœ‰';
+          return consensus.decision === 'HOLD' ? 'ä¸€è‡´Â·æš‚åœ' : 'åŒæ¨¡ä¸€è‡´';
+        })()}
+        tone={(() => {
+          const consensus = state?.slow_loop?.digest?.consensus;
+          if (!consensus) return 'purple';
+          return (consensus.reason || '').includes('ä¸€è‡´') ? 'green' : 'amber';
+        })()}
+        onClick={onConsensusHistory}
+      />
+    </div>
+    {riskIsLive && <div className="live-risk-equity-note">
+      <span>å®žç›˜æ—¥é£ŽæŽ§ Â· æ—¥åˆæƒç›Š {fmtUsd(risk?.day_start_equity_usd ?? risk?.capital_base_usd)} Â· å½“å‰æƒç›Š {fmtUsd(risk?.equity_usd)} Â· ä¼°å€¼æ—¶é—´ {fmtDateTime(risk?.data_as_of)}</span>
+      <span>é£ŽæŽ§åŒ…å«å…¨éƒ¨é“¾ä¸ŠæŒä»“åŠåŽ†å²å¾…å…‘æ¢å°¾ä»“ï¼›OPEN æŒä»“åˆ—è¡¨å¯èƒ½è¿‡æ»¤å°é¢æˆ–å·²ç»“ç®—è®°å½•ã€‚</span>
+    </div>}
+    <div className="pencil-assets-row">{assets.map(([name, value, color, live]) => {
+      // The card's numbers follow its own lane; prefer the backend's full-day
+      // per-asset summary (the 30-order response window drops older fills),
+      // falling back to the local derivation for older servers.
+      const assetKey = name;
+      const fromLane = (lane: 'paper' | 'live') => {
+        const ba = state?.mode_split?.[lane]?.cumulative_by_asset?.[assetKey]
+          ?? state?.mode_split?.[lane]?.by_asset?.[assetKey];
+        if (!ba) return lane === 'live' ? { profit: null, wins: 0, losses: 0, rate: null } : null;
+        const wins = ba.wins ?? 0; const losses = ba.losses ?? 0;
+        return { profit: ba.realized_usd ?? (lane === 'paper' ? 0 : null), wins, losses, rate: wins + losses ? wins / (wins + losses) * 100 : null };
+      };
+      const perf = fromLane(live ? 'live' : 'paper') ?? assetPerformance(state?.orders || [], name, !live);
+      return <button type="button" className="pencil-asset-card pencil-asset-card-clickable" key={name} style={{ '--pencil-accent': color } as CSSProperties} onClick={() => onAssetClick(assetKey as 'BTC' | 'SOL' | 'ETH' | 'WEATHER' | 'SPORTS')} aria-label={`æŸ¥çœ‹${name}${live ? 'å®žç›˜' : 'æ¨¡æ‹Ÿ'}æ•°æ®`}>
+        <span>{name} Â· {live ? 'LIVE' : 'PAPER'}</span>
+        <b>{name === 'SOL' ? (solHealth ? `äº‹ä»¶ ${solHealth.db?.events ?? 0}` : '--') : (typeof value === 'number' ? fmtUsd(value) : '--')}</b>
+        <small>{name === 'SOL' ? 'SOL 5m ç­–ç•¥æœåŠ¡' : 'BTC ç­–ç•¥æœåŠ¡'}</small>
+        <small className="asset-stop-loss">{name === 'SOL' ? (solHealth?.live_trading_enabled ? 'å®žç›˜å…¥å£å·²å¼€å¯' : 'Paper è¿è¡Œ Â· å®žç›˜å…³é—­') : `æ­¢æŸ ${state?.stop_loss?.BTC?.status ?? '--'}`}</small>
+        {name === 'SOL' ? <em className="asset-profit-neutral">SOL Paper äº‹ä»¶ {solHealth?.db?.events ?? 0} Â· æŒä»“ {solHealth?.db?.positions ?? 0}</em> : <em className={perf.profit == null ? '' : perf.profit >= 0 ? 'asset-profit-positive' : 'asset-profit-negative'}>{live ? 'å®žç›˜ç»æµŽ' : 'æ¨¡æ‹Ÿ'}ç´¯è®¡ç›ˆäº {fmtSignedUsd(perf.profit)} Â· èƒœçŽ‡ {perf.rate == null ? '--' : `${perf.rate.toFixed(1)}%`}</em>}
+      </button>;
+    })}</div>
+  </div>;
+}
+
+function serviceIsLive(state: State | null, asset: 'BTC' | 'SOL' | 'ETH' | 'WEATHER' | 'SPORTS') {
+  if (asset === 'BTC' && state?.active_lane) return state.active_lane === 'live';
+  const info = state?.service_modes?.[asset];
+  if (info?.live_enabled != null) return info.live_enabled === true;
+  if (info?.mode) return info.mode.toLowerCase() === 'live';
+  return state?.bot_mode === 'live' && (asset === 'BTC' || asset === 'ETH');
+}
+
+function fmtSignedUsd(value: number | null | undefined) {
+  if (value == null || !Number.isFinite(value)) return 'â€”';
+  if (!Number.isFinite(value) || Math.abs(value) < 0.005) return '$0.00';
+  return `${value >= 0 ? '+' : '-'}$${Math.abs(value).toFixed(2)}`;
+}
+
+function fmtAge(seconds: number | null | undefined): string {
+  if (seconds == null || !Number.isFinite(seconds)) return '--';
+  const value = Math.max(0, Math.round(seconds));
+  if (value < 60) return `${value}s`;
+  if (value < 3600) return `${Math.floor(value / 60)}m ${value % 60}s`;
+  return `${Math.floor(value / 3600)}h ${Math.floor((value % 3600) / 60)}m`;
+}
+
+function fmtDateTime(ts: number | null | undefined): string {
+  if (ts == null || !Number.isFinite(ts)) return '--';
+  return new Date(ts * 1000).toLocaleString('zh-CN', { hour12: false, timeZone: 'Asia/Shanghai' });
+}
+
+function finiteValue(value: unknown): number | null {
+  if (value == null || value === '' || typeof value === 'boolean') return null;
+  const number = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function sumNullable(values: Array<number | null | undefined>): number | null {
+  if (!values.length || values.some((value) => value == null || !Number.isFinite(value))) return null;
+  return values.reduce<number>((sum, value) => sum + (value as number), 0);
+}
+
+function dailyEconomic(row: Record<string, any> | null | undefined): number | null {
+  if (!row) return null;
+  return finiteValue(row.net_pnl_usd ?? row.economic_pnl_usd ?? row.pnl_usd ?? row.realized_usd ?? row.realized_pnl_usd);
+}
+
+function dailyTrade(row: Record<string, any> | null | undefined): number | null {
+  return row ? finiteValue(row.trade_pnl_usd ?? row.gross_pnl_usd ?? row.pnl_usd) : null;
+}
+
+function dailyFees(row: Record<string, any> | null | undefined): number | null {
+  return row ? finiteValue(row.fees_usd) : null;
+}
+
+function dailyRebates(row: Record<string, any> | null | undefined): number | null {
+  if (!row) return null;
+  return finiteValue(row.rebates_usd ?? row.rebate_usd) ?? sumNullable([finiteValue(row.maker_rebate_usd), finiteValue(row.taker_rebate_usd), finiteValue(row.fees_refunded_usd)]);
+}
+
+function activityAmount(order: Order): number | null {
+  const direct = finiteValue(order.usdc_size);
+  if (direct != null) return Math.abs(direct);
+  const size = finiteValue(order.size);
+  const price = finiteValue(order.price);
+  return size != null && price != null ? Math.abs(size * price) : null;
+}
+
+function activityCashflow(order: Order): number | null {
+  const supplied = finiteValue(order.cashflow_usd);
+  if (supplied != null) return supplied;
+  const amount = activityAmount(order);
+  if (amount == null) return null;
+  const kind = String(order.activity_type || '').toUpperCase();
+  if (kind === 'REDEEM' || kind === 'MERGE') return amount;
+  if (kind === 'SPLIT') return -amount;
+  if (kind !== 'TRADE') return null;
+  const side = String(order.side || '').toUpperCase();
+  if (side === 'SELL') return amount;
+  if (side === 'BUY') return -amount;
+  return null;
+}
+
+/** Derive per-market performance from settled order outcomes. Unresolved orders
+ * intentionally remain neutral so the card never presents an invented PnL.
+ * `paperOnly` selects the dry-run lane so paper and live results never mix. */
+function assetPerformance(orders: Order[], asset: string, paperOnly = true) {
+  const key = asset.toUpperCase() === 'å¤©æ°”' ? 'WEATHER' : asset.toUpperCase() === 'ä½“è‚²' ? 'SPORTS' : asset.toUpperCase();
+  let profit = 0; let wins = 0; let losses = 0;
+  for (const order of orders) {
+    if ((order.dry_run !== 0) !== paperOnly) continue;
+    const orderAsset = String(order.asset || '').toUpperCase();
+    if (orderAsset !== key) continue;
+    const result = String(order.result || '').toUpperCase();
+    const size = Number(order.filled_size || order.size || 0);
+    const price = Number(order.price || 0);
+    if (!Number.isFinite(size) || !Number.isFinite(price)) continue;
+    if (result === 'HIT' || result === 'EXITED' || result === 'PARTIAL_EXIT') {
+      profit += size * Math.max(0, 1 - price); wins += 1;
+    } else if (result === 'MISS') {
+      profit -= size * Math.max(0, price); losses += 1;
+    }
+  }
+  const total = wins + losses;
+  return { profit, wins, losses, rate: total ? wins / total * 100 : null };
+}
+
+function ProductDetailModal({ asset, state, onClose }: { asset: 'BTC' | 'SOL' | 'ETH' | 'WEATHER' | 'SPORTS'; state: State | null; onClose: () => void }) {
+  const [paperOrders, setPaperOrders] = useState<Order[]>([]);
+  const [liveOrders, setLiveOrders] = useState<Order[]>([]);
+  const [days, setDays] = useState<Array<Record<string, any>>>([]);
+  const [loading, setLoading] = useState(true);
+  const [refresh, setRefresh] = useState(0);
+  const activeLive = serviceIsLive(state, asset);
+  const label = asset === 'WEATHER' ? 'å¤©æ°”' : asset === 'SPORTS' ? 'ä½“è‚²' : asset;
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    Promise.all([
+      fetchOrdersPage(0, 30, activeLive ? 'live' : 'paper', asset),
+      fetchPnlDaily(activeLive ? 'live' : 'paper', 0, 365, asset),
+    ]).then(([ordersPage, pnlPage]) => {
+      if (!cancelled) { setPaperOrders(activeLive ? [] : ordersPage.rows || []); setLiveOrders(activeLive ? ordersPage.rows || [] : []); setDays(pnlPage.rows || []); }
+    }).catch(() => {
+      if (!cancelled) { setPaperOrders([]); setLiveOrders([]); setDays([]); }
+    }).finally(() => { if (!cancelled) setLoading(false); });
+    const timer = window.setInterval(() => setRefresh((value) => value + 1), activeLive ? 15000 : 3000);
+    return () => { cancelled = true; window.clearInterval(timer); };
+  }, [asset, activeLive, refresh]);
+  const paper = state?.mode_split?.paper?.cumulative_by_asset?.[asset] || {};
+  const live = state?.mode_split?.live?.cumulative_by_asset?.[asset] || {};
+  const today = state?.mode_split?.paper?.by_asset?.[asset] || {};
+  const paperTotal = (paper.wins ?? 0) + (paper.losses ?? 0);
+  const liveTotal = (live.wins ?? 0) + (live.losses ?? 0);
+  return <DataModal title={`${label} / ${activeLive ? 'å®žç›˜' : 'PAPER æ¨¡æ‹Ÿ'}æ•°æ®`} onClose={onClose}>
+    <div className="product-detail-grid">
+      {!activeLive && <div className="product-detail-lane product-detail-paper"><h3>{label} Â· PAPER / å½“å‰ç­–ç•¥</h3><Row k="ç´¯è®¡ç›ˆäº" v={fmtSignedUsd(paper.realized_usd)} colored={paper.realized_usd} relaxed /><Row k="ç´¯è®¡èƒœçŽ‡" v={paperTotal ? fmtPct((paper.wins ?? 0) / paperTotal * 100) : '--'} relaxed /><Row k="èƒœ / è´Ÿ" v={`${paper.wins ?? 0} / ${paper.losses ?? 0}`} relaxed /><Row k="ä»Šæ—¥ç›ˆäº" v={fmtSignedUsd(today.realized_usd)} colored={today.realized_usd} relaxed /><Row k="å½“å‰å¾…ç»“ç®—" v={String(today.pending ?? 0)} relaxed /></div>}
+      {activeLive && <div className="product-detail-lane product-detail-live"><h3>{label} Â· LIVE</h3><Row k="ç´¯è®¡ç»æµŽç›ˆäº" v={fmtSignedUsd(live.realized_usd)} colored={live.realized_usd} relaxed /><Row k="ç´¯è®¡èƒœçŽ‡" v={liveTotal ? fmtPct((live.wins ?? 0) / liveTotal * 100) : '--'} relaxed /><Row k="èƒœ / è´Ÿ" v={`${live.wins ?? 'â€”'} / ${live.losses ?? 'â€”'}`} relaxed /><Row k="å®žç›˜èµ„æ ¼" v={state?.service_modes?.[asset]?.live_enabled ? 'å·²å¼€å¯' : 'æœªå¼€å¯'} relaxed /><Row k="å½“å‰è®¢å•" v="é“¾ä¸ŠçœŸå®žæˆäº¤ / å…‘æ¢" relaxed /></div>}
+    </div>
+    {!activeLive && <div className="product-detail-section"><h3>{label} Â· Paper æœ€è¿‘è®°å½•</h3>{loading ? <Empty>åŠ è½½ä¸­â€¦</Empty> : paperOrders.length ? <OrdersTable orders={paperOrders.slice(0, 12)} /> : <Empty>æš‚æ—  Paper è®¢å•ï¼›åŽ†å²æ±‡æ€»ä»ä»¥ç‹¬ç«‹è´¦æœ¬ä¸ºå‡†ã€‚</Empty>}</div>}
+    {activeLive && <div className="product-detail-section"><h3>{label} Â· Live æœ€è¿‘è®°å½•</h3>{loading ? <Empty>åŠ è½½ä¸­â€¦</Empty> : liveOrders.length ? <OrdersTable orders={liveOrders.slice(0, 12)} /> : <Empty>æš‚æ—  Live è®¢å•æˆ–å®žç›˜å°šæœªå¼€å¯ã€‚</Empty>}</div>}
+    <div className="product-detail-section"><h3>{label} Â· {activeLive ? 'å®žç›˜' : 'Paper'} æ¯æ—¥å‡€ç›ˆäº</h3>{days.length ? <div className="product-daily-list">{days.slice(0, 14).map((row) => <div key={row.day}><span>{row.day}</span><b className={(dailyEconomic(row) ?? 0) >= 0 ? 'asset-profit-positive' : 'asset-profit-negative'}>{fmtSignedUsd(dailyEconomic(row))}</b><small>{row.wins} èƒœ / {row.losses} è´Ÿ</small></div>)}</div> : <Empty>æš‚æ— å·²ç»“ç®—è®°å½•</Empty>}</div>
+  </DataModal>;
+}
+
+function DecisionLogPreview({ state }: { state: State | null }) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const [visibleRows, setVisibleRows] = useState(3);
+  const [windowStart, setWindowStart] = useState(0);
+  const [isUpdating, setIsUpdating] = useState(false);
+  const allDecisions = state?.decisions || [];
+  const latestDecisionId = allDecisions.length ? allDecisions[0].id : null;
+  useEffect(() => {
+    const node = containerRef.current;
+    if (!node) return;
+    const update = () => setVisibleRows(Math.max(1, Math.floor((node.clientHeight - 8) / 26)));
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
+  // A new decision always returns the feed to the newest row. The timed
+  // window then advances one row at a time so older activity remains
+  // inspectable without adding a second scrollbar to the dashboard panel.
+  useEffect(() => {
+    setWindowStart(0);
+    if (latestDecisionId == null) return undefined;
+    setIsUpdating(true);
+    const timeout = window.setTimeout(() => setIsUpdating(false), 500);
+    return () => window.clearTimeout(timeout);
+  }, [latestDecisionId]);
+  useEffect(() => {
+    const maxStart = Math.max(0, allDecisions.length - visibleRows);
+    if (maxStart <= 0) return undefined;
+    const interval = window.setInterval(() => {
+      setWindowStart((current) => current >= maxStart ? 0 : current + 1);
+    }, 4200);
+    return () => window.clearInterval(interval);
+  }, [allDecisions.length, visibleRows]);
+  const maxStart = Math.max(0, allDecisions.length - visibleRows);
+  const start = Math.min(windowStart, maxStart);
+  const decisions = allDecisions.slice(start, start + visibleRows);
+  // The worker legitimately goes quiet for ~10-20s while five-minute windows
+  // roll over (no market -> no decisions); label the pause honestly so a
+  // static list reads as "between windows", not as a frozen feed.
+  const latestTs = allDecisions[0]?.ts ?? null;
+  const windowGap = latestTs != null && Date.now() / 1000 - latestTs > 8;
+  return <div className={`decision-log-preview${isUpdating ? ' decision-log-updated' : ''}`} ref={containerRef} aria-live="polite">
+    {windowGap && <div className="decision-log-row decision-log-gap"><span>â³ çª—å£åˆ‡æ¢ä¸­</span><small>ç­‰å¾…ä¸‹ä¸€ä¸ª 5 åˆ†é’Ÿå¸‚åœºçš„æ–°å†³ç­–â€¦</small><b>PAPER</b></div>}
+    {decisions.map((d) => <div className="decision-log-row" key={`${d.id}-${start}`}><span>{d.asset || '--'} Â· {zhText(d.action)}</span><small>{zhText(d.reason).slice(0, 36)}</small><b>{d.dry_run ? 'PAPER' : 'LIVE'}</b></div>)}
+    {!decisions.length && <Empty>æš‚æ— å®žæ—¶å†³ç­–</Empty>}
+  </div>;
+}
+
+function PencilMetric({ label, value, tone, mode, onClick }: { label: string; value: string; tone: 'green' | 'amber' | 'blue' | 'purple'; mode?: KpiMode; onClick?: () => void }) {
+  const compact = label.startsWith('æ»‘ç‚¹å®¹å·®');
+  return <div className={`pencil-metric pencil-tone-${tone}${compact ? ' pencil-metric-slippage' : ''}${onClick ? ' pencil-metric-clickable' : ''}`} onClick={onClick} role={onClick ? 'button' : undefined} tabIndex={onClick ? 0 : undefined} onKeyDown={onClick ? (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onClick(); } } : undefined}>{mode && <ModeChip mode={mode} />}<span className="pencil-metric-label">{label}</span><b className="pencil-metric-value">{value}</b></div>;
+}
+
+const DISMISSED_PROPOSALS_KEY = 'polyauto-dismissed-proposals';
+
+function proposalId(p: SlowLoopProposal): string {
+  return `${p.key}:${String(p.proposed)}:${p.ts}`;
+}
+
+/** Binance-style bottom-right toast stack surfacing PENDING_HUMAN agent
+ * proposals.  Display-only: approval still happens outside the UI, so the
+ * card says where; dismissing just hides the card on this browser. */
+function ProposalToasts({ state }: { state: State | null }) {
+  const [dismissed, setDismissed] = useState<string[]>(() => {
+    try { return JSON.parse(localStorage.getItem(DISMISSED_PROPOSALS_KEY) || '[]'); }
+    catch { return []; }
+  });
+  const proposals = (state?.slow_loop?.proposals ?? [])
+    .filter((p) => !dismissed.includes(proposalId(p)))
+    .slice(0, 3);
+  const dismiss = (id: string) => {
+    setDismissed((current) => {
+      const next = [...current.filter((x) => x !== id), id].slice(-60);
+      try { localStorage.setItem(DISMISSED_PROPOSALS_KEY, JSON.stringify(next)); } catch { /* per-browser convenience only */ }
+      return next;
+    });
+  };
+  if (!proposals.length) return null;
+  return (
+    <div className="proposal-toasts" aria-live="polite" aria-label="å¾…å®¡æ‰¹å‚æ•°ææ¡ˆ">
+      {proposals.map((p) => {
+        const id = proposalId(p);
+        const conf = p.confidence === 'high' ? 'é«˜ç½®ä¿¡' : p.confidence === 'medium' ? 'ä¸­ç½®ä¿¡' : 'ä½Žç½®ä¿¡';
+        return (
+          <div className={`proposal-toast proposal-conf-${p.confidence}`} key={id}>
+            <div className="proposal-toast-head">
+              <span className="proposal-toast-title">âš™ å‚æ•°ææ¡ˆ Â· {p.key}</span>
+              <i className={`proposal-conf-chip chip-${p.confidence}`}>{conf}</i>
+              <button type="button" className="proposal-toast-close" aria-label="å…³é—­" onClick={() => dismiss(id)}>Ã—</button>
+            </div>
+            <div className="proposal-toast-change">
+              <code>{String(p.current)}</code>
+              <span className="proposal-arrow">â†’</span>
+              <code className="proposal-target">{String(p.proposed)}</code>
+            </div>
+            <div className="proposal-toast-reason" title={p.reason}>{p.reason}</div>
+            <div className="proposal-toast-foot">
+              <span>{p.source_agent} Â· {fmtTime(p.ts)} Â· å¾…äººå·¥å®¡æ‰¹</span>
+              <button type="button" className="proposal-toast-later" onClick={() => dismiss(id)}>ç¨åŽå¤„ç†</button>
+            </div>
+          </div>
+        );
+      })}
+      <div className="proposal-toast-hint">å®¡æ‰¹å…¥å£ï¼šagents/out/proposals.jsonlï¼ˆä¸ä¼šè‡ªåŠ¨åº”ç”¨ï¼‰</div>
+    </div>
+  );
+}
+
+function PortfolioChart({ state, asset = 'BTC', history, sinceTs }: { state: State | null; asset?: 'BTC' | 'ETH'; history?: PriceHistoryPoint[]; sinceTs?: number | null }) {
+  const base = history || (asset === 'ETH' ? state?.eth_price_history : state?.btc_price_history) || [];
+  // Period filter: keep the window when it still draws a line; otherwise
+  // fall back to whatever history memory holds (honest about coverage).
+  let pts = base;
+  if (sinceTs) {
+    const filtered = base.filter((p) => p.ts >= sinceTs);
+    if (filtered.length >= 2) pts = filtered;
+  }
+  const points = pts.slice(sinceTs ? -240 : -48);
+  if (points.length < 2) return <Empty>ç­‰å¾…ç»„åˆè¡Œæƒ…æ•°æ®â€¦</Empty>;
+  const prices = points.map((p) => p.price); const lo = Math.min(...prices); const hi = Math.max(...prices); const span = Math.max(hi - lo, 1);
+  const line = points.map((p, i) => `${(i / (points.length - 1)) * 100},${100 - ((p.price - lo) / span) * 82 - 9}`).join(' ');
+  const signal = asset === 'ETH' ? state?.eth_signal : state?.btc_signal;
+  const market = asset === 'ETH' ? state?.eth_market : state?.market;
+  const bookUp = asset === 'ETH' ? state?.eth_book_up : state?.book_up;
+  const bookDown = asset === 'ETH' ? state?.eth_book_down : state?.book_down;
+  const delta = signal?.delta_usd;
+  // Direction word mirrors the worker's own signal side; fall back to the
+  // delta sign so the label never contradicts the number next to it.
+  const sideWord = signal ? (signal.signal_side === 'UP' ? 'ä¸Šæ¶¨' : signal.signal_side === 'DOWN' ? 'ä¸‹è·Œ' : delta != null && delta !== 0 ? (delta > 0 ? 'ä¸Šæ¶¨' : 'ä¸‹è·Œ') : 'æŒå¹³') : null;
+  const tRem = market ? Math.max(0, market.end_ts - Date.now() / 1000) : null;
+  const quote = (side: 'ä¸Šæ¶¨' | 'ä¸‹è·Œ', book: Book | null | undefined) => (
+    <span className="chart-book-row">
+      <i className={side === 'ä¸Šæ¶¨' ? 'chart-side-up' : 'chart-side-down'}>{side}</i>
+      ä¹°ä¸€ <b className="chart-book-bid">{book?.best_bid == null ? '--' : fmtPx(book.best_bid)}</b>Ã—{book?.bid_size == null ? '--' : fmtNum(book.bid_size, 0)}
+      <em>Â·</em>
+      å–ä¸€ <b className="chart-book-ask">{book?.best_ask == null ? '--' : fmtPx(book.best_ask)}</b>Ã—{book?.ask_size == null ? '--' : fmtNum(book.ask_size, 0)}
+    </span>
+  );
+  return <div className="portfolio-chart" aria-label={`${asset}ç»„åˆæ›²çº¿å’Œæˆäº¤é‡`}>
+    <svg viewBox="0 0 100 100" preserveAspectRatio="none"><polyline points={line} fill="none" stroke="var(--green)" strokeWidth="1.2" vectorEffect="non-scaling-stroke" /></svg>
+    <div className="volume-bars" aria-label="å®žæ—¶ç›ˆäºæŸ±å½¢"><span className="sr-only">ç»¿è‰²ä¸ºç›ˆåˆ©ï¼Œçº¢è‰²ä¸ºäºæŸ</span>{points.slice(-24).map((p, i) => { const pnl = Number(p.delta_usd || 0); return <i key={`${p.ts}-${i}`} className={pnl >= 0 ? 'pnl-positive' : 'pnl-negative'} title={`${pnl >= 0 ? 'ç›ˆåˆ©' : 'äºæŸ'} ${fmtUsd(Math.abs(pnl))}`} style={{ height: `${Math.max(8, Math.min(100, Math.abs(pnl) * 4 + 8))}%` }} />; })}</div>
+    <div className="portfolio-chart-overlay" aria-label={`${asset}å®žæ—¶è¡Œæƒ…æ‘˜è¦`}>
+      <span>{asset} ä»·æ ¼å·® <b className={delta != null && delta >= 0 ? 'kpi-positive' : 'kpi-negative'}>{delta == null ? '--' : `${delta >= 0 ? '+' : ''}${fmtUsd(delta)}`}</b>{sideWord && <i className={`chart-side-word ${sideWord === 'ä¸Šæ¶¨' ? 'chart-side-up' : sideWord === 'ä¸‹è·Œ' ? 'chart-side-down' : ''}`}>{sideWord}</i>}</span>
+      <span>TWAP / åŸºå‡† <b>{signal ? `${fmtUsd(signal.current_price)} / ${fmtUsd(signal.price_to_beat)}` : '--'}</b></span>
+      <span>å€’è®¡æ—¶ <b className={tRem != null && tRem < 60 ? 'chart-countdown-hot' : ''}>{tRem == null ? '--' : fmtDur(tRem)}</b></span>
+      {quote('ä¸Šæ¶¨', bookUp)}
+      {quote('ä¸‹è·Œ', bookDown)}
+    </div>
+    <div className="chart-caption"><span>ä½Ž {fmtUsd(lo)}</span><span>{asset} ç»„åˆèµ°åŠ¿</span><span>é«˜ {fmtUsd(hi)}</span></div>
+  </div>;
+}
+
+function ProbabilityPanel({ state }: { state: State | null }) {
+  const rows = [
+    ['BTC ä¸Šæ¶¨', state?.btc_signal ? Math.max(0, Math.min(1, 0.5 + state.btc_signal.delta_usd / 200)) : null, '#f4b942'],
+    ['BTC ä¸‹è·Œ', state?.btc_signal ? Math.max(0, Math.min(1, 0.5 - state.btc_signal.delta_usd / 200)) : null, '#f05b68'],
+  ] as const;
+  return <div className="probability-panel">{rows.map(([label, probability, color]) => <div className="probability-row" key={label}><span>{label}</span><div className="probability-track"><i style={{ width: `${(probability ?? 0) * 100}%`, background: color }} /></div><b>{probability == null ? '--' : fmtPct(probability * 100)}</b></div>)}</div>;
+}
+
+type KpiMode = 'paper' | 'live' | 'chain';
+
+function ModeChip({ mode }: { mode: KpiMode }) {
+  const label = mode === 'live' ? 'å®žç›˜' : mode === 'chain' ? 'é“¾ä¸Š' : 'æ¨¡æ‹Ÿ';
+  return <i className={`kpi-mode kpi-mode-${mode}`}>{label}</i>;
+}
+
+function KpiStrip({ state, totalEquity, winRate, onWallet, onPositions, onPnlHistory }: { state: State | null; totalEquity: number | null; winRate: number | null; onWallet: () => void; onPositions: () => void; onPnlHistory: () => void }) {
+  void winRate; // cumulative win rate is read from the lane ledger below
+  const activeMode: 'paper' | 'live' = serviceIsLive(state, 'BTC') ? 'live' : 'paper';
+  const paperLane = state?.mode_split?.paper;
+  const liveLane = state?.mode_split?.live;
+  const pnl = activeMode === 'paper' ? paperLane?.realized_usd ?? null : state?.pnl?.realized_usd ?? null;
+  const cumulative = state?.mode_split?.[activeMode]?.cumulative_realized_usd ?? pnl;
+  const cumulativeWins = state?.mode_split?.[activeMode]?.cumulative_wins ?? (activeMode === 'live' ? state?.pnl?.wins : undefined);
+  const cumulativeLosses = state?.mode_split?.[activeMode]?.cumulative_losses ?? (activeMode === 'live' ? state?.pnl?.losses : undefined);
+  const chain = state?.chain_holdings;
+  const chainSummary = state?.chain_snapshot?.live_summary ?? state?.wallet?.polymarket_profile?.live_summary;
+  const chainSnapshot = state?.chain_snapshot;
+  const chainAccountEnabled = activeMode === 'live';
+  const chainAvailable = chainAccountEnabled && chainSummary?.available === true;
+  // Keep the source indicator in secondary copy while the KPI badge follows the active execution lane.
+  const kpiMode: KpiMode = activeMode;
+  const chainPendingCount = chainAccountEnabled ? chainAvailable ? chain?.pending_count : state?.pnl?.pending : paperLane?.pending;
+  const chainRedeemableCount = chainAvailable ? (chain?.redeemable_count ?? 0) : 0;
+  const chainPendingValue = chainAvailable ? (chain?.pending_value_usd ?? 0) : null;
+  const chainRedeemableValue = chainAvailable ? (chain?.redeemable_value_usd ?? 0) : null;
+  const displayCumulative = chainAccountEnabled ? (chainSummary?.economic_usd ?? null) : cumulative;
+  const displayToday = chainAccountEnabled ? (chainSummary?.today_economic_pnl_usd ?? null) : paperLane?.daily_economic_pnl_usd ?? pnl;
+  const todayWins = chainAccountEnabled ? chainSummary?.today_wins : paperLane?.wins;
+  const todayLosses = chainAccountEnabled ? chainSummary?.today_losses : paperLane?.losses;
+  const displayCumulativeWins = chainAccountEnabled ? chainSummary?.wins : cumulativeWins;
+  const displayCumulativeLosses = chainAccountEnabled ? chainSummary?.losses : cumulativeLosses;
+  const todayTotal = todayWins != null && todayLosses != null ? todayWins + todayLosses : null;
+  // Return%% divides by the ACTIVE lane's capital base (paper equity for the
+  // paper lane -- the same number the worker's risk gate uses), never by the
+  // chain balance while simulating.
+  const capitalBase = state?.mode_split?.[activeMode]?.capital_base_usd ?? (chainAccountEnabled ? totalEquity : null);
+  // The headline cards are explicitly "today" metrics.  The backend applies
+  // the Asia/Shanghai day boundary; use that active lane value here instead
+  // of the lifetime cumulative ledger used by the detail views.
+  const returnBase = chainAccountEnabled ? (liveLane?.capital_base_usd ?? totalEquity) : capitalBase;
+  // The headline is a Beijing-time trading-day return.  Lifetime economic PnL
+  // remains available in the first card and in the history modal; it must not
+  // leak into the daily percentage card.
+  const returnPct = returnBase && returnBase > 0 && displayToday != null ? displayToday / returnBase * 100 : null;
+  const chainFreshness = chainAccountEnabled
+    ? chainAvailable ? `é“¾ä¸Šé‡‡æ · ${fmtDateTime(chainSnapshot?.data_as_of)} Â· å»¶è¿Ÿ ${fmtAge(chainSnapshot?.data_age_sec)}${chainSnapshot?.stale ? ' Â· æ•°æ®å¯èƒ½æ»žåŽ' : ''}` : 'é“¾ä¸Šç»Ÿè®¡æš‚ä¸å¯ç”¨'
+    : `${paperLane?.group ?? 'PAPER'} ç‹¬ç«‹æ¨¡æ‹Ÿè´¦æœ¬${paperLane?.stale ? ' Â· æ•°æ®å¯èƒ½æ»žåŽ' : ''}`;
+  const openValue = activeMode === 'paper'
+    ? state?.mode_split?.paper?.open_value_usd
+    : state?.wallet.value_usd;
+  const items: Array<{ label: string; value: string; tone?: number | null; sub?: string; mode?: KpiMode; onClick?: () => void }> = [
+    { label: activeMode === 'paper' ? 'æ¨¡æ‹Ÿè´¦æˆ·ä½™é¢' : 'è´¦æˆ·ä½™é¢', value: fmtUsd(activeMode === 'paper' ? paperLane?.cash_usd : state?.wallet.balance_pusd), mode: activeMode === 'paper' ? 'paper' : 'chain', onClick: onWallet, sub: activeMode === 'paper' ? 'å½“å‰ç­–ç•¥è™šæ‹Ÿèµ„é‡‘ Â· ç‚¹å‡»æŸ¥çœ‹' : 'ç‚¹å‡»æŸ¥çœ‹å……å€¼ / æçŽ°' },
+    { label: activeMode === 'paper' ? 'æ¨¡æ‹ŸæŒä»“æˆæœ¬' : 'æŒä»“å¸‚å€¼', value: fmtUsd(openValue), mode: activeMode, onClick: onPositions, sub: chainAvailable ? `å¾…ç»“ç®— ${fmtUsd(chainPendingValue)} + å¾…å…‘æ¢ ${fmtUsd(chainRedeemableValue)}` : 'ç‚¹å‡»æŸ¥çœ‹å½“å‰æ¨¡å¼æŒä»“' },
+    { label: activeMode === 'paper' ? 'æ¨¡æ‹Ÿå¾…ç»“ç®—' : 'å¾…ç»“ç®— / å¾…å…‘æ¢', value: chainAvailable ? `${chainPendingCount} / ${chainRedeemableCount}` : chainPendingCount == null ? 'â€”' : String(chainPendingCount), mode: activeMode, onClick: onPositions, sub: chainAvailable ? `å¾…ç»“ç®— ${chainPendingCount} Â· ${fmtUsd(chainPendingValue)} ï½œ å¾…å…‘æ¢ ${chainRedeemableCount} Â· ${fmtUsd(chainRedeemableValue)}` : activeMode === 'paper' ? 'å½“å‰ç­–ç•¥ç‹¬ç«‹æ¨¡æ‹ŸæŒä»“ Â· ç‚¹å‡»æŸ¥çœ‹ç»“ç®—åŽ†å²' : 'é“¾ä¸Šå¾…ç»“ç®—çŠ¶æ€' },
+    { label: chainAccountEnabled ? 'ç´¯è®¡ç»æµŽç›ˆäº Â· é“¾ä¸Š' : 'ç´¯è®¡ç›ˆäº Â· æ¨¡æ‹Ÿ', value: fmtUsd(displayCumulative), tone: displayCumulative, mode: kpiMode, onClick: onPnlHistory, sub: chainFreshness },
+    { label: 'ä»Šæ—¥æ”¶ç›ŠçŽ‡', value: fmtPct(returnPct), tone: returnPct, mode: kpiMode, onClick: onPnlHistory, sub: `åŒ—äº¬æ—¶é—´ä»Šæ—¥${chainAccountEnabled ? 'ç»æµŽ' : 'ç»æµŽ'}ç›ˆäº / ${chainAccountEnabled ? 'é“¾ä¸Šæ—¥åˆæƒç›Š' : 'æ¨¡æ‹Ÿæœ¬é‡‘'} ${fmtUsd(returnBase)} Â· ç‚¹å‡»æŸ¥çœ‹æ¯æ—¥åŽ†å²` },
+    { label: 'ä»Šæ—¥èƒœçŽ‡', value: fmtPct(todayTotal && todayWins != null ? todayWins / todayTotal * 100 : null), mode: kpiMode, onClick: onPnlHistory, sub: `å·²ç»“æŸå¸‚åœº ${todayWins ?? 'â€”'} èƒœ / ${todayLosses ?? 'â€”'} è´Ÿ Â· ç´¯è®¡ ${displayCumulativeWins ?? 'â€”'} / ${displayCumulativeLosses ?? 'â€”'}` },
+    {
+      label: chainAccountEnabled ? 'ä»Šæ—¥æŸç›Š Â· é“¾ä¸Š' : 'ä»Šæ—¥æŸç›Š Â· æ¨¡æ‹Ÿ',
+      value: fmtUsd(displayToday),
+      tone: displayToday,
+      mode: kpiMode,
+      onClick: onPnlHistory,
+      sub: chainAccountEnabled ? `åŒ—äº¬æ—¶é—´ Â· å«æ‰‹ç»­è´¹ / è¿”ä½£ Â· ${todayWins ?? 'â€”'} èƒœ / ${todayLosses ?? 'â€”'} è´Ÿ` : `åŒ—äº¬æ—¶é—´ Â· æƒç›Šå˜åŒ–å«è´¹ç”¨ Â· ${todayWins ?? 'â€”'} èƒœ / ${todayLosses ?? 'â€”'} è´Ÿ`,
+    },
+  ] as const;
+  return <div className="kpi-strip" aria-label="è´¦æˆ·å…³é”®æŒ‡æ ‡">
+    {items.map((item) => <div className={`kpi-card${item.onClick ? ' kpi-card-clickable' : ''}${item.label.startsWith('ä»Šæ—¥æŸç›Š') ? ' kpi-card-pnl' : ''}`} key={item.label} onClick={item.onClick} role={item.onClick ? 'button' : undefined} tabIndex={item.onClick ? 0 : undefined} onKeyDown={item.onClick ? (event) => { if (event.key === 'Enter' || event.key === ' ') item.onClick?.(); } : undefined}>
+      {item.mode && <ModeChip mode={item.mode} />}
+      <span className="kpi-label">{item.label}</span><strong className={item.tone == null ? '' : item.tone >= 0 ? 'kpi-positive' : 'kpi-negative'}>{item.value}</strong>{item.sub && <small className="kpi-sub" title={item.sub}>{item.sub}</small>}
+    </div>)}
+  </div>;
+}
+
+function RiskSnapshotPanel({ snapshot, riskState }: { snapshot?: State['risk_snapshot']; riskState?: string }) {
+  const state = snapshot?.state || riskState || 'UNKNOWN';
+  const tone = state === 'OK' ? 1 : state === 'UNKNOWN' ? null : -1;
+  const live = snapshot?.mode === 'live' || snapshot?.valuation === 'marked_account_equity';
+  return <div className="risk-snapshot-panel">
+    <Row k="é£Žé™©é—¸é—¨" v={zhText(state)} colored={tone} relaxed />
+    {live && <>
+      <Row k="æ—¥åˆæƒç›Š" v={fmtUsd(snapshot?.day_start_equity_usd ?? snapshot?.capital_base_usd)} relaxed />
+      <Row k="å½“å‰æƒç›Š" v={fmtUsd(snapshot?.equity_usd)} relaxed />
+    </>}
+    <Row k="å½“å‰æŒä»“" v={String(snapshot?.position_count ?? 0)} relaxed />
+    <Row k={snapshot?.valuation === 'entry_cost' ? 'æŒä»“æˆæœ¬' : 'æŒä»“å¸‚å€¼'} v={fmtUsd(snapshot?.position_value_usd)} relaxed />
+    <Row k="æœªæˆäº¤è®¢å•" v={String(snapshot?.open_orders ?? 0)} relaxed />
+    <Row k="æŒ‚å•åä¹‰" v={fmtUsd(snapshot?.open_order_notional_usd)} relaxed />
+    <Row k="æ•žå£å æ¯”" v={snapshot?.exposure_ratio == null ? '--' : fmtPct(snapshot.exposure_ratio * 100)} relaxed />
+    <Row k={live ? 'å½“æ—¥å‡€æƒç›Šå˜åŒ–ï¼ˆå«è´¹ï¼‰' : 'é£ŽæŽ§è´¦æœ¬ Â· ä»Šæ—¥å·²å®žçŽ°'} v={fmtUsd(live ? snapshot?.daily_net_pnl_usd : snapshot?.daily_realized_usd)} colored={live ? snapshot?.daily_net_pnl_usd : snapshot?.daily_realized_usd} relaxed />
+    <Row k="äºæŸä¸Šé™" v={snapshot?.max_daily_loss_fraction == null ? '--' : fmtPct(snapshot.max_daily_loss_fraction * 100)} dim mono relaxed />
+    <Row k="æŒä»“ä¸Šé™" v={String(snapshot?.max_open_positions ?? '--')} dim mono relaxed />
+    {live && <div className="live-risk-equity-note">æ—¥é£ŽæŽ§å«å…¨éƒ¨é“¾ä¸ŠæŒä»“åŠåŽ†å²å¾…å…‘æ¢å°¾ä»“ï¼ŒOPEN åˆ—è¡¨æ¡æ•°å¯èƒ½ä¸åŒã€‚</div>}
+  </div>;
+}
+
+function emptyProfile(): LlmModelProfile {
+  return { enabled: false, provider: 'openai-compatible', base_url: '', model: '', api_key: '', api_key_configured: false, timeout_sec: 30, max_tokens: 512, temperature: 0.2, system_prompt: '' };
+}
+
+function profileFromLegacy(settings: LlmSettings): LlmModelProfile {
+  return {
+    enabled: settings.enabled,
+    provider: settings.provider,
+    base_url: settings.base_url,
+    model: settings.model,
+    api_key: settings.api_key,
+    api_key_configured: settings.api_key_configured,
+    timeout_sec: settings.timeout_sec,
+    max_tokens: settings.max_tokens,
+    temperature: settings.temperature,
+    system_prompt: settings.system_prompt,
+  };
+}
+
+function SystemSettings({ onClose }: { onClose: () => void }) {
+  const [settings, setSettings] = useState<LlmSettings | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [probing, setProbing] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [message, setMessage] = useState('');
+  const [activeSlot, setActiveSlot] = useState<'primary' | 'secondary'>('primary');
+  const [modelOptions, setModelOptions] = useState<Record<'primary' | 'secondary', string[]>>({ primary: [], secondary: [] });
+  const [manualModel, setManualModel] = useState<Record<'primary' | 'secondary', boolean>>({ primary: false, secondary: false });
+  useEffect(() => {
+    fetchLlmSettings().then((raw) => {
+      const primary = raw.primary || profileFromLegacy(raw);
+      const secondary = raw.secondary || emptyProfile();
+      setSettings({ ...raw, primary, secondary });
+      setModelOptions({ primary: primary.model ? [primary.model] : [], secondary: secondary.model ? [secondary.model] : [] });
+    }).catch((e) => setMessage(`è¯»å–å¤±è´¥ï¼š${e}`)).finally(() => setLoading(false));
+  }, []);
+  const update = (patch: Partial<LlmSettings>) => setSettings((s) => s ? { ...s, ...patch } : s);
+  const updateProfile = (slot: 'primary' | 'secondary', patch: Partial<LlmModelProfile>) => setSettings((s) => {
+    if (!s) return s;
+    const current = s[slot] || (slot === 'primary' ? profileFromLegacy(s) : emptyProfile());
+    const next = { ...current, ...patch };
+    // Keep the legacy flat fields synchronized with the primary profile so
+    // older dashboard servers continue to work unchanged.
+    return slot === 'primary'
+      ? { ...s, ...next, primary: next }
+      : { ...s, secondary: next };
+  });
+  const save = async () => {
+    if (!settings) return;
+    setSaving(true); setMessage('');
+    try {
+      const saved = await saveLlmSettings(settings);
+      setSettings(saved);
+      setMessage('å·²ä¿å­˜ã€‚é‡å¯æœåŠ¡åŽç”Ÿæ•ˆã€‚');
+    } catch (e) { setMessage(`ä¿å­˜å¤±è´¥ï¼š${e}`); }
+    finally { setSaving(false); }
+  };
+  const probe = async () => {
+    if (!settings) return;
+    const profile = settings[activeSlot] || (activeSlot === 'primary' ? profileFromLegacy(settings) : emptyProfile());
+    const key = profile.api_key && profile.api_key !== 'â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢' ? profile.api_key : (profile.api_key_configured ? 'â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢' : '');
+    if (!profile.base_url || !key) { setMessage('è¯·å¡«å†™å½“å‰æ¨¡åž‹æŽ¥å£åœ°å€å’Œ API å¯†é’¥åŽå†æ‹‰å–æ¨¡åž‹ã€‚'); return; }
+    setProbing(true); setMessage('æ­£åœ¨æ‹‰å–æ¨¡åž‹åˆ—è¡¨â€¦');
+    try {
+      const result = await probeLlm(profile.base_url, key, profile.timeout_sec, activeSlot);
+      const options = Array.from(new Set((result.models || []).map((model) => String(model).trim()).filter(Boolean)));
+      setModelOptions((current) => ({ ...current, [activeSlot]: options }));
+      const selected = profile.model && options.includes(profile.model) ? profile.model : options[0] || profile.model || '';
+      setManualModel((current) => ({ ...current, [activeSlot]: Boolean(selected && !options.includes(selected)) }));
+      updateProfile(activeSlot, { base_url: result.effective_base_url, model: selected });
+      setMessage(`${activeSlot === 'primary' ? 'ä¸»æ¨¡åž‹' : 'å¤æ ¸æ¨¡åž‹'}å·²å‘çŽ° ${result.models.length} ä¸ªæ¨¡åž‹ã€‚`);
+    } catch (e) { setMessage(`æ‹‰å–å¤±è´¥ï¼š${e}`); }
+    finally { setProbing(false); }
+  };
+  const test = async () => {
+    if (!settings) return;
+    const profile = settings[activeSlot] || (activeSlot === 'primary' ? profileFromLegacy(settings) : emptyProfile());
+    setTesting(true); setMessage('æ­£åœ¨æµ‹è¯•æ¨¡åž‹è¿žæŽ¥â€¦');
+    try {
+      const result = await testLlm({ base_url: profile.base_url, model: profile.model, api_key: profile.api_key, timeout_sec: profile.timeout_sec, slot: activeSlot });
+      setMessage(`è¿žæŽ¥æˆåŠŸï¼ˆ${result.model}ï¼Œ${result.latency_ms} msï¼‰ã€‚`);
+    } catch (e) { setMessage(`æµ‹è¯•å¤±è´¥ï¼š${e}`); }
+    finally { setTesting(false); }
+  };
+  return (
+    <div className="settings-overlay" role="dialog" aria-modal="true" aria-label="ç³»ç»Ÿè®¾ç½®">
+      <div className="settings-dialog">
+        <div className="settings-header"><span>ç³»ç»Ÿè®¾ç½® / æ¨¡åž‹ API</span><button type="button" onClick={onClose} className="settings-close">Ã—</button></div>
+        {loading && <div className="settings-loading">æ­£åœ¨è¯»å–é…ç½®â€¦</div>}
+        {!loading && settings && <>
+          <p className="settings-note">é…ç½®å‚è€ƒ Mixã€ŒsystemLLMã€ä¸­ç»§æ ¼å¼ã€‚ä¸»æ¨¡åž‹è´Ÿè´£åˆ†æžï¼Œå¤æ ¸æ¨¡åž‹ç‹¬ç«‹æ ¡éªŒï¼›æ„è§ä¸ä¸€è‡´æ—¶è¿›å…¥ç­‰å¾…ã€‚API å¯†é’¥ä»…ç”¨äºŽè¿žæŽ¥æ¨¡åž‹ï¼Œé¡µé¢ä¸ä¼šæ˜¾ç¤ºåŽŸæ–‡ã€‚AI ä¸èƒ½ç»•è¿‡ç¡®å®šæ€§é£ŽæŽ§æˆ–ç›´æŽ¥æŒæœ‰ç§é’¥ï¼›ä¿å­˜åŽè¯·é‡å¯æœºå™¨äººæœåŠ¡ã€‚</p>
+          <div className="settings-grid">
+            <label>å¯ç”¨æ¨¡åž‹ API<input type="checkbox" checked={settings.enabled} onChange={(e) => update({ enabled: e.target.checked })} /></label>
+            <label>å¯ç”¨ AI åªè¯»é¡¾é—®<input type="checkbox" checked={settings.advisor_enabled} onChange={(e) => update({ advisor_enabled: e.target.checked })} /></label>
+            <div className="model-tabs settings-wide" role="tablist" aria-label="æ¨¡åž‹è§’è‰²">
+              <button type="button" className={activeSlot === 'primary' ? 'model-tab active' : 'model-tab'} onClick={() => setActiveSlot('primary')}>ä¸»æ¨¡åž‹ Â· GPT-6-Astra</button>
+              <button type="button" className={activeSlot === 'secondary' ? 'model-tab active' : 'model-tab'} onClick={() => setActiveSlot('secondary')}>å¤æ ¸æ¨¡åž‹ Â· Grok</button>
+            </div>
+            {(() => {
+              const profile = settings[activeSlot] || (activeSlot === 'primary' ? profileFromLegacy(settings) : emptyProfile());
+              return <>
+                <label>å¯ç”¨å½“å‰æ¨¡åž‹<input type="checkbox" checked={profile.enabled} onChange={(e) => updateProfile(activeSlot, { enabled: e.target.checked })} /></label>
+                <label>æœåŠ¡å•†æ ‡è¯†<input value={profile.provider} onChange={(e) => updateProfile(activeSlot, { provider: e.target.value })} placeholder="openai-compatible" /></label>
+                <label className="settings-wide">æŽ¥å£åœ°å€<input value={profile.base_url} onChange={(e) => updateProfile(activeSlot, { base_url: e.target.value })} placeholder="https://api.openai.com/v1" /><small className="settings-hint">å¡«å†™ OpenAI å…¼å®¹åœ°å€ï¼›è£¸åŸŸåä¼šè‡ªåŠ¨è¡¥ä¸Š /v1ã€‚</small></label>
+                <label>æ¨¡åž‹åç§°<select className="model-select" value={manualModel[activeSlot] ? '__manual__' : profile.model} onChange={(e) => {
+                  if (e.target.value === '__manual__') {
+                    setManualModel((current) => ({ ...current, [activeSlot]: true }));
+                  } else {
+                    setManualModel((current) => ({ ...current, [activeSlot]: false }));
+                    updateProfile(activeSlot, { model: e.target.value });
+                  }
+                }}>
+                  {!(modelOptions[activeSlot] || []).length && !profile.model && <option value="">è¯·å…ˆæ‹‰å–æ¨¡åž‹</option>}
+                  {profile.model && !(modelOptions[activeSlot] || []).includes(profile.model) && <option value={profile.model}>{profile.model}ï¼ˆå½“å‰ï¼‰</option>}
+                  {(modelOptions[activeSlot] || []).map((model) => <option value={model} key={model}>{model}</option>)}
+                  <option value="__manual__">æ‰‹åŠ¨è¾“å…¥æ¨¡åž‹ IDâ€¦</option>
+                </select>
+                {manualModel[activeSlot] && <input className="model-manual-input" value={profile.model} onChange={(e) => updateProfile(activeSlot, { model: e.target.value })} placeholder="ä¾‹å¦‚ grok-3-latest" autoComplete="off" />}
+                <small className="settings-hint">ç‚¹å‡»â€œæ‹‰å–æ¨¡åž‹â€åŽä»Žåˆ—è¡¨é€‰æ‹©ï¼›è‹¥ä¸Šæ¸¸æœªåˆ—å‡ºç›®æ ‡æ¨¡åž‹ï¼Œå¯åˆ‡æ¢â€œæ‰‹åŠ¨è¾“å…¥æ¨¡åž‹ IDâ€ã€‚</small></label>
+                <label>API å¯†é’¥<input type="password" value={profile.api_key === 'â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢' ? '' : profile.api_key} onChange={(e) => updateProfile(activeSlot, { api_key: e.target.value })} placeholder={profile.api_key_configured ? 'å·²é…ç½®ï¼ˆç•™ç©ºä¿æŒä¸å˜ï¼‰' : 'è¯·è¾“å…¥å¯†é’¥'} autoComplete="new-password" /></label>
+                <label>è¶…æ—¶ï¼ˆç§’ï¼‰<input type="number" min="1" max="120" step="1" value={profile.timeout_sec} onChange={(e) => updateProfile(activeSlot, { timeout_sec: Number(e.target.value) })} /></label>
+                <label>æœ€å¤§ Tokens<input type="number" min="1" max="32768" step="1" value={profile.max_tokens} onChange={(e) => updateProfile(activeSlot, { max_tokens: Number(e.target.value) })} /></label>
+                <label>æ¸©åº¦<input type="number" min="0" max="2" step="0.1" value={profile.temperature} onChange={(e) => updateProfile(activeSlot, { temperature: Number(e.target.value) })} /></label>
+                <label className="settings-wide">ç³»ç»Ÿæç¤ºè¯<textarea rows={3} value={profile.system_prompt} onChange={(e) => updateProfile(activeSlot, { system_prompt: e.target.value })} placeholder="å¯é€‰ï¼šç”¨äºŽæ¨¡åž‹å†³ç­–çš„ç³»ç»Ÿæç¤ºè¯" /></label>
+              </>;
+            })()}
+          </div>
+          {message && <div className="settings-message">{message}</div>}
+          <div className="settings-actions"><button type="button" onClick={probe} disabled={probing || testing} className="settings-secondary">{probing ? 'æ‹‰å–ä¸­â€¦' : 'æ‹‰å–æ¨¡åž‹'}</button><button type="button" onClick={test} disabled={testing || probing} className="settings-secondary">{testing ? 'æµ‹è¯•ä¸­â€¦' : 'æµ‹è¯•è¿žæŽ¥'}</button><button type="button" onClick={onClose} className="settings-secondary">å–æ¶ˆ</button><button type="button" onClick={save} disabled={saving || probing || testing} className="settings-primary">{saving ? 'ä¿å­˜ä¸­â€¦' : 'ä¿å­˜è®¾ç½®'}</button></div>
+        </>}
+      </div>
+    </div>
+  );
+}
+
+function DataModal({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
+  const modal = (
+    <div
+      className="data-modal-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-label={title}
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <div className="data-modal-dialog" onMouseDown={(event) => event.stopPropagation()}>
+        <div className="data-modal-header">
+          <span>{title}</span>
+          <button type="button" onClick={onClose} className="data-modal-close" aria-label="å…³é—­">Ã—</button>
+        </div>
+        <div className="data-modal-content">{children}</div>
+      </div>
+    </div>
+  );
+  // Render outside the terminal shell so fixed/overflow and CRT layers can
+  // never cover the dialog with an opaque black stacking context.
+  return typeof document === 'undefined' ? null : createPortal(modal, document.body);
+}
+
+function TopBar({
+  time, botRunning, botMode, riskState, err, lastFlashAt, onSettings,
+  operatorToken, onOperatorTokenChange, liveBusy, liveMessage, onToggleLive, serviceModes, paperServices, serviceBusy, onToggleService,
+  riskConfig, llmUsage, llmModels, musicEnabled, onToggleMusic, profileName, portfolioValue, accountLive,
+}: {
+  time: number;
+  botRunning: boolean;
+  botMode: string;
+  riskState: string;
+  err: string | null;
+  lastFlashAt: number;
+  onSettings: () => void;
+  operatorToken: string;
+  onOperatorTokenChange: (value: string) => void;
+  liveBusy: boolean;
+  liveMessage: string;
+  onToggleLive: () => void;
+  serviceModes?: State['service_modes']; paperServices?: State['paper_services']; serviceBusy: string | null; onToggleService: (asset: string, enabled: boolean) => void;
+  riskConfig?: ExecutionRiskConfig;
+  llmUsage?: LlmUsageSnapshot | null;
+  llmModels?: { primary_model?: string; secondary_model?: string };
+  musicEnabled: boolean;
+  onToggleMusic: () => void;
+  profileName?: string | null;
+  portfolioValue?: number | null;
+  accountLive: boolean;
+}) {
+  const blink = Date.now() - lastFlashAt < 5000;
+  const riskOk = riskState === 'OK';
+  // Paper worker å¯åœï¼šä¹è§‚è¦†ç›–å±‚å¸æ”¶åŽç«¯ 3s å¿«ç…§ç¼“å­˜ï¼›æœåŠ¡å™¨ä¸€è‡´åŽè‡ªåŠ¨æ¸…é™¤ã€‚
+  const [paperBusy, setPaperBusy] = useState<string | null>(null);
+  const [paperMsg, setPaperMsg] = useState('');
+  const [paperOverride, setPaperOverride] = useState<Record<string, boolean>>({});
+  useEffect(() => {
+    setPaperOverride((m) => {
+      let changed = false;
+      const next = { ...m };
+      for (const k of Object.keys(next)) {
+        if (paperServices?.[k]?.active === next[k]) { delete next[k]; changed = true; }
+      }
+      return changed ? next : m;
+    });
+  }, [paperServices]);
+  const onTogglePaper = async (asset: string, enabled: boolean) => {
+    if (!operatorToken) { setPaperMsg('éœ€è¦æ“ä½œä»¤ç‰Œï¼ˆé¡¶æ è¾“å…¥ï¼‰'); return; }
+    if (!window.confirm(`ç¡®è®¤${enabled ? 'å¯åŠ¨' : 'åœæ­¢'} ${asset} PAPER workerï¼Ÿ${enabled ? '' : '\nåœæ­¢åŽè¯¥äº§å“ä¸å†äº§ç”Ÿæ–°æ¨¡æ‹Ÿå…¥åœºï¼ŒåŽ†å²è´¦ç›®ä¿ç•™ã€‚'}`)) return;
+    setPaperBusy(asset); setPaperMsg('');
+    try {
+      const res = await putPaperService(asset, enabled, operatorToken);
+      setPaperOverride((m) => ({ ...m, [asset]: res.paper_active ?? enabled }));
+      setPaperMsg(res.note || '');
+    } catch (e) {
+      setPaperMsg(e instanceof Error ? e.message : String(e));
+    } finally {
+      setPaperBusy(null);
+    }
+  };
+  const botLabel = !botRunning
+    ? 'å·²åœæ­¢'
+    : !riskOk
+      ? `å·²é”å®š (${zhText(riskState)})`
+      : 'è¿è¡Œä¸­';
+  const botColor = !botRunning
+    ? 'var(--red)'
+    : !riskOk
+      ? 'var(--amber)'
+      : 'var(--green)';
+
+  // mode chip: green for paper (safe), red for live (real money)
+  const modeChip = botMode === 'live'
+    ? { label: 'å®žç›˜', bg: '#330000', fg: 'var(--red)', border: 'var(--red)' }
+    : botMode === 'paper'
+      ? { label: 'æ¨¡æ‹Ÿç›˜', bg: '#001a0d', fg: 'var(--green)', border: 'var(--green)' }
+      : { label: 'ç¦»çº¿', bg: 'transparent', fg: 'var(--txt-dim)', border: 'var(--border-hi)' };
+
+  return (
+    <div className="terminal-topbar" style={topBarStyle}>
+      <div className="topbar-brand">
+        <img src="/xustlepoly-favicon.png" alt="XustlePoly" />
+        <span className="topbar-brand-name">XustlePoly_HFT</span>
+        <span className="topbar-divider">//</span>
+        <span className="topbar-market-label">BTC äº”åˆ†é’Ÿ</span>
+      </div>
+      <LlmUsagePanel usage={llmUsage} models={llmModels} />
+      <span className="topbar-mode" style={{
+        marginLeft: 12,
+        padding: '1px 8px',
+        border: `1px solid ${modeChip.border}`,
+        background: modeChip.bg,
+        color: modeChip.fg,
+        fontWeight: 700,
+        letterSpacing: '1.5px',
+        fontSize: 11,
+      }}>{modeChip.label}</span>
+      <div className="topbar-status">
+        <span style={{ color: botColor, fontWeight: 600 }}>* æœºå™¨äºº {botLabel}</span>
+        <span className="topbar-status-separator">|</span>
+        <span style={{ color: err ? 'var(--red)' : 'var(--green)' }}>* {err ? 'æŽ¥å£é”™è¯¯' : 'æŽ¥å£æ­£å¸¸'}</span>
+        {blink && <><span className="topbar-status-separator">|</span><span className="topbar-trade-flash">* å·²è§¦å‘äº¤æ˜“</span></>}
+      </div>
+      <div className="topbar-controls">
+      <div className="topbar-action-row">
+        <button type="button" onClick={onSettings} className="settings-button">ç³»ç»Ÿè®¾ç½®</button>
+        <input
+          type="password"
+          value={operatorToken}
+          onChange={(e) => onOperatorTokenChange(e.target.value)}
+          className="live-token-input"
+          placeholder="å®žç›˜ä»¤ç‰Œ"
+          aria-label="å®žç›˜æ“ä½œä»¤ç‰Œ"
+          autoComplete="off"
+        />
+        <button
+          type="button"
+          onClick={onToggleLive}
+          disabled={liveBusy}
+          className={botRunning && botMode === 'live' ? 'live-stop-button' : 'live-start-button'}
+          title={liveMessage || 'éœ€è¦å®žç›˜æ“ä½œä»¤ç‰Œ'}
+        >
+          {liveBusy ? 'å¤„ç†ä¸­â€¦' : botRunning && botMode === 'live' ? 'å…³é—­å®žç›˜' : 'å¼€å¯å®žç›˜'}
+        </button>
+        <button type="button" onPointerDown={() => onToggleMusic()} onClick={(event) => { if (event.detail === 0) onToggleMusic(); }} className={`music-toggle ${musicEnabled ? 'music-on' : ''}`} aria-pressed={musicEnabled} title="æ’­æ”¾/æš‚åœè§†é¢‘èƒŒæ™¯éŸ³ä¹">
+          {musicEnabled ? 'â™« éŸ³ä¹å¼€' : 'â™« éŸ³ä¹å…³'}
+        </button>
+        <details className="strategy-menu">
+          <summary>ç­–ç•¥ç®¡ç†</summary>
+          <div className="strategy-menu-popover" role="dialog" aria-label="BTC ç­–ç•¥ç®¡ç†">
+            <div className="strategy-dialog-heading"><strong>BTC ç­–ç•¥ç®¡ç†</strong><button type="button" className="strategy-dialog-close" aria-label="å…³é—­ç­–ç•¥ç®¡ç†" onClick={(event) => event.currentTarget.closest('details')?.removeAttribute('open')}>Ã—</button></div>
+            {(['BTC'] as const).map((asset) => {
+              const info = serviceModes?.[asset];
+              const paperActive = paperOverride[asset] ?? paperServices?.[asset]?.active;
+              const bootOn = paperServices?.[asset]?.enabled;
+              const label = paperActive === false ? 'Worker å·²åœæ­¢' : 'OpenClaw è°ƒåº¦ Â· Worker æ‰§è¡Œ';
+              return <div className="strategy-menu-row" key={asset}><b>{asset}</b>{info?.live_enabled
+                ? <span className="strategy-live">å®žç›˜</span>
+                : <button type="button" className={`paper-switch ${paperActive === false ? 'paper-off' : 'paper-on'}`} disabled={paperBusy === asset}
+                    title={operatorToken ? `ç‚¹å‡»${paperActive === false ? 'å¯åŠ¨' : 'åœæ­¢'} ${asset} Paper workerï¼ˆå¼€æœºè‡ªå¯ï¼š${bootOn ? 'å¼€' : 'å…³'}ï¼‰` : 'éœ€è¦é¡¶æ æ“ä½œä»¤ç‰Œ'}
+                    onClick={() => onTogglePaper(asset, paperActive === false)}>
+                    <span className="paper-knob" />{paperBusy === asset ? 'å¤„ç†ä¸­â€¦' : paperActive === false ? 'PaperÂ·å·²åœ' : 'PaperÂ·è¿è¡Œ'}
+                  </button>}<small>{label}</small></div>;
+            })}
+            {paperMsg && <div className="paper-switch-msg" title={paperMsg}>{paperMsg}</div>}
+            <RiskSettingsForm riskConfig={riskConfig} operatorToken={operatorToken} />
+          </div>
+        </details>
+        <div className="service-switches" aria-label="å„æœåŠ¡å®žç›˜å¼€å…³">
+          {(['BTC'] as const).map((asset) => {
+            const info = serviceModes?.[asset]; const allowed = info?.can_enable_live === true; const enabled = info?.live_enabled === true;
+            return <button key={asset} type="button" className={`service-switch ${enabled ? 'service-on' : ''}`} disabled={!allowed || serviceBusy === asset} title={allowed ? `${asset} å®žç›˜èµ„æ ¼å¼€å…³` : `${asset} å·²é”å®šä¸º Paper`} onClick={() => onToggleService(asset, !enabled)}>{asset} {enabled ? 'LIVE' : 'PAPER'}</button>;
+          })}
+        </div>
+        {liveMessage && <span className="live-control-message" title={liveMessage}>{liveMessage}</span>}
+      </div>
+        <div className="topbar-account-summary" title={accountLive ? 'Polymarket è´¦æˆ· / èµ„äº§ç»„åˆ' : 'å½“å‰ç­–ç•¥æ¨¡æ‹Ÿè´¦æˆ· / æ¨¡æ‹Ÿæƒç›Š'}>
+          <span>{accountLive ? profileName || 'é“¾ä¸Šç”¨æˆ·æœªåŒæ­¥' : 'æ¨¡æ‹Ÿè´¦æˆ·'}</span>
+          <b>{portfolioValue == null ? accountLive ? 'é“¾ä¸Šé‡‘é¢ä¸å¯ç”¨' : 'æ¨¡æ‹Ÿé‡‘é¢æš‚ä¸å¯ç”¨' : `${accountLive ? '' : 'ç»„åˆé‡‘é¢ '}${fmtUsd(portfolioValue)}`}</b>
+        </div>
+        <span className="topbar-clock">{fmtTime(time)}</span>
+      </div>
+    </div>
+  );
+}
+
+/** Operator-gated editor for the worker trigger lines (daily loss circuit +
+ * daily realized-profit stop).  Saving rewrites .env and restarts the paper
+ * workers so the RUNNING gate matches what the panel shows. */
+type ExecutionRiskConfig = {
+  maxDailyLossFraction?: number; maxDailyRealizedProfitFraction?: number; maxDailyRealizedProfitUsd?: number;
+  paperEquityUsd?: number; kellySizingEnabled?: boolean;
+  minEntryPrice?: number; maxEntryPrice?: number; secondsBeforeClose?: number; minTRemainingSec?: number;
+  orderRiskFraction?: number; reversalExitWindowSec?: number; reversalHeldBidDrawdown?: number;
+  confirmChecks?: number; reversalConfirmChecks?: number; maxOpenPositions?: number;
+  reversalPartialExitEnabled?: boolean; reversalPartialExitFraction?: number;
+  sellFokSlippageTicks?: number; sellExitMaxDepthTicks?: number; sellExitMaxDepthLevels?: number;
+  sellExitFakFallbackEnabled?: boolean; sellExitReconcileTrades?: boolean;
+  entryOrderMode?: string; entryMakerOrderType?: string; entryMakerTtlSec?: number;
+  entryMakerPostOnly?: boolean; entryMakerFallbackTaker?: boolean;
+  profitExitEnabled?: boolean; profitExitOrderMode?: string; profitTargetFraction?: number;
+  profitTargetTicks?: number; profitExitFraction?: number; profitMakerOrderType?: string;
+  profitMakerTtlSec?: number; profitMakerPostOnly?: boolean; profitMakerFallbackTaker?: boolean;
+  stopExitOrderMode?: string; reversalExitOrderMode?: string;
+  nearCloseExitEnabled?: boolean; nearCloseExitWindowSec?: number; nearCloseExitOrderMode?: string;
+};
+
+function RiskSettingsForm({ riskConfig, operatorToken }: { riskConfig?: ExecutionRiskConfig; operatorToken: string }) {
+  const [lossPct, setLossPct] = useState<string>('');
+  const [capPct, setCapPct] = useState<string>('');
+  const [equityUsd, setEquityUsd] = useState<string>('');
+  const [kelly, setKelly] = useState<boolean | null>(null); // null = untouched; only sent when toggled
+  const [entryMode, setEntryMode] = useState(riskConfig?.entryOrderMode || 'TAKER');
+  const [entryTtl, setEntryTtl] = useState(String(riskConfig?.entryMakerTtlSec ?? 3));
+  const [entryPostOnly, setEntryPostOnly] = useState(riskConfig?.entryMakerPostOnly ?? true);
+  const [entryFallback, setEntryFallback] = useState(riskConfig?.entryMakerFallbackTaker ?? true);
+  const [profitEnabled, setProfitEnabled] = useState(riskConfig?.profitExitEnabled ?? false);
+  const [profitMode, setProfitMode] = useState(riskConfig?.profitExitOrderMode || 'MAKER_FIRST');
+  const [profitTargetPct, setProfitTargetPct] = useState(String((riskConfig?.profitTargetFraction ?? 0.05) * 100));
+  const [profitTicks, setProfitTicks] = useState(String(riskConfig?.profitTargetTicks ?? 2));
+  const [profitTtl, setProfitTtl] = useState(String(riskConfig?.profitMakerTtlSec ?? 2));
+  const [profitPostOnly, setProfitPostOnly] = useState(riskConfig?.profitMakerPostOnly ?? true);
+  const [profitFallback, setProfitFallback] = useState(riskConfig?.profitMakerFallbackTaker ?? true);
+  const [nearCloseEnabled, setNearCloseEnabled] = useState(riskConfig?.nearCloseExitEnabled ?? true);
+  const [nearCloseWindow, setNearCloseWindow] = useState(String(riskConfig?.nearCloseExitWindowSec ?? 15));
+  const [minEntryPrice, setMinEntryPrice] = useState(String(riskConfig?.minEntryPrice ?? 0.84));
+  const [maxEntryPrice, setMaxEntryPrice] = useState(String(riskConfig?.maxEntryPrice ?? 0.90));
+  const [secondsBeforeClose, setSecondsBeforeClose] = useState(String(riskConfig?.secondsBeforeClose ?? 120));
+  const [minTRemainingSec, setMinTRemainingSec] = useState(String(riskConfig?.minTRemainingSec ?? 120));
+  const [orderRiskPct, setOrderRiskPct] = useState(String((riskConfig?.orderRiskFraction ?? 0.02) * 100));
+  const [reversalWindow, setReversalWindow] = useState(String(riskConfig?.reversalExitWindowSec ?? 180));
+  const [drawdownPct, setDrawdownPct] = useState(String((riskConfig?.reversalHeldBidDrawdown ?? 0.40) * 100));
+  const [confirmChecks, setConfirmChecks] = useState(String(riskConfig?.confirmChecks ?? 2));
+  const [reversalConfirmChecks, setReversalConfirmChecks] = useState(String(riskConfig?.reversalConfirmChecks ?? 2));
+  const [maxPositions, setMaxPositions] = useState(String(riskConfig?.maxOpenPositions ?? 3));
+  const [partialExitEnabled, setPartialExitEnabled] = useState(riskConfig?.reversalPartialExitEnabled ?? false);
+  const [partialExitFraction, setPartialExitFraction] = useState(String((riskConfig?.reversalPartialExitFraction ?? 0.5) * 100));
+  const [sellFokSlippage, setSellFokSlippage] = useState(String(riskConfig?.sellFokSlippageTicks ?? 1));
+  const [sellDepthTicks, setSellDepthTicks] = useState(String(riskConfig?.sellExitMaxDepthTicks ?? 5));
+  const [sellDepthLevels, setSellDepthLevels] = useState(String(riskConfig?.sellExitMaxDepthLevels ?? 10));
+  const [sellFakFallback, setSellFakFallback] = useState(riskConfig?.sellExitFakFallbackEnabled ?? true);
+  const [sellReconcile, setSellReconcile] = useState(riskConfig?.sellExitReconcileTrades ?? true);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState('');
+  const currentLoss = riskConfig?.maxDailyLossFraction != null ? (riskConfig.maxDailyLossFraction * 100).toFixed(0) : '--';
+  const currentCapFraction = riskConfig?.maxDailyRealizedProfitFraction != null ? riskConfig.maxDailyRealizedProfitFraction : 0;
+  const currentCapUsd = riskConfig?.maxDailyRealizedProfitUsd != null ? riskConfig.maxDailyRealizedProfitUsd : null;
+  const currentEquity = riskConfig?.paperEquityUsd != null ? riskConfig.paperEquityUsd : null;
+  const currentKelly = riskConfig?.kellySizingEnabled;
+  const kellyEffective = kelly != null ? kelly : (currentKelly ?? false);
+  const save = async () => {
+    if (!operatorToken.trim()) { setMsg('è¯·å…ˆåœ¨é¡¶æ å¡«å†™å®žç›˜æ“ä½œä»¤ç‰Œ'); return; }
+    const payload: Parameters<typeof putRiskSettings>[0] = { restart_workers: true };
+    if (lossPct.trim() !== '') payload.max_daily_loss_fraction = Number(lossPct) / 100;
+    if (capPct.trim() !== '') payload.max_daily_realized_profit_fraction = Number(capPct) / 100;
+    if (equityUsd.trim() !== '') payload.paper_equity_usd = Number(equityUsd);
+    if (kelly != null) payload.kelly_sizing_enabled = kelly;
+    payload.min_entry_price = Number(minEntryPrice);
+    payload.max_entry_price = Number(maxEntryPrice);
+    payload.seconds_before_close = Number(secondsBeforeClose);
+    payload.min_t_remaining_sec = Number(minTRemainingSec);
+    payload.order_risk_fraction = Number(orderRiskPct) / 100;
+    payload.reversal_exit_window_sec = Number(reversalWindow);
+    payload.reversal_held_bid_drawdown = Number(drawdownPct) / 100;
+    payload.confirm_checks = Number(confirmChecks);
+    payload.reversal_confirm_checks = Number(reversalConfirmChecks);
+    payload.max_open_positions = Number(maxPositions);
+    payload.reversal_partial_exit_enabled = partialExitEnabled;
+    payload.reversal_partial_exit_fraction = Number(partialExitFraction) / 100;
+    payload.sell_fok_slippage_ticks = Number(sellFokSlippage);
+    payload.sell_exit_max_depth_ticks = Number(sellDepthTicks);
+    payload.sell_exit_max_depth_levels = Number(sellDepthLevels);
+    payload.sell_exit_fak_fallback_enabled = sellFakFallback;
+    payload.sell_exit_reconcile_trades = sellReconcile;
+    payload.entry_order_mode = entryMode as 'TAKER' | 'MAKER_FIRST';
+    payload.entry_maker_order_type = 'GTC';
+    payload.entry_maker_ttl_sec = Number(entryTtl);
+    payload.entry_maker_post_only = entryPostOnly;
+    payload.entry_maker_fallback_taker = entryFallback;
+    payload.profit_exit_enabled = profitEnabled;
+    payload.profit_exit_order_mode = profitMode as 'TAKER' | 'MAKER_FIRST';
+    payload.profit_target_fraction = Number(profitTargetPct) / 100;
+    payload.profit_target_ticks = Number(profitTicks);
+    payload.profit_exit_fraction = 1;
+    payload.profit_maker_order_type = 'GTC';
+    payload.profit_maker_ttl_sec = Number(profitTtl);
+    payload.profit_maker_post_only = profitPostOnly;
+    payload.profit_maker_fallback_taker = profitFallback;
+    payload.stop_exit_order_mode = 'TAKER';
+    payload.reversal_exit_order_mode = 'TAKER';
+    payload.near_close_exit_enabled = nearCloseEnabled;
+    payload.near_close_exit_window_sec = Number(nearCloseWindow);
+    payload.near_close_exit_order_mode = 'TAKER';
+    if (!Object.keys(payload).some((key) => key !== 'restart_workers' && payload[key as keyof typeof payload] != null)) { setMsg('è¯·è‡³å°‘å¡«å†™ä¸€é¡¹'); return; }
+    setBusy(true); setMsg('ä¿å­˜å¹¶é‡å¯ worker ä¸­â€¦');
+    try {
+      const r = await putRiskSettings(payload, operatorToken.trim());
+      setMsg(r.note || 'å·²ä¿å­˜');
+      setLossPct(''); setCapPct(''); setEquityUsd(''); setKelly(null);
+    } catch (e) { setMsg(`å¤±è´¥ï¼š${e}`); }
+    finally { setBusy(false); }
+  };
+  return (
+    <div className="strategy-risk-form" onClick={(event) => event.stopPropagation()}>
+      <div className="strategy-risk-title">é£ŽæŽ§è§¦å‘çº¿ï¼ˆworker å®žé™…æ‰§è¡Œå€¼ï¼‰</div>
+      <div className="strategy-risk-title">è®¢å•æ‰§è¡Œç­–ç•¥ï¼ˆæ··åˆæ¨¡å¼ï¼‰</div>
+      <label>å…¥åœºè®¢å•æ¨¡å¼
+        <select value={entryMode} onChange={(e) => setEntryMode(e.target.value)}>
+          <option value="TAKER">Takerï¼ˆä¸»åŠ¨æˆäº¤ï¼‰</option>
+          <option value="MAKER_FIRST">Maker ä¼˜å…ˆï¼ˆæ··åˆï¼‰</option>
+        </select>
+      </label>
+      <label>å…¥åœº Maker TTLï¼ˆç§’ï¼‰<input type="number" min="0.5" max="60" step="0.5" value={entryTtl} onChange={(e) => setEntryTtl(e.target.value)} /></label>
+      <label className="risk-checkbox"><input type="checkbox" checked={entryPostOnly} onChange={(e) => setEntryPostOnly(e.target.checked)} /> å…¥åœº Maker post-only</label>
+      <label className="risk-checkbox"><input type="checkbox" checked={entryFallback} onChange={(e) => setEntryFallback(e.target.checked)} /> Maker æœªæˆäº¤æ—¶ Taker å…œåº•</label>
+      <div className="strategy-risk-hint">æ­¢æŸã€åè½¬å’Œä¸´è¿‘ç»“ç®—å›ºå®šä½¿ç”¨ Takerï¼›Maker è¶…æ—¶æ’¤å•åŽæ‰å…è®¸å…œåº•ã€‚</div>
+      <div className="strategy-risk-title">ç›ˆåˆ©é€€å‡ºä¸Žä¸´è¿‘ç»“ç®—</div>
+      <label className="risk-checkbox"><input type="checkbox" checked={profitEnabled} onChange={(e) => setProfitEnabled(e.target.checked)} /> å¯ç”¨ç›ˆåˆ©ä¸»åŠ¨é€€å‡º</label>
+      <label>ç›ˆåˆ©é€€å‡ºæ¨¡å¼
+        <select value={profitMode} onChange={(e) => setProfitMode(e.target.value)}>
+          <option value="MAKER_FIRST">Maker ä¼˜å…ˆï¼ˆæ··åˆï¼‰</option>
+          <option value="TAKER">Takerï¼ˆä¸»åŠ¨æˆäº¤ï¼‰</option>
+        </select>
+      </label>
+      <label>ç›ˆåˆ©ç›®æ ‡ %<input type="number" min="0" max="100" step="0.1" value={profitTargetPct} onChange={(e) => setProfitTargetPct(e.target.value)} /></label>
+      <label>ç›ˆåˆ©ç›®æ ‡æœ€å°è·³æ•°<input type="number" min="0" max="100" step="1" value={profitTicks} onChange={(e) => setProfitTicks(e.target.value)} /></label>
+      <label>ç›ˆåˆ© Maker TTLï¼ˆç§’ï¼‰<input type="number" min="0.5" max="60" step="0.5" value={profitTtl} onChange={(e) => setProfitTtl(e.target.value)} /></label>
+      <label className="risk-checkbox"><input type="checkbox" checked={profitPostOnly} onChange={(e) => setProfitPostOnly(e.target.checked)} /> ç›ˆåˆ© Maker post-only</label>
+      <label className="risk-checkbox"><input type="checkbox" checked={profitFallback} onChange={(e) => setProfitFallback(e.target.checked)} /> ç›ˆåˆ© Maker æœªæˆäº¤æ—¶ Taker å…œåº•</label>
+      <label className="risk-checkbox"><input type="checkbox" checked={nearCloseEnabled} onChange={(e) => setNearCloseEnabled(e.target.checked)} /> ä¸´è¿‘ç»“ç®—å¼ºåˆ¶é€€å‡ºï¼ˆTakerï¼‰</label>
+      <label>ä¸´è¿‘ç»“ç®—çª—å£ï¼ˆç§’ï¼‰<input type="number" min="0" max="300" step="1" value={nearCloseWindow} onChange={(e) => setNearCloseWindow(e.target.value)} /></label>
+      <div className="strategy-risk-title">BTC å…¥åœºä¸Žé£ŽæŽ§å‚æ•°</div>
+      <label>å…¥åœºä»·æ ¼ä¸‹é™<input type="number" min="0" max="1" step="0.01" value={minEntryPrice} onChange={(e) => setMinEntryPrice(e.target.value)} /></label>
+      <label>å…¥åœºä»·æ ¼ä¸Šé™<input type="number" min="0" max="1" step="0.01" value={maxEntryPrice} onChange={(e) => setMaxEntryPrice(e.target.value)} /></label>
+      <label>å…¥åœºå‰©ä½™æ—¶é—´ä¸Šé™ï¼ˆç§’ï¼‰<input type="number" min="0" max="600" step="1" value={secondsBeforeClose} onChange={(e) => setSecondsBeforeClose(e.target.value)} /></label>
+      <label>å…¥åœºå‰©ä½™æ—¶é—´ä¸‹é™ï¼ˆç§’ï¼‰<input type="number" min="0" max="600" step="1" value={minTRemainingSec} onChange={(e) => setMinTRemainingSec(e.target.value)} /></label>
+      <label>å•ç¬”é£Žé™© %<input type="number" min="0" max="100" step="0.1" value={orderRiskPct} onChange={(e) => setOrderRiskPct(e.target.value)} /></label>
+      <label>åè½¬é€€å‡ºçª—å£ï¼ˆç§’ï¼‰<input type="number" min="0" max="600" step="1" value={reversalWindow} onChange={(e) => setReversalWindow(e.target.value)} /></label>
+      <label>å›žæ’¤æ­¢æŸ %<input type="number" min="0" max="100" step="1" value={drawdownPct} onChange={(e) => setDrawdownPct(e.target.value)} /></label>
+      <label>å…¥åœºç¡®è®¤æ¬¡æ•°<input type="number" min="0" max="20" step="1" value={confirmChecks} onChange={(e) => setConfirmChecks(e.target.value)} /></label>
+      <label>åè½¬ç¡®è®¤æ¬¡æ•°<input type="number" min="0" max="20" step="1" value={reversalConfirmChecks} onChange={(e) => setReversalConfirmChecks(e.target.value)} /></label>
+      <label>æœ€å¤§æŒä»“æ•°<input type="number" min="1" max="20" step="1" value={maxPositions} onChange={(e) => setMaxPositions(e.target.value)} /></label>
+      <div className="strategy-risk-title">ä¹°å…¥ä¸Žé€€å‡ºè®¢å•</div>
+      <div className="strategy-risk-hint">Taker ä¹°å…¥ä½¿ç”¨ FOKï¼›æ­¢æŸ/åè½¬é€€å‡ºä½¿ç”¨ FOKï¼ŒæµåŠ¨æ€§ä¸è¶³æ—¶æŒ‰ FAK å…œåº•ã€‚å½“å‰æ··åˆæ¨¡å¼ä¼šä¼˜å…ˆæŒ‚ Makerã€‚</div>
+      <label>é€€å‡º FOK æ»‘ç‚¹è·³æ•°<input type="number" min="0" max="100" step="1" value={sellFokSlippage} onChange={(e) => setSellFokSlippage(e.target.value)} /></label>
+      <label>é€€å‡ºæ·±åº¦è·³æ•°<input type="number" min="0" max="100" step="1" value={sellDepthTicks} onChange={(e) => setSellDepthTicks(e.target.value)} /></label>
+      <label>é€€å‡ºæ·±åº¦æ¡£ä½<input type="number" min="0" max="100" step="1" value={sellDepthLevels} onChange={(e) => setSellDepthLevels(e.target.value)} /></label>
+      <label className="risk-checkbox"><input type="checkbox" checked={sellFakFallback} onChange={(e) => setSellFakFallback(e.target.checked)} /> é€€å‡º FAK å…œåº•</label>
+      <label className="risk-checkbox"><input type="checkbox" checked={sellReconcile} onChange={(e) => setSellReconcile(e.target.checked)} /> é€€å‡ºæˆäº¤å›žæŸ¥</label>
+      <label className="risk-checkbox"><input type="checkbox" checked={partialExitEnabled} onChange={(e) => setPartialExitEnabled(e.target.checked)} /> å¯ç”¨éƒ¨åˆ†é€€å‡º</label>
+      {partialExitEnabled && <label>éƒ¨åˆ†é€€å‡ºæ¯”ä¾‹ %<input type="number" min="0" max="100" step="1" value={partialExitFraction} onChange={(e) => setPartialExitFraction(e.target.value)} /></label>}
+      <label>æ—¥äºæŸç†”æ–­ %<input type="number" min="1" max="50" step="1" placeholder={`å½“å‰ ${currentLoss}%`} value={lossPct} onChange={(e) => setLossPct(e.target.value)} /></label>
+      <label>æ¯æ—¥æ”¶ç›ŠçŽ‡ä¸Šé™ %<input type="number" min="0" max="100" step="0.1" placeholder={currentCapFraction > 0 ? `å½“å‰ ${(currentCapFraction * 100).toFixed(2)}%` : 'å½“å‰ å…³é—­(0)'} value={capPct} onChange={(e) => setCapPct(e.target.value)} /></label>
+      <small className="strategy-risk-hint">æŒ‰å½“å‰æ¨¡æ‹Ÿæœ¬é‡‘æ¢ç®—ç›®æ ‡ï¼š{currentCapFraction > 0 && currentCapUsd != null ? `${(currentCapFraction * 100).toFixed(2)}% Â· ${fmtUsd(currentCapUsd)}` : 'å…³é—­'}</small>
+      <label>æ¨¡æ‹Ÿæœ¬é‡‘ $<input type="number" min="10" max="100000" step="10" placeholder={currentEquity != null ? `å½“å‰ $${currentEquity}` : '--'} value={equityUsd} onChange={(e) => setEquityUsd(e.target.value)} /></label>
+      <div className="risk-kelly-row">
+        <span className="risk-kelly-label">å‡¯åˆ©æ‹‰é—¸<em>ï¼ˆå£è¢‹çº§ä»“ä½ï¼‰</em></span>
+        <button type="button" role="switch" aria-checked={kellyEffective} className={`kelly-switch ${kellyEffective ? 'on' : 'off'}`} onClick={() => setKelly(!kellyEffective)}>
+          <span className="kelly-knob" /><span className="kelly-state">{kellyEffective ? 'å¼€' : 'å…³'}</span>
+        </button>
+        <small className="risk-kelly-hint">{currentKelly == null ? 'å½“å‰ --' : `å½“å‰ ${currentKelly ? 'å¼€Â·å‡¯åˆ©ä»“ä½' : 'å…³Â·å›ºå®šä»“ä½'}`}{kelly != null && kelly !== currentKelly ? ' â†’å¾…ä¿å­˜' : ''}</small>
+      </div>
+      <button type="button" disabled={busy} onClick={save}>{busy ? 'åº”ç”¨ä¸­â€¦' : 'ä¿å­˜å¹¶é‡å¯ Worker'}</button>
+      {msg && <small className="strategy-risk-msg">{msg}</small>}
+    </div>
+  );
+}
+
+function LlmUsagePanel({ usage, models }: { usage?: LlmUsageSnapshot | null; models?: { primary_model?: string; secondary_model?: string } }) {
+  const rows = usage?.models || [];
+  const find = (name: string | undefined, fallback: string) => {
+    if (!name) return rows.find((r) => r.model.toLowerCase().includes(fallback.toLowerCase()));
+    return rows.find((r) => r.model === name)
+      || rows.find((r) => r.model.toLowerCase().includes(name.toLowerCase()))
+      || (fallback === 'grok' ? rows.find((r) => r.model.toLowerCase().includes('grok')) : undefined);
+  };
+  const primary = find(models?.primary_model, 'astra');
+  const secondary = find(models?.secondary_model, 'grok');
+  const modelName = (entry: typeof primary, configured: string | undefined, fallback: string) => entry?.model || configured || fallback;
+  const short = (n: number | undefined) => n == null ? '0' : n.toLocaleString('en-US');
+  return <div className="llm-usage-panel" aria-label="åŒæ¨¡åž‹ TOKEN å®žæ—¶æ¶ˆè€—">
+    <div className="llm-usage-item"><span className="llm-usage-model" title={modelName(primary, models?.primary_model, 'GPT-6-Astra')}>{modelName(primary, models?.primary_model, 'GPT-6-Astra')}</span><span className="llm-usage-value">{short(primary?.total_tokens)} TOK</span><small>{primary ? `ç´¯è®¡ Â· ${short(primary.last_tokens)} æœ¬æ¬¡` : 'å°šæœªè°ƒç”¨'}</small></div>
+    <div className="llm-usage-divider" />
+    <div className="llm-usage-item"><span className="llm-usage-model" title={modelName(secondary, models?.secondary_model, 'Grok')}>{modelName(secondary, models?.secondary_model, 'Grok')}</span><span className="llm-usage-value">{short(secondary?.total_tokens)} TOK</span><small>{secondary ? `ç´¯è®¡ Â· ${short(secondary.last_tokens)} æœ¬æ¬¡` : 'å°šæœªè°ƒç”¨'}</small></div>
+  </div>;
+}
+
+function BottomBar({ state, transport, llmUsage, onAgentClick }: { state: State | null; transport: 'ws' | 'rest'; llmUsage: LlmUsageSnapshot | null; onAgentClick: (role: typeof OPENCLAW_ROLES[number]) => void }) {
+  const errs = state?.errors || {};
+  const errKeys = Object.keys(errs);
+  const roleCards = OPENCLAW_ROLES.map((role) => ({ role, status: findAgentStatus(state?.agent_status, role.keys) }));
+  return (
+    <>
+      <div className="openclaw-agent-dock" aria-label="OpenClaw ä¸­æ–‡æƒé™çŠ¶æ€">
+        {roleCards.map(({ role, status }, index) => <AgentCard key={role.id} role={role} status={status} llmUsage={llmUsage} roleIndex={index} todayCounts={state?.today_counts} onClick={() => onAgentClick(role)} />)}
+      </div>
+      <div className="bottom-bar" style={bottomBarStyle}>
+        <span style={{ color: transport === 'ws' ? 'var(--green)' : 'var(--txt-dim)' }}>{transport === 'ws' ? 'WS å®žæ—¶æŽ¨é€ Â· 0.25s' : 'è½®è¯¢ 1s Â· å›žé€€'}</span>
+        <span style={{ color: 'var(--txt-dim)', margin: '0 12px' }}>/</span>
+        <span style={{ color: 'var(--txt-dim)' }}>
+          å†³ç­– <b style={{ color: 'var(--txt-hi)' }}>{(state?.decisions_total ?? state?.decisions.length ?? 0).toLocaleString('en-US')}</b>
+          {' / è®¢å• '}<b style={{ color: 'var(--txt-hi)' }}>{(state?.orders_total ?? state?.orders.length ?? 0).toLocaleString('en-US')}</b>
+        </span>
+        <span style={spacer} />
+        {errKeys.length > 0 && (
+          <span style={{ color: 'var(--red)' }}>é”™è¯¯ï¼š{errKeys.join(', ')}</span>
+        )}
+      </div>
+    </>
+  );
+}
+
+export function AssetDock({ state }: { state: State | null }) {
+  const assets = [
+    ['BTC', state?.btc_signal?.current_price, '#f4b942', state?.bot_assets?.BTC],
+  ] as const;
+  return <div className="asset-dock" aria-label="èµ„äº§æœåŠ¡">
+    {assets.map(([name, value, color, live]) => <div className="asset-card" key={name} style={{ '--asset-accent': color } as CSSProperties}>
+      <span className="asset-icon">{name.slice(0, 1)}</span><span className="asset-name">{name}</span><strong>{typeof value === 'number' ? fmtUsd(value) : '--'}</strong><span className="asset-mode">{live ? 'å®žç›˜' : 'æ¨¡æ‹Ÿ'}</span>
+    </div>)}
+  </div>;
+}
+
+const OPENCLAW_ROLES = [
+  { id: 'desk', label: 'å°é•¿è°ƒåº¦', keys: ['desk', 'head_of_desk', 'å°é•¿è°ƒåº¦'], color: '#ffc857', tool: 'æŒ‡æŒ¥' },
+  { id: 'search', label: 'æœºä¼šçŒŽæ‰‹', keys: ['search', 'æœºä¼šçŒŽæ‰‹'], color: '#22d3ee', tool: 'æ‰«æ' },
+  { id: 'whale', label: 'èªæ˜Žé’±è·Ÿè¸ª', keys: ['whale', 'èªæ˜Žé’±è·Ÿè¸ª'], color: '#c084fc', tool: 'è¿½è¸ª' },
+  { id: 'shill', label: 'èˆ†æƒ…éªŒè¯', keys: ['shill', 'èˆ†æƒ…éªŒè¯'], color: '#60a5fa', tool: 'éªŒè¯' },
+  { id: 'risk', label: 'é£ŽæŽ§åˆè§„', keys: ['risk', 'é£ŽæŽ§åˆè§„'], color: '#facc15', tool: 'é˜²æŠ¤' },
+  { id: 'sniper', label: 'è®¢å•æ‰§è¡Œ', keys: ['sniper', 'è®¢å•æ‰§è¡Œ'], color: '#fb923c', tool: 'æ‰§è¡Œ' },
+  { id: 'exit', label: 'ä»“ä½ç®¡ç†', keys: ['exit', 'ä»“ä½ç®¡ç†'], color: '#4ade80', tool: 'ç®¡ç†' },
+  { id: 'rug', label: 'ç†”æ–­å…œåº•', keys: ['rug', 'ç†”æ–­å…œåº•'], color: '#f87171', tool: 'ç†”æ–­' },
+] as const;
+
+function findAgentStatus(all: Record<string, AgentStatus> | undefined, keys: readonly string[]): AgentStatus {
+  if (!all) return { status: 'offline' };
+  const entry = Object.entries(all).find(([key]) => keys.some((candidate) => key.toLowerCase() === candidate.toLowerCase()));
+  return entry?.[1] || { status: 'offline' };
+}
+
+function formatAgentDataScope(scope: AgentStatus['data_scope']): string {
+  if (!scope) return 'BTC Paper';
+  if (typeof scope === 'string') return scope;
+  return Object.entries(scope).filter(([key]) => key.toUpperCase() === 'BTC').map(([, value]) => `BTC ${value === 'live' ? 'å®žæ—¶' : 'Paper'}`).join(' Â· ') || 'BTC Paper';
+}
+
+function formatAgentExecutionScope(scope: string | undefined): string {
+  const labels: Record<string, string> = {
+    btc_l2_live: 'BTC å®žç›˜ Â· L2',
+    btc_close_only_live: 'BTC å®žç›˜ Â· ä»…å¹³ä»“',
+    btc_emergency_live: 'BTC å®žç›˜ Â· ç´§æ€¥å¤„ç½®',
+    risk_gate: 'é£ŽæŽ§é—¸é—¨ Â· å¯æ‹’ç»',
+    read_only: 'åªè¯»åˆ†æž Â· æ— ä¸‹å•æƒé™',
+  };
+  return labels[scope || ''] || scope || 'åªè¯»åˆ†æž Â· æ— ä¸‹å•æƒé™';
+}
+
+function AgentCard({ role, status, llmUsage, roleIndex, todayCounts, onClick }: { role: typeof OPENCLAW_ROLES[number]; status: AgentStatus; llmUsage: LlmUsageSnapshot | null; roleIndex: number; todayCounts?: State['today_counts']; onClick: () => void }) {
+  const raw = String(status.status || 'offline').toLowerCase();
+  const statusKey = raw === 'running' || raw === 'ok' ? 'running' : raw === 'idle' || raw === 'waiting' ? 'idle' : raw === 'blocked' ? 'blocked' : raw === 'error' || raw === 'failed' ? 'error' : 'offline';
+  const statusLabel = statusKey === 'running' ? 'è¿è¡Œä¸­' : statusKey === 'idle' ? 'ç­‰å¾…ä¸­' : statusKey === 'blocked' ? 'å·²é˜»æ–­' : statusKey === 'error' ? 'å¼‚å¸¸' : 'ç¦»çº¿';
+  const queue = Number(status.queue_depth ?? 0);
+  // Event figure = Beijing-trading-day count (resets at 00:00 Beijing);
+  // falls back to the lifetime last-id when the server predates today_counts.
+  const isExecRole = role.id === 'sniper' || role.id === 'exit' || role.id === 'rug';
+  const eventId = todayCounts
+    ? (isExecRole ? todayCounts.orders : todayCounts.decisions)
+    : (isExecRole ? status.last_order_id : status.last_decision_id);
+  const durationSeconds = Math.max(0.8, Math.min(3.8, 2.4 - queue * 0.12));
+  const activityDuration = `${durationSeconds.toFixed(2)}s`;
+  // Stable per-role phase offsets keep cards from rising as one synchronized
+  // block while still reflecting the same workflow heartbeat.
+  const phaseSeed = [...role.id].reduce((sum, char) => sum + char.charCodeAt(0), 0) % 100;
+  const activityDelay = `${(-(phaseSeed / 100) * durationSeconds).toFixed(2)}s`;
+  const recentTokens = (llmUsage?.models || []).reduce((sum, model) => sum + Number(model.last_tokens || 0), 0);
+  const tokenLevel = Math.max(.2, Math.min(1, recentTokens / 1200));
+  return (
+    <div className={`agent-card agent-${statusKey}`} style={{ '--agent-accent': role.color, '--agent-activity-duration': activityDuration, '--agent-activity-delay': activityDelay } as CSSProperties} title={status.execution_detail || status.detail || role.label} onClick={onClick} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onClick(); } }} role="button" tabIndex={0}>
+      <div className="agent-avatar"><img src={`/openclaw-${role.id === 'desk' ? 'taizhang' : role.id === 'search' ? 'hunter' : role.id}-cutout.png`} alt={`${role.label} OpenClaw`} /></div>
+      <div className="agent-card-name">{role.label}</div>
+      <div className="agent-card-body">
+        <div className="agent-card-metrics" aria-label={`${role.label}å®žæ—¶æŒ‡æ ‡`}>
+          <div><span>çŠ¶æ€</span><b><i className="agent-status-dot" />{statusLabel}</b></div>
+          <div><span>é˜Ÿåˆ—</span><b>{queue}</b></div>
+          <div><span>äº‹ä»¶</span><b>{eventId ?? '--'}</b></div>
+        </div>
+        <div className="agent-token-wave" aria-label={`${role.label} TOKEN ä½¿ç”¨æ³¢åŠ¨`} title={`TOKEN ä½¿ç”¨ï¼š${recentTokens.toLocaleString('en-US')}ï¼ˆæœ€è¿‘ä¸€æ¬¡æ¨¡åž‹è°ƒç”¨ï¼‰`} style={{ '--token-level': tokenLevel, '--wave-seed': roleIndex } as CSSProperties}>
+          {Array.from({ length: 8 }, (_, bar) => <i key={bar} style={{ '--wave-bar': bar, '--wave-height': [0.5, 0.78, 1, 0.62, 0.9, 0.56, 0.74, 0.46][bar], '--wave-scale': [0.5, 0.78, 1, 0.62, 0.9, 0.56, 0.74, 0.46][bar] * tokenLevel } as CSSProperties} />)}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const AGENT_CAPABILITIES: Record<string, string[]> = {
+  desk: ['ä»»åŠ¡è°ƒåº¦', 'å®¡æ‰¹é˜Ÿåˆ—', 'æ—¥æŠ¥æ±‡æ€»', 'æ— äº¤æ˜“æƒé™'],
+  search: ['å¸‚åœºå‘çŽ°', 'ä»·å·®æ‰«æ', 'äº‹ä»¶ç­›é€‰', 'åªè¯»è¡Œæƒ…'],
+  whale: ['å¤§é¢æˆäº¤è·Ÿè¸ª', 'ç›˜å£å¼‚åŠ¨', 'åœ°å€è¡Œä¸ºåˆ†æž', 'åªè¯»è¡Œæƒ…'],
+  shill: ['æ–°é—»ä¸Žå…¬å‘Š', 'æ°‘è°ƒä¸Žèˆ†æƒ…', 'äº‹ä»¶çœŸå®žæ€§æ ¡éªŒ', 'åªè¯»æ•°æ®'],
+  risk: ['æ•žå£æ ¡éªŒ', 'æ»‘ç‚¹æ£€æŸ¥', 'äºæŸç†”æ–­', 'æ‹’ç»è®¢å•'],
+  sniper: ['æ‰§è¡Œé£ŽæŽ§é€šè¿‡è®¢å•', 'æ’¤å•ä¸ŽçŠ¶æ€åŒæ­¥', 'éƒ¨åˆ†æˆäº¤å¤„ç†', 'æ— ç§é’¥/æçŽ°æƒé™'],
+  exit: ['æ­¢ç›ˆæ­¢æŸå»ºè®®', 'å¹³ä»“æŒ‡ä»¤', 'æŒä»“ç”Ÿå‘½å‘¨æœŸ', 'ç¦æ­¢åŠ ä»“'],
+  rug: ['ç´§æ€¥æ’¤å•', 'ç´§æ€¥å¹³ä»“', 'å¼‚å¸¸ç†”æ–­', 'æ— å¼€ä»“æƒé™'],
+};
+
+function AgentDetailModal({ role, status, state, onClose }: { role: typeof OPENCLAW_ROLES[number]; status: AgentStatus; state: State | null; onClose: () => void }) {
+  const heartbeat = status.heartbeat_ts ?? status.last_heartbeat_ts;
+  const age = heartbeat ? Math.max(0, Date.now() / 1000 - heartbeat) : null;
+  const related = (role.id === 'sniper' || role.id === 'exit' || role.id === 'rug') ? (state?.orders || []).slice(0, 8) : [];
+  const liveBridge = state?.bot_mode === 'live' && Boolean(state?.service_modes?.BTC?.live_enabled);
+  const executionRole = role.id === 'sniper' || role.id === 'exit' || role.id === 'rug';
+  const effectiveLive = status.mode === 'live' || (liveBridge && executionRole);
+  const liveOrders = (state?.orders || []).filter((order) => order.dry_run === 0).length;
+  const paperOrders = (state?.orders || []).filter((order) => order.dry_run !== 0).length;
+  const statusText = String(status.status || 'offline').toLowerCase();
+  const statusLabel = statusText === 'running' ? 'è¿è¡Œä¸­' : statusText === 'idle' || statusText === 'waiting' ? 'ç­‰å¾…ä¸­' : statusText === 'blocked' ? 'å·²é˜»æ–­' : statusText === 'error' ? 'å¼‚å¸¸' : 'ç¦»çº¿';
+  const executionDetail = effectiveLive
+    ? 'BTC L2 å®žç›˜é“¾è·¯ï¼›è®¢å•ä»éœ€ RISK é€šè¿‡'
+    : (status.execution_detail || status.detail || 'æš‚æ— çŠ¶æ€è¯´æ˜Ž');
+  return <DataModal title={`${role.label} / OpenClaw è¯¦ç»†æ•°æ®`} onClose={onClose}>
+    <div className="agent-detail-head" style={{ '--agent-accent': role.color } as CSSProperties}>
+      <img src={`/openclaw-${role.id === 'desk' ? 'taizhang' : role.id === 'search' ? 'hunter' : role.id}-cutout.png`} alt={`${role.label} OpenClaw`} />
+      <div><strong>{role.label}</strong><span>{statusLabel} Â· {formatAgentExecutionScope(status.execution_scope)}</span><small>{executionDetail}</small></div>
+    </div>
+    <div className="agent-detail-metrics">
+      <div><span>æœ€è¿‘å¿ƒè·³</span><b>{age == null ? 'æ— è®°å½•' : age < 2 ? 'åˆšåˆš' : `${Math.floor(age)} ç§’å‰`}</b></div>
+      <div><span>å¤„ç†é˜Ÿåˆ—</span><b>{status.queue_depth ?? 0}</b></div>
+      <div><span>å½“å‰å¸‚åœº</span><b>{status.market || 'æœªæŒ‡å®š'}</b></div>
+      <div><span>è¿è¡Œæ¨¡å¼</span><b>{effectiveLive ? 'BTC Live' : 'Paper'}</b></div>
+      <div><span>æ•°æ®èŒƒå›´</span><b>{formatAgentDataScope(status.data_scope)}</b></div>
+      <div><span>æ‰§è¡Œæƒé™</span><b>{formatAgentExecutionScope(status.execution_scope)}</b></div>
+      <div><span>ä¸»æ¨¡åž‹è°ƒç”¨</span><b>{status.model_calls?.primary === 'ok' ? 'æ­£å¸¸' : status.model_calls?.primary === 'error' ? 'å¼‚å¸¸' : 'ç­‰å¾…'}</b></div>
+      <div><span>å¤æ ¸æ¨¡åž‹è°ƒç”¨</span><b>{status.model_calls?.secondary === 'ok' ? 'æ­£å¸¸' : status.model_calls?.secondary === 'error' ? 'å¼‚å¸¸' : 'ç­‰å¾…'}</b></div>
+      <div><span>BTC å®žç›˜è®¢å•</span><b>{liveOrders}</b></div>
+      <div><span>Paper è®¢å•</span><b>{paperOrders}</b></div>
+    </div>
+    <div className="agent-detail-section"><h4>æƒé™èŒƒå›´</h4><div className="agent-capability-list">{(AGENT_CAPABILITIES[role.id] || []).map((capability) => <span key={capability}>{capability}</span>)}</div></div>
+    {status.slow_loop && Object.keys(status.slow_loop).length > 0 && (
+      <div className="agent-detail-section"><h4>æ…¢çŽ¯ä»»åŠ¡ï¼ˆæœ€è¿‘ä¸€è½®ï¼‰</h4>
+        <div className="agent-detail-orders">
+          {Object.entries(status.slow_loop).map(([task, info]) => (
+            <div key={task}>
+              <span>{task}</span>
+              <span>{info?.workflow_stage || info?.status || '--'}</span>
+              <span>
+                {info?.duration_ms != null ? `${info.duration_ms}ms` : ''}
+                {info?.n_reviews != null ? ` Â· å¤ç›˜${info.n_reviews}` : ''}
+                {info?.n_degraded != null ? ` Â· é€€åŒ–${info.n_degraded}` : ''}
+                {info?.whale_trades != null ? ` Â· æ ·æœ¬${info.whale_trades.toLocaleString('en-US')}` : ''}
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+    )}
+    {(role.id === 'sniper' || role.id === 'exit' || role.id === 'rug') && <div className="agent-detail-section"><h4>æœ€è¿‘æ‰§è¡Œå›žæŠ¥ï¼ˆäº‹ä»¶æ˜Žç»†ï¼‰</h4>{related.length ? <div className="agent-detail-orders">{related.map((order) => <div key={order.id}><span>#{order.id} {order.asset || '--'} Â· {zhText(order.side)}</span><span>{zhText(order.status)}</span><span>{fmtTime(order.ts)}</span></div>)}</div> : <Empty>æš‚æ— æ‰§è¡Œè®°å½•</Empty>}</div>}
+    {role.id === 'desk' && (state?.slow_loop?.proposals?.length ?? 0) > 0 && (
+      <div className="agent-detail-section"><h4>å¾…å®¡æ‰¹ææ¡ˆï¼ˆå°é•¿æ±‡æ€»ï¼‰</h4>
+        <div className="agent-detail-orders">
+          {(state?.slow_loop?.proposals ?? []).slice(0, 5).map((p) => (
+            <div key={`${p.key}-${p.ts}`}>
+              <span style={{ color: 'var(--amber-bright)' }}>{p.key}</span>
+              <span><code style={{ color: 'var(--txt-dim)' }}>{String(p.current)}</code> <b style={{ color: 'var(--green)' }}>â†’ {String(p.proposed)}</b></span>
+              <span style={{ color: p.confidence === 'high' ? 'var(--green)' : 'var(--txt-dim)' }}>{p.confidence} Â· {p.source_agent}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    )}
+    {!(role.id === 'sniper' || role.id === 'exit' || role.id === 'rug') && (() => {
+      // Each analysis role sees ITS OWN slice of the decision stream, not a
+      // shared dump: filters mirror what the role is responsible for.
+      const filters: Record<string, (d: Decision) => boolean> = {
+        desk: () => true,
+        search: (d) => d.action === 'BUY' || ['SKIP_PRICE', 'SKIP_EDGE', 'SKIP_CONFIRM', 'SKIP_TIME', 'SKIP_SIZE'].includes(d.action),
+        whale: (d) => d.action.includes('SIGNAL') || /delta/i.test(d.reason || ''),
+        shill: (d) => ['SKIP_VOLATILE', 'SKIP_MARKET', 'SKIP_AMBIGUOUS', 'SKIP_TREND_OVERHEAT', 'SKIP_PRICE_MOMENTUM'].includes(d.action),
+        risk: (d) => ['SKIP_RISK', 'SKIP_BALANCE', 'SKIP_EXEC_RISK', 'SKIP_RETRY_CAP', 'SKIP_ONE_SIDE'].includes(d.action),
+      };
+      const filter = filters[role.id] ?? (() => true);
+      const rows = (state?.decisions ?? []).filter(filter).slice(0, 8);
+      return (
+        <div className="agent-detail-section"><h4>æœ€è¿‘äº‹ä»¶ï¼ˆ{role.label}ç›¸å…³å†³ç­–æµï¼‰</h4>
+          {rows.length ? (
+            <div className="agent-detail-orders">
+              {rows.map((d) => (
+                <div key={d.id}>
+                  <span><b style={{ color: 'var(--amber)' }}>#{d.id}</b> {d.asset || '--'} Â· <b style={{ color: actionColor(d.action) }}>{zhText(d.action)}</b></span>
+                  <span title={zhText(d.reason)}>{zhText(d.reason).slice(0, 30)}</span>
+                  <span style={{ color: 'var(--txt-dim)' }}>{fmtTime(d.ts)}</span>
+                </div>
+              ))}
+            </div>
+          ) : <Empty>çª—å£å†…æš‚æ— {role.label}ç›¸å…³äº‹ä»¶ï¼ˆè¿‘ {state?.decisions?.length ?? 0} æ¡å†³ç­–ä¸­ï¼‰</Empty>}
+        </div>
+      );
+    })()}
+  </DataModal>;
+}
+
+export function LobsterAvatar({ accent, tool, roleId }: { accent: string; tool: string; roleId: string }) {
+  return (
+    <svg className="lobster-svg" viewBox="0 0 80 64" role="img" aria-label={`Qç‰ˆé¾™è™¾ï¼š${tool}`}>
+      <defs><linearGradient id={`lobster-${accent.replace('#', '')}`} x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#ff786b"/><stop offset=".58" stopColor="#d73542"/><stop offset="1" stopColor="#761d37"/></linearGradient></defs>
+      <ellipse cx="40" cy="55" rx="24" ry="5" fill="#000" opacity=".45" />
+      <path d="M25 46c-7 4-13 4-18 1l5-5-7-5 12-2c2-8 8-13 16-15h14c8 2 14 7 16 15l12 2-7 5 5 5c-6 3-12 3-18-1-3 4-7 6-10 6s-7-2-10-6Z" fill={`url(#lobster-${accent.replace('#', '')})`} stroke="#ff9b82" strokeWidth="1.2" />
+      <ellipse cx="40" cy="31" rx="15" ry="12" fill="#f05a55" stroke="#ff9b82" strokeWidth="1.2" />
+      <circle cx="35" cy="29" r="3.4" fill="#fff"/><circle cx="45" cy="29" r="3.4" fill="#fff"/><circle cx="35" cy="29" r="1.5" fill="#111"/><circle cx="45" cy="29" r="1.5" fill="#111" />
+      <path d="M36 36q4 3 8 0" fill="none" stroke="#57152d" strokeWidth="1.4" strokeLinecap="round" />
+      <path d="M28 20 23 10M52 20l5-10" stroke="#ff9b82" strokeWidth="1.2" strokeLinecap="round"/><circle cx="23" cy="9" r="2" fill={accent}/><circle cx="57" cy="9" r="2" fill={accent}/>
+      <path d="M14 28 5 20M66 28l9-8" stroke="#ff786b" strokeWidth="4" strokeLinecap="round"/><circle cx="5" cy="20" r="4" fill={accent}/><circle cx="75" cy="20" r="4" fill={accent}/>
+      <g className={`lobster-tool lobster-tool-${roleId}`} transform={roleId === 'desk' ? undefined : 'translate(0 20)'} stroke={accent} fill="none" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        {roleId === 'desk' && <><path d="M31 8h18l-3-5H34z" fill={accent}/><path d="M34 11h12"/></>}
+        {roleId === 'search' && <><circle cx="56" cy="13" r="5"/><path d="M60 17l7 6M51 13h-8"/></>}
+        {roleId === 'whale' && <><circle cx="57" cy="13" r="5"/><path d="M61 17l5 5M53 9l-3-3"/></>}
+        {roleId === 'shill' && <><path d="M50 15a8 8 0 0 1 14 0v5H50z"/><path d="M50 19h-3v5h4M64 19h3"/></>}
+        {roleId === 'risk' && <path d="M57 7l7 3v5c0 5-3 8-7 10-4-2-7-5-7-10v-5z" fill="rgba(250,204,21,.25)" />}
+        {roleId === 'sniper' && <><rect x="49" y="7" width="15" height="10" rx="1" fill="rgba(251,146,60,.25)"/><path d="M53 20h8M56 17v3"/><path d="M52 11h7M52 14h4"/></>}
+        {roleId === 'exit' && <><circle cx="57" cy="14" r="7" fill="rgba(74,222,128,.2)"/><path d="M57 14l4-4M53 22h8"/></>}
+        {roleId === 'rug' && <><circle cx="57" cy="9" r="3" fill={accent}/><path d="M57 12v8M51 20h12M52 20l-3 5M62 20l3 5"/></>}
+      </g>
+      <rect x="34" y="3" width="12" height="7" rx="2" fill={accent} opacity=".9"/><text x="40" y="8.4" textAnchor="middle" fontSize="4.3" fill="#101010" fontWeight="700">{tool}</text>
+    </svg>
+  );
+}
+
+/** Translate common strategy/status tokens while preserving numeric details. */
+function zhText(value: string | null | undefined): string {
+  return (value ?? '--')
+    .replace(/\bSELL_DOWN\b/gi, 'å–å‡ºï¼šä¸‹è·Œ')
+    .replace(/\bSELL_UP\b/gi, 'å–å‡ºï¼šä¸Šæ¶¨')
+    .replace(/\bUP\b/gi, 'ä¸Šæ¶¨')
+    .replace(/\bDOWN\b/gi, 'ä¸‹è·Œ')
+    .replace(/\bbuy window\b/gi, 'ä¹°å…¥çª—å£')
+    .replace(/\bexec_ask\b/gi, 'æ‰§è¡Œå–ä»·')
+    .replace(/\bt_remaining\b/gi, 'å‰©ä½™æ—¶é—´')
+    .replace(/\bedge\b/gi, 'ä¼˜åŠ¿')
+    .replace(/\bexit_dry_run\b/gi, 'æ¨¡æ‹Ÿé€€å‡º')
+    .replace(/\bdry_run\b/gi, 'æ¨¡æ‹Ÿæ‰§è¡Œ')
+    .replace(/\bSKIP_PRICE\b/gi, 'è·³è¿‡ï¼šä»·æ ¼')
+    .replace(/\bSKIP_TIME\b/gi, 'è·³è¿‡ï¼šæ—¶é—´')
+    .replace(/\bSKIP_MARKET\b/gi, 'è·³è¿‡ï¼šå¸‚åœº')
+    .replace(/\bSKIP_BALANCE\b/gi, 'è·³è¿‡ï¼šä½™é¢')
+    .replace(/\bSELL_DOWN\b/gi, 'å–å‡ºï¼šä¸‹è·Œ')
+    .replace(/\bSELL_UP\b/gi, 'å–å‡ºï¼šä¸Šæ¶¨')
+    .replace(/\bBUY\b/g, 'ä¹°å…¥')
+    .replace(/\bSELL\b/g, 'å–å‡º')
+    .replace(/\bHIT\b/g, 'å‘½ä¸­')
+    .replace(/\bMISS\b/g, 'æœªå‘½ä¸­')
+    .replace(/\bFAILED\b/g, 'å¤±è´¥')
+    .replace(/\bPENDING\b/g, 'å¾…ç»“ç®—')
+    .replace(/\bUNCERTAIN\b/g, 'å¾…ç¡®è®¤')
+    .replace(/\bEXITED\b/g, 'å·²é€€å‡º')
+    .replace(/\bPARTIAL_EXIT\b/g, 'éƒ¨åˆ†é€€å‡º')
+    .replace(/\bEXIT_FAILED\b/g, 'é€€å‡ºå¤±è´¥')
+    .replace(/\bEXIT_UNCERTAIN\b/g, 'é€€å‡ºå¾…ç¡®è®¤')
+    .replace(/\bEXIT_UNMATCHED\b/g, 'æœªæˆäº¤ï¼ˆç›˜å£æ— åŒ¹é…ï¼Œç­‰å¾…é‡è¯•ï¼‰')
+    .replace(/\bexit_unmatched\b/gi, 'æœªæˆäº¤ï¼ˆç›˜å£æ— åŒ¹é…ï¼‰')
+    .replace(/\bNONE\b/g, 'æ— ')
+    .replace(/\boff\b/gi, 'å…³é—­')
+    .replace(/\bprice-only\b/gi, 'ä»…ä»·æ ¼')
+    .replace(/\bmonitor only\b/gi, 'ä»…ç›‘æŽ§')
+    .replace(/\bLIVE ENABLED\b/gi, 'å®žç›˜å·²å¯ç”¨')
+    .replace(/\bunlimited\b/gi, 'ä¸é™')
+    .replace(/\bdrift unlimited\b/gi, 'æ»‘ç‚¹ä¸é™')
+    .replace(/\bhedge\b/gi, 'å¯¹å†²')
+    .replace(/\bskip\b/gi, 'è·³è¿‡')
+    .replace(/\bnormal\b/gi, 'å¸¸è§„')
+    .replace(/\bearly\b/gi, 'æ—©æœŸ')
+    .replace(/\bstrong\b/gi, 'å¼ºä¿¡å·')
+    .replace(/\btail\b/gi, 'å°¾ç›˜')
+    .replace(/\blate\b/gi, 'å°¾æ®µ')
+    .replace(/\bfinal\b/gi, 'æœ€ç»ˆ')
+    .replace(/\bprev\b/gi, 'å‰ä¸€æ¡£')
+    .replace(/\bmove\b/gi, 'å˜åŠ¨')
+    .replace(/\bsame-dir\b/gi, 'åŒæ–¹å‘')
+    .replace(/\bper-slot side\b/gi, 'æ¯æ—¶æ®µå•è¾¹')
+    .replace(/\bheld\b/gi, 'æŒæœ‰')
+    .replace(/\breverse\b/gi, 'åè½¬')
+    .replace(/\bdrift\b/gi, 'ä»·æ ¼æ¼‚ç§»')
+    .replace(/\bequity\b/gi, 'èµ„äº§')
+    .replace(/\bfixed\b/gi, 'å›ºå®š')
+    .replace(/\bno qualifying side\b/gi, 'æ²¡æœ‰ç¬¦åˆæ¡ä»¶çš„æ–¹å‘')
+    .replace(/\bno qualifying market\b/gi, 'æ²¡æœ‰ç¬¦åˆæ¡ä»¶çš„å¸‚åœº')
+    .replace(/\bUP edge\b/gi, 'ä¸Šæ¶¨ä¼˜åŠ¿')
+    .replace(/\bDOWN edge\b/gi, 'ä¸‹è·Œä¼˜åŠ¿')
+    .replace(/\bnet_edge\b/gi, 'å‡€ä¼˜åŠ¿')
+    .replace(/\bask\b/gi, 'å–ä»·')
+    .replace(/\blimit\b/gi, 'ä¸Šé™')
+    .replace(/\bfee\b/gi, 'æ‰‹ç»­è´¹')
+    .replace(/\bWARN proxy allowed\b/gi, 'è­¦å‘Šï¼šå…è®¸ä»£ç†')
+    .replace(/\bON: RTDS TWAP required\b/gi, 'å¼€å¯ï¼šéœ€è¦ RTDS TWAP')
+    .replace(/\bON: block Binance proxy on Chainlink\b/gi, 'å¼€å¯ï¼šé˜»æ­¢ Binance ä»£ç†')
+    .replace(/\ball non-tail\b/gi, 'æ‰€æœ‰éžå°¾ç›˜')
+    .replace(/\bSTABLE\b/gi, 'ç¨³å®š')
+    .replace(/\bSTALE\b/gi, 'è¿‡æœŸ')
+    .replace(/\bPROFIT_TAKE\b/g, 'æ­¢ç›ˆä¿æŠ¤')
+    .replace(/\bLOSS_CAP\b/g, 'äºæŸä¸Šé™')
+    .replace(/\bLOSS_STREAK\b/g, 'è¿žç»­äºæŸ')
+    .replace(/\bOK\b/g, 'æ­£å¸¸');
+}
+
+function useViewportWidth(): number {
+  const [width, setWidth] = useState(() => (
+    typeof window === 'undefined' ? 1200 : window.innerWidth
+  ));
+
+  useEffect(() => {
+    const onResize = () => setWidth(window.innerWidth);
+    onResize();
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
+  return width;
+}
+
+function MarketPanelBody({ children }: { children: ReactNode }) {
+  return <div className="market-panel-body">{children}</div>;
+}
+
+/**
+ * Compact rolling spot-price chart used as a low-contrast panel background.
+ * The API keeps a short trace per five-minute market; this component only
+ * normalises the values and draws them, so it has no charting dependency.
+ */
+function VolatilityChart({
+  asset,
+  history,
+  currentPrice,
+}: {
+  asset: 'BTC' | 'ETH';
+  history?: PriceHistoryPoint[];
+  currentPrice?: number;
+}) {
+  const points = (history || [])
+    .filter((p) => Number.isFinite(p.price))
+    .slice(-180);
+  if (points.length === 0 && !Number.isFinite(currentPrice)) return null;
+
+  if (points.length === 0 && Number.isFinite(currentPrice)) {
+    points.push({ ts: Date.now() / 1000, price: Number(currentPrice) });
+  }
+  const values = points.map((p) => p.price);
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  // Keep very small moves visible without making a flat feed fill the chart.
+  const range = Math.max(max - min, Math.abs(max) * 0.00003, 0.000001);
+  const pad = range * 0.16;
+  const low = min - pad;
+  const high = max + pad;
+  const usable = Math.max(high - low, 0.000001);
+  const coords = points.map((point, index) => {
+    const x = points.length <= 1 ? 50 : (index / (points.length - 1)) * 100;
+    const y = 28 - ((point.price - low) / usable) * 23;
+    return [x, Math.max(2, Math.min(29, y))] as const;
+  });
+  const linePath = coords.map(([x, y], index) => `${index === 0 ? 'M' : 'L'}${x.toFixed(2)},${y.toFixed(2)}`).join(' ');
+  const areaPath = `${linePath} L100,31 L0,31 Z`;
+  const color = asset === 'BTC' ? '#f4b942' : '#4ec0ff';
+  const gradientId = asset === 'BTC' ? 'btc-volatility-fill' : 'eth-volatility-fill';
+  return (
+    <div className="volatility-chart" aria-label={`${asset} ä»·æ ¼æ³¢åŠ¨å›¾`}>
+      <svg viewBox="0 0 100 32" preserveAspectRatio="none" role="img" aria-hidden="true">
+        <defs>
+          <linearGradient id={gradientId} x1="0" x2="0" y1="0" y2="1">
+            <stop offset="0%" stopColor={color} stopOpacity=".30" />
+            <stop offset="100%" stopColor={color} stopOpacity=".02" />
+          </linearGradient>
+        </defs>
+        <path d={areaPath} fill={`url(#${gradientId})`} />
+        <path d={linePath} fill="none" stroke={color} strokeOpacity=".58" strokeWidth=".65" vectorEffect="non-scaling-stroke" />
+        {coords.length > 0 && <circle cx={coords[coords.length - 1][0]} cy={coords[coords.length - 1][1]} r="1.05" fill={color} fillOpacity=".9" />}
+      </svg>
+    </div>
+  );
+}
+
+function Panel({
+  title, children, flex, contentStyle, onClick, ariaLabel,
+}: {
+  title: string;
+  children: ReactNode;
+  flex?: boolean;
+  contentStyle?: CSSProperties;
+  onClick?: () => void;
+  ariaLabel?: string;
+}) {
+  return (
+    <div
+      style={{
+      border: '1px solid var(--border)',
+      background: 'var(--bg-panel)',
+      display: 'flex',
+      flexDirection: 'column',
+      flex: flex ? 1 : '0 0 auto',
+      minHeight: 0,
+      cursor: onClick ? 'pointer' : undefined,
+      ...((onClick ? { transition: 'border-color .12s ease' } : {})),
+    }}
+      onClick={onClick}
+      role={onClick ? 'button' : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      aria-label={ariaLabel}
+      onKeyDown={onClick ? (event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          onClick();
+        }
+      } : undefined}
+    >
+      <div style={panelTitleStyle}>{title}</div>
+      <div style={{ padding: '8px 12px', flex: flex ? 1 : 'unset', overflow: 'auto', ...contentStyle }}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function Row({
+  k, v, hi, big, dim, mono, colored, relaxed, onClick, clickable, ariaLabel,
+}: {
+  k: string; v: ReactNode; hi?: boolean; big?: boolean;
+  dim?: boolean; mono?: boolean; colored?: number | null; relaxed?: boolean;
+  onClick?: () => void; clickable?: boolean; ariaLabel?: string;
+}) {
+  let color: string = hi ? 'var(--txt-hi)' : dim ? 'var(--txt-dim)' : 'var(--txt)';
+  if (typeof colored === 'number') {
+    color = colored > 0 ? 'var(--green)' : colored < 0 ? 'var(--red)' : color;
+  }
+  const isClickable = clickable || Boolean(onClick);
+  return (
+    <div
+      style={{
+        display: 'flex',
+        justifyContent: 'space-between',
+        gap: 8,
+        padding: relaxed ? '3px 0' : '2px 0',
+        cursor: isClickable ? 'pointer' : undefined,
+        borderRadius: isClickable ? 2 : undefined,
+      }}
+      onClick={onClick}
+      role={isClickable ? 'button' : undefined}
+      tabIndex={isClickable ? 0 : undefined}
+      aria-label={ariaLabel}
+      onKeyDown={isClickable ? (event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          onClick?.();
+        }
+      } : undefined}
+    >
+      <span style={{ color: 'var(--txt-dim)', letterSpacing: '0.5px', flex: '0 0 auto' }}>{k}</span>
+      <span style={{
+        color,
+        fontFamily: mono ? 'inherit' : undefined,
+        fontSize: big ? 16 : undefined,
+        fontWeight: big ? 700 : 500,
+        textAlign: 'right',
+        overflowWrap: 'anywhere',
+      }}>{typeof v === 'string' ? zhText(v) : v}</span>
+    </div>
+  );
+}
+
+function Sep() {
+  return <div style={{ height: 1, background: 'var(--border)', margin: '4px 0' }} />;
+}
+
+function BookView({
+  label, book, cap, floor,
+}: { label: string; book: Book | null | undefined; cap: number; floor: number }) {
+  const ask = book?.best_ask ?? null;
+  let askColor = 'var(--txt)';
+  if (ask != null) {
+    if (ask > cap) askColor = 'var(--txt-dim)';
+    else if (ask > floor) askColor = 'var(--amber-bright)';
+    else askColor = 'var(--txt-dim)';
+  }
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '3px 0', borderTop: '1px dashed var(--border)' }}>
+      <span style={{ color: 'var(--txt-dim)', width: 36 }}>{label}</span>
+      <span style={{ color: 'var(--txt-dim)' }}>ä¹°ä¸€</span>
+      <span style={{ color: 'var(--green)' }}>{fmtPx(book?.best_bid)}</span>
+      <span style={{ color: 'var(--txt-dim)' }}>x{fmtNum(book?.bid_size, 0)}</span>
+      <span style={spacer} />
+      <span style={{ color: 'var(--txt-dim)' }}>å–ä¸€</span>
+      <span style={{ color: askColor, fontWeight: 700 }}>{fmtPx(ask)}</span>
+      <span style={{ color: 'var(--txt-dim)' }}>x{fmtNum(book?.ask_size, 0)}</span>
+    </div>
+  );
+}
+
+function actionColor(a: string | null | undefined): string {
+  const value = a ?? '';
+  if (value === 'BUY') return 'var(--green)';
+  if (value === 'SELL_EXIT' || value.startsWith('SELL')) return 'var(--amber-bright)';
+  if (value.startsWith('SKIP')) return 'var(--txt)';
+  return 'var(--txt-hi)';
+}
+
+function orderStatusColor(status: string): string {
+  if (status === 'matched' || status === 'filled' || status === 'exit_matched' || status === 'exit_filled') return 'var(--green)';
+  if (status === 'error' || status === 'pre_submit_error' || status === 'exit_error' || status === 'exit_pre_submit_error') return 'var(--red)';
+  return 'var(--amber)';
+}
+
+function DecisionsTable({ decisions }: { decisions: Decision[] }) {
+  if (!decisions.length) return <Empty>æš‚æ— å†³ç­–<span className="caret">_</span></Empty>;
+  return (
+    <table style={tableStyle}>
+      <thead>
+        <tr>
+          <Th>æ—¶é—´</Th><Th>èµ„äº§</Th><Th>å¸‚åœº</Th><Th>æ–¹å‘</Th><Th right>å‰©ä½™</Th><Th right>å–ä»·</Th><Th>åŠ¨ä½œ</Th><Th>åŽŸå› </Th>
+        </tr>
+      </thead>
+      <tbody>
+        {decisions.slice(0, 40).map((d) => (
+          <tr key={d.id} style={{ background: d.action === 'BUY' ? 'rgba(0,255,127,0.04)' : undefined }}>
+            <Td>{fmtTime(d.ts)}</Td>
+            <Td>{d.asset || '--'}</Td>
+            <Td dim>{shortMarket(d.market_slug)}</Td>
+            {/* side-less rows are market-level gates (e.g. time window),
+                evaluated before either side -- label them honestly. */}
+            <Td dim={!d.side}>{d.side ? zhText(d.side) : 'å…¨å¸‚åœº'}</Td>
+            <Td right>{fmtNum(d.t_remaining, 1)}s</Td>
+            <Td right>{fmtPx(d.ask_price)}</Td>
+            <Td color={actionColor(d.action)} bold>{zhText(d.action)}</Td>
+            <Td>{zhText(d.reason)}</Td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+function feeAmountLabel(value: number): string {
+  const sign = value < 0 ? '-' : value > 0 ? '+' : '';
+  return `${sign}$${Math.abs(value).toFixed(6)}`;
+}
+
+function OrderFee({ order }: { order: Order }) {
+  const kind = (order.activity_type || 'TRADE').toUpperCase();
+  const chain = order.source === 'polymarket';
+  const value = finiteValue(order.fee_usd);
+  if (!chain) return <span style={{ color: value == null ? 'var(--txt-dim)' : value < 0 ? 'var(--red)' : value > 0 ? 'var(--green)' : 'var(--txt-hi)' }}>{value == null ? 'â€”' : feeAmountLabel(value)}</span>;
+  if (order.fee_status === 'not_applicable' || (chain && kind !== 'TRADE')) {
+    return <span title="æ­¤è®°å½•ä¸æ˜¯ä¹°å–æˆäº¤ï¼Œä¸é€‚ç”¨äº¤æ˜“æ‰‹ç»­è´¹ï¼›é“¾ä¸Š Gas å•ç‹¬è®¡è´¹ã€‚" style={{ color: 'var(--txt-dim)' }}>ä¸é€‚ç”¨</span>;
+  }
+  if (order.fee_status === 'ambiguous') {
+    return <span title="åŒä¸€äº¤æ˜“åŒ…å«å¤šç¬”æˆäº¤ï¼Œæš‚ä¸èƒ½å”¯ä¸€å¯¹åº”è¯¥ç¬”æ‰‹ç»­è´¹ï¼›å¾…æ ¸å¯¹æˆäº¤æ˜Žç»†åŽæ˜¾ç¤ºï¼Œé¿å…é‡å¤è®¡è´¹ã€‚" style={{ color: 'var(--amber)' }}>å¾…æ ¸å¯¹</span>;
+  }
+  if (value == null || order.fee_status === 'pending') {
+    return <span title="è¯¥ç¬”æˆäº¤çš„å®žé™…æ‰‹ç»­è´¹å°šæœªå–å¾—ï¼Œæ­£åœ¨åŒæ­¥ï¼›ä¸æŒ‰æ€»æ‰‹ç»­è´¹åˆ†æ‘Šæˆ–ä»¥è´¹çŽ‡æŽ¨ç®—ã€‚" style={{ color: 'var(--amber)' }}>å¾…åŒæ­¥</span>;
+  }
+  const role = (order.liquidity_role || '').toUpperCase();
+  const roleLabel = role === 'MAKER' || role === 'TAKER' ? role : '';
+  const source = ({ polygon_order_filled: 'Polygon æˆäº¤äº‹ä»¶', clob_authenticated_trades: 'CLOB å·²è®¤è¯æˆäº¤è®°å½•' } as Record<string, string>)[order.fee_source || ''] || order.fee_source || 'æˆäº¤è´¹ç”¨è®°å½•';
+  const title = `å®žé™…äº¤æ˜“æ‰‹ç»­è´¹ ${feeAmountLabel(value)} Â· ${roleLabel || 'æµåŠ¨æ€§è§’è‰²å¾…ç¡®è®¤'} Â· æ¥æºï¼š${source}ï¼›è¿”ä½£å•ç‹¬ç»Ÿè®¡ã€‚`;
+  return <span title={title} style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'flex-end', gap: 5, fontVariantNumeric: 'tabular-nums', color: value < 0 ? 'var(--red)' : value > 0 ? 'var(--green)' : 'var(--txt-hi)' }}>
+    {roleLabel && <small style={{ fontSize: 8, color: 'var(--txt-dim)' }}>{roleLabel}</small>}
+    <span>{feeAmountLabel(value)}</span>
+  </span>;
+}
+
+function OrdersTable({ orders }: { orders: Order[] }) {
+  if (!orders.length) return <Empty>æš‚æ— è®¢å•<span className="caret">_</span></Empty>;
+  return (
+    <table style={tableStyle}>
+      <thead>
+        <tr>
+          <Th>åŒ—äº¬æ—¶é—´</Th><Th>æ¥æº / ç±»åž‹</Th><Th>å¸‚åœº</Th><Th>æ–¹å‘</Th><Th right>ä»½é¢</Th><Th right>ä»·æ ¼</Th><Th>çŠ¶æ€</Th><Th right>çŽ°é‡‘æµ</Th><Th right>æ‰‹ç»­è´¹</Th>
+        </tr>
+      </thead>
+      <tbody>
+        {orders.slice(0, 20).map((o) => {
+          const chain = o.source === 'polymarket';
+          const kind = o.activity_type || (o.side.toUpperCase().startsWith('REDEEM') ? 'REDEEM' : 'TRADE');
+          const typeLabel = ({ TRADE: 'æˆäº¤', REDEEM: 'å…‘æ¢', MERGE: 'åˆå¹¶', SPLIT: 'æ‹†åˆ†' } as Record<string, string>)[kind] || kind;
+          const amount = chain ? activityCashflow(o) : finiteValue(o.cashflow_usd)
+            ?? (o.side.toUpperCase().startsWith('SELL') ? 1 : -1) * (o.filled_size || o.size) * o.price;
+          return (
+            <tr key={o.record_key || `${o.dry_run}:${o.id}`}>
+              <Td dim>{fmtDateTime(o.ts)}</Td>
+              <Td>{chain ? 'é“¾ä¸Š' : 'æ¨¡æ‹Ÿ'} Â· {typeLabel}</Td>
+              <Td dim>{o.title ? o.title.replace(/^Bitcoin Up or Down - /, '') : shortMarket(o.market_slug)}</Td>
+              <Td>{chain && kind !== 'TRADE' ? 'â€”' : zhText(o.side)}{o.outcome ? ` Â· ${zhText(o.outcome)}` : ''}</Td>
+              <Td right>{fmtNum(o.size, 2)}</Td>
+              <Td right>{kind === 'TRADE' ? fmtPx(o.price) : 'â€”'}</Td>
+              <Td color={chain ? 'var(--green)' : orderStatusColor(o.status)} bold>{chain ? 'å·²ç¡®è®¤' : zhText(o.status)}</Td>
+              <Td right color={amount == null ? undefined : amount >= 0 ? 'var(--green)' : 'var(--red)'}>{fmtSignedUsd(amount)}</Td>
+              <Td right><OrderFee order={o} /></Td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
+  );
+}
+
+/** Primary vs secondary model opinion history (desk cycles), paginated. */
+function ConsensusHistoryModal({ onClose }: { onClose: () => void }) {
+  const PAGE = 10;
+  const [page, setPage] = useState(0);
+  const [rows, setRows] = useState<Array<{ ts: number; decision?: string; reason?: string; agreed?: boolean; primary_text?: string; secondary_text?: string; reviews?: number; pnl_usd?: number }>>([]);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState('');
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true); setErr('');
+    fetchConsensusHistory(page * PAGE, PAGE)
+      .then((r) => { if (!cancelled) { setRows(r.rows); setTotal(r.total); } })
+      .catch((e) => { if (!cancelled) setErr(String(e)); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [page]);
+  const pages = Math.max(1, Math.ceil(total / PAGE));
+  const opinionColor = (text?: string) => {
+    const t = (text || '').toUpperCase();
+    if (t.includes('BUY')) return 'var(--green)';
+    if (t.includes('SELL')) return 'var(--red)';
+    if (t.includes('HOLD')) return 'var(--amber-bright)';
+    return 'var(--txt-dim)';
+  };
+  return <DataModal title="åŒæ¨¡åž‹æ„è§åŽ†å² / ä¸»æ¨¡åž‹ Ã— å¤æ ¸æ¨¡åž‹" onClose={onClose}>
+    <div className="orders-all-toolbar">
+      <span className="orders-all-count">å…± {total} è½®å°é•¿å…±è¯†</span>
+      <span style={spacer} />
+      <button type="button" className="orders-page-btn" disabled={page <= 0 || loading} onClick={() => setPage((p) => Math.max(0, p - 1))}>â€¹ ä¸Šä¸€é¡µ</button>
+      <span className="orders-all-count">{page + 1} / {pages}</span>
+      <button type="button" className="orders-page-btn" disabled={page + 1 >= pages || loading} onClick={() => setPage((p) => p + 1)}>ä¸‹ä¸€é¡µ â€º</button>
+    </div>
+    {err && <div className="settings-message">{err}</div>}
+    {loading ? <Empty>åŠ è½½ä¸­â€¦</Empty> : !rows.length ? <Empty>æš‚æ— å…±è¯†è®°å½•ï¼ˆæ…¢çŽ¯æ¯ 10 åˆ†é’Ÿä¸€è½®ï¼‰</Empty> : (
+      <table style={tableStyle}>
+        <thead><tr><Th>æ—¶é—´</Th><Th>ä¸»æ¨¡åž‹æ„è§</Th><Th>å¤æ ¸æ¨¡åž‹æ„è§</Th><Th>ä»²è£ç»“è®º</Th><Th right>å¤ç›˜çª—</Th><Th right>æœŸé—´ç›ˆäº</Th></tr></thead>
+        <tbody>
+          {rows.map((r, i) => (
+            <tr key={`${r.ts}-${i}`}>
+              <Td dim>{fmtTime(r.ts)}</Td>
+              <Td color={opinionColor(r.primary_text)} bold>{r.primary_text || 'â€”'}</Td>
+              <Td color={opinionColor(r.secondary_text)} bold>{r.secondary_text || 'â€”'}</Td>
+              <Td color={r.agreed ? 'var(--green)' : 'var(--amber-bright)'} bold>
+                {r.agreed ? `ä¸€è‡´ Â· ${r.decision}` : 'åˆ†æ­§ Â· æŒæœ‰'}
+              </Td>
+              <Td right dim>{r.reviews ?? '--'}</Td>
+              <Td right color={(r.pnl_usd ?? 0) >= 0 ? 'var(--green)' : 'var(--red)'}>{r.pnl_usd == null ? '--' : fmtSignedUsd(r.pnl_usd)}</Td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    )}
+  </DataModal>;
+}
+
+/** Daily settled PnL history for one lane, paginated. */
+function PnlHistoryModal({ initialLane, onClose }: { initialLane: 'paper' | 'live'; onClose: () => void }) {
+  const PAGE = 14;
+  const [lane, setLane] = useState<'paper' | 'live'>(initialLane);
+  const source = lane === 'live' ? 'chain' : 'ledger';
+  const [page, setPage] = useState(0);
+  const cached = cachedPnlDaily(lane, page * PAGE, PAGE, 'BTC', source);
+  const [rows, setRows] = useState<Array<Record<string, any>>>(() => cached?.rows ?? []);
+  const [totalDays, setTotalDays] = useState<number | null>(cached?.total_days ?? null);
+  const [capital, setCapital] = useState<number | null>(cached?.capital_base_usd ?? null);
+  const [snapshot, setSnapshot] = useState<PnlDailyPage | null>(cached ?? null);
+  const [loading, setLoading] = useState(!cached);
+  const [refresh, setRefresh] = useState(0);
+  const [err, setErr] = useState('');
+  useEffect(() => {
+    let cancelled = false;
+    const prior = cachedPnlDaily(lane, page * PAGE, PAGE, 'BTC', source);
+    if (prior) { setRows(prior.rows); setTotalDays(prior.total_days); setSnapshot(prior); }
+    setLoading(true); setErr('');
+    fetchPnlDaily(lane, page * PAGE, PAGE, 'BTC', source)
+      .then((r) => { if (!cancelled) { setRows(r.rows); setTotalDays(r.total_days); setCapital(r.capital_base_usd || null); setSnapshot(r); } })
+      .catch((e) => { if (!cancelled) setErr(String(e)); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    const timer = window.setInterval(() => setRefresh((value) => value + 1), lane === 'paper' ? 3000 : 15000);
+    return () => { cancelled = true; if (timer != null) window.clearInterval(timer); };
+  }, [lane, page, refresh]);
+  const pages = Math.max(1, Math.ceil((totalDays ?? 0) / PAGE));
+  const pageEconomic = sumNullable(rows.map((row) => dailyEconomic(row)));
+  const pageTrade = sumNullable(rows.map((row) => dailyTrade(row)));
+  const pageFees = sumNullable(rows.map((row) => dailyFees(row)));
+  const pageRebates = sumNullable(rows.map((row) => dailyRebates(row)));
+  const pageSlippage = sumNullable(rows.map((row) => finiteValue(row.slippage_usd)));
+  const today = snapshot?.today_summary ?? null;
+  const todayEconomic = finiteValue(snapshot?.today_economic_pnl_usd ?? dailyEconomic(today));
+  const todayTrade = finiteValue(snapshot?.today_trade_pnl_usd ?? dailyTrade(today));
+  const todayFees = finiteValue(snapshot?.today_fees_usd ?? dailyFees(today));
+  const todayRebates = finiteValue(snapshot?.today_rebates_usd ?? dailyRebates(today));
+  const todayWins = finiteValue(today?.wins);
+  const todayLosses = finiteValue(today?.losses);
+  const feeBreakdown = snapshot?.fee_breakdown;
+  const paperPnlLabel = rows.some((row) => finiteValue(row.net_pnl_usd ?? row.economic_pnl_usd) != null) ? 'æ¨¡æ‹Ÿç»æµŽå‡€ç›ˆäº' : 'æ¨¡æ‹Ÿå·²å®žçŽ°ç›ˆäº';
+  const sampleNote = lane === 'live'
+    ? `åŒ—äº¬æ—¶é—´ Â· è´¢åŠ¡é‡‡æ · ${fmtDateTime(snapshot?.data_as_of)} Â· å»¶è¿Ÿ ${fmtAge(snapshot?.data_age_sec)}${snapshot?.stale ? ' Â· å®˜æ–¹é‡‡æ ·å¯èƒ½æ»žåŽ' : ''}`
+    : `${snapshot?.source === 'native_paper_ledger' ? 'å½“å‰ BTC5m åŽŸç”Ÿæ¨¡æ‹Ÿè´¦æœ¬' : 'ç‹¬ç«‹ Paper è´¦æœ¬'} Â· æŒ‰åŒ—äº¬æ—¶é—´è‡ªç„¶æ—¥${snapshot?.stale ? ' Â· æ•°æ®å¯èƒ½æ»žåŽ' : ''}`;
+  return <DataModal title={`BTC æ¯æ—¥æ”¶ç›ŠçŽ‡åŽ†å² / ${lane === 'live' ? 'å®žç›˜ç»æµŽç›ˆäº' : paperPnlLabel}ï¼ˆåŒ—äº¬æ—¶é—´ï¼‰`} onClose={onClose}>
+    <div className="orders-all-toolbar">
+      {(['live', 'paper'] as const).map((item) => <button key={item} type="button" className={`orders-lane-tab${lane === item ? ' active' : ''}`} onClick={() => { setLane(item); setPage(0); setRows([]); setTotalDays(null); setSnapshot(null); }}>{item === 'live' ? 'å®žç›˜' : 'æ¨¡æ‹Ÿ'}</button>)}
+      <span className="orders-all-count">å…± {totalDays ?? '--'} ä¸ªè‡ªç„¶æ—¥{lane === 'paper' && capital ? ` Â· æ¨¡æ‹Ÿæœ¬é‡‘ ${fmtUsd(capital)}` : lane === 'live' ? ' Â· æ”¶ç›ŠçŽ‡ä½¿ç”¨å„æ—¥å·²ç¡®è®¤æ—¥åˆæƒç›Š' : ''}</span>
+      <span style={spacer} />
+      <button type="button" className="orders-page-btn" disabled={loading} onClick={() => setRefresh((value) => value + 1)}>{loading ? 'æ›´æ–°ä¸­â€¦' : 'åˆ·æ–°'}</button>
+      <button type="button" className="orders-page-btn" disabled={page <= 0 || loading} onClick={() => setPage((p) => Math.max(0, p - 1))}>â€¹ ä¸Šä¸€é¡µ</button>
+      <span className="orders-all-count">{page + 1} / {pages}</span>
+      <button type="button" className="orders-page-btn" disabled={page + 1 >= pages || loading} onClick={() => setPage((p) => p + 1)}>ä¸‹ä¸€é¡µ â€º</button>
+    </div>
+    <div className="positions-sync-note">{sampleNote}</div>
+    {lane === 'live' && <div className="positions-sync-note">Activity æˆªè‡³ {fmtDateTime(snapshot?.activity_as_of)} Â· è¯»å–äºŽ {fmtDateTime(snapshot?.activity_updated_at)}{snapshot?.activity_ahead_of_pnl ? ' Â· æ–°æˆäº¤å°šæœªè¿›å…¥è´¢åŠ¡é‡‡æ ·' : ''} Â· åŽ†å²{snapshot?.source_fidelity === '1d' ? 'æŒ‰å®˜æ–¹æ—¥é‡‡æ ·' : `é‡‡æ ·ç²¾åº¦ ${snapshot?.source_fidelity || 'â€”'}`}</div>}
+    {lane === 'live' && <div className="positions-sync-note">èƒœè´ŸæŒ‰å®˜æ–¹å·²ç»“æŸæŒä»“çš„ç»æµŽç›ˆäºï¼Œæ¯ä¸ªå¸‚åœºè®¡ä¸€æ¬¡ Â· è¯»å–äºŽ {fmtDateTime(snapshot?.outcomes_updated_at)}</div>}
+    <div className="pnl-summary-grid">
+      <div className="pnl-summary-card"><h3>{lane === 'live' ? 'å½“å‰é¡µå·²çŸ¥é‡‡æ ·åˆè®¡' : 'å½“å‰é¡µæ¨¡æ‹Ÿåˆè®¡'}</h3><Row k={lane === 'live' ? 'ç»æµŽå‡€ç›ˆäº' : 'æ‰£è´¹åŽå‡€ç›ˆäº'} v={fmtSignedUsd(pageEconomic)} colored={pageEconomic} relaxed /><Row k="äº¤æ˜“ç›ˆäº" v={fmtSignedUsd(pageTrade)} colored={pageTrade} relaxed /><Row k="æ‰‹ç»­è´¹" v={fmtSignedUsd(pageFees)} colored={pageFees} relaxed /><Row k="è¿”ä½£" v={fmtSignedUsd(pageRebates)} colored={pageRebates} relaxed /><small className="pnl-summary-note">{lane === 'live' ? 'ç¼ºå°‘å¯é æœŸåˆåŸºå‡†çš„æ—¥æœŸæ˜¾ç¤º â€”ï¼›ç¼ºå°‘å·²ç¡®è®¤æ—¥åˆæƒç›Šæ—¶ä¸è®¡ç®—æ”¶ç›ŠçŽ‡ã€‚' : `å‡€ç›ˆäºå·²è®¡å…¥æ¨¡æ‹Ÿäº¤æ˜“è´¹ç”¨ï¼›æ¨¡æ‹Ÿæ»‘ç‚¹${pageSlippage == null ? '' : ` ${fmtSignedUsd(pageSlippage)}`}å·²å«æˆäº¤ä»·ï¼Œä¸é‡å¤æ‰£å‡ã€‚è¿”ä½£ä»…è®°å½•å·²å…¥è´¦é‡‘é¢ã€‚`}</small></div>
+      {lane === 'live' && <div className="pnl-summary-card pnl-summary-chain"><h3>åŒ—äº¬æ—¶é—´å½“æ—¥ Â· é“¾ä¸Š</h3><Row k="ç»æµŽå‡€ç›ˆäº" v={fmtSignedUsd(todayEconomic)} colored={todayEconomic} relaxed /><Row k="äº¤æ˜“ç›ˆäº" v={fmtSignedUsd(todayTrade)} colored={todayTrade} relaxed /><Row k="æ‰‹ç»­è´¹" v={fmtSignedUsd(todayFees)} colored={todayFees} relaxed /><Row k="è¿”ä½£" v={fmtSignedUsd(todayRebates)} colored={todayRebates} relaxed /><Row k="èƒœ / è´Ÿ" v={`${todayWins ?? 'â€”'} / ${todayLosses ?? 'â€”'}`} relaxed /></div>}
+      {lane === 'live' && <div className="pnl-summary-card"><h3>æ‰‹ç»­è´¹ / è¿”ä½£æ˜Žç»†</h3><Row k="ç´¯è®¡æ‰‹ç»­è´¹" v={fmtSignedUsd(feeBreakdown?.total_usd)} colored={feeBreakdown?.total_usd} relaxed /><Row k="Maker æ‰‹ç»­è´¹" v={fmtSignedUsd(feeBreakdown?.maker_fee_usd)} colored={feeBreakdown?.maker_fee_usd} relaxed /><Row k="Taker æ‰‹ç»­è´¹" v={fmtSignedUsd(feeBreakdown?.taker_fee_usd)} colored={feeBreakdown?.taker_fee_usd} relaxed /><Row k="ç´¯è®¡è¿”ä½£" v={fmtSignedUsd(feeBreakdown?.rebates_usd)} colored={feeBreakdown?.rebates_usd} relaxed /><Row k="æ‰‹ç»­è´¹é€€è¿˜" v={fmtSignedUsd(feeBreakdown?.fees_refunded_usd)} colored={feeBreakdown?.fees_refunded_usd} relaxed /><small className="pnl-summary-note">è¿”ä½£åˆè®¡å«æ‰‹ç»­è´¹é€€è¿˜ Â· å®˜æ–¹æœªæä¾› Maker/Taker æ‰‹ç»­è´¹æ‹†åˆ†</small></div>}
+    </div>
+    {err && <div className="settings-message">{err}</div>}
+    {lane === 'live' && (snapshot?.error || snapshot?.activity_stale || snapshot?.outcomes_stale) && <div className="settings-message">éƒ¨åˆ†é“¾ä¸ŠæŽ¥å£æ›´æ–°å»¶è¿Ÿï¼Œå·²ä¿ç•™æœ€è¿‘å¯ç”¨æ•°æ®ï¼›ç¼ºå¤±æ•°æ®ä»¥ â€” æ˜¾ç¤ºã€‚</div>}
+    {loading && !rows.length ? <div role="status" style={{ minHeight: 180, padding: 20 }}>æ­£åœ¨è¯»å–åŒ—äº¬æ—¶é—´æ¯æ—¥è´¦æœ¬â€¦</div> : !rows.length ? <Empty>æš‚æ— åŽ†å²ç»“ç®—æ•°æ®</Empty> : (
+      <table style={tableStyle}>
+        <thead><tr><Th>åŒ—äº¬æ—¥æœŸ</Th><Th right>{lane === 'live' ? 'ç»æµŽå‡€ç›ˆäº' : 'æ‰£è´¹åŽå‡€ç›ˆäº'}</Th><Th right>äº¤æ˜“ç›ˆäº</Th><Th right>æ‰‹ç»­è´¹</Th><Th right>è¿”ä½£</Th><Th right>èƒœ</Th><Th right>è´Ÿ</Th><Th right>èƒœçŽ‡</Th><Th right>æ”¶ç›ŠçŽ‡</Th></tr></thead>
+        <tbody>
+          {rows.map((r) => {
+            const pnl = dailyEconomic(r);
+            const wins = finiteValue(r.wins);
+            const losses = finiteValue(r.losses);
+            const total = wins != null && losses != null ? wins + losses : null;
+            const wr = total && wins != null ? wins / total * 100 : null;
+            const dayCapital = lane === 'live' || snapshot?.source === 'isolated_p3_public_paper'
+              ? finiteValue(r.capital_base_usd) : capital;
+            const ret = dayCapital && dayCapital > 0 && pnl != null ? pnl / dayCapital * 100 : null;
+            return (
+              <tr key={String(r.day)}>
+                <Td><span title={lane === 'live' ? `åŸºå‡† ${fmtDateTime(r.baseline_ts)} Â· é‡‡æ · ${fmtDateTime(r.data_as_of)} Â· ${r.coverage === 'complete' ? 'å®Œæ•´è¾¹ç•Œ' : r.coverage === 'unavailable' ? 'ç¼ºå°‘åŸºå‡†' : 'éƒ¨åˆ†é‡‡æ ·'}` : undefined}>{String(r.day ?? '--')}</span>{lane === 'live' && r.coverage && r.coverage !== 'complete' && <small className="pnl-day-coverage">{r.coverage === 'unavailable' ? 'åŸºå‡†å¾…æ ¸' : 'éƒ¨åˆ†é‡‡æ ·'}</small>}</Td>
+                <Td right color={pnl == null ? undefined : pnl >= 0 ? 'var(--green)' : 'var(--red)'} bold>{fmtSignedUsd(pnl)}</Td>
+                <Td right>{fmtSignedUsd(dailyTrade(r))}</Td><Td right color={(dailyFees(r) ?? 0) < 0 ? 'var(--red)' : undefined}>{fmtSignedUsd(dailyFees(r))}</Td><Td right color={(dailyRebates(r) ?? 0) > 0 ? 'var(--green)' : undefined}>{fmtSignedUsd(dailyRebates(r))}</Td>
+                <Td right>{wins ?? 'â€”'}</Td>
+                <Td right>{losses ?? 'â€”'}</Td>
+                <Td right>{wr == null ? '--' : `${wr.toFixed(1)}%`}</Td>
+                <Td right color={ret == null ? undefined : ret >= 0 ? 'var(--green)' : 'var(--red)'}>{ret == null ? '--' : `${ret >= 0 ? '+' : ''}${ret.toFixed(2)}%`}</Td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    )}
+  </DataModal>;
+}
+
+function WalletActivityModal({ state, onClose }: { state: State | null; onClose: () => void }) {
+  const [rows, setRows] = useState<Array<Record<string, unknown>>>([]);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState('');
+  useEffect(() => {
+    let cancelled = false;
+    fetchPolymarketFunding(0, 30).then((r) => { if (!cancelled) { setRows(r.rows || []); setTotal(r.total || 0); if (r.available === false && r.message) setErr(r.message); } })
+      .catch((e) => { if (!cancelled) setErr(String(e)); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, []);
+  const profile = state?.wallet?.user_name || state?.wallet?.pseudonym || state?.wallet?.polymarket_profile?.name || state?.wallet?.polymarket_profile?.pseudonym || state?.wallet?.profile?.name || state?.wallet?.profile?.pseudonym || 'Polymarket ç”¨æˆ·';
+  return <DataModal title={`${profile} / å……å€¼ä¸ŽæçŽ°è®°å½•`} onClose={onClose}>
+    <div className="orders-all-toolbar"><span className="orders-all-count">è´¦æˆ·ä½™é¢ {fmtUsd(state?.wallet?.balance_pusd)} Â· ç»„åˆ {fmtUsd(state?.wallet?.portfolio_value_usd ?? state?.wallet?.polymarket_profile?.portfolio_value_usd ?? state?.wallet?.value_usd)}</span><span style={spacer} /><span className="orders-all-count">å…± {total} ç¬”</span></div>
+    {err && <div className="settings-message">{err}</div>}
+    {loading ? <Empty>åŠ è½½ä¸­â€¦</Empty> : !rows.length ? <Empty>æš‚æ— å……å€¼ / æçŽ°è®°å½•<span className="caret">_</span></Empty> : (
+      <table style={tableStyle}><thead><tr><Th>æ—¶é—´</Th><Th>ç±»åž‹</Th><Th right>é‡‘é¢</Th><Th>çŠ¶æ€</Th><Th>äº¤æ˜“å“ˆå¸Œ</Th></tr></thead><tbody>
+        {rows.map((row, i) => {
+          const ts = Number(row.timestamp ?? row.ts ?? 0);
+          const type = String(row.type || row.kind || row.direction || 'â€”');
+          const amount = Number(row.amount_usd ?? row.amount ?? row.usdc_size ?? 0);
+          const status = String(row.status || 'å·²ç¡®è®¤');
+          const tx = String(row.transaction_hash || row.tx_hash || row.hash || 'â€”');
+          return <tr key={`${tx}-${i}`}><Td dim>{ts ? fmtTime(ts) : 'â€”'}</Td><Td>{zhText(type)}</Td><Td right color={amount >= 0 ? 'var(--green)' : 'var(--red)'}>{fmtUsd(amount)}</Td><Td>{zhText(status)}</Td><Td dim>{tx.length > 18 ? `${tx.slice(0, 10)}â€¦${tx.slice(-8)}` : tx}</Td></tr>;
+        })}
+      </tbody></table>
+    )}
+  </DataModal>;
+}
+
+/** Full order history (paper + live) with server-side pagination. */
+function beijingDate(ts = Date.now() / 1000): string {
+  return new Date((ts + 8 * 3600) * 1000).toISOString().slice(0, 10);
+}
+
+function beijingDateStart(date: string): number {
+  return Date.parse(`${date}T00:00:00+08:00`) / 1000;
+}
+
+function OrdersAllModal({ initialLane = 'all', onClose }: { initialLane?: 'all' | 'paper' | 'live'; onClose: () => void }) {
+  const PAGE = 20;
+  const [lane, setLane] = useState<'all' | 'paper' | 'live'>(initialLane);
+  const [assetFilter, setAssetFilter] = useState<'ALL' | 'BTC' | 'SOL'>('ALL');
+  const [page, setPage] = useState(0);
+  const [rows, setRows] = useState<Order[]>([]);
+  const [total, setTotal] = useState<number | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState('');
+  const [activity, setActivity] = useState<OrdersPage | null>(null);
+  const [liveDaily, setLiveDaily] = useState<PnlDailyPage | null>(null);
+  const [refresh, setRefresh] = useState(0);
+  const [startDate, setStartDate] = useState(() => beijingDate());
+  const [endDate, setEndDate] = useState('');
+  const [period, setPeriod] = useState<OrdersPeriodFilter>(() => ({ start_ts: beijingDateStart(beijingDate()) }));
+  const feeRetryKey = useRef('');
+  useEffect(() => {
+    let cancelled = false;
+    let feeRetryTimer: number | null = null;
+    setLoading(true); setErr('');
+    const assetsToFetch = assetFilter === 'ALL' ? ['BTC', 'SOL'] : [assetFilter];
+    Promise.allSettled([
+      Promise.all(assetsToFetch.map((asset) => fetchOrdersPage(page * PAGE, PAGE, lane, asset, lane === 'live' ? period : undefined))),
+      lane === 'paper' ? Promise.resolve(null) : fetchPnlDaily('live', 0, 14, 'BTC', 'chain'),
+    ]).then(([ordersResult, dailyResult]) => {
+      if (cancelled) return;
+      const errors: string[] = [];
+      if (ordersResult.status === 'fulfilled') {
+        const pages = ordersResult.value;
+        const result = { ...pages[0], rows: pages.flatMap((value) => value.rows).sort((a, b) => Number(b.ts || 0) - Number(a.ts || 0)), total: pages.reduce((sum, value) => sum + value.total, 0) };
+        setRows(result.rows); setTotal(result.total); setActivity(result);
+        const retryKey = `${lane}:${assetFilter}:${page}:${period.start_ts}:${period.end_ts}`;
+        const hasPendingFees = result.rows.some((row) => row.source === 'polymarket' && row.activity_type === 'TRADE'
+          && row.fee_status !== 'ambiguous' && row.fee_status !== 'not_applicable'
+          && (finiteValue(row.fee_usd) == null || row.fee_status === 'pending'));
+        if (lane !== 'paper' && hasPendingFees && feeRetryKey.current !== retryKey) {
+          feeRetryKey.current = retryKey;
+          feeRetryTimer = window.setTimeout(() => { if (!cancelled) setRefresh((value) => value + 1); }, 5000);
+        }
+      } else errors.push(`äº¤æ˜“è®°å½•æ›´æ–°å¤±è´¥ï¼š${String(ordersResult.reason)}`);
+      if (dailyResult.status === 'fulfilled') setLiveDaily(dailyResult.value);
+      else errors.push('å½“æ—¥é“¾ä¸Šç»Ÿè®¡æ›´æ–°å¤±è´¥ï¼Œå·²ä¿ç•™æœ€è¿‘å¯ç”¨é‡‡æ ·ã€‚');
+      setErr(errors.join(' '));
+    }).finally(() => { if (!cancelled) setLoading(false); });
+    const timer = window.setInterval(() => setRefresh((value) => value + 1), lane === 'paper' ? 3000 : 15000);
+    return () => { cancelled = true; if (timer != null) window.clearInterval(timer); if (feeRetryTimer != null) window.clearTimeout(feeRetryTimer); };
+  }, [lane, assetFilter, page, refresh, period.start_ts, period.end_ts]);
+  const pages = Math.max(1, Math.ceil((total ?? 0) / PAGE));
+  const pageChainRows = rows.filter((row) => row.source === 'polymarket');
+  const pageCashflow = sumNullable(pageChainRows.map((row) => activityCashflow(row)));
+  const pageTradeRows = pageChainRows.filter((row) => row.activity_type === 'TRADE');
+  const confirmedFeeRows = pageTradeRows.filter((row) => finiteValue(row.fee_usd) != null && row.fee_status !== 'pending' && row.fee_status !== 'ambiguous');
+  const pageFees = sumNullable(confirmedFeeRows.map((row) => finiteValue(row.fee_usd)));
+  const summary = activity?.period_summary;
+  const periodCashflow = finiteValue(summary?.net_cashflow_usd);
+  const periodFees = finiteValue(summary?.fees_usd);
+  const periodEconomic = finiteValue(summary?.official_economic_pnl_usd);
+  const quickClosed = finiteValue(summary?.quick_closed_pnl_usd);
+  const periodLabel = summary
+    ? `${fmtDateTime(summary.start_ts)} â€” ${fmtDateTime(summary.end_ts)}`
+    : 'æœŸé—´èŒƒå›´å¾…åŒæ­¥';
+  const resetForPeriod = (next: OrdersPeriodFilter) => {
+    setPage(0); setRows([]); setTotal(null); setActivity(null); setErr('');
+    feeRetryKey.current = ''; setPeriod(next); setRefresh((value) => value + 1);
+  };
+  const applyDates = () => {
+    const from = startDate ? beijingDateStart(startDate) : undefined;
+    const until = endDate ? beijingDateStart(endDate) + 86400 : undefined;
+    if ((from != null && (!Number.isFinite(from) || from > Date.now() / 1000))
+      || (until != null && !Number.isFinite(until))
+      || (from != null && until != null && from >= until)) {
+      setErr('è¯·é€‰æ‹©æœ‰æ•ˆçš„åŒ—äº¬æ—¥æœŸï¼Œå¼€å§‹æ—¥æœŸä¸èƒ½æ™šäºŽç»“æŸæ—¥æœŸæˆ–å½“å‰æ—¶åˆ»ã€‚'); return;
+    }
+    resetForPeriod({ start_ts: from, end_ts: until });
+  };
+  const selectPeriod = (kind: 'today' | 'yesterday' | 'all') => {
+    const day = kind === 'yesterday' ? beijingDate(Date.now() / 1000 - 86400) : beijingDate();
+    setStartDate(kind === 'all' ? '' : day); setEndDate(kind === 'yesterday' ? day : '');
+    resetForPeriod(kind === 'all' ? {} : { start_ts: beijingDateStart(day), end_ts: kind === 'yesterday' ? beijingDateStart(day) + 86400 : undefined });
+  };
+  const changePage = (next: number) => { setRows([]); setPage(next); };
+  return <DataModal title={lane === 'live' ? 'Polymarket å®žç›˜äº¤æ˜“è®°å½• / å½“å‰ç”¨æˆ·' : lane === 'paper' ? 'BTC PAPER / æ¨¡æ‹Ÿæˆäº¤è®°å½•' : 'è®¢å•æ€»è§ˆ / æ¨¡æ‹Ÿ + å®žç›˜'} onClose={onClose}>
+    <div className="orders-all-toolbar">
+      {(['all', 'paper', 'live'] as const).map((l) => (
+        <button key={l} type="button" className={`orders-lane-tab${lane === l ? ' active' : ''}`}
+          onClick={() => { setLane(l); setPage(0); setRows([]); setTotal(null); setActivity(null); setLiveDaily(null); }}>
+          {l === 'all' ? 'å…¨éƒ¨' : l === 'paper' ? 'æ¨¡æ‹Ÿ' : 'å®žç›˜'}
+        </button>
+      ))}
+      <span className="orders-all-count">å…± {total?.toLocaleString('en-US') ?? 'â€”'} ç¬” Â· {lane === 'live' ? 'é“¾ä¸ŠçœŸå®žè®°å½•' : lane === 'paper' ? 'Paper æˆäº¤' : 'é“¾ä¸Š + Paper æˆäº¤'}</span>
+      {(['ALL', 'BTC', 'SOL'] as const).map((asset) => <button key={asset} type="button" className={`orders-lane-tab${assetFilter === asset ? ' active' : ''}`} onClick={() => { setAssetFilter(asset); setPage(0); setRows([]); setTotal(null); }}>{asset === 'ALL' ? 'å…¨éƒ¨èµ„äº§' : asset}</button>)}
+      <span style={spacer} />
+      <button type="button" className="orders-page-btn" disabled={loading} onClick={() => setRefresh((value) => value + 1)}>{loading ? 'æ›´æ–°ä¸­â€¦' : 'åˆ·æ–°'}</button>
+      <button type="button" className="orders-page-btn" disabled={page <= 0 || loading} onClick={() => changePage(Math.max(0, page - 1))}>â€¹ ä¸Šä¸€é¡µ</button>
+      <span className="orders-all-count">{page + 1} / {pages}</span>
+      <button type="button" className="orders-page-btn" disabled={page + 1 >= pages || loading} onClick={() => changePage(page + 1)}>ä¸‹ä¸€é¡µ â€º</button>
+    </div>
+    {lane === 'live' && <div className="orders-period-toolbar" aria-label="åŒ—äº¬æ—¶é—´å®žç›˜è®°å½•ç­›é€‰">
+      <label>åŒ—äº¬å¼€å§‹æ—¥æœŸ<input type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} /></label>
+      <label>åŒ—äº¬ç»“æŸæ—¥æœŸ<input type="date" value={endDate} onChange={(event) => setEndDate(event.target.value)} /><small>ç•™ç©ºç»Ÿè®¡è‡³çŽ°åœ¨ï¼Œæ‰€é€‰ç»“æŸæ—¥æœŸåŒ…å«å…¨å¤©</small></label>
+      <button type="button" className="orders-page-btn" onClick={applyDates}>æŸ¥è¯¢åŒºé—´</button>
+      <button type="button" className="orders-page-btn" onClick={() => selectPeriod('today')}>ä»Šæ—¥</button>
+      <button type="button" className="orders-page-btn" onClick={() => selectPeriod('yesterday')}>æ˜¨æ—¥</button>
+      <button type="button" className="orders-page-btn" onClick={() => selectPeriod('all')}>å…¨éƒ¨æ—¥æœŸ</button>
+    </div>}
+    {lane !== 'paper' && <>
+      <div className="positions-sync-note">åŒ—äº¬æ—¶é—´ Â· ç»Ÿè®¡åŒºé—´ {periodLabel} Â· å„é¡¹æœŸé—´æ±‡æ€»è¦†ç›–å…¨éƒ¨ç­›é€‰è®°å½•ï¼Œä¸éšç¿»é¡µå˜åŒ–ã€‚</div>
+      <div className="positions-sync-note">Activity æˆªè‡³ {fmtDateTime(activity?.activity_as_of)} Â· è¯»å–äºŽ {fmtDateTime(activity?.updated_at)}{liveDaily?.activity_ahead_of_pnl ? ' Â· æ–°æˆäº¤å°šæœªè¿›å…¥è´¢åŠ¡é‡‡æ ·' : ''}</div>
+      <div className="pnl-summary-grid orders-summary-grid">
+        <div className="pnl-summary-card"><h3>ç­›é€‰æœŸé—´ Â· çœŸå®žèµ„é‡‘æ”¶ä»˜</h3><Row k="å‡€çŽ°é‡‘æµï¼ˆå«æœ¬é‡‘ï¼‰" v={fmtSignedUsd(periodCashflow)} colored={periodCashflow} relaxed /><Row k="å·²ç¡®è®¤æ‰‹ç»­è´¹" v={periodFees == null ? 'å¾…åŒæ­¥' : feeAmountLabel(periodFees)} colored={periodFees} relaxed /><Row k="è´¹ç”¨å·²ç¡®è®¤" v={`${summary?.fee_confirmed ?? 'â€”'} / ${summary?.fee_total_trades ?? 'â€”'} ç¬”æˆäº¤`} relaxed /><Row k="æˆäº¤ / å…‘æ¢" v={`${summary?.trades ?? 'â€”'} / ${summary?.redemptions ?? 'â€”'}`} relaxed /><small className="pnl-summary-note">çŽ°é‡‘æµå«æ”¶å›žæœ¬é‡‘åŠä¹°å…¥æˆæœ¬ï¼Œä¸èƒ½ä»£è¡¨åˆ©æ¶¦ï¼›å·²åŒ…å«äº¤æ˜“è´¹ç”¨ï¼Œä¸å†é‡å¤æ‰£è´¹ã€‚{summary?.fees_complete === false ? ' éƒ¨åˆ†è´¹ç”¨å¾…ç¡®è®¤ï¼Œè´¹ç”¨æŠ«éœ²åˆè®¡å°šä¸å®Œæ•´ã€‚' : ''}</small></div>
+        <div className="pnl-summary-card pnl-summary-chain"><h3>åŒåŒºé—´ Â· å®˜æ–¹ç»æµŽé‡‡æ ·</h3><Row k="ç»æµŽå‡€ç›ˆäº" v={fmtSignedUsd(periodEconomic)} colored={periodEconomic} relaxed /><Row k="äº¤æ˜“ç›ˆäº" v={fmtSignedUsd(summary?.official_trade_pnl_usd)} colored={summary?.official_trade_pnl_usd} relaxed /><Row k="æ‰‹ç»­è´¹" v={fmtSignedUsd(summary?.official_fees_usd)} colored={summary?.official_fees_usd} relaxed /><Row k="è¿”ä½£" v={fmtSignedUsd(summary?.official_rebates_usd)} colored={summary?.official_rebates_usd} relaxed /><small className="pnl-summary-note">åŸºå‡† {fmtDateTime(summary?.official_baseline_ts)}<br />é‡‡æ · {fmtDateTime(summary?.official_data_as_of)}{summary?.official_data_source_ts != null && summary.official_data_source_ts !== summary.official_data_as_of && <>ï¼ˆæºæ•°æ® {fmtDateTime(summary.official_data_source_ts)}ï¼‰</>}<br />{summary?.official_coverage === 'complete' ? 'åŒºé—´è¾¹ç•Œå®Œæ•´' : summary?.official_coverage === 'unavailable' ? 'ç¼ºå°‘å¯é åŸºå‡†ï¼Œé‡‘é¢æš‚ä¸è®¡ç®—' : 'éƒ¨åˆ†é‡‡æ ·ï¼šè¾¹ç•Œæˆ–æœ€æ–°æˆäº¤å°šæœªå®Œæ•´è¦†ç›–'}</small></div>
+        <div className="pnl-summary-card"><h3>å¿«é€Ÿé—­ä»“ç»“æžœ Â· å®˜æ–¹æŒä»“</h3><Row k="å·²é—­åˆå¸‚åœºå‡€ç›ˆäº" v={fmtSignedUsd(quickClosed)} colored={quickClosed} relaxed /><Row k="å·²é—­åˆå¸‚åœº" v={summary?.quick_closed_markets ?? 'â€”'} relaxed /><small className="pnl-summary-note">æœ€åŽç»“æžœ {fmtDateTime(summary?.quick_closed_as_of)}<br />æŒ‰é—­åˆæ—¥æœŸå½’å±žçš„å®Œæ•´å¸‚åœºç”Ÿå‘½å‘¨æœŸç›ˆäºï¼Œå¯èƒ½åŒ…å«æœŸå‰æˆæœ¬ï¼›ä¸å«ä»åœ¨äº¤æ˜“æŒä»“çš„æµ®ç›ˆäºï¼Œä¸èƒ½ä»£æ›¿åŒºé—´ç»æµŽä¼°å€¼ã€‚</small></div>
+      </div>
+      <div className="positions-sync-note">æœ¬é¡µ {pageChainRows.length} æ¡çŽ°é‡‘æ”¶ä»˜ {fmtSignedUsd(pageCashflow)} Â· æœ¬é¡µå·²ç¡®è®¤æ‰‹ç»­è´¹ {pageFees == null ? 'å¾…åŒæ­¥' : feeAmountLabel(pageFees)}ï¼ˆ{confirmedFeeRows.length}/{pageTradeRows.length}ï¼‰ Â· å…¨è´¦æˆ·ç´¯è®¡æ‰‹ç»­è´¹ {fmtSignedUsd(liveDaily?.fee_breakdown?.total_usd)} Â· å…¨è´¦æˆ·ç´¯è®¡è¿”ä½£ {fmtSignedUsd(liveDaily?.fee_breakdown?.rebates_usd)}</div>
+    </>}
+    {err && <div className="settings-message">{err}</div>}
+    {(activity?.stale || liveDaily?.activity_stale || liveDaily?.outcomes_stale || liveDaily?.error) && <div className="settings-message">é“¾ä¸ŠæŽ¥å£æ›´æ–°å»¶è¿Ÿï¼Œå½“å‰æ˜¾ç¤ºæœ€è¿‘å¯ç”¨æ•°æ®ã€‚</div>}
+    {loading && !rows.length ? <Empty>åŠ è½½ä¸­â€¦</Empty> : <OrdersTable orders={rows} />}
+  </DataModal>;
+}
+
+/** Window end from the market slug (â€¦-5m-<start>); stale = long past end
+ * with no resolution recorded, which we label instead of hiding. */
+function paperWindowEnd(slug: string): number | null {
+  const m = /-(\d{9,})$/.exec(slug || '');
+  return m ? Number(m[1]) + 300 : null;
+}
+
+function PaperPositionsTable({ rows }: { rows: PaperPosition[] }) {
+  if (!rows.length) return <Empty>æš‚æ— æ¨¡æ‹ŸæŒä»“<span className="caret">_</span></Empty>;
+  const now = Date.now() / 1000;
+  return (
+    <table style={tableStyle}>
+      <thead>
+        <tr><Th>æ—¶é—´</Th><Th>å¸‚åœº</Th><Th>èµ„äº§</Th><Th>æ–¹å‘</Th><Th right>æ•°é‡</Th><Th right>ä»·æ ¼</Th><Th right>åä¹‰</Th><Th>çŠ¶æ€</Th></tr>
+      </thead>
+      <tbody>
+        {rows.map((p, i) => {
+          const end = paperWindowEnd(p.market_slug);
+          const stale = end != null && now - end > 900;
+          return (
+            <tr key={`${p.market_slug}-${i}`}>
+              <Td dim>{fmtDateTime(p.ts)}</Td>
+              <Td dim>{shortMarket(p.market_slug)}</Td>
+              <Td>{p.asset}</Td>
+              <Td>{zhText(p.side)}</Td>
+              <Td right>{fmtNum(p.remaining_size ?? p.size, 2)}</Td>
+              <Td right>{fmtPx(p.entry_price ?? p.price)}</Td>
+              <Td right>{fmtUsd(p.notional_usd)}</Td>
+              <Td color={stale ? 'var(--red)' : 'var(--amber)'} bold>{stale ? 'è¶…æœŸå¾…ç»“ç®—' : 'å¾…ç»“ç®—'}</Td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
+  );
+}
+
+function PaperSettledTable({ rows }: { rows: PaperPosition[] }) {
+  if (!rows.length) return <Empty>æš‚æ— æ¨¡æ‹Ÿç»“ç®—åŽ†å²<span className="caret">_</span></Empty>;
+  return <table style={tableStyle}>
+    <thead><tr><Th>åŒ—äº¬ç»“ç®—æ—¶é—´</Th><Th>å¸‚åœº</Th><Th>æ–¹å‘</Th><Th right>æ•°é‡</Th><Th right>äº¤æ˜“ç›ˆäº</Th><Th right>æ‰‹ç»­è´¹</Th><Th right>å‡€ç›ˆäº</Th><Th>çŠ¶æ€</Th></tr></thead>
+    <tbody>{rows.map((p, i) => {
+      const gross = finiteValue(p.gross_pnl_usd ?? p.pnl_usd);
+      const fees = finiteValue(p.fees_usd ?? p.fee_usd);
+      const net = finiteValue(p.net_pnl_usd ?? p.pnl_net_usd);
+      return <tr key={`${p.market_slug}-${p.closed_ts ?? i}`}>
+        <Td dim>{fmtDateTime(p.closed_ts)}</Td><Td dim>{shortMarket(p.market_slug)}</Td><Td>{zhText(p.side)}</Td>
+        <Td right>{fmtNum(p.size, 2)}</Td><Td right>{fmtSignedUsd(gross)}</Td>
+        <Td right color={fees != null && fees < 0 ? 'var(--red)' : undefined}>{fmtSignedUsd(fees)}</Td>
+        <Td right color={net == null ? undefined : net >= 0 ? 'var(--green)' : 'var(--red)'} bold>{fmtSignedUsd(net)}</Td>
+        <Td color="var(--green)">å·²ç»“ç®—å…¥è´¦</Td>
+      </tr>;
+    })}</tbody>
+  </table>;
+}
+
+function PositionsTable({ positions }: { positions: Position[] }) {
+  if (!positions.length) return <Empty>æš‚æ— æŒä»“<span className="caret">_</span></Empty>;
+  return (
+    <table style={tableStyle}>
+      <thead>
+        <tr>
+          <Th>åç§°</Th><Th>æ–¹å‘</Th><Th right>æ•°é‡</Th><Th right>ä»·æ ¼</Th><Th right>ä»·å€¼</Th>
+        </tr>
+      </thead>
+      <tbody>
+        {positions.map((p, i) => {
+          const raw = p as Position & { slug?: string; position_side?: string; outcome_index?: number; current_size?: number; total_size?: number; current_price?: number; current_value?: number };
+          const name = (p.title || p.market_slug || raw.slug || p.conditionId || '--').replace(/^Bitcoin Up or Down - /, '');
+          const direction = p.outcome || p.side || raw.position_side || (raw.outcome_index === 0 ? 'Up' : raw.outcome_index === 1 ? 'Down' : '--');
+          const quantity = Number(p.size ?? raw.current_size ?? raw.total_size ?? 0);
+          const price = Number(p.curPrice ?? raw.current_price ?? 0);
+          const value = Number(p.currentValue ?? raw.current_value ?? quantity * price);
+          return <tr key={i}>
+            <Td dim>{name}</Td>
+            <Td>{zhText(String(direction || '--'))}</Td>
+            <Td right>{fmtNum(quantity, 2)}</Td>
+            <Td right>{fmtPx(price)}</Td>
+            <Td right>{fmtUsd(value)}</Td>
+          </tr>;
+        })}
+      </tbody>
+    </table>
+  );
+}
+
+function shortMarket(slug: string | null | undefined): string {
+  return (slug || '').replace('btc-updown-5m-', '').replace('eth-updown-5m-', '');
+}
+
+function fmtMoneyCompact(v: number | null | undefined): string {
+  if (v == null || Number.isNaN(v)) return '--';
+  const abs = Math.abs(v);
+  const digits = abs < 10 ? 2 : 0;
+  const sign = v < 0 ? '-' : '';
+  return `${sign}$${abs.toFixed(digits)}`;
+}
+
+
+function Th({ children, right }: { children: ReactNode; right?: boolean }) {
+  return (
+    <th style={{
+      textAlign: right ? 'right' : 'left',
+      padding: '4px 8px',
+      color: 'var(--txt-dim)',
+      fontWeight: 400,
+      borderBottom: '1px solid var(--border)',
+      fontSize: 10,
+      letterSpacing: '0.8px',
+      position: 'sticky',
+      top: 0,
+      background: 'var(--bg-panel)',
+    }}>{children}</th>
+  );
+}
+
+function Td({
+  children, right, dim, color, bold,
+}: { children: ReactNode; right?: boolean; dim?: boolean; color?: string; bold?: boolean }) {
+  return (
+    <td style={{
+      textAlign: right ? 'right' : 'left',
+      padding: '3px 8px',
+      color: color || (dim ? 'var(--txt-dim)' : 'var(--txt)'),
+      fontWeight: bold ? 700 : 400,
+      borderBottom: '1px solid rgba(255,255,255,0.02)',
+      whiteSpace: 'nowrap',
+      overflow: 'hidden',
+      textOverflow: 'ellipsis',
+      maxWidth: 240,
+    }}>{children}</td>
+  );
+}
+
+function Empty({ children }: { children: ReactNode }) {
+  return <div style={{ color: 'var(--txt-dim)', padding: '8px 4px' }}>{children}</div>;
+}
+
+const shellStyle: CSSProperties = { height: '100vh', display: 'grid', gridTemplateRows: '34px auto minmax(0, 1fr) auto' };
+const topBarStyle: CSSProperties = {
+  display: 'flex', alignItems: 'center', padding: '0 14px',
+  borderBottom: '1px solid var(--border-hi)', background: 'var(--bg-panel)',
+  fontSize: 12, letterSpacing: '0.5px',
+};
+const bottomBarStyle: CSSProperties = {
+  display: 'flex', alignItems: 'center', padding: '0 12px',
+  borderTop: '1px solid var(--border-hi)', background: 'var(--bg-panel)',
+  fontSize: 10, letterSpacing: '0.5px',
+};
+const gridStyle: CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: '380px minmax(360px, 1fr) 430px',
+  gap: 8, padding: 8, height: '100%', overflow: 'hidden',
+};
+const colStack: CSSProperties = { display: 'flex', flexDirection: 'column', gap: 6, minHeight: 0 };
+const compactGridStyle: CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: '300px minmax(0, 1fr)',
+  gridTemplateRows: 'minmax(0, 1fr) 210px',
+  gap: 8,
+  padding: 8,
+  height: '100%',
+  overflow: 'hidden',
+};
+const compactLeftColStack: CSSProperties = {
+  ...colStack,
+  gridColumn: '1',
+  gridRow: '1',
+};
+const compactMiddleColStack: CSSProperties = {
+  ...colStack,
+  gridColumn: '2',
+  gridRow: '1',
+};
+const compactRightColStack: CSSProperties = {
+  ...colStack,
+  gridColumn: '1 / span 2',
+  gridRow: '2',
+};
+const strategyStackStyle: CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 6,
+};
+const strategySectionStyle: CSSProperties = {
+  minWidth: 0,
+  border: '1px solid rgba(255,255,255,0.05)',
+  padding: '4px 6px',
+};
+const subTitleStyle: CSSProperties = {
+  color: 'var(--amber-bright)',
+  fontSize: 10,
+  fontWeight: 700,
+  letterSpacing: '1px',
+  paddingBottom: 3,
+};
+const panelTitleStyle: CSSProperties = {
+  background: 'var(--border)', color: 'var(--amber)',
+  padding: '4px 12px', fontSize: 11, letterSpacing: '1.2px', fontWeight: 600,
+};
+const spacer: CSSProperties = { flex: 1 };
+const tableStyle: CSSProperties = { width: '100%', borderCollapse: 'collapse', fontSize: 11 };
+

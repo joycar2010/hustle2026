@@ -1,0 +1,7 @@
+[Unit]
+Description=Settle outstanding btc5m Paper positions while entry is stopped
+[Service]
+Type=oneshot
+User=ec2-user
+WorkingDirectory=/home/ec2-user/polymarketbot-test/releases/polytest-products-20261125-r1
+ExecStart=/usr/bin/env -i PATH=/usr/bin:/bin PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PYTHONPATH=/home/ec2-user/polymarketbot-test/releases/polytest-products-20261125-r1/source/btc /home/ec2-user/polymarketbot-test/releases/polytest-p9-btc-a-20261121T135508Z/.venv/bin/python /home/ec2-user/polymarketbot-test/releases/polytest-products-20261125-r1/worker.py btc5m --settle-only

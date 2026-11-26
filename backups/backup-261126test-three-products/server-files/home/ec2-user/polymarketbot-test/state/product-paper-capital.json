@@ -1,0 +1,21 @@
+{
+  "products": {
+    "BTC": {
+      "capital_base_usd": 200.0,
+      "db_path": "/home/ec2-user/polymarketbot-test/state/paper-native-a/data/paper.db",
+      "source": "verified_running_worker_config",
+      "unit": "polymarket-test-btc-paper.service",
+      "worker_pid": 154693,
+      "live_trading_enabled": false
+    },
+    "SOL": {
+      "capital_base_usd": 200.0,
+      "db_path": "/home/ec2-user/polymarketbot-test/releases/polytest-sol5m-20261121T140426Z/data/paper_sol5m.db",
+      "source": "verified_running_worker_config",
+      "unit": "polytest-sol5m-paper.service",
+      "worker_pid": 693398,
+      "live_trading_enabled": false
+    }
+  },
+  "capital_basis": "sum_of_independent_configured_paper_allocations"
+}

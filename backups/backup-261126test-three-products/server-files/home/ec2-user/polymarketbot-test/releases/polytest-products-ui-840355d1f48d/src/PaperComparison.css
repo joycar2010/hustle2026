@@ -1,0 +1,46 @@
+.paper-comparison { margin: 10px 24px; padding: 10px 12px; border: 1px solid #3b5884; border-radius: 7px; background: #0c1421; color: #d6e3f5; font-size: 11px; }
+.paper-comparison-heading, .paper-comparison-group-title { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.paper-comparison-heading { margin-bottom: 9px; color: #bcd7ff; }
+.paper-comparison-heading strong { font-size: 13px; }
+.paper-comparison-badge { display: inline-block; padding: 2px 7px; margin-right: 5px; border: 1px solid #92b5ed; border-radius: 4px; color: #d9e9ff; background: #203e66; letter-spacing: .6px; }
+.paper-comparison-groups { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.paper-comparison-group { min-width: 0; padding: 8px 10px; border: 1px solid #293c57; border-radius: 5px; background: #0a101a; }
+.paper-comparison-group-title b { color: #84caff; }
+.paper-comparison-group-title > span { color: #9eaec2; }
+.paper-comparison-group dl { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 7px; margin: 9px 0; }
+.paper-comparison-group dl > div { min-width: 0; }
+.paper-comparison-group dt { margin-bottom: 3px; color: #a8b9cf; }
+.paper-comparison-group dd { margin: 0; color: #f0f5ff; font-size: clamp(11px, 1.1vw, 15px); font-weight: 700; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.paper-comparison-positive { color: #4ce0a0 !important; }
+.paper-comparison-negative { color: #ff7584 !important; }
+.paper-comparison-warning { color: #ffcd77 !important; }
+.paper-comparison-filter { display: flex; flex-wrap: wrap; gap: 4px 8px; color: #b8c7dc; }
+.paper-comparison-filter span { color: #e6c995; }
+.paper-comparison-status { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 9px; color: #b7c8e1; }
+.paper-comparison summary { cursor: pointer; padding: 5px 0 0; color: #9ab9e3; }
+.paper-comparison-detail { display: flex; flex-direction: column; gap: 4px; padding-top: 5px; color: #b9c9de; overflow-wrap: anywhere; }
+.paper-comparison p { margin: 6px 0 0; }
+.paper-comparison-method { margin-top: 3px; }
+.paper-ai { margin: 9px 0; padding: 8px; border: 1px solid #34465e; border-radius: 4px; background: #101a2a; }
+.paper-ai-heading, .paper-ai-role, .paper-ai-model > div, .paper-ai-result { display: flex; flex-wrap: wrap; align-items: center; gap: 5px 8px; min-width: 0; }
+.paper-ai-heading { justify-content: space-between; color: #bcd7ff; }
+.paper-ai-heading > span:not(.paper-ai-state), .paper-ai-counts, .paper-ai-role-heading { color: #a9bdd7; font-size: 10px; }
+.paper-ai-role-heading { margin-top: 8px; }
+.paper-ai-roles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px 10px; margin-top: 5px; }
+.paper-ai-role { justify-content: space-between; font-size: 10px; }
+.paper-ai-state { flex-shrink: 0; border: 1px solid currentColor; border-radius: 3px; padding: 1px 5px; font-size: 10px; line-height: 1.4; }
+.paper-ai-pending { color: #9fb9db; }
+.paper-ai-stale { color: #ffcd77; }
+.paper-ai-error, .paper-ai-veto { color: #ff8794; }
+.paper-ai-approved { color: #4ce0a0; }
+.paper-ai-call-heading { margin-top: 10px; padding-top: 8px; border-top: 1px solid #293c57; }
+.paper-ai-counts { margin-top: 4px; }
+.paper-ai-model { margin-top: 7px; padding: 6px 0; border-top: 1px solid #24334a; min-width: 0; }
+.paper-ai-model > div > b { flex: 1; min-width: 90px; color: #e2ecfa; overflow-wrap: anywhere; }
+.paper-ai-model small, .paper-ai-model p, .paper-ai-note { color: #a8bbd3; font-size: 10px; overflow-wrap: anywhere; }
+.paper-ai-model small { display: block; margin-top: 3px; }
+.paper-ai-result { margin-top: 6px; }
+.paper-ai-result small { flex-basis: 100%; color: #c0cee2; overflow-wrap: anywhere; }
+@media(max-width: 900px) { .paper-comparison { margin: 8px; } .paper-comparison-groups { grid-template-columns: minmax(0, 1fr); } .paper-comparison-group dd { font-size: 12px; } }
+@media(max-width: 460px) { .paper-comparison-group dl { grid-template-columns: repeat(2, minmax(0, 1fr)); } .paper-comparison-group-title > span { font-size: 10px; } }
+@media(max-width: 460px) { .paper-ai-roles { grid-template-columns: minmax(0, 1fr); } }

@@ -1,0 +1,139 @@
+{
+  "updated_ts": 1792922176.2043867,
+  "heartbeat_ts": 1792922176.2043867,
+  "running": true,
+  "enabled": true,
+  "mode": "paper",
+  "paper_only": true,
+  "live_enabled": false,
+  "live_orders": false,
+  "status": "no_markets",
+  "error": null,
+  "trades_last_cycle": 0,
+  "market_count": 0,
+  "orders_new": 0,
+  "markets": [
+    {
+      "city": "New York City",
+      "city_key": "nyc",
+      "target_date": "2026-10-25",
+      "temperature_c": 19.2,
+      "probability": null,
+      "source": "Open-Meteo forecast only",
+      "status": "PAPER · forecast only; no active market",
+      "mode": "paper",
+      "paper_only": true,
+      "updated_ts": 1792922176.2043867
+    },
+    {
+      "city": "Chicago",
+      "city_key": "chicago",
+      "target_date": "2026-10-25",
+      "temperature_c": 20.3,
+      "probability": null,
+      "source": "Open-Meteo forecast only",
+      "status": "PAPER · forecast only; no active market",
+      "mode": "paper",
+      "paper_only": true,
+      "updated_ts": 1792922176.2043867
+    },
+    {
+      "city": "Miami",
+      "city_key": "miami",
+      "target_date": "2026-10-25",
+      "temperature_c": 27.2,
+      "probability": null,
+      "source": "Open-Meteo forecast only",
+      "status": "PAPER · forecast only; no active market",
+      "mode": "paper",
+      "paper_only": true,
+      "updated_ts": 1792922176.2043867
+    },
+    {
+      "city": "Los Angeles",
+      "city_key": "los_angeles",
+      "target_date": "2026-10-25",
+      "temperature_c": 25.0,
+      "probability": null,
+      "source": "Open-Meteo forecast only",
+      "status": "PAPER · forecast only; no active market",
+      "mode": "paper",
+      "paper_only": true,
+      "updated_ts": 1792922176.2043867
+    },
+    {
+      "city": "Denver",
+      "city_key": "denver",
+      "target_date": "2026-10-25",
+      "temperature_c": 15.1,
+      "probability": null,
+      "source": "Open-Meteo forecast only",
+      "status": "PAPER · forecast only; no active market",
+      "mode": "paper",
+      "paper_only": true,
+      "updated_ts": 1792922176.2043867
+    }
+  ],
+  "rows": [
+    {
+      "city": "New York City",
+      "city_key": "nyc",
+      "target_date": "2026-10-25",
+      "temperature_c": 19.2,
+      "probability": null,
+      "source": "Open-Meteo forecast only",
+      "status": "PAPER · forecast only; no active market",
+      "mode": "paper",
+      "paper_only": true,
+      "updated_ts": 1792922176.2043867
+    },
+    {
+      "city": "Chicago",
+      "city_key": "chicago",
+      "target_date": "2026-10-25",
+      "temperature_c": 20.3,
+      "probability": null,
+      "source": "Open-Meteo forecast only",
+      "status": "PAPER · forecast only; no active market",
+      "mode": "paper",
+      "paper_only": true,
+      "updated_ts": 1792922176.2043867
+    },
+    {
+      "city": "Miami",
+      "city_key": "miami",
+      "target_date": "2026-10-25",
+      "temperature_c": 27.2,
+      "probability": null,
+      "source": "Open-Meteo forecast only",
+      "status": "PAPER · forecast only; no active market",
+      "mode": "paper",
+      "paper_only": true,
+      "updated_ts": 1792922176.2043867
+    },
+    {
+      "city": "Los Angeles",
+      "city_key": "los_angeles",
+      "target_date": "2026-10-25",
+      "temperature_c": 25.0,
+      "probability": null,
+      "source": "Open-Meteo forecast only",
+      "status": "PAPER · forecast only; no active market",
+      "mode": "paper",
+      "paper_only": true,
+      "updated_ts": 1792922176.2043867
+    },
+    {
+      "city": "Denver",
+      "city_key": "denver",
+      "target_date": "2026-10-25",
+      "temperature_c": 15.1,
+      "probability": null,
+      "source": "Open-Meteo forecast only",
+      "status": "PAPER · forecast only; no active market",
+      "mode": "paper",
+      "paper_only": true,
+      "updated_ts": 1792922176.2043867
+    }
+  ]
+}

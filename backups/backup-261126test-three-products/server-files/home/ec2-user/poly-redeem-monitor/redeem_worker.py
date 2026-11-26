@@ -1,0 +1,284 @@
+"""Read-only Polymarket redemption monitor with an explicit submit guard.
+
+The worker deliberately does not implement direct CTF submission.  PolyMarket
+accounts commonly trade through a proxy/safe wallet, while the configured
+signer is an EOA.  Calling ConditionalTokens.redeemPositions from that EOA
+would either fail or, worse, use the wrong account.  A relayer adapter must be
+configured after the wallet model is verified.
+
+Normal operation is therefore safe to run in production: it polls v2
+positions, records redeemable candidates idempotently, and emits JSON lines.
+Any submit adapter must be supplied explicitly and the process refuses to
+start in execute mode without the proxy/signer checks and a separate
+REDEEM_EXECUTE=YES acknowledgement.
+"""
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import sqlite3
+import sys
+import time
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Iterable, Optional
+
+import requests
+
+
+DEFAULT_API = "https://data-api.polymarket.com/v2/positions"
+DEFAULT_DUST = 0.01
+
+
+@dataclass(frozen=True)
+class Candidate:
+    proxy_wallet: str
+    condition_id: str
+    token_id: str
+    slug: str
+    title: str
+    size: float
+    redeemable: bool
+    mergeable: bool
+    negative_risk: bool
+
+    @property
+    def key(self) -> str:
+        raw = ":".join((self.proxy_wallet.lower(), self.condition_id.lower(), self.token_id))
+        return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "key": self.key,
+            "proxy_wallet": self.proxy_wallet,
+            "condition_id": self.condition_id,
+            "token_id": self.token_id,
+            "slug": self.slug,
+            "title": self.title,
+            "size": self.size,
+            "redeemable": self.redeemable,
+            "mergeable": self.mergeable,
+            "negative_risk": self.negative_risk,
+        }
+
+
+def _as_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def fetch_candidates(
+    user: str,
+    *,
+    api_url: str = DEFAULT_API,
+    dust: float = DEFAULT_DUST,
+    timeout: float = 15.0,
+    session: Optional[requests.Session] = None,
+) -> list[Candidate]:
+    """Read v2 positions and return only settled redeem/merge candidates."""
+    client = session or requests.Session()
+    response = client.get(
+        api_url,
+        params={"user": user, "limit": "500", "sizeThreshold": "0"},
+        headers={
+            "Accept": "application/json",
+            "User-Agent": "poly-redeem-monitor/1.0",
+        },
+        timeout=timeout,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    rows = payload.get("data", []) if isinstance(payload, dict) else payload
+    result: list[Candidate] = []
+    for row in rows or []:
+        if not isinstance(row, dict):
+            continue
+        size = float(row.get("current_size", row.get("size", 0)) or 0)
+        redeemable = _as_bool(row.get("redeemable"))
+        mergeable = _as_bool(row.get("mergeable"))
+        negative_risk = _as_bool(row.get("negative_risk"))
+        if size <= dust or not (redeemable or mergeable or negative_risk):
+            continue
+        proxy = str(row.get("proxy_wallet") or "").strip()
+        condition = str(row.get("condition_id") or row.get("conditionId") or "").strip()
+        token = str(row.get("token_id") or row.get("tokenId") or "").strip()
+        if not proxy or not condition or not token:
+            continue
+        result.append(
+            Candidate(
+                proxy_wallet=proxy,
+                condition_id=condition,
+                token_id=token,
+                slug=str(row.get("slug") or ""),
+                title=str(row.get("title") or ""),
+                size=size,
+                redeemable=redeemable,
+                mergeable=mergeable,
+                negative_risk=negative_risk,
+            )
+        )
+    return result
+
+
+class Ledger:
+    """Small local idempotency ledger; no wallet data is stored."""
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.db = sqlite3.connect(str(path))
+        self.db.execute(
+            """CREATE TABLE IF NOT EXISTS redemption_candidates (
+                candidate_key TEXT PRIMARY KEY,
+                first_seen REAL NOT NULL,
+                last_seen REAL NOT NULL,
+                status TEXT NOT NULL,
+                payload TEXT NOT NULL,
+                tx_hash TEXT
+            )"""
+        )
+        columns = {row[1] for row in self.db.execute("PRAGMA table_info(redemption_candidates)")}
+        if "transaction_id" not in columns:
+            self.db.execute("ALTER TABLE redemption_candidates ADD COLUMN transaction_id TEXT")
+        if "transaction_hash" not in columns:
+            self.db.execute("ALTER TABLE redemption_candidates ADD COLUMN transaction_hash TEXT")
+        if "relayer_state" not in columns:
+            self.db.execute("ALTER TABLE redemption_candidates ADD COLUMN relayer_state TEXT")
+        if "updated_at" not in columns:
+            self.db.execute("ALTER TABLE redemption_candidates ADD COLUMN updated_at REAL")
+        self.db.commit()
+
+    def observe(self, candidate: Candidate, now: Optional[float] = None) -> str:
+        now = float(now if now is not None else time.time())
+        payload = json.dumps(candidate.as_dict(), ensure_ascii=False, sort_keys=True)
+        row = self.db.execute(
+            "SELECT status FROM redemption_candidates WHERE candidate_key=?",
+            (candidate.key,),
+        ).fetchone()
+        if row:
+            self.db.execute(
+                "UPDATE redemption_candidates SET last_seen=?, payload=? WHERE candidate_key=?",
+                (now, payload, candidate.key),
+            )
+            self.db.commit()
+            return str(row[0])
+        self.db.execute(
+            "INSERT INTO redemption_candidates(candidate_key, first_seen, last_seen, status, payload) VALUES(?,?,?,?,?)",
+            (candidate.key, now, now, "observed", payload),
+        )
+        self.db.commit()
+        return "observed"
+
+    def close(self) -> None:
+        self.db.close()
+
+    def sync_relayer_ledger(self, path: Path) -> int:
+        """Project Relayer JSON state into this monitor ledger by condition id."""
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (FileNotFoundError, OSError, ValueError):
+            return 0
+        if not isinstance(payload, dict):
+            return 0
+        rows = self.db.execute("SELECT candidate_key, payload FROM redemption_candidates").fetchall()
+        by_condition: dict[str, list[str]] = {}
+        for key, raw in rows:
+            try:
+                condition = str(json.loads(raw).get("condition_id") or "").lower()
+            except (TypeError, ValueError):
+                condition = ""
+            if condition:
+                by_condition.setdefault(condition, []).append(str(key))
+        state_map = {
+            "SUBMITTED": "submitted",
+            "STATE_CONFIRMED": "confirmed",
+            "STATE_MINED": "mined",
+            "STATE_FAILED": "failed",
+            "STATE_INVALID": "invalid",
+            "POLL_TIMEOUT": "poll_timeout",
+        }
+        changed = 0
+        for item in payload.values():
+            if not isinstance(item, dict):
+                continue
+            condition = str(item.get("condition_id") or "").lower()
+            status = state_map.get(str(item.get("status") or "").upper())
+            if not condition or not status:
+                continue
+            for key in by_condition.get(condition, []):
+                self.db.execute(
+                    "UPDATE redemption_candidates SET status=?, relayer_state=?, transaction_id=?, transaction_hash=?, updated_at=? WHERE candidate_key=?",
+                    (status, str(item.get("status") or ""), item.get("transaction_id"), item.get("transaction_hash"), time.time(), key),
+                )
+                changed += 1
+        # A candidate that has not been returned by the Data API for ten
+        # minutes and has no Relayer record is not safe to call `observed`.
+        # Keep it visible as an explicit manual-review state instead of
+        # implying that it is still pending redemption.
+        stale_cutoff = time.time() - 600.0
+        cur = self.db.execute(
+            "UPDATE redemption_candidates SET status='unmatched', relayer_state='NOT_IN_RELAYER_LEDGER', updated_at=? "
+            "WHERE status='observed' AND last_seen < ?",
+            (time.time(), stale_cutoff),
+        )
+        changed += int(cur.rowcount or 0)
+        self.db.commit()
+        return changed
+
+
+def validate_execute_guard(candidates: Iterable[Candidate]) -> None:
+    """Refuse unsafe direct submission for proxy wallets.
+
+    A future relayer adapter can replace this function.  Until then, direct
+    CTF calls are intentionally unavailable.
+    """
+    if os.environ.get("REDEEM_EXECUTE") != "YES":
+        raise RuntimeError("execution disabled; set REDEEM_EXECUTE=YES only with an approved relayer")
+    if not os.environ.get("REDEEM_RELAYER_URL"):
+        raise RuntimeError("no approved redemption relayer configured")
+    if not list(candidates):
+        return
+
+
+def poll_once(args: argparse.Namespace) -> int:
+    user = args.user or os.environ.get("POLYMARKET_PROXY_WALLET")
+    if not user:
+        raise SystemExit("--user or POLYMARKET_PROXY_WALLET is required")
+    candidates = fetch_candidates(user, api_url=args.api_url, dust=args.dust)
+    ledger = Ledger(Path(args.ledger))
+    try:
+        rows = []
+        for candidate in candidates:
+            status = ledger.observe(candidate)
+            rows.append({**candidate.as_dict(), "ledger_status": status})
+        sync_path_text = os.environ.get("REDEEM_RELAYER_LEDGER", "").strip()
+        if sync_path_text:
+            ledger.sync_relayer_ledger(Path(sync_path_text))
+        if args.execute:
+            validate_execute_guard(candidates)
+            raise RuntimeError("relayer adapter is not installed; no transaction was submitted")
+    finally:
+        ledger.close()
+    print(json.dumps({"user": user, "count": len(rows), "candidates": rows}, ensure_ascii=False))
+    return len(rows)
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Polymarket redemption monitor (dry-run by default)")
+    parser.add_argument("--user", help="proxy wallet address")
+    parser.add_argument("--api-url", default=os.environ.get("REDEEM_POSITIONS_API", DEFAULT_API))
+    parser.add_argument("--ledger", default=os.environ.get("REDEEM_LEDGER_PATH", "redeem-candidates.db"))
+    parser.add_argument("--dust", type=float, default=float(os.environ.get("REDEEM_DUST_SHARES", DEFAULT_DUST)))
+    parser.add_argument("--execute", action="store_true", help="refuse unless approved relayer is configured")
+    return parser
+
+
+if __name__ == "__main__":
+    try:
+        poll_once(build_parser().parse_args())
+    except Exception as exc:
+        print(json.dumps({"error": str(exc)}, ensure_ascii=False), file=sys.stderr)
+        raise SystemExit(1)

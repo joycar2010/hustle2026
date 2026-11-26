@@ -1,0 +1,12 @@
+{
+  "paper_bankroll_usd": 200.0,
+  "price_hosts": "okx,coinbase,kraken",
+  "poll_interval_sec": 1.0,
+  "product_key": "btc15m_le",
+  "series_slug": "btc-up-or-down-15m",
+  "crypto_asset": "btc",
+  "late_edge_db_name": "paper_btc15m.db",
+  "mode": "late_edge",
+  "window_sec": 900,
+  "market_slug_prefix": "btc-updown-15m"
+}

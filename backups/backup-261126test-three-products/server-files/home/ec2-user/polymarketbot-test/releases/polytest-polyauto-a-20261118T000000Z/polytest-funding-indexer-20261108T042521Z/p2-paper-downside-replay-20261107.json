@@ -1,0 +1,18 @@
+{
+  "windows": 72,
+  "entries": 8,
+  "exits": 8,
+  "partial_exits": 0,
+  "duplicate_exit_attempts_suppressed": 0,
+  "open_positions_after_replay": 0,
+  "pending_shares": 0,
+  "realized_pnl_usd": -0.212,
+  "controls": {
+    "entry_price": "0.84-0.90",
+    "drawdown_stop": 0.1,
+    "max_open_positions": 3,
+    "persistent_exit_intent": true,
+    "real_orders": false
+  },
+  "generated_at": "2026-11-07T18:04:30Z"
+}

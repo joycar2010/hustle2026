@@ -1,0 +1,18 @@
+SOURCE=/home/ec2-user/releases/pr2-p9-20261120T113000Z
+RELEASE=/home/ec2-user/polymarketbot-test/releases/polytest-p9-btc-a-20261121T135508Z
+MODE=late_edge
+LIVE_TRADING_ENABLED=false
+BTC_LIVE_ENABLED=false
+PAPER_DB=/home/ec2-user/polymarketbot-test/releases/polytest-p9-btc-a-20261121T135508Z/data/paper.db
+PAPER_SERVICE=polymarket-p9-btc-a-paper.service
+LIVE_TEMPLATE=polymarket-p9-btc-a-live.service
+PAPER_SERVICE_ENABLED=disabled
+LIVE_TEMPLATE_ENABLED=disabled
+NATIVE_SERVICE_TOUCHED=false
+NATIVE_BRIDGE_TOUCHED=false
+b1b9fc83f3affc6d0661a7fd24aae1d70960aa7ff23dc4b905715ee92083f9a9  /home/ec2-user/releases/pr2-p9-20261120T113000Z/btc5m/engine.py
+a5b15fdea653c560cacc5dd4cbfb7aea9fc9be8689d696a3043ca39656262f17  /home/ec2-user/releases/pr2-p9-20261120T113000Z/btc5m/config.py
+56584a7fd8403e78158a0f823c01d570e362641d1375638b20020922398961f7  /home/ec2-user/releases/pr2-p9-20261120T113000Z/.env
+b1b9fc83f3affc6d0661a7fd24aae1d70960aa7ff23dc4b905715ee92083f9a9  /home/ec2-user/polymarketbot-test/releases/polytest-p9-btc-a-20261121T135508Z/btc5m/engine.py
+a5b15fdea653c560cacc5dd4cbfb7aea9fc9be8689d696a3043ca39656262f17  /home/ec2-user/polymarketbot-test/releases/polytest-p9-btc-a-20261121T135508Z/btc5m/config.py
+4ac87a48e9f3f2cb4ac1164000c63f85ccc774bef162c8dd1d68aebac949cc9a  /home/ec2-user/polymarketbot-test/releases/polytest-p9-btc-a-20261121T135508Z/.env

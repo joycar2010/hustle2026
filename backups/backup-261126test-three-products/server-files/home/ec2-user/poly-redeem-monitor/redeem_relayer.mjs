@@ -1,0 +1,261 @@
+import fs from "node:fs";
+import path from "node:path";
+import process from "node:process";
+import { fileURLToPath } from "node:url";
+import { createWalletClient, encodeFunctionData, http, zeroHash } from "viem";
+import { privateKeyToAccount } from "viem/accounts";
+import { polygon } from "viem/chains";
+import {
+  RelayClient,
+  buildSafeTransactionRequest,
+  buildDepositWalletBatchRequest,
+} from "@polymarket/builder-relayer-client";
+
+const CTF = "0x4d97dcd97ec945f40cf65f87097ace5ea0476045";
+const USDC = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174";
+const RELAYER_DEFAULT = "https://relayer-v2.polymarket.com";
+const CTF_ABI = [{
+  name: "redeemPositions",
+  type: "function",
+  stateMutability: "nonpayable",
+  inputs: [
+    { name: "collateralToken", type: "address" },
+    { name: "parentCollectionId", type: "bytes32" },
+    { name: "conditionId", type: "bytes32" },
+    { name: "indexSets", type: "uint256[]" },
+  ],
+  outputs: [],
+}, {
+  name: "mergePositions",
+  type: "function",
+  stateMutability: "nonpayable",
+  inputs: [
+    { name: "collateralToken", type: "address" },
+    { name: "parentCollectionId", type: "bytes32" },
+    { name: "conditionId", type: "bytes32" },
+    { name: "partition", type: "uint256[]" },
+    { name: "amount", type: "uint256" },
+  ],
+  outputs: [],
+}];
+
+function loadEnv(file) {
+  if (!file || !fs.existsSync(file)) return;
+  for (const raw of fs.readFileSync(file, "utf8").split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line || line.startsWith("#") || !line.includes("=")) continue;
+    const i = line.indexOf("=");
+    const k = line.slice(0, i).trim();
+    let v = line.slice(i + 1).trim();
+    if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) v = v.slice(1, -1);
+    if (!(k in process.env)) process.env[k] = v;
+  }
+}
+
+const args = new Set(process.argv.slice(2));
+const here = path.dirname(fileURLToPath(import.meta.url));
+loadEnv(process.env.POLYTEST_ENV_FILE || "/home/ec2-user/polymarketbot-test/releases/polyauto-d-20261101/.env");
+loadEnv(path.join(here, ".env"));
+
+const relayerUrl = (process.env.RELAYER_URL || RELAYER_DEFAULT).replace(/\/$/, "");
+const relayerKey = process.env.RELAYER_API_KEY || "";
+const relayerAddress = process.env.RELAYER_API_KEY_ADDRESS || "";
+const signerKey = process.env.PRIVATE_KEY || "";
+const funder = process.env.FUNDER_ADDRESS || process.env.POLYMARKET_PROXY_WALLET || "";
+const expectedSigner = process.env.WALLET_ADDRESS || "";
+const rpc = process.env.POLYGON_RPC_URL || "https://polygon-bor-rpc.publicnode.com";
+const apiUrl = process.env.REDEEM_POSITIONS_API || "https://data-api.polymarket.com/v2/positions";
+const ledgerPath = process.env.REDEEM_RELAYER_LEDGER || path.join(here, "state", "relayer-submissions.json");
+const maxPerRun = Math.max(1, Number(process.env.REDEEM_MAX_PER_RUN || 1));
+
+function fail(message) {
+  throw new Error(message);
+}
+
+function addressEqual(a, b) {
+  return String(a || "").toLowerCase() === String(b || "").toLowerCase();
+}
+
+function asBool(value) {
+  return value === true || ["1", "true", "yes", "on"].includes(String(value ?? "").trim().toLowerCase());
+}
+
+async function fetchCandidates() {
+  if (!funder) fail("FUNDER_ADDRESS/POLYMARKET_PROXY_WALLET is missing");
+  const u = new URL(apiUrl);
+  u.searchParams.set("user", funder);
+  u.searchParams.set("limit", "500");
+  u.searchParams.set("sizeThreshold", "0");
+  const r = await fetch(u, { headers: { accept: "application/json", "user-agent": "polytest-redeem-preflight/1.0" } });
+  if (!r.ok) fail(`Data API HTTP ${r.status}`);
+  const payload = await r.json();
+  const rows = Array.isArray(payload) ? payload : (payload?.data || []);
+  return rows.filter((x) => {
+    const size = Number(x.current_size ?? x.size ?? 0);
+    // Include all settled candidates so the preflight/ledger can account for
+    // mergeable and negative-risk positions instead of silently dropping them.
+    return size > 0.01 && (asBool(x.redeemable) || asBool(x.mergeable) || asBool(x.negative_risk));
+  });
+}
+
+function makePositionTx(row) {
+  const conditionId = String(row.condition_id || row.conditionId || "");
+  if (!/^0x[0-9a-fA-F]{64}$/.test(conditionId)) fail("invalid conditionId");
+  if (asBool(row.negative_risk)) {
+    return { supported: false, reason: "negative-risk adapter requires its dedicated contract" };
+  }
+  if (asBool(row.mergeable)) {
+    return {
+      supported: true,
+      kind: "merge",
+      to: CTF,
+      data: encodeFunctionData({
+        abi: CTF_ABI,
+        functionName: "mergePositions",
+        args: [USDC, zeroHash, conditionId, [1n, 2n], BigInt(Math.floor(Number(row.current_size ?? row.size ?? 0) * 1e6))],
+      }),
+      value: "0",
+    };
+  }
+  return {
+    supported: true,
+    kind: "redeem",
+    to: CTF,
+    data: encodeFunctionData({
+      abi: CTF_ABI,
+      functionName: "redeemPositions",
+      args: [USDC, zeroHash, conditionId, [1n, 2n]],
+    }),
+    value: "0",
+  };
+}
+
+function readLedger() {
+  try { return JSON.parse(fs.readFileSync(ledgerPath, "utf8")); }
+  catch { return {}; }
+}
+
+function writeLedger(value) {
+  fs.mkdirSync(path.dirname(ledgerPath), { recursive: true });
+  const tmp = `${ledgerPath}.tmp-${process.pid}`;
+  fs.writeFileSync(tmp, JSON.stringify(value, null, 2) + "\n", { mode: 0o600 });
+  fs.renameSync(tmp, ledgerPath);
+}
+
+function candidateKey(row) {
+  return `${funder.toLowerCase()}:${String(row.condition_id || row.conditionId || "").toLowerCase()}`;
+}
+
+async function buildRequest(client, account, walletType, walletAddress, row, nonce) {
+  const tx = makePositionTx(row);
+  if (!tx.supported) return { unsupported: true, reason: tx.reason };
+  if (walletType === "WALLET") {
+    return buildDepositWalletBatchRequest(
+      client.signer,
+      { from: account.address, chainId: 137, walletAddress, nonce: nonce.nonce, deadline: String(Math.floor(Date.now() / 1000) + 300), calls: [{ target: tx.to, value: "0", data: tx.data }] },
+      client.contractConfig.DepositWalletContracts,
+    );
+  }
+  return buildSafeTransactionRequest(
+    client.signer,
+    { from: account.address, nonce: nonce.nonce, chainId: 137, transactions: [{ to: tx.to, operation: 0, data: tx.data, value: "0" }] },
+    client.contractConfig.SafeContracts,
+    "polytest joycar redeem",
+  );
+}
+
+async function submitToRelayer(request) {
+  const r = await fetch(`${relayerUrl}/submit`, {
+    method: "POST",
+    headers: {
+      accept: "application/json",
+      "content-type": "application/json",
+      "RELAYER_API_KEY": relayerKey,
+      "RELAYER_API_KEY_ADDRESS": relayerAddress,
+      "user-agent": "polytest-redeem-worker/1.0",
+    },
+    body: JSON.stringify(request),
+  });
+  const body = await r.text();
+  let payload;
+  try { payload = JSON.parse(body); } catch { payload = { raw: body.slice(0, 300) }; }
+  if (!r.ok) fail(`Relayer submit HTTP ${r.status}: ${payload.error || "request rejected"}`);
+  if (!payload.transactionID) fail("Relayer response did not include transactionID");
+  return payload;
+}
+
+async function pollRelayer(transactionId) {
+  const headers = { accept: "application/json", "RELAYER_API_KEY": relayerKey, "RELAYER_API_KEY_ADDRESS": relayerAddress, "user-agent": "polytest-redeem-worker/1.0" };
+  for (let i = 0; i < 20; i += 1) {
+    const u = new URL(`${relayerUrl}/transaction`);
+    u.searchParams.set("id", transactionId);
+    const r = await fetch(u, { headers });
+    if (r.ok) {
+      const rows = await r.json();
+      const row = Array.isArray(rows) ? rows[0] : rows;
+      if (row && ["STATE_CONFIRMED", "STATE_MINED", "STATE_FAILED", "STATE_INVALID"].includes(row.state)) return row;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+  }
+  return { transactionID: transactionId, state: "POLL_TIMEOUT" };
+}
+
+async function preflight() {
+  if (!signerKey || !/^0x[0-9a-fA-F]{64}$/.test(signerKey)) fail("PRIVATE_KEY is missing or invalid");
+  if (!expectedSigner || !addressEqual(expectedSigner, relayerAddress)) fail("RELAYER_API_KEY_ADDRESS must equal WALLET_ADDRESS");
+  if (!relayerKey) fail("RELAYER_API_KEY is missing");
+  const account = privateKeyToAccount(signerKey);
+  if (!addressEqual(account.address, expectedSigner)) fail("PRIVATE_KEY does not derive WALLET_ADDRESS");
+  const wallet = createWalletClient({ account, chain: polygon, transport: http(rpc) });
+  const client = new RelayClient(relayerUrl, 137, wallet);
+  const walletType = String(process.env.SIGNATURE_TYPE || "0") === "3" ? "WALLET" : "SAFE";
+  // The existing deployment already records the Polymarket wallet as FUNDER_ADDRESS.
+  // Avoid the SDK's default polygon-rpc.com probe here; deployment is verified by
+  // the Relayer API itself, and the configured RPC is only used by future adapters.
+  const derived = funder;
+  if (!derived) fail("FUNDER_ADDRESS is missing");
+  const deployed = await client.getDeployed(derived, walletType);
+  if (!deployed) fail(`configured ${walletType} is not deployed according to Relayer`);
+  const nonce = await client.getNonce(account.address, walletType);
+  const candidates = await fetchCandidates();
+  const built = [];
+  for (const row of candidates) {
+    const request = await buildRequest(client, account, walletType, derived, row, nonce);
+    built.push({ slug: row.slug || "", condition_id: row.condition_id || row.conditionId || "", size: Number(row.current_size ?? row.size ?? 0), request_type: request.unsupported ? "UNSUPPORTED" : request.type, target: request.to || "", supported: !request.unsupported, reason: request.reason || "", data_bytes: JSON.stringify(request).length });
+  }
+  return { relayer_url: relayerUrl, signer: account.address, wallet_type: walletType, proxy_wallet: derived, deployed, nonce: nonce.nonce, candidate_count: candidates.length, built, candidates, account, client };
+}
+
+async function main() {
+  const result = await preflight();
+  if (args.has("--execute")) {
+    if (process.env.REDEEM_EXECUTE !== "YES" || process.env.REDEEM_APPROVED !== "YES") fail("execution locked; set REDEEM_EXECUTE=YES and REDEEM_APPROVED=YES after explicit approval");
+    const ledger = readLedger();
+    let submitted = 0;
+    for (const row of result.candidates) {
+      if (submitted >= maxPerRun) break;
+      const key = candidateKey(row);
+      const old = ledger[key];
+      if (old && ["SUBMITTED", "STATE_CONFIRMED", "STATE_MINED"].includes(old.status)) continue;
+      const nonce = await result.client.getNonce(result.account.address, String(process.env.SIGNATURE_TYPE || "0") === "3" ? "WALLET" : "SAFE");
+      const request = await buildRequest(result.client, result.account, result.wallet_type, result.proxy_wallet, row, nonce);
+      if (request.unsupported) continue;
+      ledger[key] = { status: "BUILDING", condition_id: row.condition_id || row.conditionId || "", slug: row.slug || "", first_seen: old?.first_seen || Date.now() };
+      writeLedger(ledger);
+      const response = await submitToRelayer(request);
+      ledger[key] = { ...ledger[key], status: "SUBMITTED", transaction_id: response.transactionID, submitted_at: Date.now() };
+      writeLedger(ledger);
+      const finalState = await pollRelayer(response.transactionID);
+      ledger[key] = { ...ledger[key], status: finalState.state || "POLL_TIMEOUT", transaction_hash: finalState.transactionHash || "", updated_at: Date.now() };
+      writeLedger(ledger);
+      submitted += 1;
+    }
+    result.submitted = submitted;
+  }
+  delete result.candidates;
+  delete result.account;
+  delete result.client;
+  console.log(JSON.stringify(result));
+}
+
+main().catch((e) => { console.error(JSON.stringify({ error: String(e.message || e) })); process.exit(1); });

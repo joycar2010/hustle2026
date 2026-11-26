@@ -1,0 +1,12 @@
+[Unit]
+Description=Run Polytest Relayer redemption preflight every 30 seconds
+
+[Timer]
+OnBootSec=25s
+OnUnitActiveSec=30s
+AccuracySec=5s
+Persistent=true
+Unit=polytest-redeem-relayer-preflight.service
+
+[Install]
+WantedBy=timers.target

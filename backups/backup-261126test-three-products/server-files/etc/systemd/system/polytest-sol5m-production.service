@@ -1,0 +1,27 @@
+[Unit]
+Description=Polymarket SOL5M production-shaped Paper template (live disabled)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/ec2-user/polymarketbot-test/releases/polytest-sol5m-20261121T140426Z
+Environment=PYTHONUNBUFFERED=1
+Environment=PRODUCT_KEY=sol5m
+Environment=SERIES_SLUG=sol-up-or-down-5m
+Environment=MARKET_SLUG_PREFIX=sol-updown-5m
+Environment=CRYPTO_ASSET=sol
+Environment=MODE=late_edge
+Environment=LATE_EDGE_DB_NAME=paper_sol5m.db
+# Keep the production-shaped unit fail-closed until a reviewed change.
+Environment=LIVE=false
+Environment=LIVE_TRADING_ENABLED=false
+ExecStart=/home/ec2-user/polymarketbot-test/releases/polytest-sol5m-20261121T140426Z/.venv/bin/python -m sol5m paper
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+

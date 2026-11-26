@@ -1,0 +1,13 @@
+[Unit]
+Description=Polytest Paper 24h health and 48h comparison
+After=polymarket-test-btc-paper.service polytest-btc15m-paper.service polytest-sol5m-paper.service
+[Service]
+User=ec2-user
+ExecStart=/usr/bin/python3 -B /usr/local/lib/polytest-paper-observation/observe.py
+UMask=0077
+Restart=on-failure
+RestartSec=30
+Nice=10
+NoNewPrivileges=yes
+[Install]
+WantedBy=multi-user.target

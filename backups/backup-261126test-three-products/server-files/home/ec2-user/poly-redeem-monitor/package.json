@@ -1,0 +1,1 @@
+{"private":true,"type":"module","dependencies":{"@polymarket/builder-relayer-client":"^0.0.10","viem":"^2.31.4"}}

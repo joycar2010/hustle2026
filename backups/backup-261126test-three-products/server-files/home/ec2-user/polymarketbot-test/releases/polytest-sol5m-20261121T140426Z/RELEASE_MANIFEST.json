@@ -1,0 +1,32 @@
+{
+  "release": "polytest-sol5m",
+  "product": "sol5m",
+  "series_slug": "sol-up-or-down-5m",
+  "asset": "sol",
+  "window_sec": 300,
+  "mode": "late_edge",
+  "live": false,
+  "live_trading_enabled": false,
+  "paper_db": "data/paper_sol5m.db",
+  "api": {
+    "health": "/api/health",
+    "profile": "/api/profile",
+    "market": "/api/market",
+    "ws_status": "/api/ws/status",
+    "websocket": "/ws"
+  },
+  "services": [
+    "services/sol5m-paper.service",
+    "services/sol5m-production.service",
+    "services/sol5m-api.service"
+  ],
+  "validation": {
+    "adapter_tests": "5 passed",
+    "paper_once": "passed; live market discovered; no order placed",
+    "api_health": "passed; live=false",
+    "dashboard_group_routes": "positions/events/calibration sol5m returned 200",
+    "btc_live_path_modified": false,
+    "ui_modified": false
+  },
+  "known_baseline": "Upstream copied suite retains two pre-existing strategy expectation failures; adapter tests are green."
+}

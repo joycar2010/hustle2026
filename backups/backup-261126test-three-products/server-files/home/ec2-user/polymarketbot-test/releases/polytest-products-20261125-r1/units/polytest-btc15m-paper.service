@@ -1,0 +1,16 @@
+[Unit]
+Description=Polytest BTC 15m late-edge Paper
+After=network-online.target
+Wants=network-online.target
+[Service]
+User=ec2-user
+Group=ec2-user
+WorkingDirectory=/home/ec2-user/polymarketbot-test/releases/polytest-products-20261125-r1
+Environment=
+EnvironmentFile=
+ExecStart=
+ExecStart=/usr/bin/env -i PATH=/usr/bin:/bin PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PYTHONPATH=/home/ec2-user/polymarketbot-test/releases/polytest-products-20261125-r1/source/btc /home/ec2-user/polymarketbot-test/releases/polytest-p9-btc-a-20261121T135508Z/.venv/bin/python /home/ec2-user/polymarketbot-test/releases/polytest-products-20261125-r1/worker.py btc15m
+Restart=on-failure
+RestartSec=3
+[Install]
+WantedBy=multi-user.target

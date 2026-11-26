@@ -1,0 +1,22 @@
+[Unit]
+Description=polytest native btc5m Paper dashboard compatibility bridge
+After=polymarket-test-btc-paper.service
+Requires=polymarket-test-btc-paper.service
+
+[Service]
+Type=simple
+User=ec2-user
+WorkingDirectory=/home/ec2-user/polymarketbot-test/releases/polytest-native-btc5m-20261118T181500Z
+Environment=NATIVE_DB=/home/ec2-user/polymarketbot-test/state/paper-native-a/data/paper.db
+Environment=LEGACY_DB=/home/ec2-user/polymarketbot-test/state/paper-a/trades.db
+Environment=BRIDGE_STATE=/home/ec2-user/polymarketbot-test/state/paper-native-a/bridge-state.json
+Environment=BRIDGE_INTERVAL_SEC=3
+ExecStart=/usr/bin/python3 /home/ec2-user/polymarketbot-test/releases/polytest-native-btc5m-20261118T181500Z/scripts/native_legacy_bridge.py
+Restart=always
+RestartSec=3
+KillMode=control-group
+UMask=0077
+TimeoutStopSec=15
+
+[Install]
+WantedBy=multi-user.target

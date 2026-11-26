@@ -1,0 +1,32 @@
+[Unit]
+Description=Polytest supervised BTC live worker
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=ec2-user
+Group=ec2-user
+WorkingDirectory=@RELEASE_ROOT@
+EnvironmentFile=@RELEASE_ROOT@/.env
+Environment=PYTHONPATH=@RELEASE_ROOT@
+Environment=PYTHONUNBUFFERED=1
+Environment=LIVE_WORKER_SYSTEMD_UNIT=polymarket-test-btc-live.service
+ExecStartPre=@RELEASE_ROOT@/.venv/bin/python @RELEASE_ROOT@/scripts/live_preflight.py
+ExecStartPre=@RELEASE_ROOT@/.venv/bin/python @RELEASE_ROOT@/scripts/verify_setup.py
+ExecStart=@RELEASE_ROOT@/.venv/bin/python -m bot.live_worker --live --asset BTC
+Restart=on-failure
+RestartSec=5
+KillMode=control-group
+KillSignal=SIGTERM
+TimeoutStopSec=30
+UMask=0077
+NoNewPrivileges=true
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=polytest-btc-live
+
+[Install]
+WantedBy=multi-user.target

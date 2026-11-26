@@ -1,0 +1,17 @@
+{
+  "updated_ts": 1792346610.5487368,
+  "heartbeat_ts": 1792346610.5487368,
+  "running": true,
+  "enabled": true,
+  "mode": "paper",
+  "paper_only": true,
+  "live_enabled": false,
+  "live_orders": false,
+  "status": "no_markets",
+  "error": null,
+  "trades_last_cycle": 0,
+  "market_count": 0,
+  "orders_new": 0,
+  "markets": [],
+  "rows": []
+}

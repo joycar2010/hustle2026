@@ -1,0 +1,26 @@
+[Unit]
+Description=Polymarket SOL5M isolated Paper worker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/poly-sol5m-release
+Environment=PYTHONUNBUFFERED=1
+Environment=PRODUCT_KEY=sol5m
+Environment=SERIES_SLUG=sol-up-or-down-5m
+Environment=MARKET_SLUG_PREFIX=sol-updown-5m
+Environment=CRYPTO_ASSET=sol
+Environment=MODE=late_edge
+Environment=LATE_EDGE_DB_NAME=paper_sol5m.db
+Environment=LIVE=false
+Environment=LIVE_TRADING_ENABLED=false
+ExecStart=/opt/poly-sol5m-release/.venv/bin/python -m sol5m paper
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+

@@ -1,0 +1,16 @@
+[Unit]
+Description=Polytest controlled Polymarket redemption worker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ec2-user
+WorkingDirectory=/home/ec2-user/poly-redeem-monitor
+Environment=POLYTEST_ENV_FILE=/home/ec2-user/polymarketbot-test/releases/polyauto-d-20261101/.env
+ExecStart=/usr/bin/node /home/ec2-user/poly-redeem-monitor/redeem_relayer.mjs --execute
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/ec2-user/poly-redeem-monitor/state

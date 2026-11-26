@@ -1,0 +1,12 @@
+{
+  "paper_bankroll_usd": 200.0,
+  "price_hosts": "okx,coinbase,kraken",
+  "poll_interval_sec": 1.0,
+  "product_key": "sol5m",
+  "series_slug": "sol-up-or-down-5m",
+  "crypto_asset": "sol",
+  "late_edge_db_name": "paper_sol5m.db",
+  "mode": "late_edge",
+  "window_sec": 300,
+  "market_slug_prefix": "sol-updown-5m"
+}
